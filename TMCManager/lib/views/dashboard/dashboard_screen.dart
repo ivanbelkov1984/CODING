@@ -1,7 +1,14 @@
 import 'package:flutter/material.dart';
 
 class DashboardScreen extends StatelessWidget {
-  const DashboardScreen({super.key});
+  final VoidCallback onLogout;
+  final VoidCallback toggleTheme;
+
+  const DashboardScreen({
+    super.key,
+    required this.onLogout,
+    required this.toggleTheme,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -9,6 +16,18 @@ class DashboardScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Панель управления'),
         centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.brightness_6),
+            onPressed: toggleTheme,
+            tooltip: 'Переключить тему',
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: onLogout,
+            tooltip: 'Выйти',
+          ),
+        ],
       ),
       body: GridView.count(
         crossAxisCount: 2, // Две карточки в ряду
