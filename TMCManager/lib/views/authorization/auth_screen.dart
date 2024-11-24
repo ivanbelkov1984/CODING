@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:logger/logger.dart';
 import '../../services/api_client.dart';
 import '../../services/auth_service.dart';
 import '../../services/storage_service.dart';
 import 'auth_view_model.dart';
+
+final logger = Logger();
 
 class AuthScreen extends StatefulWidget {
   final VoidCallback toggleTheme;
@@ -45,6 +48,7 @@ class _AuthScreenState extends State<AuthScreen> {
       setState(() {
         _errorMessage = 'Ошибка загрузки данных: $e';
       });
+      logger.w('Данные авторизации отсутствуют, переход на /auth');
     }
   }
 
@@ -65,6 +69,7 @@ class _AuthScreenState extends State<AuthScreen> {
       final isSuccess = await _authViewModel.authenticate(clientId, apiKey);
       if (isSuccess) {
         if (mounted) {
+          logger.i('Переход на экран: /dashboard');
           Navigator.pushReplacementNamed(context, '/dashboard');
         }
       } else {

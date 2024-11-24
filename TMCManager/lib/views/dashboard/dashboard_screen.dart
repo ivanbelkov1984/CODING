@@ -7,93 +7,66 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Главная Панель'),
+        title: const Text('Панель управления'),
+        centerTitle: true,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Добро пожаловать в TMCManager!',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: GridView.count(
-                crossAxisCount: 2,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
+      body: GridView.count(
+        crossAxisCount: 2, // Две карточки в ряду
+        padding: const EdgeInsets.all(16),
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+        children: [
+          Card(
+            elevation: 4, // Тень для выделения плитки
+            margin: const EdgeInsets.all(8),
+            color: Theme.of(context).cardColor,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  _buildDashboardCard(
-                    context: context,
-                    title: 'Управление товарами',
-                    icon: Icons.inventory,
-                    onTap: () {
-                      Navigator.pushNamed(context, '/products');
-                    },
+                  Text(
+                    'Общий остаток',
+                    style: Theme.of(context).textTheme.bodyLarge,
                   ),
-                  _buildDashboardCard(
-                    context: context,
-                    title: 'Остатки',
-                    icon: Icons.storage,
-                    onTap: () {
-                      Navigator.pushNamed(context, '/stocks');
-                    },
-                  ),
-                  _buildDashboardCard(
-                    context: context,
-                    title: 'Возвраты',
-                    icon: Icons.assignment_return,
-                    onTap: () {
-                      Navigator.pushNamed(context, '/returns');
-                    },
-                  ),
-                  _buildDashboardCard(
-                    context: context,
-                    title: 'Аналитика',
-                    icon: Icons.analytics,
-                    onTap: () {
-                      Navigator.pushNamed(context, '/analytics');
-                    },
+                  const SizedBox(height: 8),
+                  Text(
+                    '1250 м',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyLarge
+                        ?.copyWith(fontSize: 24, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDashboardCard({
-    required BuildContext context,
-    required String title,
-    required IconData icon,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Card(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-        elevation: 4,
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 48, color: Theme.of(context).primaryColor),
-              const SizedBox(height: 16),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-            ],
           ),
-        ),
+          Card(
+            elevation: 4,
+            margin: const EdgeInsets.all(8),
+            color: Theme.of(context).cardColor,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Продажи за неделю',
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '350 м',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyLarge
+                        ?.copyWith(fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
