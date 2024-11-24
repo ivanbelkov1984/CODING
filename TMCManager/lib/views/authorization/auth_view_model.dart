@@ -19,7 +19,8 @@ class AuthViewModel {
     }
   }
 
-  Future<Map<String, String>> loadAuthData() async {
+  Future<Map<String, String?>> loadAuthData() async {
     return await storageService.loadAuthData();
   }
 }
+

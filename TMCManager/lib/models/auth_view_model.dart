@@ -6,26 +6,27 @@ class AuthViewModel {
 
   AuthViewModel(this.storageService);
 
+  /// Сохраняет данные авторизации
   Future<void> saveAuthData(String clientId, String apiKey) async {
     try {
-      // Сохранение данных авторизации
       await storageService.saveAuthData(clientId, apiKey);
       logger.i('Auth data saved successfully');
     } catch (e) {
-      logger.e('Failed to save auth data', e);
+      logger.e('Failed to save auth data', error: e);
     }
   }
 
+  /// Очищает данные авторизации
   Future<void> clearAuthData() async {
     try {
-      // Убедитесь, что метод clearAuthData существует в StorageService
-      await storageService.clearData(); // Исправлено название метода
+      await storageService.clearData();
       logger.i('Auth data cleared successfully');
     } catch (e) {
-      logger.e('Failed to clear auth data', e);
+      logger.e('Failed to clear auth data', error: e);
     }
   }
 
+  /// Выполняет авторизацию
   Future<void> authenticate(String clientId, String apiKey) async {
     try {
       if (clientId.isEmpty || apiKey.isEmpty) {
@@ -34,7 +35,7 @@ class AuthViewModel {
       await saveAuthData(clientId, apiKey);
       logger.i('Authentication successful');
     } catch (e) {
-      logger.e('Authentication failed', e);
+      logger.e('Authentication failed', error: e);
     }
   }
 }

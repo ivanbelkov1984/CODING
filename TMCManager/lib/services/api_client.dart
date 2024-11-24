@@ -41,7 +41,7 @@ class ApiClient {
         return response; // Это добавлено для строгого контроля исключений.
       }
     } catch (error) {
-      _logger.e('API Error', error); // Используем логгер для ошибок
+      _logger.e('API Error', error: error); // Используем логгер для ошибок
       rethrow;
     }
   }

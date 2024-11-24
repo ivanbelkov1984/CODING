@@ -1,0 +1,36 @@
+{
+	"backtrace" : 0,
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : 
+		[
+			"flutter/ephemeral/.plugin_symlinks/flutter_secure_storage_windows/windows/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			}
+		]
+	},
+	"dependencies" : 
+	[
+		{
+			"id" : "flutter_secure_storage_windows_plugin::@ef50a4a009d72e8219ec"
+		},
+		{
+			"id" : "ZERO_CHECK::@6890427a1f51a3e7e1df"
+		}
+	],
+	"id" : "ALL_BUILD::@ef50a4a009d72e8219ec",
+	"isGeneratorProvided" : true,
+	"name" : "ALL_BUILD",
+	"paths" : 
+	{
+		"build" : "plugins/flutter_secure_storage_windows",
+		"source" : "flutter/ephemeral/.plugin_symlinks/flutter_secure_storage_windows/windows"
+	},
+	"sources" : [],
+	"type" : "UTILITY"
+}
