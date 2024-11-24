@@ -1,46 +1,86 @@
 import 'package:flutter/material.dart';
-import 'auth_view_model.dart';
 import '../../services/api_client.dart';
 import '../../services/auth_service.dart';
+import '../../services/storage_service.dart';
+import 'auth_view_model.dart';
 
 class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key});
+  final VoidCallback toggleTheme;
+
+  const AuthScreen({super.key, required this.toggleTheme});
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
 }
 
 class _AuthScreenState extends State<AuthScreen> {
-  final _clientIdController = TextEditingController();
-  final _apiKeyController = TextEditingController();
+  final TextEditingController _clientIdController = TextEditingController();
+  final TextEditingController _apiKeyController = TextEditingController();
+  late final AuthViewModel _authViewModel;
   bool _isLoading = false;
   String _errorMessage = '';
 
-  void _authenticate() async {
+  @override
+  void initState() {
+    super.initState();
+    final authService = AuthService(
+      apiClient: ApiClient(clientId: '', apiKey: ''),
+    );
+    final storageService = StorageService();
+    _authViewModel = AuthViewModel(
+      authService: authService,
+      storageService: storageService,
+    );
+    _loadAuthData();
+  }
+
+  Future<void> _loadAuthData() async {
+    try {
+      final authData = await _authViewModel.loadAuthData();
+      setState(() {
+        _clientIdController.text = authData['clientId'] ?? '';
+        _apiKeyController.text = authData['apiKey'] ?? '';
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Ошибка загрузки данных: $e';
+      });
+    }
+  }
+
+  Future<void> _authenticate() async {
     setState(() {
       _isLoading = true;
       _errorMessage = '';
     });
 
-    final apiClient = ApiClient(
-      clientId: _clientIdController.text,
-      apiKey: _apiKeyController.text,
-    );
-    final authService = AuthService(apiClient: apiClient);
-    final authViewModel = AuthViewModel(authService: authService);
+    try {
+      final clientId = _clientIdController.text.trim();
+      final apiKey = _apiKeyController.text.trim();
+      final authService = AuthService(
+        apiClient: ApiClient(clientId: clientId, apiKey: apiKey),
+      );
+      _authViewModel.authService = authService;
 
-    final isSuccess = await authViewModel.authenticate();
-
-    setState(() {
-      _isLoading = false;
-      if (!isSuccess) {
-        _errorMessage =
-            'Авторизация не удалась. Проверьте Client ID, API Key и доступы к API.';
+      final isSuccess = await _authViewModel.authenticate(clientId, apiKey);
+      if (isSuccess) {
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, '/dashboard');
+        }
       } else {
-        // Переход к следующему экрану
-        Navigator.pushReplacementNamed(context, '/dashboard');
+        setState(() {
+          _errorMessage = 'Авторизация не удалась.';
+        });
       }
-    });
+    } catch (e) {
+      setState(() {
+        _errorMessage = e.toString();
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -48,6 +88,13 @@ class _AuthScreenState extends State<AuthScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Авторизация'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.brightness_6),
+            onPressed: widget.toggleTheme,
+            tooltip: 'Переключить тему',
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
