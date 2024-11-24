@@ -38,7 +38,7 @@ class AuthService {
       }
     } catch (error) {
       // Логирование ошибки
-      logger.e('Authentication Error', error);
+      logger.e('Authentication Error', error: error);
       return false;
     }
   }
