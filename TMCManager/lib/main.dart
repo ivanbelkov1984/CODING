@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'services/storage_service.dart';
 import 'views/authorization/auth_screen.dart';
 import 'views/dashboard/dashboard_screen.dart';
-import 'utils/logger.dart' as log_utils; // Префикс изменен
+import 'utils/logger.dart' as log_utils;
 
 void main() {
   runApp(const MyApp());
@@ -20,8 +20,7 @@ class _MyAppState extends State<MyApp> {
 
   void _toggleTheme() {
     setState(() {
-      _themeMode =
-          _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
+      _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
     });
   }
 
@@ -56,7 +55,9 @@ class _MyAppState extends State<MyApp> {
       routes: {
         '/': (context) => AuthLoader(toggleTheme: _toggleTheme),
         '/auth': (context) => AuthScreen(toggleTheme: _toggleTheme),
-        '/dashboard': (context) => const DashboardScreen(),
+        '/dashboard': (context) => DashboardScreen(onLogout: () {
+              Navigator.pushReplacementNamed(context, '/auth');
+            }, toggleTheme: _toggleTheme),
       },
     );
   }
@@ -87,8 +88,7 @@ class _AuthLoaderState extends State<AuthLoader> {
       final apiKey = authData['apiKey'];
 
       if (clientId != null && apiKey != null) {
-        log_utils.logger
-            .i('Автоматическая авторизация успешна: ClientId найден.');
+        log_utils.logger.i('Автоматическая авторизация успешна: ClientId найден.');
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/dashboard');
         }
