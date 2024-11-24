@@ -2,14 +2,28 @@ import 'package:flutter/material.dart';
 import 'services/storage_service.dart';
 import 'views/authorization/auth_screen.dart';
 import 'views/dashboard/dashboard_screen.dart';
-import 'utils/logger.dart';
+import 'utils/logger.dart' as log_utils; // Префикс изменен
 
 void main() {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  ThemeMode _themeMode = ThemeMode.system;
+
+  void _toggleTheme() {
+    setState(() {
+      _themeMode =
+          _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -22,17 +36,26 @@ class MyApp extends StatelessWidget {
         brightness: Brightness.light,
       ),
       darkTheme: ThemeData(
-        primarySwatch: Colors.blue,
         useMaterial3: true,
         brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF121212),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFFBB86FC),
+          secondary: Color(0xFF03DAC6),
+          surface: Color(0xFF1E1E1E),
+          onSurface: Color(0xFFE0E0E0),
+        ),
+        cardColor: const Color(0xFF1E1E1E),
+        textTheme: const TextTheme(
+          bodyLarge: TextStyle(color: Color(0xFFE0E0E0)),
+          bodyMedium: TextStyle(color: Color(0xFFCFCFCF)),
+        ),
       ),
-      themeMode: ThemeMode.system, // Поддержка светлой и темной тем
+      themeMode: _themeMode,
       initialRoute: '/',
       routes: {
-        '/': (context) => const AuthLoader(),
-        '/auth': (context) => AuthScreen(toggleTheme: () {
-              // Add your theme toggling logic here
-            }),
+        '/': (context) => AuthLoader(toggleTheme: _toggleTheme),
+        '/auth': (context) => AuthScreen(toggleTheme: _toggleTheme),
         '/dashboard': (context) => const DashboardScreen(),
       },
     );
@@ -40,7 +63,9 @@ class MyApp extends StatelessWidget {
 }
 
 class AuthLoader extends StatefulWidget {
-  const AuthLoader({super.key});
+  final VoidCallback toggleTheme;
+
+  const AuthLoader({super.key, required this.toggleTheme});
 
   @override
   State<AuthLoader> createState() => _AuthLoaderState();
@@ -62,22 +87,20 @@ class _AuthLoaderState extends State<AuthLoader> {
       final apiKey = authData['apiKey'];
 
       if (clientId != null && apiKey != null) {
-        logger.i('Автоматическая авторизация успешна: ClientId найден.');
+        log_utils.logger
+            .i('Автоматическая авторизация успешна: ClientId найден.');
         if (mounted) {
-          // Проверяем, существует ли еще контекст
           Navigator.pushReplacementNamed(context, '/dashboard');
         }
       } else {
-        logger.w('Данные авторизации отсутствуют.');
+        log_utils.logger.w('Данные авторизации отсутствуют.');
         if (mounted) {
-          // Проверяем, существует ли еще контекст
           Navigator.pushReplacementNamed(context, '/auth');
         }
       }
     } catch (e) {
-      logger.e('Ошибка загрузки данных авторизации: $e');
+      log_utils.logger.e('Ошибка загрузки данных авторизации: $e');
       if (mounted) {
-        // Проверяем, существует ли еще контекст
         Navigator.pushReplacementNamed(context, '/auth');
       }
     }
