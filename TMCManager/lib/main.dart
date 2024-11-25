@@ -1,9 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'services/product_service.dart';
 import 'views/authorization/auth_screen.dart';
 import 'views/dashboard/dashboard_screen.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => ProductService()),
+      ],
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatefulWidget {
@@ -33,9 +42,12 @@ class _MyAppState extends State<MyApp> {
       initialRoute: '/auth',
       routes: {
         '/auth': (context) => AuthScreen(toggleTheme: _toggleTheme),
-        '/dashboard': (context) => DashboardScreen(onLogout: () {
-              Navigator.pushReplacementNamed(context, '/auth');
-            }, toggleTheme: _toggleTheme),
+        '/dashboard': (context) => DashboardScreen(
+              onLogout: () {
+                Navigator.pushReplacementNamed(context, '/auth');
+              },
+              toggleTheme: _toggleTheme,
+            ),
       },
     );
   }
