@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
 
 class AnalyticsChart extends StatelessWidget {
-  final Map<String, dynamic> data;
+  final List<Map<String, dynamic>> data;
 
   const AnalyticsChart({super.key, required this.data});
 
@@ -10,11 +10,22 @@ class AnalyticsChart extends StatelessWidget {
   Widget build(BuildContext context) {
     return SfCartesianChart(
       primaryXAxis: CategoryAxis(),
-      series: <CartesianSeries<MapEntry<String, dynamic>, String>>[
-        ColumnSeries<MapEntry<String, dynamic>, String>(
-          dataSource: data.entries.toList(),
-          xValueMapper: (entry, _) => entry.key,
-          yValueMapper: (entry, _) => entry.value as num,
+      primaryYAxis: NumericAxis(),
+      tooltipBehavior: TooltipBehavior(enable: true),
+      series: <CartesianSeries>[
+        ColumnSeries<Map<String, dynamic>, String>(
+          dataSource: data,
+          xValueMapper: (item, _) => item['date'] as String,
+          yValueMapper: (item, _) => item['revenue'] as num,
+          name: 'Выручка',
+          color: Colors.blue,
+        ),
+        LineSeries<Map<String, dynamic>, String>(
+          dataSource: data,
+          xValueMapper: (item, _) => item['date'] as String,
+          yValueMapper: (item, _) => item['sales'] as num,
+          name: 'Продажи',
+          color: Colors.green,
         ),
       ],
     );
