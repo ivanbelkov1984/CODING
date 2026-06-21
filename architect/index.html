@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#F5F4F0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#18181A" media="(prefers-color-scheme: dark)">
+<meta name="description" content="Архитектор — система управления знаниями и жизнью">
+<title>Архитектор</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,400&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ══ ONBOARDING ════════════════════════════════════════════════ -->
+<div class="ov" id="ov-onboard">
+  <div class="onboard-sheet">
+    <div class="onboard-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="12,2 22,8.5 22,15.5 12,22 2,15.5 2,8.5"/><line x1="12" y1="2" x2="12" y2="22" opacity=".45"/><line x1="2" y1="8.5" x2="22" y2="8.5" opacity=".45"/></svg></div>
+    <div class="onboard-h">Архитектор</div>
+    <div class="onboard-d">Система управления знаниями, жизнью и творчеством. Настрой под себя — имя, оси жизни, домен работы.</div>
+    <div class="sh-form">
+      <div>
+        <div class="f-lbl">Твоё имя</div>
+        <input class="field" id="ob-name" placeholder="Например: Иван" autocomplete="name">
+      </div>
+      <div>
+        <div class="f-lbl">Главный домен (книга / стихи / музыка / проект)</div>
+        <input class="field" id="ob-domain" placeholder="Например: Книга" value="Книга">
+      </div>
+      <button class="btn btn-p btn-full" onclick="finishOnboard()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+        Начать работу
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SPLASH ════════════════════════════════════════════════════ -->
+<div id="splash">
+  <div class="sp-icon">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="12,2 22,8.5 22,15.5 12,22 2,15.5 2,8.5"/>
+      <line x1="12" y1="2" x2="12" y2="22" opacity=".45"/>
+      <line x1="2" y1="8.5" x2="22" y2="8.5" opacity=".45"/>
+    </svg>
+  </div>
+  <div class="sp-eyebrow">Архитектор</div>
+  <div class="sp-badge" id="sp-wn">Неделя ·</div>
+  <div class="sp-hl">Система <em id="sp-focus-word">активна</em></div>
+  <div class="sp-div"></div>
+  <div class="sp-list" id="sp-list"></div>
+  <div class="sp-hint">нажми чтобы войти</div>
+</div>
+
+<!-- ══ APP ═══════════════════════════════════════════════════════ -->
+<div id="app">
+
+<!-- TOPBAR -->
+<header class="topbar">
+  <div class="top-brand">
+    <div class="top-dot">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <polygon points="12,2 22,8.5 22,15.5 12,22 2,15.5 2,8.5"/>
+        <line x1="12" y1="2" x2="12" y2="22" opacity=".45"/>
+      </svg>
+    </div>
+    <span id="ptitle" class="top-title">Архитектор</span>
+  </div>
+  <div class="top-acts">
+    <button class="ib" onclick="openOv('ov-search')" aria-label="Поиск"><i data-lucide="search"></i></button>
+    <button class="ib" onclick="openOv('ov-add')" aria-label="Новый инсайт"><i data-lucide="plus"></i></button>
+    <button class="ib" onclick="toggleTheme()" aria-label="Тема"><i data-lucide="sun-moon"></i></button>
+  </div>
+</header>
+
+<main class="content">
+
+<!-- ── ГЛАВНАЯ ─────────────────────────────────────────────────── -->
+<section class="pg on" id="pg-home">
+  <div class="h-hero">
+    <div class="h-date" id="h-date"></div>
+    <div class="h-hl">Система <em id="h-st">готова</em></div>
+    <div id="h-streak-wrap"></div>
+  </div>
+  <div class="sec-lbl">Действия</div>
+  <div class="qarow">
+    <button class="qabtn" onclick="openOv('ov-ci')" aria-label="Check-in">
+      <div class="qa-ic" style="background:var(--green-l)"><svg style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg></div>
+      <span class="qa-lbl">Check-in</span>
+    </button>
+    <button class="qabtn" onclick="openOv('ov-add')" aria-label="Инсайт">
+      <div class="qa-ic" style="background:var(--blue-l)"><svg style="color:var(--blue-t)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
+      <span class="qa-lbl">Инсайт</span>
+    </button>
+    <button class="qabtn" onclick="openOv('ov-drm')" aria-label="Сон">
+      <div class="qa-ic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></div>
+      <span class="qa-lbl">Сон</span>
+    </button>
+    <button class="qabtn" onclick="doSync()" aria-label="Синхронизировать">
+      <div class="qa-ic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></div>
+      <span class="qa-lbl">Синк</span>
+    </button>
+  </div>
+  <div id="pat-suggest-home"></div>
+  <div class="sec-lbl">Координаты</div>
+  <div class="compass-wrap"><svg id="compass" viewBox="0 0 280 280" style="width:100%;max-width:280px;display:block"></svg></div>
+  <div class="agrid" id="ax-grid"></div>
+  <div class="sec-lbl">Эта неделя</div>
+  <div class="kgrid">
+    <div class="kc"><span class="kn" id="kn-i">0</span><span class="kl">Инсайты</span><span class="kt" id="kt-i"></span></div>
+    <div class="kc"><span class="kn" id="kn-d">0</span><span class="kl">Сны</span><span class="kt" id="kt-d"></span></div>
+    <div class="kc"><span class="kn" id="kn-p">0</span><span class="kl">Паттерны</span><span class="kt" id="kt-p"></span></div>
+    <div class="kc"><span class="kn" id="kn-c">0</span><span class="kl">Глав</span><span class="kt" id="kt-c"></span></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:.5rem;padding:1.25rem 1rem .375rem">
+    <div class="oqpulse"></div>
+    <span class="sec-lbl" style="padding:0">Открытые вопросы</span>
+  </div>
+  <div class="card mx mb" id="h-oq"></div>
+  <div class="sec-lbl">Последние инсайты</div>
+  <div class="card mx" style="margin-bottom:5rem" id="h-ins"></div>
+</section>
+
+<!-- ── ИНСАЙТЫ ─────────────────────────────────────────────────── -->
+<section class="pg" id="pg-insights">
+  <div class="fstrip" id="iflt">
+    <div class="fpill on" data-tag="all" onclick="flt('all',this)"><i data-lucide="layers" style="width:13px;height:13px"></i>Все</div>
+    <div class="fpill" data-tag="book" onclick="flt('book',this)"><i data-lucide="book-open" style="width:13px;height:13px"></i>Книга</div>
+    <div class="fpill" data-tag="bot" onclick="flt('bot',this)"><i data-lucide="bot" style="width:13px;height:13px"></i>Бот</div>
+    <div class="fpill" data-tag="personal" onclick="flt('personal',this)"><i data-lucide="user" style="width:13px;height:13px"></i>Личное</div>
+    <div class="fpill" data-tag="dream" onclick="flt('dream',this)"><i data-lucide="moon" style="width:13px;height:13px"></i>Сны</div>
+    <div class="fpill" data-tag="pattern" onclick="flt('pattern',this)"><i data-lucide="git-branch" style="width:13px;height:13px"></i>Паттерны</div>
+    <div class="fpill" data-tag="spirit" onclick="flt('spirit',this)"><i data-lucide="sparkles" style="width:13px;height:13px"></i>Духовное</div>
+    <div class="fpill" data-tag="vitality" onclick="flt('vitality',this)"><i data-lucide="activity" style="width:13px;height:13px"></i>Vitality</div>
+  </div>
+  <div class="sort-row">
+    <span class="sort-lbl">Сортировка:</span>
+    <button class="sort-btn on" data-sort="date" onclick="setSort('date',this)">По дате</button>
+    <button class="sort-btn" data-sort="weight" onclick="setSort('weight',this)">По весу</button>
+    <button class="sort-btn" data-sort="tag" onclick="setSort('tag',this)">По тегу</button>
+  </div>
+  <div class="card mx" style="margin-bottom:5rem"><div id="ins-list"></div></div>
+</section>
+
+<!-- ── КНИГА / ДОМЕН ───────────────────────────────────────────── -->
+<section class="pg" id="pg-book">
+  <div class="rings-row" id="book-rings"></div>
+  <div class="sec-lbl" id="book-lbl">Главы</div>
+  <div class="card mx" style="margin-bottom:5rem"><div id="ch-list"></div></div>
+</section>
+
+<!-- ── ЖИЗНЬ ───────────────────────────────────────────────────── -->
+<section class="pg" id="pg-vit">
+  <div class="sec-lbl">Сегодня</div>
+  <div class="card mx mb" id="vit-today"></div>
+  <div class="sec-lbl">8 осей жизни</div>
+  <div class="vbars" id="vit-bars"></div>
+  <div style="padding:0 var(--s4) var(--s4)">
+    <button class="btn btn-s btn-sm" onclick="openOv('ov-axis-all')"><i data-lucide="sliders"></i> Настроить оси</button>
+  </div>
+  <div style="height:5rem"></div>
+</section>
+
+<!-- ── СИСТЕМА ─────────────────────────────────────────────────── -->
+<section class="pg" id="pg-sys">
+  <div class="sync-hero" onclick="doSync()" role="button" aria-label="Синхронизировать">
+    <div class="sync-hero-icon"><i data-lucide="refresh-cw" style="width:24px;height:24px;color:#fff"></i></div>
+    <div class="sync-hero-text">
+      <h3>Синхронизировать</h3>
+      <p>Данные → Claude → GitHub документы</p>
+      <span class="sync-badge" id="sync-lbl">Нажми — всё автоматически</span>
+    </div>
+  </div>
+  <div class="cmd-wrap" style="position:relative">
+    <div class="cmd-bar">
+      <i data-lucide="terminal" style="width:16px;height:16px;color:var(--t3);flex-shrink:0"></i>
+      <input class="cmd-in" id="cmd" placeholder="/актуально  /книга  /паттерны  /состояние  /помощь" autocomplete="off" autocorrect="off" spellcheck="false">
+      <button class="cmd-go" onclick="runCmd()" aria-label="Выполнить"><i data-lucide="arrow-up"></i></button>
+    </div>
+    <div class="cmd-ac" id="cmd-ac"></div>
+  </div>
+  <div id="cmd-out">
+    <div class="card"><div style="padding:1rem" id="cmd-res"></div></div>
+  </div>
+  <div class="sec-lbl">Дайджесты</div>
+  <div class="card mx"><div id="dg-list"></div></div>
+  <div style="padding:1rem;display:flex;gap:.625rem;flex-wrap:wrap">
+    <button class="btn btn-s btn-sm" onclick="mkDig()"><i data-lucide="refresh-cw"></i>Дайджест</button>
+    <button class="btn btn-s btn-sm" onclick="openOv('ov-evo')"><i data-lucide="trending-up"></i>Эволюция</button>
+  </div>
+  <div style="height:5rem"></div>
+</section>
+
+<!-- ── КАРТА ───────────────────────────────────────────────────── -->
+<section class="pg" id="pg-map">
+  <div class="subnav" id="subnav">
+    <div class="snpill on" onclick="msub('bot',this)"><i data-lucide="bot" style="width:13px;height:13px"></i>Бот</div>
+    <div class="snpill" onclick="msub('patterns',this)"><i data-lucide="git-branch" style="width:13px;height:13px"></i>Паттерны</div>
+    <div class="snpill" onclick="msub('dreams',this)"><i data-lucide="moon" style="width:13px;height:13px"></i>Сны</div>
+    <div class="snpill" onclick="msub('spiritual',this)"><i data-lucide="sparkles" style="width:13px;height:13px"></i>Духовное</div>
+    <div class="snpill" onclick="msub('evolution',this)"><i data-lucide="trending-up" style="width:13px;height:13px"></i>Эволюция</div>
+    <div class="snpill" onclick="msub('settings',this)"><i data-lucide="settings" style="width:13px;height:13px"></i>Настройки</div>
+  </div>
+  <div id="ms-bot">
+    <div class="sec-lbl">Задачи бота</div>
+    <div class="card mx"><div id="bot-tasks"></div></div>
+    <div style="height:5rem"></div>
+  </div>
+  <div id="ms-patterns" style="display:none">
+    <div class="sec-lbl">Паттерны</div>
+    <div class="card mx"><div id="pat-list"></div></div>
+    <div style="padding:var(--s4);display:flex;gap:var(--s2)">
+      <button class="btn btn-s btn-sm" onclick="openOv('ov-pat-add')"><i data-lucide="plus"></i>Паттерн</button>
+    </div>
+    <div style="height:5rem"></div>
+  </div>
+  <div id="ms-dreams" style="display:none">
+    <div class="sec-lbl">Сновидения</div>
+    <div class="card mx"><div id="drm-list"></div></div>
+    <div style="height:5rem"></div>
+  </div>
+  <div id="ms-spiritual" style="display:none">
+    <div class="sec-lbl">Духовный путь</div>
+    <div class="card mx"><div id="spi-list"></div></div>
+    <div style="padding:var(--s4);display:flex;gap:var(--s2)">
+      <button class="btn btn-s btn-sm" onclick="openOv('ov-spi-add')"><i data-lucide="plus"></i>Запись</button>
+    </div>
+    <div style="height:5rem"></div>
+  </div>
+  <div id="ms-evolution" style="display:none">
+    <div class="sec-lbl">Журнал эволюции</div>
+    <div class="card mx"><div id="evo-more"></div></div>
+    <div style="padding:var(--s4);display:flex;gap:var(--s2)">
+      <button class="btn btn-s btn-sm" onclick="openOv('ov-evo-add')"><i data-lucide="plus"></i>Запись</button>
+    </div>
+    <div style="height:5rem"></div>
+  </div>
+  <div id="ms-settings" style="display:none">
+    <div class="sec-lbl">Настройки</div>
+    <div class="card mx">
+      <div class="srow" onclick="toggleTheme()"><div class="sic" style="background:var(--gold-l)"><svg style="color:var(--gold)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2"/></svg></div><span class="sl2">Тема</span><span class="sv2" id="thv">Дневная</span></div>
+      <div class="srow" onclick="openOv('ov-cfg')"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg></div><span class="sl2">Конфигурация осей</span><span class="sv2">Настроить</span></div>
+      <div class="srow"><div class="sic" style="background:var(--blue-l)"><svg style="color:var(--blue-t)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/></svg></div><span class="sl2">Backend API</span><span class="sv2" id="api-lbl">Не подключён</span></div>
+      <div class="srow" onclick="exportData()"><div class="sic" style="background:var(--green-l)"><svg style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div><span class="sl2">Экспорт данных</span><span class="sv2">JSON</span></div>
+      <div class="srow" onclick="openOv('ov-import')"><div class="sic" style="background:var(--orange-l)"><svg style="color:var(--orange)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><span class="sl2">Импорт данных</span><span class="sv2">JSON</span></div>
+      <div class="srow"><div class="sic" style="background:var(--bg2)"><svg style="color:var(--t3)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></div><span class="sl2">Версия</span><span class="sv2">v5.0 · Архитектор</span></div>
+    </div>
+    <div style="height:5rem"></div>
+  </div>
+</section>
+
+</main>
+
+<!-- TAB BAR -->
+<nav class="tabbar">
+  <div class="tabbar-inner">
+    <button class="tab on" id="nt-home" onclick="goTo('home',this)" aria-label="Главная"><i data-lucide="compass"></i><span class="tab-lbl">Главная</span></button>
+    <button class="tab" id="nt-insights" onclick="goTo('insights',this)" aria-label="Инсайты"><i data-lucide="sparkles"></i><span class="tab-lbl">Инсайты</span><span class="tbadge" id="tbadge" style="display:none"></span></button>
+    <button class="tab" id="nt-book" onclick="goTo('book',this)" aria-label="Книга"><i data-lucide="book-open"></i><span class="tab-lbl" id="tab-book-lbl">Книга</span></button>
+    <button class="tab" id="nt-vit" onclick="goTo('vit',this)" aria-label="Жизнь"><i data-lucide="activity"></i><span class="tab-lbl">Жизнь</span></button>
+    <button class="tab" id="nt-sys" onclick="goTo('sys',this)" aria-label="Система"><i data-lucide="layout-dashboard"></i><span class="tab-lbl">Система</span></button>
+    <button class="tab" id="nt-map" onclick="goTo('map',this)" aria-label="Карта"><i data-lucide="map"></i><span class="tab-lbl">Карта</span></button>
+  </div>
+</nav>
+</div><!-- end #app -->
+
+<!-- ══ OVERLAYS ══════════════════════════════════════════════════ -->
+
+<!-- ПОИСК -->
+<div class="ov" id="ov-search" onclick="if(event.target===this)closeOv('ov-search')">
+  <div class="search-box">
+    <div class="search-bar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input id="search-in" placeholder="Поиск по инсайтам, снам, паттернам…" autocomplete="off" oninput="runSearch(this.value)">
+      <span class="search-close" onclick="closeOv('ov-search')">Закрыть</span>
+    </div>
+    <div class="search-results" id="search-results"><div class="search-empty">Начни вводить запрос</div></div>
+  </div>
+</div>
+
+<!-- НОВЫЙ ИНСАЙТ -->
+<div class="ov" id="ov-add" onclick="if(event.target===this)closeOv('ov-add')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Новый инсайт</div>
+    <div class="sh-form">
+      <div>
+        <div class="f-lbl">Тег</div>
+        <div class="trow" id="add-tags">
+          <button class="tp a-book" data-t="book" onclick="sTag(this)">Книга</button>
+          <button class="tp" data-t="bot" onclick="sTag(this)">Бот</button>
+          <button class="tp" data-t="personal" onclick="sTag(this)">Личное</button>
+          <button class="tp" data-t="project" onclick="sTag(this)">Проект</button>
+          <button class="tp" data-t="vitality" onclick="sTag(this)">Vitality</button>
+          <button class="tp" data-t="dream" onclick="sTag(this)">Сон</button>
+          <button class="tp" data-t="pattern" onclick="sTag(this)">Паттерн</button>
+          <button class="tp" data-t="spirit" onclick="sTag(this)">Духовное</button>
+        </div>
+      </div>
+      <div>
+        <div class="f-lbl">Уровень интеграции</div>
+        <div class="wrow" id="add-wts">
+          <button class="wp on" data-w="1" onclick="sW(this)">Наблюдение</button>
+          <button class="wp" data-w="2" onclick="sW(this)">Понято</button>
+          <button class="wp" data-w="3" onclick="sW(this)">Прочувствовано</button>
+          <button class="wp" data-w="4" onclick="sW(this)">Интегрировано</button>
+          <button class="wp" data-w="5" onclick="sW(this)">Трансформировало</button>
+        </div>
+      </div>
+      <textarea class="field" id="add-tx" placeholder="Инсайт, наблюдение, вывод…" rows="5"></textarea>
+      <div>
+        <div class="f-lbl">Источник (необязательно)</div>
+        <input class="field" id="add-src" placeholder="Например: Сессия с Claude, Книга МакКи…">
+      </div>
+      <button class="btn btn-p btn-full" onclick="saveIns()"><i data-lucide="check"></i>Сохранить инсайт</button>
+    </div>
+  </div>
+</div>
+
+<!-- РЕДАКТИРОВАТЬ ИНСАЙТ -->
+<div class="ov" id="ov-edit" onclick="if(event.target===this)closeOv('ov-edit')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Редактировать</div>
+    <input type="hidden" id="edit-id">
+    <div class="sh-form">
+      <div>
+        <div class="f-lbl">Тег</div>
+        <div class="trow" id="edit-tags">
+          <button class="tp" data-t="book" onclick="sTagEdit(this)">Книга</button>
+          <button class="tp" data-t="bot" onclick="sTagEdit(this)">Бот</button>
+          <button class="tp" data-t="personal" onclick="sTagEdit(this)">Личное</button>
+          <button class="tp" data-t="project" onclick="sTagEdit(this)">Проект</button>
+          <button class="tp" data-t="vitality" onclick="sTagEdit(this)">Vitality</button>
+          <button class="tp" data-t="dream" onclick="sTagEdit(this)">Сон</button>
+          <button class="tp" data-t="pattern" onclick="sTagEdit(this)">Паттерн</button>
+          <button class="tp" data-t="spirit" onclick="sTagEdit(this)">Духовное</button>
+        </div>
+      </div>
+      <div>
+        <div class="f-lbl">Уровень</div>
+        <div class="wrow" id="edit-wts">
+          <button class="wp" data-w="1" onclick="sWEdit(this)">Наблюдение</button>
+          <button class="wp" data-w="2" onclick="sWEdit(this)">Понято</button>
+          <button class="wp" data-w="3" onclick="sWEdit(this)">Прочувствовано</button>
+          <button class="wp" data-w="4" onclick="sWEdit(this)">Интегрировано</button>
+          <button class="wp" data-w="5" onclick="sWEdit(this)">Трансформировало</button>
+        </div>
+      </div>
+      <textarea class="field" id="edit-tx" rows="5"></textarea>
+      <input class="field" id="edit-src" placeholder="Источник…">
+      <div style="display:flex;gap:var(--s3)">
+        <button class="btn btn-d btn-sm" onclick="deleteInsConfirm()"><i data-lucide="trash-2"></i>Удалить</button>
+        <button class="btn btn-p btn-full" onclick="saveEdit()"><i data-lucide="check"></i>Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CHECK-IN -->
+<div class="ov" id="ov-ci" onclick="if(event.target===this)closeOv('ov-ci')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Vitality Check-in</div>
+    <div class="vgrid" style="padding:0 1rem 1rem">
+      <div class="vf" style="grid-column:1/-1"><label>Сон — часов</label><div class="sl"><input type="range" id="ci-sl" min="1" max="12" step=".5" value="7" oninput="document.getElementById('ci-sl-v').textContent=this.value" aria-label="Часы сна"><span class="slv" id="ci-sl-v">7</span></div></div>
+      <div class="vf"><label>Качество сна</label><div class="sl"><input type="range" id="ci-sq" min="1" max="10" value="7" oninput="document.getElementById('ci-sq-v').textContent=this.value"><span class="slv" id="ci-sq-v">7</span></div></div>
+      <div class="vf"><label>Ясность</label><div class="sl"><input type="range" id="ci-cl" min="1" max="10" value="7" oninput="document.getElementById('ci-cl-v').textContent=this.value"><span class="slv" id="ci-cl-v">7</span></div></div>
+      <div class="vf"><label>Тревожность</label><div class="sl"><input type="range" id="ci-st" min="1" max="10" value="4" oninput="document.getElementById('ci-st-v').textContent=this.value"><span class="slv" id="ci-st-v">4</span></div></div>
+      <div class="vf"><label>Мотивация</label><div class="sl"><input type="range" id="ci-mv" min="1" max="10" value="7" oninput="document.getElementById('ci-mv-v').textContent=this.value"><span class="slv" id="ci-mv-v">7</span></div></div>
+    </div>
+    <div style="padding:0 1rem">
+      <div class="f-lbl" style="margin-bottom:.75rem">Привычки</div>
+      <div class="tog-row"><span class="tog-lbl">Никотин</span><div class="tog" id="tog-nic" onclick="this.classList.toggle('on')" role="switch"></div></div>
+      <div class="tog-row"><span class="tog-lbl">Кофеин</span><div class="tog on" id="tog-caf" onclick="this.classList.toggle('on')" role="switch"></div></div>
+      <div class="tog-row" style="border-bottom:none"><span class="tog-lbl">Алкоголь</span><div class="tog" id="tog-alc" onclick="this.classList.toggle('on')" role="switch"></div></div>
+    </div>
+    <div style="padding:1rem">
+      <div class="f-lbl">Активность</div>
+      <div class="trow" id="ci-act">
+        <button class="tp a-moss" data-a="нет" onclick="sAct(this)">Нет</button>
+        <button class="tp" data-a="прогулка" onclick="sAct(this)">Прогулка</button>
+        <button class="tp" data-a="тренировка" onclick="sAct(this)">Тренировка</button>
+        <button class="tp" data-a="йога" onclick="sAct(this)">Йога</button>
+        <button class="tp" data-a="бег" onclick="sAct(this)">Бег</button>
+      </div>
+    </div>
+    <div style="padding:0 1rem">
+      <div class="f-lbl">Тонус</div>
+      <div class="trow" id="ci-tone">
+        <button class="tp a-moss" data-to="заряжен" onclick="sTone(this)">Заряжен</button>
+        <button class="tp" data-to="нейтрально" onclick="sTone(this)">Нейтрально</button>
+        <button class="tp" data-to="пусто" onclick="sTone(this)">Пусто</button>
+        <button class="tp" data-to="тяжело" onclick="sTone(this)">Тяжело</button>
+      </div>
+    </div>
+    <div style="padding:1rem">
+      <textarea class="field" id="ci-note" placeholder="Что происходит прямо сейчас…" rows="2"></textarea>
+      <div style="height:.75rem"></div>
+      <button class="btn btn-p btn-full" onclick="saveCI()"><i data-lucide="check"></i>Сохранить check-in</button>
+    </div>
+  </div>
+</div>
+
+<!-- СОН -->
+<div class="ov" id="ov-drm" onclick="if(event.target===this)closeOv('ov-drm')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Зафиксировать сон</div>
+    <div class="sh-form">
+      <textarea class="field" id="drm-tx" placeholder="Образы без интерпретации — что было, тело, тон, атмосфера…" rows="5"></textarea>
+      <div>
+        <div class="f-lbl">Атмосфера</div>
+        <div class="trow" id="drm-tone">
+          <button class="tp" data-dt="тяжело" onclick="sDT(this)">Тяжело</button>
+          <button class="tp" data-dt="тревожно" onclick="sDT(this)">Тревожно</button>
+          <button class="tp a-moss" data-dt="нейтрально" onclick="sDT(this)">Нейтрально</button>
+          <button class="tp" data-dt="светло" onclick="sDT(this)">Светло</button>
+          <button class="tp" data-dt="трансформация" onclick="sDT(this)">Трансформация</button>
+        </div>
+      </div>
+      <input class="field" id="drm-arch" placeholder="Архетипический образ (если очевиден)…">
+      <button class="btn btn-p btn-full" onclick="saveDrm()"><i data-lucide="moon"></i>Сохранить сон</button>
+    </div>
+  </div>
+</div>
+
+<!-- ДОБАВИТЬ ПАТТЕРН -->
+<div class="ov" id="ov-pat-add" onclick="if(event.target===this)closeOv('ov-pat-add')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Новый паттерн</div>
+    <div class="sh-form">
+      <div>
+        <div class="f-lbl">Тип</div>
+        <div class="trow" id="pat-types">
+          <button class="tp a-pattern" data-pt="Поведенческий" onclick="sPT(this)">Поведенческий</button>
+          <button class="tp" data-pt="Отношенческий" onclick="sPT(this)">Отношенческий</button>
+          <button class="tp" data-pt="Творческий" onclick="sPT(this)">Творческий</button>
+          <button class="tp" data-pt="Телесный" onclick="sPT(this)">Телесный</button>
+        </div>
+      </div>
+      <textarea class="field" id="pat-tx" placeholder="Что повторяется? Опиши паттерн…" rows="4"></textarea>
+      <button class="btn btn-p btn-full" onclick="savePat()"><i data-lucide="git-branch"></i>Сохранить паттерн</button>
+    </div>
+  </div>
+</div>
+
+<!-- ДОБАВИТЬ ДУХОВНОЕ -->
+<div class="ov" id="ov-spi-add" onclick="if(event.target===this)closeOv('ov-spi-add')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Духовный путь</div>
+    <div class="sh-form">
+      <div>
+        <div class="f-lbl">Тип практики</div>
+        <div class="trow" id="spi-types">
+          <button class="tp a-spirit" data-spt="Медитация" onclick="sSPT(this)">Медитация</button>
+          <button class="tp" data-spt="Осознанное сновидение" onclick="sSPT(this)">Осознанное сновидение</button>
+          <button class="tp" data-spt="Синхроничность" onclick="sSPT(this)">Синхроничность</button>
+          <button class="tp" data-spt="Кундалини" onclick="sSPT(this)">Кундалини</button>
+          <button class="tp" data-spt="Видение" onclick="sSPT(this)">Видение</button>
+          <button class="tp" data-spt="Иное" onclick="sSPT(this)">Иное</button>
+        </div>
+      </div>
+      <textarea class="field" id="spi-tx" placeholder="Опиши переживание без оценки…" rows="4"></textarea>
+      <button class="btn btn-p btn-full" onclick="saveSpi()"><i data-lucide="sparkles"></i>Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ДОБАВИТЬ ЭВОЛЮЦИЮ -->
+<div class="ov" id="ov-evo-add" onclick="if(event.target===this)closeOv('ov-evo-add')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Журнал эволюции</div>
+    <div class="sh-form">
+      <div>
+        <div class="f-lbl">Уровень</div>
+        <div class="wrow" id="evo-lvls">
+          <button class="wp" data-lv="0" onclick="sEL(this)">Наблюдение</button>
+          <button class="wp" data-lv="1" onclick="sEL(this)">Понято</button>
+          <button class="wp on" data-lv="2" onclick="sEL(this)">Прочувствовано</button>
+          <button class="wp" data-lv="3" onclick="sEL(this)">Трансформировало</button>
+        </div>
+      </div>
+      <textarea class="field" id="evo-tx" placeholder="Что сдвинулось в понимании или ощущении…" rows="4"></textarea>
+      <button class="btn btn-p btn-full" onclick="saveEvo()"><i data-lucide="trending-up"></i>Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ЖУРНАЛ ЭВОЛЮЦИИ (список) -->
+<div class="ov" id="ov-evo" onclick="if(event.target===this)closeOv('ov-evo')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Журнал эволюции</div>
+    <div id="evo-sh" style="padding:0 1rem 2rem"></div>
+  </div>
+</div>
+
+<!-- ДЕТАЛЬНЫЙ ПРОСМОТР -->
+<div class="ov" id="ov-det" onclick="if(event.target===this)closeOv('ov-det')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div style="padding:0 1rem">
+      <div id="det-meta" style="display:flex;align-items:center;gap:.5rem;margin-bottom:1rem"></div>
+      <div id="det-title" style="font-size:var(--tx7);font-weight:700;color:var(--t1);margin-bottom:1.25rem;line-height:1.2;letter-spacing:-.02em"></div>
+      <div id="det-body" style="font-size:var(--tx5);color:var(--t2);line-height:1.65;white-space:pre-wrap;margin-bottom:1.25rem"></div>
+      <div id="det-links" style="font-size:var(--tx3);color:var(--t3)"></div>
+    </div>
+    <div style="padding:1rem;display:flex;gap:.625rem">
+      <button class="btn btn-d btn-sm" id="det-del-btn" onclick="deleteInsFromDet()"><i data-lucide="trash-2"></i>Удалить</button>
+      <button class="btn btn-s btn-sm" id="det-edit-btn" onclick="openEditFromDet()"><i data-lucide="edit-2"></i>Изменить</button>
+      <button class="btn btn-s btn-sm" id="det-share-btn" onclick="shareIns()"><i data-lucide="share-2"></i></button>
+      <button class="btn btn-p btn-sm btn-full" onclick="closeOv('ov-det')">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- РЕДАКТИРОВАТЬ ОСИ (все) -->
+<div class="ov" id="ov-axis-all" onclick="if(event.target===this)closeOv('ov-axis-all')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Оси жизни</div>
+    <div class="sh-subtitle">Нажми на ось чтобы изменить значение</div>
+    <div class="axis-sliders" id="axis-sliders-all"></div>
+    <div style="padding:0 var(--s4) var(--s4)">
+      <button class="btn btn-p btn-full" onclick="saveAxesAll()"><i data-lucide="check"></i>Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- КОНФИГУРАЦИЯ ОСЕЙ -->
+<div class="ov" id="ov-cfg" onclick="if(event.target===this)closeOv('ov-cfg')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Конфигурация</div>
+    <div class="sh-form" style="padding:0 var(--s4) var(--s4)">
+      <div>
+        <div class="f-lbl">Имя</div>
+        <input class="field" id="cfg-name" placeholder="Твоё имя">
+      </div>
+      <div>
+        <div class="f-lbl">Домен (Книга / Музыка / Стихи / Проект…)</div>
+        <input class="field" id="cfg-domain" placeholder="Книга">
+      </div>
+      <div>
+        <div class="f-lbl">URL Backend (Railway)</div>
+        <input class="field" id="cfg-api" placeholder="https://your-app.railway.app" type="url">
+      </div>
+    </div>
+    <div class="sec-lbl">Оси радара</div>
+    <div class="cfg-axes" id="cfg-axes-list"></div>
+    <div style="padding:0 var(--s4) var(--s4);display:flex;flex-direction:column;gap:var(--s3)">
+      <button class="btn btn-s btn-full" onclick="openOv('ov-axis-new')"><i data-lucide="plus"></i>Добавить ось</button>
+      <button class="btn btn-p btn-full" onclick="saveCfg()"><i data-lucide="check"></i>Сохранить конфигурацию</button>
+    </div>
+  </div>
+</div>
+
+<!-- ДОБАВИТЬ ОСЬ -->
+<div class="ov" id="ov-axis-new" onclick="if(event.target===this)closeOv('ov-axis-new')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Новая ось</div>
+    <div class="sh-form">
+      <div>
+        <div class="f-lbl">Название</div>
+        <input class="field" id="ax-new-lbl" placeholder="Например: Здоровье">
+      </div>
+      <div>
+        <div class="f-lbl">Начальное значение (1–10)</div>
+        <div class="sl"><input type="range" id="ax-new-v" min="1" max="10" value="7" step=".5" oninput="document.getElementById('ax-new-vv').textContent=this.value"><span class="slv" id="ax-new-vv">7</span></div>
+      </div>
+      <div>
+        <div class="f-lbl">Цвет</div>
+        <div class="trow">
+          <button class="tp" style="background:#EBF2FF;border-color:#1056CC;color:#1056CC" data-ac="#1056CC" onclick="sAxColor(this)">Синий</button>
+          <button class="tp a-moss" data-ac="#1A7F3C" onclick="sAxColor(this)">Зелёный</button>
+          <button class="tp" style="background:#F5EEFF;border-color:#6B21A8;color:#6B21A8" data-ac="#6B21A8" onclick="sAxColor(this)">Фиолет.</button>
+          <button class="tp" style="background:#FEF3E2;border-color:#B45309;color:#B45309" data-ac="#B45309" onclick="sAxColor(this)">Оранжев.</button>
+          <button class="tp" style="background:#E0F7FA;border-color:#0E7490;color:#0E7490" data-ac="#0E7490" onclick="sAxColor(this)">Голубой</button>
+        </div>
+      </div>
+      <button class="btn btn-p btn-full" onclick="saveNewAxis()"><i data-lucide="plus"></i>Добавить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ИМПОРТ -->
+<div class="ov" id="ov-import" onclick="if(event.target===this)closeOv('ov-import')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Импорт данных</div>
+    <div class="sh-form">
+      <div style="padding:var(--s5);background:var(--bg2);border-radius:var(--r12);border:2px dashed var(--bd);text-align:center">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:32px;height:32px;color:var(--t3);margin-bottom:var(--s3)"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <div style="font-size:var(--tx4);font-weight:600;color:var(--t2);margin-bottom:var(--s2)">Выбери JSON файл</div>
+        <div style="font-size:var(--tx3);color:var(--t3)">Экспортированный ранее архив</div>
+        <input type="file" id="import-file" accept=".json" style="display:none" onchange="handleImport(this)">
+      </div>
+      <button class="btn btn-s btn-full" onclick="document.getElementById('import-file').click()"><i data-lucide="upload"></i>Выбрать файл</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+<script src="app.js"></script>
+</body>
+</html>
