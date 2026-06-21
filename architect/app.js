@@ -2,6 +2,8 @@
 
 // ─── УТИЛИТЫ ────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
+// Безопасный вызов иконок — не падаем, если CDN lucide ещё не загрузился
+const icons = (opt) => { try { if (typeof lucide !== 'undefined') lucide.createIcons(opt); } catch(e) {} };
 const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const hpt = () => navigator.vibrate?.([8]);
 const hptMed = () => navigator.vibrate?.([15]);
@@ -14,6 +16,8 @@ const DEFAULT_CFG = {
   userName: '',
   domainLabel: 'Книга',
   apiUrl: '',
+  spaceKey: '',
+  lastSync: '',
   newAxColor: '#1056CC',
   axes: {
     vitality:   {lbl:'Здоровье',   s:7,   c:'#1A7F3C'},
@@ -418,7 +422,7 @@ function rIns() {
     return;
   }
   el.innerHTML = list.map(iRow).join('');
-  lucide.createIcons({nodes:[el]});
+  icons({nodes:[el]});
 }
 function flt(tag, el) {
   STATE.flt = tag;
@@ -819,6 +823,9 @@ function rCfgForm() {
   const ni = $('cfg-name');   if(ni) ni.value = CFG.userName||'';
   const di = $('cfg-domain'); if(di) di.value = CFG.domainLabel||'Книга';
   const ai = $('cfg-api');    if(ai) ai.value = CFG.apiUrl||'';
+  const ki = $('cfg-space');  if(ki) ki.value = CFG.spaceKey||'';
+  const ls = $('cfg-lastsync');
+  if (ls) ls.textContent = CFG.lastSync ? 'Последняя синхронизация: '+new Date(CFG.lastSync).toLocaleString('ru') : 'Ещё не синхронизировано';
   rCfgAxes();
 }
 function rCfgAxes() {
@@ -837,9 +844,11 @@ function saveCfg() {
   CFG.userName    = $('cfg-name')?.value.trim()||CFG.userName;
   CFG.domainLabel = $('cfg-domain')?.value.trim()||CFG.domainLabel;
   CFG.apiUrl      = $('cfg-api')?.value.trim()||'';
+  const keyVal    = $('cfg-space')?.value.trim()||'';
+  CFG.spaceKey    = keyVal;  // позволяет вставить ключ с другого устройства
   if (CFG.axes.domain) CFG.axes.domain.lbl = CFG.domainLabel;
   persist(); closeOv('ov-cfg');
-  updateDomainLabel(); rCompass(); rVit();
+  updateDomainLabel(); rCompass(); rVit(); checkApiStatus();
   toast('Конфигурация сохранена', 'ok');
 }
 function saveNewAxis() {
@@ -886,29 +895,89 @@ function handleImport(input) {
 }
 
 // ─── СИНХРОНИЗАЦИЯ ───────────────────────────────────────────────
+function apiBase() {
+  return (CFG.apiUrl || window.ARCHITECT_API || '').trim().replace(/\/+$/, '');
+}
+
+// Сохранить данные на сервер (push). При первом запуске создаёт пространство.
 async function doSync() {
-  const API = CFG.apiUrl || window.ARCHITECT_API;
-  $('sync-lbl').textContent = 'Синхронизирую…';
+  const API = apiBase();
   if (!API) {
-    await new Promise(r=>setTimeout(r,1200));
     $('sync-lbl').textContent = 'Backend не подключён';
-    toast('Настрой URL backend в Конфигурации', 'warn');
+    toast('Укажи URL backend в Конфигурации', 'warn');
+    openOv('ov-cfg');
     return;
   }
+  $('sync-lbl').textContent = 'Синхронизирую…';
   try {
-    const r = await fetch(API+'/api/sync/weekly', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({db:DB, period_days:7}),
+    // Нет ключа пространства — создаём новое
+    if (!CFG.spaceKey) {
+      const cr = await fetch(API + '/api/space', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ name: CFG.userName || 'Архитектор', db: DB, cfg: CFG }),
+      });
+      if (!cr.ok) throw new Error('создание ' + cr.status);
+      const cd = await cr.json();
+      CFG.spaceKey = cd.key;
+      CFG.lastSync = cd.updated_at;
+      persist();
+      $('sync-lbl').textContent = 'Пространство создано ✓';
+      toast('Пространство создано — данные на сервере', 'ok');
+      rCfgForm();
+      return;
+    }
+    // Есть ключ — пушим изменения
+    const r = await fetch(API + '/api/space/' + CFG.spaceKey, {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ db: DB, cfg: CFG, name: CFG.userName || 'Архитектор' }),
     });
-    if (!r.ok) throw new Error(r.statusText);
-    const data = await r.json();
-    $('sync-lbl').textContent = `Обновлено: ${(data.updated_docs||[]).join(', ')||'—'}`;
-    toast('Синхронизация завершена', 'ok');
-    if (data.analysis?.main_insight) toast(data.analysis.main_insight.slice(0,60));
-  } catch(e) {
+    if (r.status === 404) {
+      // Пространство удалили на сервере — создаём заново
+      CFG.spaceKey = '';
+      persist();
+      return doSync();
+    }
+    if (!r.ok) throw new Error('сохранение ' + r.status);
+    const d = await r.json();
+    CFG.lastSync = d.updated_at;
+    persist();
+    $('sync-lbl').textContent = 'Сохранено: ' + new Date(d.updated_at).toLocaleTimeString('ru', {hour:'2-digit',minute:'2-digit'});
+    hptMed(); toast('Данные сохранены на сервере', 'ok');
+  } catch (e) {
     $('sync-lbl').textContent = 'Ошибка синхронизации';
-    toast('Ошибка: '+e.message, 'warn');
+    toast('Ошибка: ' + e.message, 'warn');
   }
+}
+
+// Загрузить данные с сервера (pull) на текущее устройство.
+async function pullData() {
+  const API = apiBase();
+  if (!API)          { toast('Укажи URL backend', 'warn'); return; }
+  if (!CFG.spaceKey) { toast('Нет ключа пространства', 'warn'); return; }
+  if (!confirm('Загрузить данные с сервера? Текущие данные на этом устройстве будут заменены.')) return;
+  try {
+    const r = await fetch(API + '/api/space/' + CFG.spaceKey);
+    if (r.status === 404) { toast('Пространство не найдено', 'warn'); return; }
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const keepApi = CFG.apiUrl, keepKey = CFG.spaceKey;
+    if (d.db && Object.keys(d.db).length)  DB  = {...DEFAULT_DB,  ...d.db};
+    if (d.cfg && Object.keys(d.cfg).length) CFG = {...DEFAULT_CFG, ...d.cfg, axes:{...DEFAULT_CFG.axes, ...(d.cfg.axes||{})}};
+    CFG.apiUrl = keepApi; CFG.spaceKey = keepKey; CFG.lastSync = d.updated_at;
+    persist(); closeOv('ov-cfg'); initAll();
+    hptMed(); toast('Данные загружены с сервера', 'ok');
+  } catch (e) {
+    toast('Ошибка загрузки: ' + e.message, 'warn');
+  }
+}
+
+// Скопировать ключ пространства (для переноса на другое устройство).
+function copySpaceKey() {
+  if (!CFG.spaceKey) { toast('Сначала синхронизируй — ключ появится', 'warn'); return; }
+  navigator.clipboard?.writeText(CFG.spaceKey).then(
+    () => toast('Ключ скопирован', 'ok'),
+    () => toast(CFG.spaceKey)
+  );
 }
 
 // ─── КОМАНДЫ ────────────────────────────────────────────────────
@@ -984,7 +1053,7 @@ function runCmd() {
   const out = key ? CMDS[key]() : `<div style="font-size:var(--tx4);color:var(--t2)">Неизвестная команда. Попробуй <strong style="color:var(--blue-t)">/помощь</strong></div>`;
   $('cmd-res').innerHTML = out;
   $('cmd-out').style.display = 'block';
-  lucide.createIcons({nodes:[$('cmd-res')]});
+  icons({nodes:[$('cmd-res')]});
 }
 $('cmd')?.addEventListener('input', e => {
   const v = e.target.value;
@@ -1009,12 +1078,12 @@ function applySuggestion(cmd) {
 
 // ─── СИНХРОНИЗАЦИЯ API LABEL ─────────────────────────────────────
 function checkApiStatus() {
-  const API = CFG.apiUrl || window.ARCHITECT_API;
+  const API = apiBase();
   const el = $('api-lbl');
   if (!API) { if(el) el.textContent='Не подключён'; return; }
   if(el) el.textContent='Проверяю…';
   fetch(API+'/health').then(r => {
-    if(r.ok) { if(el) el.textContent='Подключён ✓'; }
+    if(r.ok) { if(el) el.textContent = CFG.spaceKey ? 'Подключён ✓' : 'Готов — нажми Синк'; }
     else { if(el) el.textContent='Ошибка'; }
   }).catch(() => { if(el) el.textContent='Недоступен'; });
 }
@@ -1046,7 +1115,7 @@ function initAll() {
   updateDomainLabel();
   rHome(); rCompass(); rAxCells(); rKPIs(); rIns(); rBook();
   rBots(); rPats(); rDrms(); rSpi(); rEvoList($('evo-sh')); rDig();
-  lucide.createIcons();
+  icons();
   checkApiStatus();
   smartTriggers();
 }

@@ -551,7 +551,19 @@
       </div>
       <div>
         <div class="f-lbl">URL Backend (Railway)</div>
-        <input class="field" id="cfg-api" placeholder="https://your-app.railway.app" type="url">
+        <input class="field" id="cfg-api" placeholder="https://your-app.railway.app" type="url" autocapitalize="off" autocorrect="off" spellcheck="false">
+      </div>
+      <div>
+        <div class="f-lbl">Ключ пространства (для синка между устройствами)</div>
+        <input class="field" id="cfg-space" placeholder="Появится после первой синхронизации" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <div id="cfg-lastsync" style="font-size:var(--tx2);color:var(--t3);margin-top:var(--s2)"></div>
+      </div>
+      <div style="display:flex;gap:var(--s2)">
+        <button class="btn btn-s btn-sm" onclick="copySpaceKey()"><i data-lucide="copy"></i>Копировать ключ</button>
+        <button class="btn btn-g btn-sm" onclick="pullData()"><i data-lucide="download-cloud"></i>Загрузить с сервера</button>
+      </div>
+      <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5;background:var(--bg2);border-radius:var(--r8);padding:var(--s3)">
+        <strong style="color:var(--t2)">Как синхронизировать:</strong> на первом устройстве укажи URL и нажми «Синхронизировать» — создастся ключ. Скопируй ключ и URL, вставь их на втором устройстве, нажми «Загрузить с сервера».
       </div>
     </div>
     <div class="sec-lbl">Оси радара</div>
