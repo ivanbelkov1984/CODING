@@ -540,3 +540,9 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .dg-ai-badge{font-size:var(--tx2);font-weight:700;color:var(--purple,#6B21A8);text-transform:uppercase;letter-spacing:.06em;margin-bottom:var(--s2)}
 .btn-xs{padding:3px 10px;font-size:var(--tx2);gap:3px}
 .btn-xs i,.btn-xs svg{width:12px;height:12px}
+
+/* ── ГОД НАЗАД ─────────────────────────────────────────────────── */
+.otd{margin-top:var(--s3);padding:var(--s3);background:var(--gold-l,#FEF3E2);border:1px solid var(--gold,#B45309);border-left-width:3px;border-radius:var(--r12);cursor:pointer}
+.otd-h{font-size:var(--tx2);font-weight:700;color:var(--gold,#B45309);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+.otd-t{font-size:var(--tx4);font-weight:600;color:var(--t1);line-height:1.3}
+.otd-b{font-size:var(--tx3);color:var(--t2);line-height:1.5;margin-top:2px}

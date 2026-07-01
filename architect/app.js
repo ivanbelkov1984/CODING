@@ -534,7 +534,25 @@ function rHome() {
   $('h-oq').innerHTML = DB.oq.map((q,i) =>
     `<div class="oqrow" onclick="reflectOn(${i})" role="button"><div class="oqpulse"></div><span>${esc(q)}</span><svg class="oq-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>`
   ).join('');
+  rOnThisDay();
   rHIns();
+}
+// «Год назад» — ретроспектива: запись годичной давности (±3 дня).
+function rOnThisDay() {
+  const el = $('h-onthisday'); if (!el) return;
+  const now = new Date();
+  const target = new Date(now.getFullYear()-1, now.getMonth(), now.getDate()).getTime();
+  const old = Date.now() - 300*864e5;
+  const within = iso => { const t = Date.parse(iso); return t && Math.abs(t - target) <= 3*864e5 && t < old; };
+  const ins = DB.insights.find(i => within(i.createdAt));
+  const drm = ins ? null : DB.dreams.find(d => within(d.createdAt));
+  const hit = ins || drm;
+  if (!hit) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="otd mx mb"${ins ? ` onclick="showDet(${hit.id})" role="button"` : ''}>
+    <div class="otd-h">📅 Год назад${ins ? '' : ' · сон'}</div>
+    <div class="otd-t">${esc(hit.title)}</div>
+    <div class="otd-b">${esc((hit.body||'').slice(0,140))}</div>
+  </div>`;
 }
 // Управляемая рефлексия: тап по вопросу открывает инсайт с этим вопросом.
 function reflectOn(i) {
@@ -921,6 +939,33 @@ function saveAxesAll() {
   });
   persist(); closeOv('ov-axis-all'); rCompass(); rAxCells(); rVit();
   hptMed(); toast('Оси обновлены', 'ok');
+}
+
+// ─── РАДАР ИЗ ЛОГОВ ──────────────────────────────────────────────
+// Производит значения осей «Здоровье»/«Психология» из чек-инов
+// (честно — только при ≥3 замерах за 2 недели). Не трогает остальные оси.
+function deriveAxes() {
+  const list = DB.checkins.filter(c => c.date > dayAgo(14));
+  if (list.length < 3) return null;
+  const a = checkinAvg(list); if (!a) return null;
+  const sleepScore = Math.max(0, Math.min(10, a.sl / 8 * 10)); // 8ч ≈ 10
+  const calm = 10 - a.st;
+  return {
+    vitality:   +((sleepScore + calm) / 2).toFixed(1),          // отдых + низкий стресс
+    psychology: +((a.cl + a.mv + calm) / 3).toFixed(1),         // ясность + мотивация + спокойствие
+    n: a.n,
+  };
+}
+function applyDerivedAxes() {
+  const d = deriveAxes();
+  if (!d) { toast('Мало чек-инов для расчёта (нужно ≥3 за 2 недели)', 'warn'); return; }
+  const changed = [];
+  if (CFG.axes.vitality)   { CFG.axes.vitality.s   = d.vitality;   changed.push('Здоровье→'+d.vitality); }
+  if (CFG.axes.psychology) { CFG.axes.psychology.s = d.psychology; changed.push('Психология→'+d.psychology); }
+  if (!changed.length) { toast('Нет осей Здоровье/Психология для обновления', 'warn'); return; }
+  persist(); rCompass(); rAxCells(); rVit();
+  if ($('ov-axis-all')?.classList.contains('on')) rAxisSliders();
+  hptMed(); toast('Оси из чек-инов (' + d.n + ' дн.): ' + changed.join(', '), 'ok');
 }
 
 // ─── VITALITY ────────────────────────────────────────────────────

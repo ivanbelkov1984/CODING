@@ -91,6 +91,7 @@
     <div class="h-hl">Система <em id="h-st">готова</em></div>
     <div id="h-streak-wrap"></div>
   </div>
+  <div id="h-onthisday"></div>
   <div class="sec-lbl">Действия</div>
   <div class="qarow">
     <button class="qabtn" onclick="openOv('ov-ci')" aria-label="Check-in">
@@ -167,8 +168,9 @@
   <div class="mx mb" id="vit-trends"></div>
   <div class="sec-lbl">8 осей жизни</div>
   <div class="vbars" id="vit-bars"></div>
-  <div style="padding:0 var(--s4) var(--s4)">
+  <div style="padding:0 var(--s4) var(--s4);display:flex;gap:var(--s2);flex-wrap:wrap">
     <button class="btn btn-s btn-sm" onclick="openOv('ov-axis-all')"><i data-lucide="sliders"></i> Настроить оси</button>
+    <button class="btn btn-s btn-sm" onclick="applyDerivedAxes()"><i data-lucide="activity"></i> По чек-инам</button>
   </div>
   <div style="height:5rem"></div>
 </section>
