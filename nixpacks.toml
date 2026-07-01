@@ -1,0 +1,21 @@
+# ═══════════════════════════════════════════════════════════════
+#  Railway / Nixpacks — конфигурация сборки для монорепозитория.
+#  В корне лежит несколько проектов (TMCManager, build, architect),
+#  поэтому автосборщик не знает, что запускать. Этот файл жёстко
+#  указывает: собирать и запускать ТОЛЬКО backend приложения
+#  «Архитектор» (Node.js + Express) из папки architect/backend.
+#
+#  Если в настройках сервиса на Railway задан Root Directory
+#  = architect/backend, этот корневой файл игнорируется и
+#  используется architect/backend/railway.json — оба пути рабочие.
+# ═══════════════════════════════════════════════════════════════
+providers = ["node"]
+
+[phases.install]
+cmds = ["cd architect/backend && npm ci"]
+
+[phases.build]
+cmds = ["echo 'backend: build-шаг не нужен'"]
+
+[start]
+cmd = "cd architect/backend && npm start"
