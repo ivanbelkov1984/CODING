@@ -242,6 +242,7 @@
   <div id="ms-settings" style="display:none">
     <div class="sec-lbl">Настройки</div>
     <div class="card mx">
+      <div class="srow" onclick="openProfiles()"><div class="sic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><span class="sl2">Профиль</span><span class="sv2" id="prof-current">—</span></div>
       <div class="srow" onclick="toggleTheme()"><div class="sic" style="background:var(--gold-l)"><svg style="color:var(--gold)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2"/></svg></div><span class="sl2">Тема</span><span class="sv2" id="thv">Дневная</span></div>
       <div class="srow" onclick="openOv('ov-cfg')"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg></div><span class="sl2">Конфигурация осей</span><span class="sv2">Настроить</span></div>
       <div class="srow"><div class="sic" style="background:var(--blue-l)"><svg style="color:var(--blue-t)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/></svg></div><span class="sl2">Backend API</span><span class="sv2" id="api-lbl">Не подключён</span></div>
@@ -624,6 +625,35 @@
         <input type="file" id="import-file" accept=".json" style="display:none" onchange="handleImport(this)">
       </div>
       <button class="btn btn-s btn-full" onclick="document.getElementById('import-file').click()"><i data-lucide="upload"></i>Выбрать файл</button>
+    </div>
+  </div>
+</div>
+
+<!-- ПРОФИЛИ -->
+<div class="ov" id="ov-profiles" onclick="if(event.target===this)closeOv('ov-profiles')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Профили</div>
+    <div class="sh-form">
+      <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5">Каждый профиль — отдельное пространство с собственными данными, ключом и парольной фразой. Удобно разделять, например, «Личное» и «Работу».</div>
+      <div id="prof-list" class="prof-list"></div>
+      <button class="btn btn-p btn-full" onclick="openOv('ov-add-profile')"><i data-lucide="user-plus"></i>Добавить профиль</button>
+    </div>
+  </div>
+</div>
+
+<!-- ДОБАВИТЬ ПРОФИЛЬ -->
+<div class="ov" id="ov-add-profile" onclick="if(event.target===this)closeOv('ov-add-profile')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Новый профиль</div>
+    <div class="sh-form">
+      <div>
+        <div class="f-lbl">Название</div>
+        <input class="field" id="prof-new-name" placeholder="Например: Работа" autocapitalize="words">
+      </div>
+      <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5">Создастся чистый профиль. Данные текущего профиля останутся на месте — переключиться можно в любой момент.</div>
+      <button class="btn btn-p btn-full" onclick="createProfile()"><i data-lucide="check"></i>Создать и переключиться</button>
     </div>
   </div>
 </div>

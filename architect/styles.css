@@ -482,3 +482,14 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .log-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:5px}
 .log-time{color:var(--t3);font-variant-numeric:tabular-nums;flex-shrink:0;font-weight:600}
 .log-msg{color:var(--t2);line-height:1.4;word-break:break-word}
+
+/* ── PROFILES ──────────────────────────────────────────────────── */
+.prof-list{display:flex;flex-direction:column;gap:var(--s2)}
+.prof-row{display:flex;align-items:center;gap:var(--s3);padding:var(--s3);background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r12);cursor:pointer;transition:border-color .15s,background .15s}
+.prof-row.on{border-color:var(--blue-btn);background:var(--blue-l)}
+.prof-ava{width:38px;height:38px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:var(--tx5)}
+.prof-info{flex:1;min-width:0}
+.prof-name{font-size:var(--tx4);font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prof-sub{font-size:var(--tx2);color:var(--t3);margin-top:1px}
+.prof-act{background:none;border:none;padding:var(--s2);cursor:pointer;border-radius:var(--r8);flex-shrink:0}
+.prof-act:active{background:var(--bd)}

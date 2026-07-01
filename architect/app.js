@@ -78,13 +78,56 @@ let STATE = {
   detId: null,
 };
 
-// ─── PERSIST / HYDRATE ──────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════
+//  ПРОФИЛИ  (перенос концепции profiles из TMCManager)
+//  Каждый профиль — независимый набор данных: своя БД, своя
+//  конфигурация (URL/ключ пространства) и своя парольная фраза.
+//  Ключи в localStorage неймспейсятся по id профиля.
+// ═════════════════════════════════════════════════════════════════
+const PKEY = 'arch5_profiles', AKEY = 'arch5_active';
+const PROFILE_COLORS = ['#1056CC','#1A7F3C','#6B21A8','#B45309','#0E7490','#92400E'];
+const dbKey   = id => 'arch5_db_'   + id;
+const cfgKey  = id => 'arch5_cfg_'  + id;
+const passKey = id => 'arch5_pass_' + id;
+
+function loadProfiles() {
+  try { return JSON.parse(localStorage.getItem(PKEY) || 'null') || []; } catch(e) { return []; }
+}
+function saveProfiles(list) { try { localStorage.setItem(PKEY, JSON.stringify(list)); } catch(e) {} }
+function activeId()      { try { return localStorage.getItem(AKEY) || ''; } catch(e) { return ''; } }
+function setActiveId(id) { try { localStorage.setItem(AKEY, id); } catch(e) {} }
+function activeProfile() { const id = activeId(); return loadProfiles().find(p => p.id === id) || null; }
+
+// Гарантирует наличие хотя бы одного профиля; мигрирует старые
+// «плоские» ключи (arch5_db/arch5_cfg/arch5_pass) в профиль по умолчанию.
+function ensureProfiles() {
+  let list = loadProfiles();
+  if (!list.length) {
+    const id = 'p' + Date.now();
+    const oldDb = localStorage.getItem('arch5_db');
+    const oldCfg = localStorage.getItem('arch5_cfg');
+    const oldPass = localStorage.getItem('arch5_pass');
+    if (oldDb)   localStorage.setItem(dbKey(id), oldDb);
+    if (oldCfg)  localStorage.setItem(cfgKey(id), oldCfg);
+    if (oldPass) localStorage.setItem(passKey(id), oldPass);
+    let name = 'Основной';
+    try { const c = JSON.parse(oldCfg || 'null'); if (c && c.userName) name = c.userName; } catch(e) {}
+    list = [{ id, name, color: PROFILE_COLORS[0] }];
+    saveProfiles(list); setActiveId(id);
+    try { localStorage.removeItem('arch5_db'); localStorage.removeItem('arch5_cfg'); localStorage.removeItem('arch5_pass'); } catch(e) {}
+  }
+  if (!activeId() || !list.find(p => p.id === activeId())) setActiveId(list[0].id);
+  return list;
+}
+
+// ─── PERSIST / HYDRATE (профиль-зависимые) ──────────────────────
 // persistLocal — «тихая» запись в localStorage (без авто-синка),
 // используется движком синхронизации, чтобы не зациклиться.
 function persistLocal() {
+  const id = activeId();
   try {
-    localStorage.setItem('arch5_db',  JSON.stringify(DB));
-    localStorage.setItem('arch5_cfg', JSON.stringify(CFG));
+    localStorage.setItem(dbKey(id),  JSON.stringify(DB));
+    localStorage.setItem(cfgKey(id), JSON.stringify(CFG));
   } catch(e) {}
 }
 // persist — вызывается после любой правки пользователя: помечает
@@ -95,14 +138,93 @@ function persist() {
   persistLocal();
   if (typeof scheduleSync === 'function') scheduleSync();
 }
+// Загружает данные активного профиля (или дефолты, если пусто).
 function hydrate() {
+  ensureProfiles();
+  const id = activeId();
   try {
-    const db  = JSON.parse(localStorage.getItem('arch5_db')  || 'null');
-    const cfg = JSON.parse(localStorage.getItem('arch5_cfg') || 'null');
-    if (db)  DB  = {...DEFAULT_DB,  ...db};
-    if (cfg) CFG = {...DEFAULT_CFG, ...cfg, axes: {...DEFAULT_CFG.axes, ...(cfg.axes||{})}};
-  } catch(e) {}
+    const db  = JSON.parse(localStorage.getItem(dbKey(id))  || 'null');
+    const cfg = JSON.parse(localStorage.getItem(cfgKey(id)) || 'null');
+    DB  = db  ? {...DEFAULT_DB,  ...db} : JSON.parse(JSON.stringify(DEFAULT_DB));
+    CFG = cfg ? {...DEFAULT_CFG, ...cfg, axes: {...DEFAULT_CFG.axes, ...(cfg.axes||{})}}
+              : JSON.parse(JSON.stringify(DEFAULT_CFG));
+  } catch(e) {
+    DB  = JSON.parse(JSON.stringify(DEFAULT_DB));
+    CFG = JSON.parse(JSON.stringify(DEFAULT_CFG));
+  }
 }
+
+// ─── ПЕРЕКЛЮЧЕНИЕ / УПРАВЛЕНИЕ ПРОФИЛЯМИ ────────────────────────
+function resetSyncState() { clearTimeout(_syncTimer); _syncing = false; _dirty = false; }
+function switchProfile(id) {
+  if (id === activeId()) { closeOv('ov-profiles'); return; }
+  resetSyncState();
+  setActiveId(id);
+  hydrate();
+  closeOv('ov-profiles');
+  initAll();
+  const p = activeProfile();
+  hptMed(); toast('Профиль: ' + (p ? p.name : ''), 'ok');
+}
+function createProfile() {
+  const name = ($('prof-new-name')?.value || '').trim();
+  if (!name) { toast('Введи название профиля', 'warn'); return; }
+  const list = loadProfiles();
+  const id = 'p' + Date.now();
+  list.push({ id, name, color: PROFILE_COLORS[list.length % PROFILE_COLORS.length] });
+  saveProfiles(list); setActiveId(id);
+  DB  = JSON.parse(JSON.stringify(DEFAULT_DB));
+  CFG = JSON.parse(JSON.stringify(DEFAULT_CFG));
+  CFG.userName = name; CFG.axes.domain.lbl = CFG.domainLabel;
+  persistLocal(); resetSyncState();
+  if ($('prof-new-name')) $('prof-new-name').value = '';
+  closeOv('ov-add-profile'); closeOv('ov-profiles');
+  initAll();
+  hptMed(); toast('Профиль «' + name + '» создан', 'ok');
+}
+function renameProfile(id) {
+  const list = loadProfiles();
+  const p = list.find(x => x.id === id); if (!p) return;
+  const name = prompt('Название профиля', p.name);
+  if (name == null) return;
+  const t = name.trim(); if (!t) { toast('Пустое название', 'warn'); return; }
+  p.name = t; saveProfiles(list);
+  rProfiles(); rProfileRow(); toast('Профиль переименован', 'ok');
+}
+function deleteProfile(id) {
+  const list = loadProfiles();
+  if (list.length <= 1) { toast('Нужен хотя бы один профиль', 'warn'); return; }
+  if (!confirm('Удалить профиль и все его данные на ЭТОМ устройстве? На сервере пространство останется — его можно вернуть по ключу.')) return;
+  try { localStorage.removeItem(dbKey(id)); localStorage.removeItem(cfgKey(id)); localStorage.removeItem(passKey(id)); } catch(e) {}
+  const rest = list.filter(p => p.id !== id);
+  saveProfiles(rest);
+  if (activeId() === id) { resetSyncState(); setActiveId(rest[0].id); hydrate(); initAll(); }
+  rProfiles(); toast('Профиль удалён');
+}
+
+// ─── ПРОФИЛИ: РЕНДЕР ─────────────────────────────────────────────
+function rProfiles() {
+  const el = $('prof-list'); if (!el) return;
+  const cur = activeId();
+  el.innerHTML = loadProfiles().map(p => {
+    const on = p.id === cur;
+    return `<div class="prof-row${on ? ' on' : ''}" onclick="switchProfile('${p.id}')">
+      <div class="prof-ava" style="background:${p.color}">${esc((p.name[0] || '?').toUpperCase())}</div>
+      <div class="prof-info">
+        <div class="prof-name">${esc(p.name)}</div>
+        <div class="prof-sub">${on ? 'Активный' : 'Нажми, чтобы переключиться'}</div>
+      </div>
+      <button class="prof-act" onclick="event.stopPropagation();renameProfile('${p.id}')" aria-label="Переименовать"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:15px;height:15px;color:var(--t3)"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+      <button class="prof-act" onclick="event.stopPropagation();deleteProfile('${p.id}')" aria-label="Удалить"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:15px;height:15px;color:var(--red)"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button>
+    </div>`;
+  }).join('');
+}
+function rProfileRow() {
+  const el = $('prof-current'); if (!el) return;
+  const p = activeProfile();
+  el.textContent = p ? p.name : '—';
+}
+function openProfiles() { openOv('ov-profiles'); rProfiles(); }
 
 // ─── TOAST ──────────────────────────────────────────────────────
 function toast(msg, tp='') {
@@ -172,9 +294,13 @@ function finishOnboard() {
   CFG.userName     = name;
   CFG.domainLabel  = domain;
   CFG.axes.domain.lbl = domain;
+  // подхватываем имя в название активного профиля, если он ещё «Основной»
+  const list = loadProfiles();
+  const p = list.find(x => x.id === activeId());
+  if (p && (p.name === 'Основной' || !p.name)) { p.name = name; saveProfiles(list); }
   persist();
   closeOv('ov-onboard');
-  updateDomainLabel();
+  updateDomainLabel(); rProfileRow();
   toast('Добро пожаловать, ' + name + '!', 'ok');
 }
 function updateDomainLabel() {
@@ -982,8 +1108,8 @@ async function api(path, { method='GET', body, timeout=12000, retries=2 } = {}) 
 const _te = new TextEncoder(), _td = new TextDecoder();
 const _b64  = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
 const _ub64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
-function getPass() { try { return localStorage.getItem('arch5_pass') || ''; } catch(e) { return ''; } }
-function setPass(p) { try { p ? localStorage.setItem('arch5_pass', p) : localStorage.removeItem('arch5_pass'); } catch(e) {} }
+function getPass() { try { return localStorage.getItem(passKey(activeId())) || ''; } catch(e) { return ''; } }
+function setPass(p) { const id = activeId(); try { p ? localStorage.setItem(passKey(id), p) : localStorage.removeItem(passKey(id)); } catch(e) {} }
 async function _deriveKey(pass, salt) {
   const base = await crypto.subtle.importKey('raw', _te.encode(pass), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
@@ -1348,7 +1474,7 @@ function initAll() {
     document.documentElement.setAttribute('data-theme', t);
     const tv = $('thv'); if(tv) tv.textContent = t==='dark'?'Ночная':'Дневная';
   }
-  updateDomainLabel();
+  updateDomainLabel(); rProfileRow();
   rHome(); rCompass(); rAxCells(); rKPIs(); rIns(); rBook();
   rBots(); rPats(); rDrms(); rSpi(); rEvoList($('evo-sh')); rDig();
   icons();
