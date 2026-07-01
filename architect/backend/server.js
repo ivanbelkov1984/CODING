@@ -6,6 +6,8 @@
 // ═══════════════════════════════════════════════════════════════
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -36,10 +38,39 @@ async function initSchema() {
 
 // ─── APP ────────────────────────────────────────────────────────
 const app = express();
-app.use(cors());                          // фронт на GitHub Pages — другой origin
-app.use(express.json({ limit: '10mb' })); // данные могут быть объёмными
+app.disable('x-powered-by');
+app.set('trust proxy', 1);                // Railway за прокси — для корректного rate-limit по IP
+
+// Заголовки безопасности (это API, не HTML — CSP не нужен)
+app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: false }));
+
+// CORS: только доверенные origin (по умолчанию GitHub Pages); запросы без
+// Origin (curl, health, нативные webview) пропускаем.
+const ALLOWED = (process.env.ALLOWED_ORIGINS || 'https://ivanbelkov1984.github.io')
+  .split(',').map(s => s.trim()).filter(Boolean);
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin || ALLOWED.includes(origin)) return cb(null, true);
+    return cb(null, false);               // чужой origin — без CORS-заголовков, браузер заблокирует
+  },
+}));
+
+app.use(express.json({ limit: '5mb' }));  // данные объёмны, но не безграничны
+
+// Троттлинг только на API-запись/чтение пространств (health не ограничиваем)
+app.use('/api', rateLimit({
+  windowMs: 60_000, max: 120,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Слишком много запросов, попробуй позже' },
+}));
 
 const isUuid = s => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s || '');
+const isObj  = v => v && typeof v === 'object' && !Array.isArray(v);
+// Проверка тела: db/cfg должны быть объектами (не массив/примитив)
+function badPayload(res, db, cfg) {
+  if (!isObj(db) || !isObj(cfg)) { res.status(400).json({ error: 'db и cfg должны быть объектами' }); return true; }
+  return false;
+}
 
 // ─── ЗДОРОВЬЕ ───────────────────────────────────────────────────
 app.get('/health', async (_req, res) => {
@@ -56,6 +87,7 @@ app.get('/health', async (_req, res) => {
 app.post('/api/space', async (req, res) => {
   try {
     const { name = null, db = {}, cfg = {} } = req.body || {};
+    if (badPayload(res, db, cfg)) return;
     const r = await pool.query(
       `INSERT INTO spaces (name, db, cfg) VALUES ($1, $2, $3)
        RETURNING key, updated_at`,
@@ -90,6 +122,7 @@ app.put('/api/space/:key', async (req, res) => {
   const { key } = req.params;
   if (!isUuid(key)) return res.status(400).json({ error: 'Некорректный ключ' });
   const { db = {}, cfg = {}, name = null } = req.body || {};
+  if (badPayload(res, db, cfg)) return;
   try {
     const r = await pool.query(
       `UPDATE spaces
