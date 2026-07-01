@@ -493,3 +493,28 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .prof-sub{font-size:var(--tx2);color:var(--t3);margin-top:1px}
 .prof-act{background:none;border:none;padding:var(--s2);cursor:pointer;border-radius:var(--r8);flex-shrink:0}
 .prof-act:active{background:var(--bd)}
+
+/* ── ТРЕНДЫ ────────────────────────────────────────────────────── */
+.trend-card{background:var(--bg1);border:1px solid var(--bd);border-radius:var(--r12);padding:var(--s3)}
+.trend-h{display:flex;justify-content:space-between;align-items:baseline;gap:var(--s2);font-size:var(--tx3);font-weight:700;color:var(--t1);margin-bottom:var(--s2)}
+.trend-n{font-size:var(--tx2);font-weight:600;color:var(--t3);white-space:nowrap}
+.trend-svg{width:100%;height:120px;display:block}
+.trend-legend{font-size:10px;color:var(--t3);margin-top:2px;text-align:center}
+.trend-empty{font-size:var(--tx3);color:var(--t3);line-height:1.5;padding:var(--s2) 0}
+.trend-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--s2);margin-top:var(--s3)}
+.trend-tile{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r8);padding:var(--s2);text-align:center}
+.trend-tile b{display:block;font-size:var(--tx4);font-weight:700;color:var(--t1);font-variant-numeric:tabular-nums;line-height:1}
+.trend-tile span{font-size:9px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.05em}
+
+/* ── ДАЙДЖЕСТ (расширенный) ────────────────────────────────────── */
+.dg-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--s2);margin:var(--s3) 0}
+.dg-stat{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r8);padding:var(--s2);text-align:center}
+.dg-stat b{display:block;font-size:var(--tx5);font-weight:700;color:var(--t1);font-variant-numeric:tabular-nums;line-height:1.1}
+.dg-stat span{font-size:9px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.04em}
+.dg-sub{font-size:var(--tx2);font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;margin:var(--s2) 0 var(--s1)}
+.dg-top{font-size:var(--tx3);color:var(--t2);padding:3px 0;border-bottom:1px solid var(--bd);line-height:1.4}
+
+/* ── UNDO TOAST ────────────────────────────────────────────────── */
+.toast.t-undo{display:flex;align-items:center;gap:var(--s3);justify-content:space-between}
+.toast-undo{background:none;border:none;color:var(--blue-t,#5B9BFF);font-weight:700;font-size:var(--tx3);cursor:pointer;padding:2px 4px;white-space:nowrap;flex-shrink:0}
+.toast-undo:active{opacity:.6}

@@ -10,6 +10,16 @@ const hptMed = () => navigator.vibrate?.([15]);
 const dateRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:'short'});
 const dateFullRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:'long',year:'numeric'});
 const todayKey = () => new Date().toISOString().slice(0,10);
+const nowISO = () => new Date().toISOString();            // UTC ISO 8601 — источник истины для времени
+const SCHEMA_VERSION = 2;
+// Красивая дата из ISO createdAt (с откатом на legacy-строку date/dt)
+const dispDate = (rec, full=false) => {
+  if (rec && rec.createdAt) return (full?dateFullRU:dateRU)(new Date(rec.createdAt));
+  return (rec && (rec.date || rec.dt)) || '';
+};
+// «День» записи (локальная дата, устойчива к смене часовых поясов при отображении)
+const isoDay = iso => (iso||'').slice(0,10);
+const daysAgoISO = n => new Date(Date.now()-n*864e5).toISOString();
 
 // ─── КОНФИГУРАЦИЯ ПО УМОЛЧАНИЮ ──────────────────────────────────
 const DEFAULT_CFG = {
@@ -152,6 +162,25 @@ function hydrate() {
     DB  = JSON.parse(JSON.stringify(DEFAULT_DB));
     CFG = JSON.parse(JSON.stringify(DEFAULT_CFG));
   }
+  migrateRecords();
+}
+
+// Идемпотентная миграция: бэкфилл ISO-меток в старые записи.
+// id создавался как Date.now(), поэтому служит надёжным источником createdAt.
+function migrateRecords() {
+  let changed = false;
+  IDCOLS.forEach(c => {
+    (DB[c] || []).forEach(r => {
+      if (r && !r.createdAt) {
+        const ms = typeof r.id === 'number' ? r.id : Date.parse(r.id) || Date.now();
+        r.createdAt = new Date(ms).toISOString();
+        r.day = r.day || isoDay(r.createdAt);
+        r.sv = SCHEMA_VERSION;
+        changed = true;
+      }
+    });
+  });
+  if (changed) persistLocal();
 }
 
 // ─── ПЕРЕКЛЮЧЕНИЕ / УПРАВЛЕНИЕ ПРОФИЛЯМИ ────────────────────────
@@ -545,6 +574,7 @@ function getSortedInsights() {
   let list = STATE.flt==='all' ? [...DB.insights] : DB.insights.filter(x=>x.tag===STATE.flt);
   if (STATE.sort==='weight') list.sort((a,b) => (b.w||1)-(a.w||1));
   else if (STATE.sort==='tag') list.sort((a,b) => (a.tag||'').localeCompare(b.tag||''));
+  else list.sort((a,b) => (Date.parse(b.createdAt)||b.id||0) - (Date.parse(a.createdAt)||a.id||0)); // date: новые сверху
   return list;
 }
 function rIns() {
@@ -581,7 +611,8 @@ function saveIns() {
   DB.insights.unshift({
     id: Date.now(), tag: STATE.addTag, w: STATE.addW,
     title: tx.slice(0,80)+(tx.length>80?'…':''), body: tx,
-    date: dateRU(), src: src||'Вручную', links: [],
+    date: dateRU(), createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION,
+    src: src||'Вручную', links: [],
   });
   $('add-tx').value=''; $('add-src').value='';
   closeOv('ov-add'); persist(); rIns(); rHIns(); rKPIs(); detectPatterns();
@@ -613,11 +644,42 @@ function saveEdit() {
   persist(); closeOv('ov-edit'); rIns(); rHIns();
   hptMed(); toast('Инсайт обновлён', 'ok');
 }
-function deleteIns(id) {
+// ─── УДАЛЕНИЕ С ОТМЕНОЙ (undo) ───────────────────────────────────
+let _undo = null, _undoTimer = null;
+function delUndo(coll, id, renderFn, label) {
+  const idx = DB[coll].findIndex(x => x.id === id);
+  if (idx < 0) return;
+  const item = DB[coll][idx];
+  clearTimeout(_undoTimer);
+  _undo = { coll, id, item, idx };
   tomb(id);
-  DB.insights = DB.insights.filter(x=>x.id!==id);
-  persist(); rIns(); rHIns(); rKPIs(); detectPatterns();
-  hptMed(); toast('Инсайт удалён');
+  DB[coll].splice(idx, 1);
+  persist(); renderFn(); hptMed();
+  toastUndo(label);
+  _undoTimer = setTimeout(() => { _undo = null; }, 6500);
+}
+function undoDelete() {
+  if (!_undo) return;
+  const { coll, id, item, idx } = _undo;
+  if (DB._del) delete DB._del[id];
+  DB[coll].splice(Math.min(idx, DB[coll].length), 0, item);
+  _undo = null; clearTimeout(_undoTimer);
+  persist();
+  // перерисовать всё, что могло зависеть от удалённой записи
+  try { rIns(); rHIns(); rKPIs(); detectPatterns(); rDrms(); rPats(); rSpi(); } catch(e) {}
+  hptMed(); toast('Восстановлено', 'ok');
+}
+function toastUndo(msg) {
+  const el = document.createElement('div');
+  el.className = 'toast t-undo';
+  el.innerHTML = `<span>${esc(msg)}</span><button class="toast-undo" onclick="undoDelete();this.closest('.toast').classList.remove('on');setTimeout(()=>this.closest?.('.toast')?.remove?.(),200)">Отменить</button>`;
+  $('toasts').appendChild(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  setTimeout(() => { el.classList.remove('on'); setTimeout(() => el.remove(), 250); }, 6000);
+}
+
+function deleteIns(id) {
+  delUndo('insights', id, () => { rIns(); rHIns(); rKPIs(); detectPatterns(); }, 'Инсайт удалён');
 }
 function deleteInsConfirm() {
   const id = parseInt($('edit-id').value);
@@ -675,7 +737,7 @@ function saveCI() {
     caf: $('tog-caf').classList.contains('on'),
     alc: $('tog-alc').classList.contains('on'),
     act: STATE.ciAct, tone: STATE.ciTone, note: $('ci-note').value, ci: true, date: todayKey(),
-    _u: Date.now(),
+    createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
   };
   DB.vit = v;
   const existing = DB.checkins.findIndex(c=>c.date===v.date);
@@ -692,16 +754,15 @@ function saveDrm() {
   const tx = $('drm-tx').value.trim();
   if (!tx) { toast('Опиши сон', 'warn'); return; }
   const arch = $('drm-arch').value.trim();
-  DB.dreams.unshift({id:Date.now(), date:dateFullRU(), title:tx.slice(0,52)+(tx.length>52?'…':''), body:tx, tone:STATE.drmTone, arch:arch||null});
-  DB.insights.unshift({id:Date.now()+1, tag:'dream', w:1, title:'Сон: '+DB.dreams[0].title, body:tx, date:dateRU(), src:'Дневник снов', links:[]});
+  const _ts = Date.now();
+  DB.dreams.unshift({id:_ts, date:dateFullRU(), createdAt:nowISO(), day:todayKey(), sv:SCHEMA_VERSION, title:tx.slice(0,52)+(tx.length>52?'…':''), body:tx, tone:STATE.drmTone, arch:arch||null});
+  DB.insights.unshift({id:_ts+1, tag:'dream', w:1, title:'Сон: '+DB.dreams[0].title, body:tx, date:dateRU(), createdAt:nowISO(), day:todayKey(), sv:SCHEMA_VERSION, src:'Дневник снов', links:[]});
   $('drm-tx').value=''; $('drm-arch').value='';
   closeOv('ov-drm'); persist(); rDrms(); rIns(); rHIns(); rKPIs();
   hptMed(); toast('Сон зафиксирован', 'ok');
 }
 function deleteDrm(id) {
-  tomb(id);
-  DB.dreams = DB.dreams.filter(x=>x.id!==id);
-  persist(); rDrms(); toast('Сон удалён');
+  delUndo('dreams', id, rDrms, 'Сон удалён');
 }
 
 // ─── ПАТТЕРНЫ ────────────────────────────────────────────────────
@@ -714,31 +775,27 @@ function savePat() {
   hptMed(); toast('Паттерн зафиксирован', 'ok');
 }
 function deletePat(id) {
-  tomb(id);
-  DB.patterns = DB.patterns.filter(x=>x.id!==id);
-  persist(); rPats(); toast('Паттерн удалён');
+  delUndo('patterns', id, rPats, 'Паттерн удалён');
 }
 
 // ─── ДУХОВНОЕ ────────────────────────────────────────────────────
 function saveSpi() {
   const tx = $('spi-tx').value.trim();
   if (!tx) { toast('Опиши переживание', 'warn'); return; }
-  DB.spiritual.unshift({id:Date.now(), type:STATE.spiType, date:dateFullRU(), text:tx});
+  DB.spiritual.unshift({id:Date.now(), type:STATE.spiType, date:dateFullRU(), createdAt:nowISO(), day:todayKey(), sv:SCHEMA_VERSION, text:tx});
   $('spi-tx').value='';
   closeOv('ov-spi-add'); persist(); rSpi();
   hptMed(); toast('Запись сохранена', 'ok');
 }
 function deleteSpi(id) {
-  tomb(id);
-  DB.spiritual = DB.spiritual.filter(x=>x.id!==id);
-  persist(); rSpi(); toast('Запись удалена');
+  delUndo('spiritual', id, rSpi, 'Запись удалена');
 }
 
 // ─── ЭВОЛЮЦИЯ ────────────────────────────────────────────────────
 function saveEvo() {
   const tx = $('evo-tx').value.trim();
   if (!tx) { toast('Введи текст', 'warn'); return; }
-  DB.evolution.unshift({id:Date.now(), lv:STATE.evoLv, text:tx, dt:dateFullRU()});
+  DB.evolution.unshift({id:Date.now(), lv:STATE.evoLv, text:tx, dt:dateFullRU(), createdAt:nowISO(), day:todayKey(), sv:SCHEMA_VERSION});
   $('evo-tx').value='';
   closeOv('ov-evo-add'); persist(); rEvoList($('evo-more')); rEvoList($('evo-sh'));
   hptMed(); toast('Запись сохранена', 'ok');
@@ -845,6 +902,7 @@ function rVit() {
       <span class="vb-val" onclick="openOv('ov-axis-all')">${a.s}</span>
     </div>`;
   }).join('');
+  rTrends();
 }
 
 // ─── КНИГА ───────────────────────────────────────────────────────
@@ -943,24 +1001,116 @@ function rEvoList(el) {
   }).join('');
 }
 
+// ─── СТАТИСТИКА (общая для дайджеста и трендов) ──────────────────
+const dayAgo = n => isoDay(daysAgoISO(n));
+const pl = (n, one, few, many) => { const m10=n%10, m100=n%100; return (m10===1&&m100!==11)?one:(m10>=2&&m10<=4&&(m100<10||m100>=20))?few:many; };
+function checkinAvg(list) {
+  if (!list || !list.length) return null;
+  const s = k => list.reduce((a, c) => a + (+c[k] || 0), 0) / list.length;
+  const cl = s('cl'), mv = s('mv'), st = s('st'), sl = s('sl');
+  return { cl, mv, st, sl, comp: (cl + mv + (10 - st)) / 3, n: list.length };
+}
+
+// ─── ТРЕНД СОСТОЯНИЯ (честная визуализация: скользящее среднее,
+//     явные разрывы при пропусках, показ n — без «уверенных» выводов) ──
+function rTrends() {
+  const el = $('vit-trends'); if (!el) return;
+  const days = 30;
+  const map = {}; DB.checkins.forEach(c => { if (c.date) map[c.date] = c; });
+  const arr = [];
+  for (let i = days-1; i >= 0; i--) { const d = dayAgo(i); const c = map[d]; arr.push({ d, v: c ? (c.cl + c.mv + (10 - c.st))/3 : null }); }
+  const logged = arr.filter(p => p.v != null);
+  const n = logged.length;
+  if (n < 3) {
+    el.innerHTML = `<div class="trend-card"><div class="trend-h"><span>Тренд состояния</span></div>
+      <div class="trend-empty">Пока мало данных для честного тренда (${n} ${pl(n,'день','дня','дней')}). Делай чек-ины — через несколько дней здесь появится линия динамики.</div></div>`;
+    return;
+  }
+  // 7-дневное скользящее среднее; точка есть только если в окне ≥3 наблюдения
+  const ma = arr.map((p, idx) => {
+    const win = arr.slice(Math.max(0, idx-6), idx+1).filter(x => x.v != null);
+    return win.length >= 3 ? win.reduce((a, x) => a + x.v, 0) / win.length : null;
+  });
+  const W=320,H=120,padL=14,padR=8,padT=8,padB=6, iw=W-padL-padR, ih=H-padT-padB;
+  const x = i => padL + (i/(days-1))*iw;
+  const y = v => padT + (1 - v/10)*ih;
+  let grid=''; [0,5,10].forEach(g => { const yy=y(g); grid+=`<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W-padR}" y2="${yy.toFixed(1)}" stroke="var(--bd)" stroke-width="1"/><text x="2" y="${(yy+3).toFixed(1)}" font-size="8" fill="var(--t3)">${g}</text>`; });
+  const dots = arr.map((p,i) => p.v==null ? '' : `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="1.7" fill="var(--t3)" opacity="0.5"/>`).join('');
+  let path='', pen=false;
+  ma.forEach((v,i) => { if (v==null) { pen=false; return; } path += `${pen?'L':'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)} `; pen=true; });
+  const avg = (logged.reduce((a,p)=>a+p.v,0)/n).toFixed(1);
+  const ac = avg>=7?'var(--green)':avg>=5?'var(--blue-t)':'var(--orange)';
+  const sub = checkinAvg(logged.map(p => map[p.d]));
+  el.innerHTML = `<div class="trend-card">
+    <div class="trend-h"><span>Тренд состояния · 30 дней</span><span class="trend-n">${n} ${pl(n,'день','дня','дней')} · ср. <b style="color:${ac}">${avg}</b></span></div>
+    <svg viewBox="0 0 ${W} ${H}" class="trend-svg" preserveAspectRatio="none">${grid}<path d="${path.trim()}" fill="none" stroke="${ac}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dots}</svg>
+    <div class="trend-legend">линия — 7-дневное среднее · точки — дни · разрывы = пропуски</div>
+    <div class="trend-tiles">
+      ${[['Ясность',sub.cl],['Мотивация',sub.mv],['Стресс',sub.st],['Сон',sub.sl]].map(([l,v]) =>
+        `<div class="trend-tile"><b>${l==='Сон'?v.toFixed(1)+'ч':v.toFixed(1)}</b><span>${l}</span></div>`).join('')}
+    </div>
+  </div>`;
+}
+
 // ─── ДАЙДЖЕСТ ────────────────────────────────────────────────────
 function rDig() {
-  $('dg-list').innerHTML = DB.digests.map(d =>
-    `<div class="dg">
-      <div class="dg-w">${d.week}</div>
-      <div class="dg-h">${esc(d.h)}</div>
+  const el = $('dg-list');
+  if (!DB.digests.length) {
+    el.innerHTML = `<div class="empty"><div class="em-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:26px;height:26px;color:var(--t3)"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="em-t">Дайджеста пока нет</div><div class="em-d">Нажми «Сформировать» — соберу сводку недели из твоих данных</div></div>`;
+    return;
+  }
+  el.innerHTML = DB.digests.map(d => {
+    // Новый формат (с top/stateAvg) или старый (week/h/cnt/themes)
+    if (d.top !== undefined) {
+      const arrow = d.stateDelta == null ? '' : d.stateDelta > 0 ? `<span style="color:var(--green)">▲ +${d.stateDelta}</span>` : d.stateDelta < 0 ? `<span style="color:var(--orange)">▼ ${d.stateDelta}</span>` : '<span style="color:var(--t3)">≈</span>';
+      return `<div class="dg">
+        <div class="dg-w">${esc(d.week)}</div>
+        <div class="dg-h">Итоги недели</div>
+        <div class="dg-stats">
+          <div class="dg-stat"><b>${d.cnt}</b><span>инсайтов</span></div>
+          <div class="dg-stat"><b>${d.adherence}/7</b><span>чек-инов</span></div>
+          <div class="dg-stat"><b>${d.stateAvg ?? '—'}</b><span>состояние ${arrow}</span></div>
+          <div class="dg-stat"><b>${d.dreams}</b><span>снов</span></div>
+        </div>
+        ${d.top && d.top.length ? `<div class="dg-sub">Сильнейшие инсайты</div>${d.top.map(t=>`<div class="dg-top"><span class="tag ${TC[t.tag]||'tg-personal'}">${TL[t.tag]||t.tag}</span> ${esc(t.title)}</div>`).join('')}` : ''}
+        ${d.themes && d.themes.length ? `<div class="chips" style="margin-top:var(--s3)">${d.themes.map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div>` : ''}
+      </div>`;
+    }
+    return `<div class="dg">
+      <div class="dg-w">${esc(d.week)}</div>
+      <div class="dg-h">${esc(d.h||'Дайджест')}</div>
       <div class="dg-meta"><div class="dg-m"><strong>${d.cnt}</strong> инсайтов</div></div>
-      <div class="chips">${d.themes.map(t=>`<span class="chip">${t}</span>`).join('')}</div>
-    </div>`
-  ).join('');
+      <div class="chips">${(d.themes||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div>
+    </div>`;
+  }).join('');
 }
+// Реальный дайджест: считается из фактических данных за 7 дней (без выдумок).
 async function mkDig() {
-  toast('Генерируем…');
-  await new Promise(r=>setTimeout(r,900));
-  const now = new Date();
-  const w = `${now.getDate()-6}–${now.getDate()} ${['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'][now.getMonth()]} ${now.getFullYear()}`;
-  DB.digests.unshift({id:Date.now(), week:w, h:'Дайджест: Архитектор v5', cnt:DB.insights.length, themes:['Vitality','Паттерны',CFG.domainLabel,'Система']});
-  rDig(); toast('Дайджест готов', 'ok');
+  toast('Считаю по твоим данным…');
+  await new Promise(r => setTimeout(r, 250));
+  const now = Date.now();
+  const wk = iso => iso && Date.parse(iso) >= now - 7*864e5;
+  const insW = DB.insights.filter(i => wk(i.createdAt));
+  const top = [...(insW.length ? insW : DB.insights)]
+    .sort((a,b) => (b.w||1)-(a.w||1)).slice(0,3)
+    .map(i => ({ title: i.title, tag: i.tag }));
+  const ciW = DB.checkins.filter(c => c.date >  dayAgo(7));
+  const ciP = DB.checkins.filter(c => c.date <= dayAgo(7) && c.date > dayAgo(14));
+  const aW = checkinAvg(ciW), aP = checkinAvg(ciP);
+  const stateDelta = (aW && aP) ? +(aW.comp - aP.comp).toFixed(1) : null;
+  const counts = {}; insW.forEach(i => counts[i.tag] = (counts[i.tag]||0)+1);
+  const themes = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([t])=>TL[t]||t);
+  const dreams = DB.dreams.filter(d => wk(d.createdAt)).length;
+  const M = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+  const d0 = new Date(now-6*864e5), d1 = new Date(now);
+  const week = `${d0.getDate()} ${M[d0.getMonth()]} – ${d1.getDate()} ${M[d1.getMonth()]}`;
+  DB.digests.unshift({
+    id: now, createdAt: nowISO(), sv: SCHEMA_VERSION, week,
+    cnt: insW.length, adherence: ciW.length,
+    stateAvg: aW ? +aW.comp.toFixed(1) : null, stateDelta,
+    dreams, patterns: DB.patterns.length, themes, top,
+  });
+  persist(); rDig(); hptMed(); toast('Дайджест готов', 'ok');
 }
 
 // ─── КОНФИГ ──────────────────────────────────────────────────────
@@ -1461,8 +1611,8 @@ function smartTriggers() {
   }
   // Молчащие разделы
   const lastDrm = DB.dreams[0];
-  if (lastDrm) {
-    const daysAgo = Math.floor((Date.now() - new Date(lastDrm.date).getTime()) / 86400000);
+  if (lastDrm && lastDrm.createdAt) {
+    const daysAgo = Math.floor((Date.now() - Date.parse(lastDrm.createdAt)) / 86400000);
     if (daysAgo > 7) setTimeout(() => toast('Снов не было 7+ дней'), 5000);
   }
 }
