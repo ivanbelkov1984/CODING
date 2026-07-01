@@ -247,6 +247,7 @@
       <div class="srow"><div class="sic" style="background:var(--blue-l)"><svg style="color:var(--blue-t)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/></svg></div><span class="sl2">Backend API</span><span class="sv2" id="api-lbl">Не подключён</span></div>
       <div class="srow" onclick="exportData()"><div class="sic" style="background:var(--green-l)"><svg style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div><span class="sl2">Экспорт данных</span><span class="sv2">JSON</span></div>
       <div class="srow" onclick="openOv('ov-import')"><div class="sic" style="background:var(--orange-l)"><svg style="color:var(--orange)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><span class="sl2">Импорт данных</span><span class="sv2">JSON</span></div>
+      <div class="srow" onclick="openLog()"><div class="sic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></div><span class="sl2">Журнал синхронизации</span><span class="sv2">Открыть</span></div>
       <div class="srow"><div class="sic" style="background:var(--bg2)"><svg style="color:var(--t3)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></div><span class="sl2">Версия</span><span class="sv2">v5.0 · Архитектор</span></div>
     </div>
     <div style="height:5rem"></div>
@@ -562,8 +563,14 @@
         <button class="btn btn-s btn-sm" onclick="copySpaceKey()"><i data-lucide="copy"></i>Копировать ключ</button>
         <button class="btn btn-g btn-sm" onclick="pullData()"><i data-lucide="download-cloud"></i>Загрузить с сервера</button>
       </div>
+      <div>
+        <div class="f-lbl">Парольная фраза (шифрование данных)</div>
+        <input class="field" id="cfg-pass" type="password" placeholder="Оставь пустым, чтобы не шифровать" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <div id="cfg-enc-status" style="font-size:var(--tx2);color:var(--t3);margin-top:var(--s2)"></div>
+        <button class="btn btn-s btn-sm" style="margin-top:var(--s2)" onclick="saveEncPass()"><i data-lucide="lock"></i>Применить шифрование</button>
+      </div>
       <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5;background:var(--bg2);border-radius:var(--r8);padding:var(--s3)">
-        <strong style="color:var(--t2)">Как синхронизировать:</strong> на первом устройстве укажи URL и нажми «Синхронизировать» — создастся ключ. Скопируй ключ и URL, вставь их на втором устройстве, нажми «Загрузить с сервера».
+        <strong style="color:var(--t2)">Как синхронизировать:</strong> укажи URL — дальше всё автоматически: любое изменение само уходит на сервер (оффлайн — сохранится при возврате сети). Чтобы открыть данные на втором устройстве, впиши тот же URL, <strong style="color:var(--t2)">Ключ пространства</strong> и ту же <strong style="color:var(--t2)">парольную фразу</strong>, затем «Загрузить с сервера».
       </div>
     </div>
     <div class="sec-lbl">Оси радара</div>
@@ -617,6 +624,19 @@
         <input type="file" id="import-file" accept=".json" style="display:none" onchange="handleImport(this)">
       </div>
       <button class="btn btn-s btn-full" onclick="document.getElementById('import-file').click()"><i data-lucide="upload"></i>Выбрать файл</button>
+    </div>
+  </div>
+</div>
+
+<!-- ЖУРНАЛ СИНХРОНИЗАЦИИ -->
+<div class="ov" id="ov-log" onclick="if(event.target===this)closeOv('ov-log')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Журнал синхронизации</div>
+    <div class="sh-form">
+      <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5">Последние события: сеть, синхронизация, ошибки. Помогает понять, что происходит с данными.</div>
+      <div id="log-list" class="log-list"></div>
+      <button class="btn btn-s btn-full" onclick="doSync()"><i data-lucide="refresh-cw"></i>Синхронизировать сейчас</button>
     </div>
   </div>
 </div>

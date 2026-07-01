@@ -58,6 +58,8 @@ const DEFAULT_DB = {
     'Что мешает двигаться вперёд?',
   ],
   vit: {sl:7, sq:7, cl:7, st:4, mv:7, nic:false, caf:true, alc:false, act:'нет', tone:'нейтрально', note:'', ci:false, date:''},
+  _del: {},   // «надгробия» удалённых записей: { id: timestamp }
+  __ts: 0,    // метка времени документа (для слияния скалярных полей)
 };
 
 // ─── СОСТОЯНИЕ ──────────────────────────────────────────────────
@@ -77,11 +79,21 @@ let STATE = {
 };
 
 // ─── PERSIST / HYDRATE ──────────────────────────────────────────
-function persist() {
+// persistLocal — «тихая» запись в localStorage (без авто-синка),
+// используется движком синхронизации, чтобы не зациклиться.
+function persistLocal() {
   try {
     localStorage.setItem('arch5_db',  JSON.stringify(DB));
     localStorage.setItem('arch5_cfg', JSON.stringify(CFG));
   } catch(e) {}
+}
+// persist — вызывается после любой правки пользователя: помечает
+// документ меткой времени, пишет локально и планирует фоновый синк.
+function persist() {
+  const now = Date.now();
+  DB.__ts = now; CFG._ts = now;
+  persistLocal();
+  if (typeof scheduleSync === 'function') scheduleSync();
 }
 function hydrate() {
   try {
@@ -471,10 +483,12 @@ function saveEdit() {
   ins.tag = STATE.editTag; ins.w = STATE.editW;
   ins.title = tx.slice(0,80)+(tx.length>80?'…':'');
   ins.body  = tx; ins.src = $('edit-src').value.trim()||ins.src;
+  touch(ins);
   persist(); closeOv('ov-edit'); rIns(); rHIns();
   hptMed(); toast('Инсайт обновлён', 'ok');
 }
 function deleteIns(id) {
+  tomb(id);
   DB.insights = DB.insights.filter(x=>x.id!==id);
   persist(); rIns(); rHIns(); rKPIs(); detectPatterns();
   hptMed(); toast('Инсайт удалён');
@@ -535,10 +549,12 @@ function saveCI() {
     caf: $('tog-caf').classList.contains('on'),
     alc: $('tog-alc').classList.contains('on'),
     act: STATE.ciAct, tone: STATE.ciTone, note: $('ci-note').value, ci: true, date: todayKey(),
+    _u: Date.now(),
   };
   DB.vit = v;
   const existing = DB.checkins.findIndex(c=>c.date===v.date);
-  if (existing>=0) DB.checkins[existing] = v; else DB.checkins.push(v);
+  const ci = {...v, id: existing>=0 ? DB.checkins[existing].id : Date.now()};
+  if (existing>=0) DB.checkins[existing] = ci; else DB.checkins.push(ci);
   closeOv('ov-ci'); persist(); rVit(); rCompass(); rHState(); rStreak();
   const avg = (v.cl + v.mv + (10-v.st)) / 3;
   if (avg < 5) toast('Состояние ниже 5 — восстановление в приоритете', 'warn');
@@ -557,6 +573,7 @@ function saveDrm() {
   hptMed(); toast('Сон зафиксирован', 'ok');
 }
 function deleteDrm(id) {
+  tomb(id);
   DB.dreams = DB.dreams.filter(x=>x.id!==id);
   persist(); rDrms(); toast('Сон удалён');
 }
@@ -571,6 +588,7 @@ function savePat() {
   hptMed(); toast('Паттерн зафиксирован', 'ok');
 }
 function deletePat(id) {
+  tomb(id);
   DB.patterns = DB.patterns.filter(x=>x.id!==id);
   persist(); rPats(); toast('Паттерн удалён');
 }
@@ -585,6 +603,7 @@ function saveSpi() {
   hptMed(); toast('Запись сохранена', 'ok');
 }
 function deleteSpi(id) {
+  tomb(id);
   DB.spiritual = DB.spiritual.filter(x=>x.id!==id);
   persist(); rSpi(); toast('Запись удалена');
 }
@@ -754,7 +773,7 @@ function rBots() {
     </div>`
   ).join('');
 }
-function toggleBot(id) { const t=DB.bots.find(x=>x.id===id); if(t){t.done=!t.done;rBots();} }
+function toggleBot(id) { const t=DB.bots.find(x=>x.id===id); if(t){t.done=!t.done;touch(t);persist();rBots();} }
 function rPats() {
   $('pat-list').innerHTML = DB.patterns.length ? DB.patterns.map(p =>
     `<div class="pat">
@@ -826,6 +845,8 @@ function rCfgForm() {
   const ki = $('cfg-space');  if(ki) ki.value = CFG.spaceKey||'';
   const ls = $('cfg-lastsync');
   if (ls) ls.textContent = CFG.lastSync ? 'Последняя синхронизация: '+new Date(CFG.lastSync).toLocaleString('ru') : 'Ещё не синхронизировано';
+  const pi = $('cfg-pass'); if (pi) pi.value = getPass();
+  updateEncStatus();
   rCfgAxes();
 }
 function rCfgAxes() {
@@ -894,80 +915,255 @@ function handleImport(input) {
   reader.readAsText(file);
 }
 
-// ─── СИНХРОНИЗАЦИЯ ───────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════
+//  СИНХРОНИЗАЦИЯ v2  (перенос практик из TMCManager)
+//  · единый API-клиент с таймаутом, ретраями и нормализацией ошибок
+//  · структурный лог последних событий
+//  · шифрование данных (AES-GCM) перед отправкой на сервер
+//  · версии записей + слияние (offline-first, без потери данных)
+//  · оффлайн-очередь и авто-синк
+// ═════════════════════════════════════════════════════════════════
 function apiBase() {
   return (CFG.apiUrl || window.ARCHITECT_API || '').trim().replace(/\/+$/, '');
 }
 
-// Сохранить данные на сервер (push). При первом запуске создаёт пространство.
-async function doSync() {
-  const API = apiBase();
-  if (!API) {
-    $('sync-lbl').textContent = 'Backend не подключён';
-    toast('Укажи URL backend в Конфигурации', 'warn');
-    openOv('ov-cfg');
-    return;
-  }
-  $('sync-lbl').textContent = 'Синхронизирую…';
-  try {
-    // Нет ключа пространства — создаём новое
-    if (!CFG.spaceKey) {
-      const cr = await fetch(API + '/api/space', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ name: CFG.userName || 'Архитектор', db: DB, cfg: CFG }),
-      });
-      if (!cr.ok) throw new Error('создание ' + cr.status);
-      const cd = await cr.json();
-      CFG.spaceKey = cd.key;
-      CFG.lastSync = cd.updated_at;
-      persist();
-      $('sync-lbl').textContent = 'Пространство создано ✓';
-      toast('Пространство создано — данные на сервере', 'ok');
-      rCfgForm();
-      return;
-    }
-    // Есть ключ — пушим изменения
-    const r = await fetch(API + '/api/space/' + CFG.spaceKey, {
-      method: 'PUT', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ db: DB, cfg: CFG, name: CFG.userName || 'Архитектор' }),
-    });
-    if (r.status === 404) {
-      // Пространство удалили на сервере — создаём заново
-      CFG.spaceKey = '';
-      persist();
-      return doSync();
-    }
-    if (!r.ok) throw new Error('сохранение ' + r.status);
-    const d = await r.json();
-    CFG.lastSync = d.updated_at;
-    persist();
-    $('sync-lbl').textContent = 'Сохранено: ' + new Date(d.updated_at).toLocaleTimeString('ru', {hour:'2-digit',minute:'2-digit'});
-    hptMed(); toast('Данные сохранены на сервере', 'ok');
-  } catch (e) {
-    $('sync-lbl').textContent = 'Ошибка синхронизации';
-    toast('Ошибка: ' + e.message, 'warn');
-  }
+// ─── ЛОГ (кольцевой буфер последних 50 событий) ──────────────────
+const LOG = [];
+function log(level, msg, extra) {
+  const e = { t: Date.now(), level, msg: String(msg), extra: extra ? String(extra) : '' };
+  LOG.push(e);
+  if (LOG.length > 50) LOG.shift();
+  const fn = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log';
+  (console[fn] || console.log)('[arch]', msg, extra || '');
+  if ($('ov-log')?.classList.contains('on')) rLog();
 }
 
-// Загрузить данные с сервера (pull) на текущее устройство.
-async function pullData() {
+// ─── ЕДИНЫЙ API-КЛИЕНТ ───────────────────────────────────────────
+const _httpMsg = s => ({400:'Некорректный запрос',401:'Нет авторизации',403:'Доступ запрещён',404:'Не найдено',409:'Конфликт данных',500:'Ошибка сервера'})[s] || ('Ошибка '+s);
+const _backoff = a => new Promise(r => setTimeout(r, [600,1800,4000][a] || 4000));
+async function api(path, { method='GET', body, timeout=12000, retries=2 } = {}) {
   const API = apiBase();
-  if (!API)          { toast('Укажи URL backend', 'warn'); return; }
-  if (!CFG.spaceKey) { toast('Нет ключа пространства', 'warn'); return; }
-  if (!confirm('Загрузить данные с сервера? Текущие данные на этом устройстве будут заменены.')) return;
+  if (!API) throw new Error('Backend не подключён');
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), timeout);
+    try {
+      const r = await fetch(API + path, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: ctrl.signal,
+      });
+      clearTimeout(to);
+      if (r.status >= 500 && attempt < retries) { log('warn', method+' '+path+' → '+r.status, 'ретрай'); await _backoff(attempt); continue; }
+      const data = r.status === 204 ? null : await r.json().catch(() => null);
+      if (!r.ok) {
+        const err = new Error((data && data.error) || _httpMsg(r.status));
+        err.status = r.status;
+        log('warn', method+' '+path+' → '+r.status, err.message);
+        throw err;
+      }
+      log('info', method+' '+path+' → '+r.status);
+      return data;
+    } catch (e) {
+      clearTimeout(to);
+      lastErr = e;
+      const retryable = (e.name === 'AbortError' || e.name === 'TypeError') && !e.status;
+      if (retryable && attempt < retries) { log('warn', 'сеть '+path, 'ретрай '+(attempt+1)); await _backoff(attempt); continue; }
+      if (e.status) throw e;
+      throw new Error(e.name === 'AbortError' ? 'Таймаут — сервер не ответил' : 'Нет соединения');
+    }
+  }
+  throw lastErr;
+}
+
+// ─── ШИФРОВАНИЕ (AES-GCM, ключ из парольной фразы) ───────────────
+const _te = new TextEncoder(), _td = new TextDecoder();
+const _b64  = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const _ub64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+function getPass() { try { return localStorage.getItem('arch5_pass') || ''; } catch(e) { return ''; } }
+function setPass(p) { try { p ? localStorage.setItem('arch5_pass', p) : localStorage.removeItem('arch5_pass'); } catch(e) {} }
+async function _deriveKey(pass, salt) {
+  const base = await crypto.subtle.importKey('raw', _te.encode(pass), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name:'PBKDF2', salt, iterations:100000, hash:'SHA-256' },
+    base, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']
+  );
+}
+async function encryptPayload(obj, pass) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv   = crypto.getRandomValues(new Uint8Array(12));
+  const key  = await _deriveKey(pass, salt);
+  const ct   = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, _te.encode(JSON.stringify(obj)));
+  return { _enc:'v1', salt:_b64(salt), iv:_b64(iv), ct:_b64(ct) };
+}
+async function decryptPayload(blob, pass) {
+  const key = await _deriveKey(pass, _ub64(blob.salt));
+  const pt  = await crypto.subtle.decrypt({ name:'AES-GCM', iv:_ub64(blob.iv) }, key, _ub64(blob.ct));
+  return JSON.parse(_td.decode(pt));
+}
+
+// ─── ВЕРСИИ ЗАПИСЕЙ + СЛИЯНИЕ ────────────────────────────────────
+// Каждая правка помечает запись меткой времени `_u`; удаление кладёт
+// «надгробие» в DB._del. Слияние — union по id, где новейшая метка
+// побеждает, а надгробие удаляет запись на всех устройствах.
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','bots','digests'];
+function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
+function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
+const _ru = r => r._u || r.id || 0;   // «когда обновлено» с откатом на id (id = Date.now())
+function mergeById(a = [], b = [], del = {}) {
+  const map = new Map();
+  const put = r => {
+    if (!r || r.id == null) return;
+    const ex = map.get(r.id);
+    if (!ex || _ru(r) >= _ru(ex)) map.set(r.id, r);
+  };
+  a.forEach(put); b.forEach(put);
+  for (const [id, dt] of Object.entries(del)) {
+    const key = map.has(+id) ? +id : id;
+    const r = map.get(key);
+    if (r && dt >= _ru(r)) map.delete(key);
+  }
+  return [...map.values()];
+}
+function mergeDB(local, remote) {
+  // объединяем надгробия (максимальная метка), чистим старше 120 дней
+  const del = {}, cutoff = Date.now() - 120*864e5;
+  for (const src of [remote._del, local._del])
+    for (const k in (src || {})) del[k] = Math.max(del[k] || 0, src[k]);
+  for (const k in del) if (del[k] < cutoff) delete del[k];
+  const out = { ...DEFAULT_DB, ...local, _del: del };
+  IDCOLS.forEach(c => { out[c] = mergeById(local[c] || [], remote[c] || [], del); });
+  // скалярные поля (состояние/главы/вопросы) — берём из более свежего документа
+  const scal = (remote.__ts || 0) > (local.__ts || 0) ? remote : local;
+  ['vit','chapters','oq'].forEach(k => { if (scal[k] !== undefined) out[k] = scal[k]; });
+  out.__ts = Math.max(local.__ts || 0, remote.__ts || 0);
+  return out;
+}
+
+// ─── УПАКОВКА / РАСПАКОВКА (с учётом шифрования) ─────────────────
+async function packPayload() {
+  const bundle = { db: DB, cfg: CFG };
+  const pass = getPass();
+  if (pass) {
+    const blob = await encryptPayload(bundle, pass);
+    return { db: blob, cfg: { _enc: 'v1' } };
+  }
+  return { db: DB, cfg: CFG };
+}
+async function unpackServer(server) {
+  const sdb = server.db || {}, scfg = server.cfg || {};
+  if (sdb._enc === 'v1' || scfg._enc === 'v1') {
+    const pass = getPass();
+    if (!pass) { const e = new Error('Нужна парольная фраза для расшифровки'); e.needPass = true; throw e; }
+    let bundle;
+    try { bundle = await decryptPayload(sdb, pass); }
+    catch (err) { const e = new Error('Неверная парольная фраза'); e.needPass = true; throw e; }
+    return { db: bundle.db || {}, cfg: bundle.cfg || {} };
+  }
+  return { db: sdb, cfg: scfg };
+}
+// Применить серверный снимок к локальному состоянию (со слиянием).
+async function applyServer(server, { merge = true } = {}) {
+  const { db: rdb, cfg: rcfg } = await unpackServer(server);
+  const remoteTs = Date.parse(server.updated_at) || 0;
+  const keepApi = CFG.apiUrl, keepKey = CFG.spaceKey;
+  if (merge) {
+    DB = mergeDB(DB, { ...rdb, __ts: remoteTs });
+    if (remoteTs > (CFG._ts || 0))
+      CFG = { ...DEFAULT_CFG, ...rcfg, axes: { ...DEFAULT_CFG.axes, ...(rcfg.axes || {}) } };
+  } else {
+    DB  = { ...DEFAULT_DB, ...rdb };
+    CFG = { ...DEFAULT_CFG, ...rcfg, axes: { ...DEFAULT_CFG.axes, ...(rcfg.axes || {}) } };
+  }
+  CFG.apiUrl = keepApi; CFG.spaceKey = keepKey; CFG.lastSync = server.updated_at;
+  persistLocal();
+}
+
+// ─── ДВИЖОК АВТО-СИНКА (offline-first) ───────────────────────────
+let _syncTimer = null, _syncing = false, _dirty = false;
+function scheduleSync(delay = 2500) {
+  if (!apiBase()) return;            // backend не настроен — авто-синк не нужен
+  _dirty = true;
+  if (CFG.spaceKey) setSyncBadge('pending');
+  clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(() => runSync().catch(() => {}), delay);
+}
+async function runSync({ manual = false } = {}) {
+  if (!apiBase()) { if (manual) { toast('Укажи URL backend в Конфигурации', 'warn'); openOv('ov-cfg'); } return; }
+  if (_syncing) { _dirty = true; return; }
+  if (!navigator.onLine) { setSyncBadge('offline'); log('warn', 'offline — синк отложен'); return; }
+  _syncing = true; _dirty = false; setSyncBadge('syncing');
   try {
-    const r = await fetch(API + '/api/space/' + CFG.spaceKey);
-    if (r.status === 404) { toast('Пространство не найдено', 'warn'); return; }
-    if (!r.ok) throw new Error(r.status);
-    const d = await r.json();
-    const keepApi = CFG.apiUrl, keepKey = CFG.spaceKey;
-    if (d.db && Object.keys(d.db).length)  DB  = {...DEFAULT_DB,  ...d.db};
-    if (d.cfg && Object.keys(d.cfg).length) CFG = {...DEFAULT_CFG, ...d.cfg, axes:{...DEFAULT_CFG.axes, ...(d.cfg.axes||{})}};
-    CFG.apiUrl = keepApi; CFG.spaceKey = keepKey; CFG.lastSync = d.updated_at;
-    persist(); closeOv('ov-cfg'); initAll();
-    hptMed(); toast('Данные загружены с сервера', 'ok');
+    if (!CFG.spaceKey) {
+      const payload = await packPayload();
+      const cd = await api('/api/space', { method:'POST', body:{ name: CFG.userName || 'Архитектор', ...payload } });
+      CFG.spaceKey = cd.key; CFG.lastSync = cd.updated_at; persistLocal();
+      setSyncBadge('ok'); hptMed(); toast('Пространство создано — данные на сервере', 'ok');
+      rCfgForm();
+    } else {
+      // pull → merge → push : устройства сходятся без потерь
+      const server = await api('/api/space/' + CFG.spaceKey);
+      await applyServer(server, { merge:true });
+      const payload = await packPayload();
+      const d = await api('/api/space/' + CFG.spaceKey, { method:'PUT', body:{ name: CFG.userName || 'Архитектор', ...payload } });
+      CFG.lastSync = d.updated_at; persistLocal();
+      renderAfterSync();
+      setSyncBadge('ok');
+      if (manual) { hptMed(); toast('Синхронизировано', 'ok'); }
+    }
+    log('info', 'sync ok');
   } catch (e) {
-    toast('Ошибка загрузки: ' + e.message, 'warn');
+    if (e.status === 404) { CFG.spaceKey = ''; persistLocal(); _syncing = false; return runSync({ manual }); }
+    setSyncBadge(e.needPass ? 'needpass' : 'error');
+    log('error', 'sync fail', e.message);
+    if (manual || e.needPass) toast(e.message, 'warn');
+    if (e.needPass) openOv('ov-cfg');
+  } finally {
+    _syncing = false;
+    if (_dirty) scheduleSync(1500);
+  }
+}
+function renderAfterSync() {
+  // тихо перерисовываем экраны после втягивания серверных изменений
+  updateDomainLabel(); rHome(); rCompass(); rAxCells(); rKPIs(); rIns();
+  rBook(); rBots(); rPats(); rDrms(); rSpi(); rEvoList($('evo-sh')); rDig();
+  icons();
+}
+function setSyncBadge(state) {
+  const el = $('sync-lbl'); if (!el) return;
+  const map = {
+    idle:     ['Нажми — всё автоматически', ''],
+    pending:  ['Ожидает синхронизации…', 'var(--orange)'],
+    syncing:  ['Синхронизирую…', 'var(--blue-t)'],
+    ok:       ['Сохранено ✓ ' + new Date().toLocaleTimeString('ru', {hour:'2-digit',minute:'2-digit'}), 'var(--green)'],
+    offline:  ['Оффлайн — сохранится при сети', 'var(--orange)'],
+    error:    ['Ошибка синхронизации', 'var(--red)'],
+    needpass: ['Нужна парольная фраза', 'var(--red)'],
+  };
+  const [txt, col] = map[state] || map.idle;
+  el.textContent = txt;
+  el.style.color = col;
+}
+
+// Ручной запуск (кнопка «Синхронизировать»).
+function doSync() { runSync({ manual: true }); }
+
+// Ручная загрузка с сервера (принудительная сверка со слиянием).
+async function pullData() {
+  if (!apiBase())    { toast('Укажи URL backend', 'warn'); return; }
+  if (!CFG.spaceKey) { toast('Нет ключа пространства', 'warn'); return; }
+  try {
+    const server = await api('/api/space/' + CFG.spaceKey);
+    await applyServer(server, { merge:true });
+    closeOv('ov-cfg'); renderAfterSync();
+    hptMed(); toast('Данные слиты с сервером', 'ok');
+    scheduleSync(500);   // дольём локальные правки обратно
+  } catch (e) {
+    if (e.status === 404) { toast('Пространство не найдено', 'warn'); return; }
+    setSyncBadge(e.needPass ? 'needpass' : 'error');
+    toast(e.message, 'warn');
   }
 }
 
@@ -978,6 +1174,46 @@ function copySpaceKey() {
     () => toast('Ключ скопирован', 'ok'),
     () => toast(CFG.spaceKey)
   );
+}
+
+// Первичная сверка при запуске + реакция на возврат сети.
+function initSync() {
+  if (!apiBase() || !CFG.spaceKey) { setSyncBadge('idle'); return; }
+  const localTs = DB.__ts || 0, syncedTs = Date.parse(CFG.lastSync) || 0;
+  setSyncBadge(localTs > syncedTs ? 'pending' : 'idle');
+  runSync().catch(() => {});
+}
+window.addEventListener('online',  () => { log('info', 'сеть вернулась'); runSync().catch(() => {}); });
+window.addEventListener('offline', () => { setSyncBadge('offline'); log('warn', 'сеть пропала'); });
+
+// ─── ЛОГ: ПРОСМОТР ───────────────────────────────────────────────
+function rLog() {
+  const el = $('log-list'); if (!el) return;
+  if (!LOG.length) { el.innerHTML = '<div class="search-empty">Событий пока нет</div>'; return; }
+  const cmap = { error:'var(--red)', warn:'var(--orange)', info:'var(--green)' };
+  el.innerHTML = [...LOG].reverse().map(e =>
+    `<div class="log-row">
+      <span class="log-dot" style="background:${cmap[e.level]||'var(--t3)'}"></span>
+      <span class="log-time">${new Date(e.t).toLocaleTimeString('ru')}</span>
+      <span class="log-msg">${esc(e.msg)}${e.extra ? ' — '+esc(e.extra) : ''}</span>
+    </div>`
+  ).join('');
+}
+function openLog() { openOv('ov-log'); rLog(); }
+
+// ─── ПАРОЛЬНАЯ ФРАЗА (шифрование) ────────────────────────────────
+function saveEncPass() {
+  const p = $('cfg-pass')?.value || '';
+  setPass(p.trim());
+  updateEncStatus();
+  toast(p.trim() ? 'Шифрование включено' : 'Шифрование выключено', 'ok');
+  scheduleSync(300);
+}
+function updateEncStatus() {
+  const el = $('cfg-enc-status'); if (!el) return;
+  const on = !!getPass();
+  el.textContent = on ? '🔒 Данные шифруются перед отправкой' : 'Без шифрования — данные хранятся как есть';
+  el.style.color = on ? 'var(--green)' : 'var(--t3)';
 }
 
 // ─── КОМАНДЫ ────────────────────────────────────────────────────
@@ -1117,6 +1353,7 @@ function initAll() {
   rBots(); rPats(); rDrms(); rSpi(); rEvoList($('evo-sh')); rDig();
   icons();
   checkApiStatus();
+  initSync();
   smartTriggers();
 }
 

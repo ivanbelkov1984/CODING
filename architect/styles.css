@@ -474,3 +474,11 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 
 /* ── CMD OUTPUT ────────────────────────────────────────────────── */
 #cmd-out{padding:0 var(--s4);margin-bottom:var(--s3);display:none}
+
+/* ── LOG VIEWER ────────────────────────────────────────────────── */
+.log-list{display:flex;flex-direction:column;gap:2px;max-height:52vh;overflow-y:auto;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r8);padding:var(--s2)}
+.log-row{display:flex;align-items:flex-start;gap:var(--s2);padding:var(--s2) var(--s2);border-bottom:1px solid var(--bd);font-size:var(--tx2)}
+.log-row:last-child{border-bottom:none}
+.log-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:5px}
+.log-time{color:var(--t3);font-variant-numeric:tabular-nums;flex-shrink:0;font-weight:600}
+.log-msg{color:var(--t2);line-height:1.4;word-break:break-word}
