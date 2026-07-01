@@ -470,14 +470,28 @@ function calcStreak() {
   }
   return streak;
 }
+// Лучший стрик — отдельно от текущего, чтобы пропуск не обнулял мотивацию.
+function calcBestStreak() {
+  const days = [...new Set(DB.checkins.map(c => c.date))].filter(Boolean).sort();
+  if (!days.length) return 0;
+  let best = 1, cur = 1;
+  for (let i = 1; i < days.length; i++) {
+    const diff = Math.round((new Date(days[i]+'T00:00:00') - new Date(days[i-1]+'T00:00:00')) / 86400000);
+    cur = diff === 1 ? cur + 1 : 1;
+    if (cur > best) best = cur;
+  }
+  return best;
+}
 function rStreak() {
   const el = $('h-streak-wrap');
   if (!el) return;
-  const s = calcStreak();
-  if (s < 2) { el.innerHTML = ''; return; }
+  const s = calcStreak(), best = calcBestStreak();
+  if (s < 2 && best < 2) { el.innerHTML = ''; return; }
+  const bestLbl = best > s ? `<span class="h-streak-best">рекорд ${best}</span>` : '';
   el.innerHTML = `<div class="h-streak">
     <span class="h-streak-n">${s}</span>
-    <span class="h-streak-l">дней подряд 🔥</span>
+    <span class="h-streak-l">${s >= 2 ? 'дней подряд 🔥' : 'начни серию заново'}</span>
+    ${bestLbl}
   </div>`;
 }
 
@@ -516,10 +530,21 @@ function rHome() {
   const M  = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
   $('h-date').textContent = `${D2[now.getDay()]}, ${now.getDate()} ${M[now.getMonth()]} ${now.getFullYear()}`;
   rHState(); rStreak(); detectPatterns();
-  $('h-oq').innerHTML = DB.oq.map(q =>
-    `<div class="oqrow"><div class="oqpulse"></div><span>${esc(q)}</span></div>`
+  $('h-oq').innerHTML = DB.oq.map((q,i) =>
+    `<div class="oqrow" onclick="reflectOn(${i})" role="button"><div class="oqpulse"></div><span>${esc(q)}</span><svg class="oq-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>`
   ).join('');
   rHIns();
+}
+// Управляемая рефлексия: тап по вопросу открывает инсайт с этим вопросом.
+function reflectOn(i) {
+  const q = DB.oq[i]; if (!q) return;
+  hpt();
+  openOv('ov-add');
+  STATE.addTag = 'personal';
+  document.querySelectorAll('#add-tags .tp').forEach(x => { x.className='tp'; if (x.dataset.t==='personal') x.className='tp a-personal'; });
+  const ta = $('add-tx');
+  if (ta) { ta.value = q + '\n\n'; ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch(e){} }
+  const sr = $('add-src'); if (sr) sr.value = 'Рефлексия';
 }
 function rHState() {
   const el = $('h-st'); const v = DB.vit;
@@ -612,7 +637,7 @@ function saveIns() {
     id: Date.now(), tag: STATE.addTag, w: STATE.addW,
     title: tx.slice(0,80)+(tx.length>80?'…':''), body: tx,
     date: dateRU(), createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION,
-    src: src||'Вручную', links: [],
+    src: src||'Вручную', links: extractLinks(tx),
   });
   $('add-tx').value=''; $('add-src').value='';
   closeOv('ov-add'); persist(); rIns(); rHIns(); rKPIs(); detectPatterns();
@@ -640,6 +665,7 @@ function saveEdit() {
   ins.tag = STATE.editTag; ins.w = STATE.editW;
   ins.title = tx.slice(0,80)+(tx.length>80?'…':'');
   ins.body  = tx; ins.src = $('edit-src').value.trim()||ins.src;
+  ins.links = extractLinks(tx);
   touch(ins);
   persist(); closeOv('ov-edit'); rIns(); rHIns();
   hptMed(); toast('Инсайт обновлён', 'ok');
@@ -692,15 +718,46 @@ function openEditFromDet() {
   if (STATE.detId) { closeOv('ov-det'); openEdit(STATE.detId); }
 }
 
+// ─── СВЯЗИ [[...]] (бэклинки) ─────────────────────────────────────
+function extractLinks(body) {
+  return [...new Set((String(body||'').match(/\[\[([^\]]+)\]\]/g) || [])
+    .map(s => s.slice(2, -2).trim()).filter(Boolean))];
+}
+// Лёгкий стем: отсекаем хвостовые гласные/ь/ъ/й, чтобы [[выгорании]]
+// находило заголовок «Выгорание…» (устойчивость к падежам).
+const stemRu = w => String(w||'').toLowerCase().trim().replace(/[ауеыоэяиюёйьъ]+$/,'');
+const matchLink = (term, ins) => {
+  const s = stemRu(term);
+  return s.length >= 3 && ins.title.toLowerCase().includes(s);
+};
+function renderBody(body) {
+  return esc(body).replace(/\[\[([^\]]+)\]\]/g, (m, p1) => {
+    const t = p1.trim();
+    return `<span class="wl" onclick="openLink(decodeURIComponent('${encodeURIComponent(t)}'))">${esc(t)}</span>`;
+  });
+}
+function openLink(term) {
+  const hit = DB.insights.find(i => matchLink(term, i));
+  if (hit) { showDet(hit.id); }
+  else { closeOv('ov-det'); openOv('ov-search'); const s=$('search-in'); if (s) { s.value=term; runSearch(term); } }
+}
+
 // ─── ДЕТАЛИ ──────────────────────────────────────────────────────
 function showDet(id) {
   const ins = DB.insights.find(x=>x.id==id);
   if (!ins) return;
   STATE.detId = ins.id;
-  $('det-meta').innerHTML = `<span class="tag ${TC[ins.tag]||'tg-personal'}">${TL[ins.tag]||ins.tag}</span><span class="pips">${pips(ins.w||1)}</span><span style="font-size:var(--tx2);font-weight:500;color:var(--t3);margin-left:auto">${ins.date} · ${esc(ins.src||'')}</span>`;
+  $('det-meta').innerHTML = `<span class="tag ${TC[ins.tag]||'tg-personal'}">${TL[ins.tag]||ins.tag}</span><span class="pips">${pips(ins.w||1)}</span><span style="font-size:var(--tx2);font-weight:500;color:var(--t3);margin-left:auto">${dispDate(ins)} · ${esc(ins.src||'')}</span>`;
   $('det-title').textContent = ins.title;
-  $('det-body').textContent  = ins.body;
-  $('det-links').innerHTML   = ins.links?.length ? 'Связи: '+ins.links.map(l=>`<span style="font-weight:700;color:var(--blue-t)">${l}</span>`).join(' · ') : '';
+  $('det-body').innerHTML    = renderBody(ins.body);
+  // исходящие связи + бэклинки (кто ссылается сюда)
+  const out  = ins.links || [];
+  const back = DB.insights.filter(x => x.id !== ins.id && (x.links||[]).some(l => matchLink(l, ins)));
+  let html = '';
+  if (out.length)  html += `<div class="det-rel"><b>Ссылается на</b> ${out.map(l => `<span class="wl" onclick="openLink(decodeURIComponent('${encodeURIComponent(l)}'))">[[${esc(l)}]]</span>`).join(' ')}</div>`;
+  if (back.length) html += `<div class="det-rel"><b>Упоминается в</b> ${back.map(x => `<span class="wl" onclick="showDet(${x.id})">${esc(x.title)}</span>`).join(' · ')}</div>`;
+  if (!out.length && !back.length) html = `<div class="det-hint">Свяжи мысли: напиши <code>[[слово]]</code> в тексте инсайта — появятся связи и бэклинки.</div>`;
+  $('det-links').innerHTML = html;
   openOv('ov-det');
 }
 function shareIns() {

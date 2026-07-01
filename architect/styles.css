@@ -518,3 +518,19 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .toast.t-undo{display:flex;align-items:center;gap:var(--s3);justify-content:space-between}
 .toast-undo{background:none;border:none;color:var(--blue-t,#5B9BFF);font-weight:700;font-size:var(--tx3);cursor:pointer;padding:2px 4px;white-space:nowrap;flex-shrink:0}
 .toast-undo:active{opacity:.6}
+
+/* ── СВЯЗИ [[...]] ──────────────────────────────────────────────── */
+.wl{color:var(--blue-t,#1056CC);font-weight:600;cursor:pointer;border-bottom:1px dashed var(--blue-t,#1056CC)}
+.wl:active{opacity:.6}
+.det-rel{font-size:var(--tx3);color:var(--t3);margin-top:var(--s2);line-height:1.6}
+.det-rel b{color:var(--t2);font-weight:700;margin-right:4px}
+.det-hint{font-size:var(--tx2);color:var(--t3);line-height:1.5;background:var(--bg2);border-radius:var(--r8);padding:var(--s2) var(--s3)}
+.det-hint code{background:var(--bd);border-radius:4px;padding:1px 5px;font-size:.9em;color:var(--t2)}
+
+/* ── СТРИК: РЕКОРД ─────────────────────────────────────────────── */
+.h-streak-best{font-size:var(--tx2);font-weight:700;color:var(--gold,#B45309);background:var(--gold-l,#FEF3E2);padding:2px 8px;border-radius:999px;margin-left:auto}
+
+/* ── ВОПРОС ДНЯ → ИНСАЙТ ───────────────────────────────────────── */
+.oqrow{cursor:pointer}
+.oq-go{width:14px;height:14px;color:var(--t3);margin-left:auto;flex-shrink:0}
+.oqrow:active{opacity:.65}
