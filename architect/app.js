@@ -28,6 +28,7 @@ const DEFAULT_CFG = {
   apiUrl: '',
   spaceKey: '',
   lastSync: '',
+  aiModel: 'claude-opus-4-8',
   newAxColor: '#1056CC',
   axes: {
     vitality:   {lbl:'Здоровье',   s:7,   c:'#1A7F3C'},
@@ -1129,6 +1130,7 @@ function rDig() {
           <div class="dg-stat"><b>${d.stateAvg ?? '—'}</b><span>состояние ${arrow}</span></div>
           <div class="dg-stat"><b>${d.dreams}</b><span>снов</span></div>
         </div>
+        ${d.ai ? `<div class="dg-ai"><div class="dg-ai-badge">✨ AI-обзор</div>${esc(d.ai)}</div>` : ''}
         ${d.top && d.top.length ? `<div class="dg-sub">Сильнейшие инсайты</div>${d.top.map(t=>`<div class="dg-top"><span class="tag ${TC[t.tag]||'tg-personal'}">${TL[t.tag]||t.tag}</span> ${esc(t.title)}</div>`).join('')}` : ''}
         ${d.themes && d.themes.length ? `<div class="chips" style="margin-top:var(--s3)">${d.themes.map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div>` : ''}
       </div>`;
@@ -1180,6 +1182,9 @@ function rCfgForm() {
   if (ls) ls.textContent = CFG.lastSync ? 'Последняя синхронизация: '+new Date(CFG.lastSync).toLocaleString('ru') : 'Ещё не синхронизировано';
   const pi = $('cfg-pass'); if (pi) pi.value = getPass();
   updateEncStatus();
+  const ak = $('cfg-aikey');   if (ak) ak.value = getAiKey();
+  const am = $('cfg-aimodel'); if (am) am.value = CFG.aiModel || AI_MODEL_DEFAULT;
+  updateAiStatus();
   rCfgAxes();
 }
 function rCfgAxes() {
@@ -1546,6 +1551,133 @@ function updateEncStatus() {
   const el = $('cfg-enc-status'); if (!el) return;
   const on = !!getPass();
   el.textContent = on ? '🔒 Данные шифруются перед отправкой' : 'Без шифрования — данные хранятся как есть';
+  el.style.color = on ? 'var(--green)' : 'var(--t3)';
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  AI (Claude API напрямую с клиента — плейнтекст не идёт через наш
+//  сервер; ключ хранится локально в профиле, opt-in).
+// ═════════════════════════════════════════════════════════════════
+const AI_MODEL_DEFAULT = 'claude-opus-4-8';
+const aiKeyName = () => 'arch5_aikey_' + activeId();
+function getAiKey() { try { return localStorage.getItem(aiKeyName()) || ''; } catch(e) { return ''; } }
+function setAiKey(k) { try { k ? localStorage.setItem(aiKeyName(), k) : localStorage.removeItem(aiKeyName()); } catch(e) {} }
+
+// Один вызов Claude Messages API из браузера.
+async function callClaude({ system, user, maxTokens = 1024, schema = null }) {
+  const key = getAiKey();
+  if (!key) { const e = new Error('Не задан API-ключ Anthropic'); e.noKey = true; throw e; }
+  const body = {
+    model: (CFG.aiModel || AI_MODEL_DEFAULT),
+    max_tokens: maxTokens,
+    messages: [{ role: 'user', content: user }],
+  };
+  if (system) body.system = system;
+  if (schema) body.output_config = { format: { type: 'json_schema', schema } };
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 60000);
+  let r;
+  try {
+    r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    clearTimeout(to);
+    throw new Error(e.name === 'AbortError' ? 'Таймаут запроса к Claude' : 'Нет соединения с Claude');
+  }
+  clearTimeout(to);
+  const data = await r.json().catch(() => null);
+  if (!r.ok) {
+    const msg = (data && data.error && data.error.message) || _httpMsg(r.status);
+    log('error', 'Claude ' + r.status, msg);
+    const e = new Error(msg); e.status = r.status; throw e;
+  }
+  if (data.stop_reason === 'refusal') throw new Error('Модель отклонила запрос');
+  const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+  log('info', 'Claude ✓ ' + (data.usage ? data.usage.output_tokens : 0) + ' ток.');
+  return text;
+}
+
+// Контекст недели для AI (агрегаты + тексты за 7 дней).
+function weekContextForAI() {
+  const now = Date.now();
+  const wk = iso => iso && Date.parse(iso) >= now - 7*864e5;
+  const ins = DB.insights.filter(i => wk(i.createdAt)).slice(0, 12)
+    .map(i => `— [${TL[i.tag]||i.tag}] ${i.title}${i.body && i.body !== i.title ? ': ' + i.body.slice(0,160) : ''}`);
+  const ciW = DB.checkins.filter(c => c.date > dayAgo(7));
+  const ciP = DB.checkins.filter(c => c.date <= dayAgo(7) && c.date > dayAgo(14));
+  const aW = checkinAvg(ciW), aP = checkinAvg(ciP);
+  const delta = (aW && aP) ? +(aW.comp - aP.comp).toFixed(1) : null;
+  const pats = DB.patterns.slice(0, 6).map(p => '— ' + p.text);
+  let s = '';
+  s += 'Инсайты недели:\n' + (ins.length ? ins.join('\n') : '— нет') + '\n\n';
+  if (aW) s += `Состояние (ср. за ${aW.n} дн.): ясность ${aW.cl.toFixed(1)}/10, стресс ${aW.st.toFixed(1)}/10, мотивация ${aW.mv.toFixed(1)}/10, сон ${aW.sl.toFixed(1)}ч` + (delta!=null?`; динамика к прошлой неделе ${delta>0?'+':''}${delta}`:'') + '\n\n';
+  s += 'Замеченные паттерны:\n' + (pats.length ? pats.join('\n') : '— нет');
+  return s;
+}
+
+const AI_SYSTEM = 'Ты — вдумчивый спутник для саморефлексии. Пиши по-русски: тепло, конкретно, без осуждения, без клише и общих фраз. Опирайся строго на данные пользователя.';
+
+// AI-обзор недели → добавляется в дайджест.
+async function aiDigest() {
+  if (!getAiKey()) { toast('Добавь API-ключ Anthropic в Конфигурации', 'warn'); openOv('ov-cfg'); return; }
+  toast('Claude обдумывает неделю…');
+  try {
+    const user = weekContextForAI() +
+      '\n\nНапиши тёплый живой обзор недели (4–6 предложений): что заметно в инсайтах и состоянии, какая динамика, на что стоит обратить внимание. Заверши одним мягким вопросом для размышления. Без клише и морализаторства.';
+    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 700 });
+    await mkDig();
+    if (DB.digests[0]) { DB.digests[0].ai = text.trim(); persist(); rDig(); }
+    hptMed(); toast('AI-обзор готов', 'ok');
+  } catch (e) {
+    if (e.noKey) openOv('ov-cfg');
+    toast('AI: ' + e.message, 'warn');
+  }
+}
+
+// AI-вопросы для рефлексии → обновляют «открытые вопросы».
+async function aiQuestions() {
+  if (!getAiKey()) { toast('Добавь API-ключ Anthropic в Конфигурации', 'warn'); openOv('ov-cfg'); return; }
+  toast('Claude придумывает вопросы…');
+  try {
+    const user = weekContextForAI() +
+      '\n\nСформулируй 3 коротких, личных и небанальных вопроса для саморефлексии, опираясь на эти данные. Каждый — одно предложение.';
+    const schema = { type:'object', additionalProperties:false, required:['questions'],
+      properties:{ questions:{ type:'array', items:{ type:'string' } } } };
+    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 400, schema });
+    let qs = [];
+    try { qs = (JSON.parse(text).questions || []).filter(Boolean).slice(0, 3); } catch(e) {}
+    if (!qs.length) throw new Error('пустой ответ');
+    DB.oq = qs;
+    persist(); rHome();
+    hptMed(); toast('Новые вопросы готовы', 'ok');
+  } catch (e) {
+    if (e.noKey) openOv('ov-cfg');
+    toast('AI: ' + e.message, 'warn');
+  }
+}
+
+// AI-настройки в форме конфигурации.
+function saveAiCfg() {
+  const k = $('cfg-aikey')?.value.trim() || '';
+  setAiKey(k);
+  CFG.aiModel = $('cfg-aimodel')?.value.trim() || AI_MODEL_DEFAULT;
+  persist();
+  updateAiStatus();
+  toast(k ? 'AI подключён' : 'AI-ключ убран', 'ok');
+}
+function updateAiStatus() {
+  const el = $('cfg-ai-status'); if (!el) return;
+  const on = !!getAiKey();
+  el.textContent = on ? '✨ AI подключён · ' + (CFG.aiModel || AI_MODEL_DEFAULT) : 'AI выключен — вставь ключ Anthropic';
   el.style.color = on ? 'var(--green)' : 'var(--t3)';
 }
 

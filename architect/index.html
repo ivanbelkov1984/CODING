@@ -119,6 +119,7 @@
   <div style="display:flex;align-items:center;gap:.5rem;padding:1.25rem 1rem .375rem">
     <div class="oqpulse"></div>
     <span class="sec-lbl" style="padding:0">Открытые вопросы</span>
+    <button class="btn btn-s btn-xs" style="margin-left:auto" onclick="aiQuestions()"><i data-lucide="sparkles"></i>AI</button>
   </div>
   <div class="card mx mb" id="h-oq"></div>
   <div class="sec-lbl">Последние инсайты</div>
@@ -192,6 +193,7 @@
   <div class="card mx"><div id="dg-list"></div></div>
   <div style="padding:1rem;display:flex;gap:.625rem;flex-wrap:wrap">
     <button class="btn btn-s btn-sm" onclick="mkDig()"><i data-lucide="refresh-cw"></i>Дайджест</button>
+    <button class="btn btn-p btn-sm" onclick="aiDigest()"><i data-lucide="sparkles"></i>AI-обзор</button>
     <button class="btn btn-s btn-sm" onclick="openOv('ov-evo')"><i data-lucide="trending-up"></i>Эволюция</button>
   </div>
   <div style="height:5rem"></div>
@@ -571,6 +573,20 @@
         <input class="field" id="cfg-pass" type="password" placeholder="Оставь пустым, чтобы не шифровать" autocapitalize="off" autocorrect="off" spellcheck="false">
         <div id="cfg-enc-status" style="font-size:var(--tx2);color:var(--t3);margin-top:var(--s2)"></div>
         <button class="btn btn-s btn-sm" style="margin-top:var(--s2)" onclick="saveEncPass()"><i data-lucide="lock"></i>Применить шифрование</button>
+      </div>
+      <div class="sec-lbl" style="padding:var(--s2) 0 0">AI (Claude)</div>
+      <div>
+        <div class="f-lbl">API-ключ Anthropic</div>
+        <input class="field" id="cfg-aikey" type="password" placeholder="sk-ant-…" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <div id="cfg-ai-status" style="font-size:var(--tx2);color:var(--t3);margin-top:var(--s2)"></div>
+      </div>
+      <div>
+        <div class="f-lbl">Модель</div>
+        <input class="field" id="cfg-aimodel" placeholder="claude-opus-4-8" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <button class="btn btn-s btn-sm" style="margin-top:var(--s2)" onclick="saveAiCfg()"><i data-lucide="sparkles"></i>Применить AI</button>
+      </div>
+      <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5;background:var(--bg2);border-radius:var(--r8);padding:var(--s3)">
+        Ключ хранится только на этом устройстве. Запросы идут <strong style="color:var(--t2)">напрямую в Anthropic</strong> — минуя наш сервер. Ключ получить: <strong style="color:var(--t2)">console.anthropic.com</strong> → API Keys. AI использует данные (инсайты, состояние) только когда ты сам нажимаешь «AI-обзор» или «Вопросы».
       </div>
       <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5;background:var(--bg2);border-radius:var(--r8);padding:var(--s3)">
         <strong style="color:var(--t2)">Как синхронизировать:</strong> укажи URL — дальше всё автоматически: любое изменение само уходит на сервер (оффлайн — сохранится при возврате сети). Чтобы открыть данные на втором устройстве, впиши тот же URL, <strong style="color:var(--t2)">Ключ пространства</strong> и ту же <strong style="color:var(--t2)">парольную фразу</strong>, затем «Загрузить с сервера».

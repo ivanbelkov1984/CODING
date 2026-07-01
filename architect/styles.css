@@ -534,3 +534,9 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .oqrow{cursor:pointer}
 .oq-go{width:14px;height:14px;color:var(--t3);margin-left:auto;flex-shrink:0}
 .oqrow:active{opacity:.65}
+
+/* ── AI-ОБЗОР ──────────────────────────────────────────────────── */
+.dg-ai{margin:var(--s3) 0;padding:var(--s3);background:var(--purple-l,#F5EEFF);border-left:3px solid var(--purple,#6B21A8);border-radius:0 var(--r8) var(--r8) 0;font-size:var(--tx3);line-height:1.6;color:var(--t2);white-space:pre-wrap}
+.dg-ai-badge{font-size:var(--tx2);font-weight:700;color:var(--purple,#6B21A8);text-transform:uppercase;letter-spacing:.06em;margin-bottom:var(--s2)}
+.btn-xs{padding:3px 10px;font-size:var(--tx2);gap:3px}
+.btn-xs i,.btn-xs svg{width:12px;height:12px}
