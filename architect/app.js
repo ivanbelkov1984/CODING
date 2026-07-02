@@ -1522,10 +1522,9 @@ function rHeatmap(elId, days) {
 function openDayCheckin(d) {
   const c = DB.checkins.find(x => x.date === d);
   if (!c) return;
-  const rows = [['Сон', (c.sl||0)+' ч'], ['Ясность', (c.cl||0)+'/10'], ['Стресс', (c.st||0)+'/10'],
-               ['Движение', (c.mv||0)+'/10'], ['Спокойствие', (10-(c.st||0))+'/10']];
   const comp = dayComposite(c);
-  toast(`${dispDate(c)} · состояние ${comp!=null?comp.toFixed(1):'—'}/10 · сон ${c.sl||0}ч`, 'ok');
+  const emo = c.emo ? ' · ' + c.emo : '';
+  toast(`${dispDate(c)} · состояние ${comp!=null?comp.toFixed(1):'—'}/10 · сон ${c.sl||0}ч${emo}`, 'ok');
 }
 
 // ─── КОРРЕЛЯЦИИ (killer-функция Daylio; честно по n) ─────────────
@@ -1652,7 +1651,7 @@ function smartInsights() {
         const delayed = o.dNext != null && Math.abs(o.dNext) > Math.abs(o.dSame) * 1.4;
         const dEff = delayed ? o.dNext : o.dSame;
         const up = dEff > 0, aE = Math.abs(dEff).toFixed(1);
-        const lead = o.kind === 'sph-habit' ? `В дни с «${esc(o.s.name)}»` : `Когда больше «${esc(o.s.name)}»`;
+        const lead = o.kind === 'sph-habit' ? `В дни с «${o.s.name}»` : `Когда больше «${o.s.name}»`;
         let text;
         if (delayed) text = `${lead} состояние ${up ? 'выше' : 'ниже'} на ${aE} балла на следующий день.`;
         else {
@@ -1721,7 +1720,9 @@ const SPHERE_TEMPLATES = [
   { name:'Настроение',icon:'🙂', color:'#1056CC', type:'score'   },
   { name:'Вода',      icon:'💧', color:'#0E7490', type:'counter', unit:'стаканов' },
 ];
-const uid = () => Date.now() * 1000 + Math.floor(Math.random() * 1000);
+let _uidSeq = 0;
+// Монотонный uid: без коллизий даже при быстрых пачках (онбординг, импорт).
+const uid = () => Date.now() * 1000 + ((_uidSeq++) % 1000);
 function createSphere({ name, icon, color, type, unit, target }) {
   const s = { id: uid(), name: String(name||'').trim() || 'Сфера', icon: icon || '●',
     color: color || '#1056CC', type: type || 'score', unit: unit || '',
