@@ -330,6 +330,12 @@ function finishOnboard() {
   const list = loadProfiles();
   const p = list.find(x => x.id === activeId());
   if (p && (p.name === 'Основной' || !p.name)) { p.name = name; saveProfiles(list); }
+  // Стартовые сферы — чтобы движок работал с первого дня (все удаляемы).
+  if (!DB.spheres || !DB.spheres.length) {
+    [ { name:'Настроение', icon:'🙂', color:'#1056CC', type:'score' },
+      { name:'Сон',        icon:'😴', color:'#6B21A8', type:'score' },
+      { name:'Спорт',      icon:'🏃', color:'#1A7F3C', type:'habit' } ].forEach(t => createSphere(t));
+  }
   persist();
   closeOv('ov-onboard');
   updateDomainLabel(); rProfileRow();
@@ -1909,6 +1915,40 @@ function saveSphereLog(id) {
   toast('Записано', 'ok');
 }
 
+// ─── СВЯЗИ МЕЖДУ СФЕРАМИ (Exist: «в дни спорта больше читаешь») ───
+function crossLinks() {
+  const sph = (DB.spheres || []).filter(s => s.type !== 'log');
+  if (sph.length < 2) return [];
+  const val = {}; sph.forEach(s => {
+    val[s.id] = {}; DB.sphereLogs.filter(l => l.sphereId === s.id && l.date)
+      .forEach(l => { val[s.id][l.date] = s.type === 'habit' ? (l.value ? 1 : 0) : +l.value; });
+  });
+  const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const out = [];
+  for (let i = 0; i < sph.length; i++) for (let j = i + 1; j < sph.length; j++) {
+    const A = sph[i], B = sph[j];
+    const days = Object.keys(val[A.id]).filter(d => d in val[B.id]);
+    if (days.length < 8) continue;
+    const av = days.map(d => val[A.id][d]), bv = days.map(d => val[B.id][d]);
+    // привычка ↔ число: сравниваем среднее числа в дни да/нет
+    const habitNum = (H, hv, N, nv) => {
+      const on = nv.filter((_, k) => hv[k]), off = nv.filter((_, k) => !hv[k]);
+      if (on.length < 3 || off.length < 3) return null;
+      const d = mean(on) - mean(off); if (Math.abs(d) < Math.max(0.5, mean(off) * 0.12)) return null;
+      return { text: `В дни с «${esc(H.name)}» «${esc(N.name)}» ${d > 0 ? 'выше' : 'ниже'}`, conf: confLabel(Math.min(on.length, off.length)), s: Math.abs(d) };
+    };
+    let link = null;
+    if (A.type === 'habit' && B.type !== 'habit') link = habitNum(A, av, B, bv);
+    else if (B.type === 'habit' && A.type !== 'habit') link = habitNum(B, bv, A, av);
+    else if (A.type !== 'habit' && B.type !== 'habit') {
+      const r = pearson(av, bv);
+      if (r != null && Math.abs(r) >= 0.45) link = { text: `Больше «${esc(A.name)}» — ${r > 0 ? 'больше' : 'меньше'} «${esc(B.name)}»`, conf: confLabel(days.length), s: Math.abs(r) };
+    }
+    if (link) out.push(link);
+  }
+  return out.sort((a, b) => b.s - a.s).slice(0, 2);
+}
+
 // ─── ОБЗОР ПЕРИОДА (месяц/год) — синтез из данных (волна 3) ───────
 function periodReview(days) {
   const since = dayAgo(days), comp = c => (c.cl + c.mv + (10 - c.st)) / 3;
@@ -1960,6 +2000,7 @@ function rReview(days) {
       <div class="rv-tile"><b>${r.checkins}</b><span>чек-инов</span></div>
     </div>
     ${r.topHelp.length?`<div class="rv-help"><div class="rv-help-t">Что тебе помогало</div>${r.topHelp.map(h=>`<div class="rv-help-r">• ${esc(h.text)}</div>`).join('')}</div>`:''}
+    ${(()=>{const cl=crossLinks();return cl.length?`<div class="rv-help"><div class="rv-help-t">Связи сфер</div>${cl.map(l=>`<div class="rv-help-r">• ${l.text} <span class="rv-conf ${l.conf.cls}">${l.conf.t}</span></div>`).join('')}</div>`:'';})()}
     ${spheresHtml?`<div class="rv-sph-wrap"><div class="rv-help-t">Сферы</div>${spheresHtml}</div>`:''}`;
 }
 

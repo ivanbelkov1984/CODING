@@ -729,3 +729,8 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
   background:var(--purple-l,#F5EEFF);border:1px solid var(--purple,#6B21A8);border-radius:12px;cursor:pointer}
 .deeper-q span{flex:1;font-size:var(--tx3);font-weight:600;color:var(--t1);line-height:1.4}
 .deeper-q b{flex:none;font-size:var(--tx2);font-weight:700;color:var(--purple,#6B21A8)}
+
+.rv-conf{font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:4px;white-space:nowrap}
+.rv-conf.cf-low{color:var(--t3);background:var(--bg3)}
+.rv-conf.cf-mid{color:var(--blue-t);background:var(--blue-l)}
+.rv-conf.cf-hi{color:var(--green);background:var(--green-l)}
