@@ -743,3 +743,14 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .emo.on{background:var(--ec);color:#fff}
 .emo.on::before{background:#fff}
 .emo:active{transform:scale(.95)}
+
+/* ── МЕДИА (фото в записях) ────────────────────────────────────── */
+.add-media{display:flex;flex-wrap:wrap;gap:6px;margin:var(--s2) 0}
+.add-media:empty{margin:0}
+.mth{position:relative;width:66px;height:66px;border-radius:10px;overflow:hidden;flex:none}
+.mth img{width:100%;height:100%;object-fit:cover;display:block}
+.mth-x{position:absolute;top:2px;right:2px;width:20px;height:20px;border:none;border-radius:50%;
+  background:rgba(0,0,0,.6);color:#fff;font-size:11px;line-height:1;cursor:pointer;display:grid;place-items:center}
+.det-media{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:1.25rem}
+.det-media:empty{margin:0}
+.det-photo{max-width:100%;width:100%;border-radius:14px;display:block}

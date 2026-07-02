@@ -391,6 +391,18 @@ function openOv(id) {
   if (id==='ov-axis-all') rAxisSliders();
   if (id==='ov-cfg')      rCfgForm();
   if (id==='ov-ci')       rEmoPicker();
+  if (id==='ov-add')      { STATE.addMedia = []; rAddMedia(); }
+}
+// Сборка мусора медиа: удаляем из IndexedDB картинки, на которые никто
+// не ссылается (после удаления инсайтов / брошенных черновиков).
+async function gcMedia() {
+  try {
+    const ref = new Set(STATE.addMedia || []);
+    (DB.insights || []).forEach(i => (i.media || []).forEach(m => ref.add(m)));
+    const db = await idbOpen();
+    const keys = await new Promise((res, rej) => { const tx = db.transaction(IDB_STORE, 'readonly'); const rq = tx.objectStore(IDB_STORE).getAllKeys(); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
+    for (const k of keys) if (!ref.has(k)) await idbDel(k).catch(() => {});
+  } catch (e) { /* IndexedDB недоступен — не критично */ }
 }
 function closeOv(id) {
   $(id).classList.remove('on');
@@ -831,6 +843,70 @@ function setSort(s, el) {
   el.classList.add('on');
   rIns();
 }
+// ═════════════════════════════════════════════════════════════════
+//  МЕДИА (фото в записях) — локально через IndexedDB (приватно, до ~ГБ).
+//  Изображения сжимаются на канвасе; в инсайте хранятся только id-ссылки.
+// ═════════════════════════════════════════════════════════════════
+const IDB_NAME = 'arch5_media', IDB_STORE = 'media';
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(IDB_NAME, 1);
+    r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains(IDB_STORE)) r.result.createObjectStore(IDB_STORE); };
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+async function idbPut(key, val) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction(IDB_STORE, 'readwrite'); tx.objectStore(IDB_STORE).put(val, key); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+async function idbGet(key) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction(IDB_STORE, 'readonly'); const rq = tx.objectStore(IDB_STORE).get(key); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); }); }
+async function idbDel(key) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction(IDB_STORE, 'readwrite'); tx.objectStore(IDB_STORE).delete(key); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+function compressImage(file, maxDim = 1280, q = 0.82) {
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let w = img.width, h = img.height;
+      if (w >= h && w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; }
+      else if (h > maxDim) { w = Math.round(w * maxDim / h); h = maxDim; }
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      try { res(cv.toDataURL('image/jpeg', q)); } catch (e) { rej(e); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('bad image')); };
+    img.src = url;
+  });
+}
+async function addPhoto(input) {
+  const file = input.files && input.files[0]; input.value = '';
+  if (!file) return;
+  if (!/^image\//.test(file.type)) { toast('Можно только изображения', 'warn'); return; }
+  try {
+    const data = await compressImage(file);
+    const key = 'm' + uid();
+    await idbPut(key, { data, type: 'image', createdAt: nowISO() });
+    STATE.addMedia = STATE.addMedia || []; STATE.addMedia.push(key);
+    rAddMedia();
+  } catch (e) { toast('Не удалось добавить фото', 'warn'); }
+}
+async function rAddMedia() {
+  const el = $('add-media'); if (!el) return;
+  const ids = STATE.addMedia || [];
+  if (!ids.length) { el.innerHTML = ''; return; }
+  const items = await Promise.all(ids.map(async id => {
+    const m = await idbGet(id).catch(() => null);
+    return m ? `<div class="mth"><img src="${m.data}" alt=""><button class="mth-x" onclick="removeAddMedia('${id}')" aria-label="Убрать">✕</button></div>` : '';
+  }));
+  el.innerHTML = items.join('');
+}
+async function removeAddMedia(id) { STATE.addMedia = (STATE.addMedia || []).filter(x => x !== id); await idbDel(id).catch(() => {}); rAddMedia(); }
+async function rDetMedia(ins) {
+  const el = $('det-media'); if (!el) return;
+  const ids = (ins && ins.media) || [];
+  if (!ids.length) { el.innerHTML = ''; return; }
+  const items = await Promise.all(ids.map(async id => {
+    const m = await idbGet(id).catch(() => null);
+    return m ? `<img class="det-photo" src="${m.data}" alt="">` : '';
+  }));
+  el.innerHTML = items.join('');
+}
 function saveIns() {
   const tx = $('add-tx').value.trim();
   if (!tx) { toast('Введи текст инсайта', 'warn'); return; }
@@ -839,8 +915,9 @@ function saveIns() {
     id: Date.now(), tag: STATE.addTag, w: STATE.addW,
     title: tx.slice(0,80)+(tx.length>80?'…':''), body: tx,
     date: dateRU(), createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION,
-    src: src||'Вручную', links: extractLinks(tx),
+    src: src||'Вручную', links: extractLinks(tx), media: STATE.addMedia || [],
   });
+  STATE.addMedia = []; const am = $('add-media'); if (am) am.innerHTML = '';
   $('add-tx').value=''; $('add-src').value='';
   closeOv('ov-add'); persist(); rIns(); rHIns(); rKPIs(); detectPatterns();
   hptMed(); toast('Инсайт сохранён', 'ok');
@@ -1044,6 +1121,7 @@ function showDet(id) {
   $('det-meta').innerHTML = `<span class="tag ${TC[ins.tag]||'tg-personal'}">${TL[ins.tag]||ins.tag}</span><span class="pips">${pips(ins.w||1)}</span><span style="font-size:var(--tx2);font-weight:500;color:var(--t3);margin-left:auto">${dispDate(ins)} · ${esc(ins.src||'')}</span>`;
   $('det-title').textContent = ins.title;
   $('det-body').innerHTML    = renderBody(ins.body);
+  rDetMedia(ins);
   // исходящие связи + бэклинки (кто ссылается сюда)
   const out  = ins.links || [];
   const back = DB.insights.filter(x => x.id !== ins.id && (x.links||[]).some(l => matchLink(l, ins)));
@@ -2420,6 +2498,7 @@ function renderAfterSync() {
   updateDomainLabel(); rHome(); rCompass(); rAxCells(); rKPIs(); rIns();
   rBook(); rBots(); rPats(); rDrms(); rSpi(); rEvoList($('evo-sh')); rDig();
   icons();
+  gcMedia();   // подчистить осиротевшие фото (после удалений/черновиков)
 }
 function setSyncBadge(state) {
   const el = $('sync-lbl'); if (!el) return;

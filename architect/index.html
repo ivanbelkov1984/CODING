@@ -355,7 +355,11 @@
         </div>
       </div>
       <textarea class="field" id="add-tx" placeholder="Инсайт, наблюдение, вывод…" rows="5"></textarea>
-      <button class="btn btn-s btn-full btn-sm" id="deeper-btn" onclick="goDeeper()"><i data-lucide="sparkles"></i>Копни глубже (AI-вопрос)</button>
+      <div id="add-media" class="add-media"></div>
+      <div style="display:flex;gap:var(--s2)">
+        <label class="btn btn-s btn-sm" style="flex:1;cursor:pointer"><i data-lucide="image"></i>Фото<input type="file" accept="image/*" style="display:none" onchange="addPhoto(this)"></label>
+        <button class="btn btn-s btn-sm" style="flex:2" id="deeper-btn" onclick="goDeeper()"><i data-lucide="sparkles"></i>Копни глубже</button>
+      </div>
       <div id="deeper-out"></div>
       <div>
         <div class="f-lbl">Источник (необязательно)</div>
@@ -605,6 +609,7 @@
       <div id="det-meta" style="display:flex;align-items:center;gap:.5rem;margin-bottom:1rem"></div>
       <div id="det-title" style="font-size:var(--tx7);font-weight:700;color:var(--t1);margin-bottom:1.25rem;line-height:1.2;letter-spacing:-.02em"></div>
       <div id="det-body" style="font-size:var(--tx5);color:var(--t2);line-height:1.65;white-space:pre-wrap;margin-bottom:1.25rem"></div>
+      <div id="det-media" class="det-media"></div>
       <div id="det-links" style="font-size:var(--tx3);color:var(--t3)"></div>
     </div>
     <div style="padding:1rem;display:flex;gap:.625rem">
