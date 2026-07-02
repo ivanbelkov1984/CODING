@@ -558,3 +558,61 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .graph-meta{text-align:center;font-size:var(--tx2);font-weight:600;color:var(--t3);margin-top:var(--s2)}
 .graph-hint{font-size:var(--tx2);color:var(--t3);line-height:1.5;margin-top:var(--s3);padding:0 var(--s1)}
 .graph-hint code{background:var(--bg2);padding:1px 5px;border-radius:5px;font-size:.9em}
+
+/* ── ГЕРОЙ СОСТОЯНИЯ (Главная) ─────────────────────────────────── */
+.state-hero{position:relative;margin:var(--s3) var(--s4) 0;padding:var(--s4) var(--s4) var(--s3);
+  background:linear-gradient(165deg,var(--blue-l),transparent 60%),var(--bg2);
+  border:1px solid var(--bd);border-radius:22px;overflow:hidden}
+.state-hero::before{content:"";position:absolute;top:-40px;right:-30px;width:180px;height:180px;
+  background:radial-gradient(circle,var(--teal-l),transparent 70%);pointer-events:none;opacity:.9}
+.sh-top{display:flex;justify-content:space-between;align-items:flex-start;position:relative;z-index:1}
+.sh-lbl{font-size:var(--tx2);font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.06em}
+.sh-score{display:flex;align-items:baseline;gap:3px;margin-top:2px;min-height:44px}
+.sh-score b{font-size:2.6rem;font-weight:800;line-height:1;letter-spacing:-.03em;color:var(--teal)}
+.sh-score span{font-size:.9rem;color:var(--t3);font-weight:600}
+.sh-nodata{font-size:2.2rem;font-weight:800;color:var(--t4)}
+.sh-delta{font-size:var(--tx2);font-weight:700;padding:4px 9px;border-radius:20px;white-space:nowrap}
+.sh-delta.up{color:var(--green);background:var(--green-l)}
+.sh-delta.down{color:var(--orange);background:var(--orange-l)}
+.sh-delta.flat{color:var(--t3);background:var(--bg3)}
+.sh-hint{font-size:var(--tx3);color:var(--t3);line-height:1.5;text-align:center;padding:var(--s2) 0 var(--s1)}
+.sh-contrib{display:grid;grid-template-columns:1fr 1fr;gap:var(--s2) var(--s3);position:relative;z-index:1;margin-top:var(--s2)}
+.cbar-h{display:flex;justify-content:space-between;align-items:center;font-size:var(--tx2);font-weight:600;color:var(--t2);margin-bottom:3px}
+.cbar-a{font-weight:700;color:var(--t3)}
+.cbar-a.up{color:var(--green)}
+.cbar-a.down{color:var(--orange)}
+.cbar-t{height:6px;background:var(--bg3);border-radius:6px;overflow:hidden}
+.cbar-f{height:100%;border-radius:6px;transition:width .5s cubic-bezier(.2,.8,.2,1)}
+
+/* ── ТЕПЛОВАЯ КАРТА НАСТРОЕНИЯ ─────────────────────────────────── */
+.hm-card{background:var(--bg2);border:1px solid var(--bd);border-radius:18px;padding:var(--s4)}
+.hm-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--s3)}
+.hm-head .t{font-size:var(--tx4);font-weight:700;color:var(--t1)}
+.hm-head .n{font-size:var(--tx2);color:var(--t2);font-weight:600}
+.hm{display:grid;gap:4px}
+.hc{aspect-ratio:1;border-radius:4px;background:var(--bg3);transition:transform .1s}
+.hc[onclick]{cursor:pointer}
+.hc[onclick]:active{transform:scale(1.3)}
+
+/* ── ГРАФ-ТИЗЕР НА ГЛАВНОЙ ─────────────────────────────────────── */
+.gg{background:var(--bg2);border:1px solid var(--bd);border-radius:18px;padding:var(--s3);position:relative;cursor:pointer}
+.gg .graph-svg{height:auto}
+.gg .empty{padding:var(--s4) 0}
+
+/* ── КОРРЕЛЯЦИИ (что влияет на состояние) ──────────────────────── */
+.corr-card{background:var(--bg2);border:1px solid var(--bd);border-radius:18px;padding:var(--s3) var(--s4)}
+.corr-empty{font-size:var(--tx3);color:var(--t3);line-height:1.5;text-align:center;padding:var(--s2) 0}
+.corr-row{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) 0}
+.corr-row+.corr-row{border-top:1px solid var(--bd)}
+.corr-lbl{font-size:var(--tx3);font-weight:600;color:var(--t1);width:34%;display:flex;align-items:center;gap:4px}
+.corr-dir{font-style:normal;font-weight:800}
+.corr-dir.pos{color:var(--green)}
+.corr-dir.neg{color:var(--orange)}
+.corr-track{flex:1;height:7px;background:var(--bg3);border-radius:7px;overflow:hidden}
+.corr-fill{height:100%;border-radius:7px}
+.corr-fill.pos{background:var(--green)}
+.corr-fill.neg{background:var(--orange)}
+.corr-conf{font-size:var(--tx2);font-weight:700;padding:2px 8px;border-radius:12px;white-space:nowrap}
+.corr-conf.cf-low{color:var(--t3);background:var(--bg3)}
+.corr-conf.cf-mid{color:var(--blue-t);background:var(--blue-l)}
+.corr-conf.cf-hi{color:var(--green);background:var(--green-l)}

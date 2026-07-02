@@ -532,6 +532,7 @@ function rHome() {
   const M  = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
   $('h-date').textContent = `${D2[now.getDay()]}, ${now.getDate()} ${M[now.getMonth()]} ${now.getFullYear()}`;
   rHState(); rStreak(); detectPatterns();
+  rStateHero(); rHeatmap('home-heatmap', 90); rCorrelations('home-corr'); rGraph('home-graph', 190, true);
   $('h-oq').innerHTML = DB.oq.map((q,i) =>
     `<div class="oqrow" onclick="reflectOn(${i})" role="button"><div class="oqpulse"></div><span>${esc(q)}</span><svg class="oq-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>`
   ).join('');
@@ -565,6 +566,32 @@ function reflectOn(i) {
   const ta = $('add-tx');
   if (ta) { ta.value = q + '\n\n'; ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch(e){} }
   const sr = $('add-src'); if (sr) sr.value = 'Рефлексия';
+}
+// Герой Главной: балл состояния + дельта к базе + разбор contributors.
+function moodColorScore(v100) { return moodColor((v100||0)/10); }
+function rStateHero() {
+  const scoreEl = $('sh-score'); if (!scoreEl) return;
+  const deltaEl = $('sh-delta'), cEl = $('sh-contrib'), lblEl = $('sh-caption');
+  const s = stateScore();
+  if (!s.ok) {
+    scoreEl.innerHTML = `<span class="sh-nodata">—</span>`;
+    if (deltaEl) deltaEl.innerHTML = '';
+    if (lblEl) lblEl.textContent = 'Состояние сегодня';
+    const need = 3 - s.n;
+    if (cEl) cEl.innerHTML = `<div class="sh-hint">Сделай ещё ${need} ${pl(need,'чек-ин','чек-ина','чек-инов')} — появится балл состояния и разбор, что тянет вверх и вниз</div>`;
+    return;
+  }
+  scoreEl.innerHTML = `<b>${s.score}</b><span>/100</span>`;
+  if (deltaEl) {
+    deltaEl.className = 'sh-delta ' + (s.delta>0?'up':s.delta<0?'down':'flat');
+    deltaEl.innerHTML = s.delta===0 ? 'ровно' : `${s.delta>0?'↑':'↓'} ${Math.abs(s.delta)} за неделю`;
+  }
+  if (lblEl) lblEl.textContent = s.score>=75?'Ты в ресурсе':s.score>=55?'Ровное состояние':s.score>=40?'Нужно бережнее':'Восстановление в приоритете';
+  if (cEl) cEl.innerHTML = s.contributors.map(c => {
+    const d = c.delta, arr = d>3?'↑':d<-3?'↓':'·', ac = d>3?'up':d<-3?'down':'';
+    return `<div class="cbar"><div class="cbar-h"><span>${c.label}</span><span class="cbar-a ${ac}">${arr} ${d>0?'+':''}${d}</span></div>
+      <div class="cbar-t"><div class="cbar-f" style="width:${c.score}%;background:${moodColorScore(c.score)}"></div></div></div>`;
+  }).join('');
 }
 function rHState() {
   const el = $('h-st'); const v = DB.vit;
@@ -826,14 +853,14 @@ function layoutGraph(nodes, edges, W, H) {
     });
   }
 }
-function rGraph() {
-  const el = $('graph-canvas'); if (!el) return;
+function rGraph(elId, height, compact) {
+  const el = $(elId || 'graph-canvas'); if (!el) return;
   const { nodes, edges } = buildGraph();
   if (!nodes.length) {
     el.innerHTML = `<div class="empty"><div class="em-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:26px;height:26px;color:var(--t3)"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div><div class="em-t">Связей пока нет</div><div class="em-d">Напиши <code>[[слово]]</code> в тексте инсайта — узлы соединятся тут</div></div>`;
     return;
   }
-  const W = el.clientWidth || 340, H = 380;
+  const W = el.clientWidth || 340, H = height || 380;
   layoutGraph(nodes, edges, W, H);
   const byId = {}; nodes.forEach(nd => byId[nd.id] = nd);
   const lines = edges.map(e => {
@@ -844,14 +871,14 @@ function rGraph() {
     const r = 6 + Math.min(nd.deg, 6) * 2;
     const c = SC[nd.tag] || 'var(--t3)';
     const short = nd.title.length > 16 ? nd.title.slice(0, 15) + '…' : nd.title;
-    return `<g class="gnode" onclick="showDet(${nd.id})">
-      <circle cx="${nd.x.toFixed(1)}" cy="${nd.y.toFixed(1)}" r="${r}" fill="${c}"/>
-      <text x="${nd.x.toFixed(1)}" y="${(nd.y + r + 11).toFixed(1)}" class="glbl">${esc(short)}</text>
+    const label = compact ? '' : `<text x="${nd.x.toFixed(1)}" y="${(nd.y + r + 11).toFixed(1)}" class="glbl">${esc(short)}</text>`;
+    return `<g class="gnode" onclick="event.stopPropagation();showDet(${nd.id})">
+      <circle cx="${nd.x.toFixed(1)}" cy="${nd.y.toFixed(1)}" r="${r}" fill="${c}"/>${label}
     </g>`;
   }).join('');
   el.innerHTML =
     `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" class="graph-svg" preserveAspectRatio="xMidYMid meet">${lines}${circ}</svg>` +
-    `<div class="graph-meta">${nodes.length} ${pl(nodes.length,'мысль','мысли','мыслей')} · ${edges.length} ${pl(edges.length,'связь','связи','связей')}</div>`;
+    `<div class="graph-meta">${nodes.length} ${pl(nodes.length,'мысль','мысли','мыслей')} · ${edges.length} ${pl(edges.length,'связь','связи','связей')}${compact?' · открыть карту →':''}</div>`;
 }
 
 // ─── ДЕТАЛИ ──────────────────────────────────────────────────────
@@ -1356,6 +1383,25 @@ function correlations() {
     return r==null ? null : { key:k, label, r:+r.toFixed(2), conf:confLabel(n) };
   }).filter(Boolean).sort((a,b)=>Math.abs(b.r)-Math.abs(a.r));
   return { n, items: out };
+}
+
+function rCorrelations(elId) {
+  const el = $(elId); if (!el) return;
+  const { n, items } = correlations();
+  if (n < 5 || !items.length) {
+    const need = Math.max(0, 5 - n);
+    el.innerHTML = `<div class="corr-empty">Что влияет на твоё состояние — покажем после ещё ${need} ${pl(need,'чек-ина','чек-инов','чек-инов')} (честно: на малых данных выводы ненадёжны)</div>`;
+    return;
+  }
+  const top = items.slice(0, 3);
+  el.innerHTML = top.map(it => {
+    const pos = it.r >= 0, strength = Math.round(Math.abs(it.r) * 100);
+    return `<div class="corr-row">
+      <span class="corr-lbl">${it.label}<i class="corr-dir ${pos?'pos':'neg'}">${pos?'↑':'↓'}</i></span>
+      <div class="corr-track"><div class="corr-fill ${pos?'pos':'neg'}" style="width:${strength}%"></div></div>
+      <span class="corr-conf ${it.conf.cls}">${it.conf.t}</span>
+    </div>`;
+  }).join('');
 }
 
 // ─── ДАЙДЖЕСТ ────────────────────────────────────────────────────

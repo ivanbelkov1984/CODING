@@ -112,9 +112,30 @@
     </button>
   </div>
   <div id="pat-suggest-home"></div>
-  <div class="sec-lbl">Координаты</div>
-  <div class="compass-wrap"><svg id="compass" viewBox="0 0 280 280" style="width:100%;max-width:280px;display:block"></svg></div>
-  <div class="agrid" id="ax-grid"></div>
+
+  <!-- ГЕРОЙ: состояние + радар + разбор -->
+  <div class="state-hero">
+    <div class="sh-top">
+      <div><div class="sh-lbl" id="sh-caption">Состояние сегодня</div><div class="sh-score" id="sh-score"></div></div>
+      <div class="sh-delta" id="sh-delta"></div>
+    </div>
+    <div class="compass-wrap"><svg id="compass" viewBox="0 0 280 280" style="width:100%;max-width:250px;display:block;margin:0 auto"></svg></div>
+    <div class="sh-contrib" id="sh-contrib"></div>
+  </div>
+
+  <!-- ТЕПЛОВАЯ КАРТА НАСТРОЕНИЯ -->
+  <div class="sec-lbl">Настроение</div>
+  <div class="hm-card mx mb" id="home-heatmap"></div>
+
+  <!-- ЧТО ВЛИЯЕТ НА СОСТОЯНИЕ (корреляции) -->
+  <div class="sec-lbl">Что влияет на состояние</div>
+  <div class="corr-card mx mb" id="home-corr"></div>
+
+  <!-- ГРАФ СВЯЗЕЙ (тизер) -->
+  <div class="sec-lbl">Карта мыслей</div>
+  <div class="gg mx mb" id="home-graph" onclick="goTo('map');msub('graph')" role="button"></div>
+
+  <div class="agrid" id="ax-grid" style="display:none"></div>
   <div class="sec-lbl">Эта неделя</div>
   <div class="kgrid">
     <div class="kc"><span class="kn" id="kn-i">0</span><span class="kl">Инсайты</span><span class="kt" id="kt-i"></span></div>
