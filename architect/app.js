@@ -532,7 +532,7 @@ function rHome() {
   const M  = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
   $('h-date').textContent = `${D2[now.getDay()]}, ${now.getDate()} ${M[now.getMonth()]} ${now.getFullYear()}`;
   rHState(); rStreak(); detectPatterns();
-  rStateHero(); rHeatmap('home-heatmap', 90); rCorrelations('home-corr'); rGraph('home-graph', 190, true);
+  rStateHero(); rSmartInsights('home-smart'); rHeatmap('home-heatmap', 90); rGraph('home-graph', 190, true);
   $('h-oq').innerHTML = DB.oq.map((q,i) =>
     `<div class="oqrow" onclick="reflectOn(${i})" role="button"><div class="oqpulse"></div><span>${esc(q)}</span><svg class="oq-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>`
   ).join('');
@@ -1383,6 +1383,80 @@ function correlations() {
     return r==null ? null : { key:k, label, r:+r.toFixed(2), conf:confLabel(n) };
   }).filter(Boolean).sort((a,b)=>Math.abs(b.r)-Math.abs(a.r));
   return { n, items: out };
+}
+
+// ─── ДВИЖОК ДЕЙСТВЕННЫХ ВЫВОДОВ (волна 1 — «данные ≠ смысл») ──────
+// Не график, а фраза: ЧТО помогает/мешает, со сдвигом во времени
+// (сегодня + назавтра), с конкретным действием и честной меткой по n.
+// Метод: медианный сплит фактора → разница среднего состояния (в баллах).
+function smartInsights() {
+  const map = {}; DB.checkins.forEach(c => { if (c.date) map[c.date] = c; });
+  const rows = Object.keys(map).sort().map(d => {
+    const c = map[d], st = dayComposite(c);
+    const nd = new Date(d + 'T00:00:00'); nd.setDate(nd.getDate() + 1);
+    const nx = map[nd.toISOString().slice(0, 10)];
+    return { c, state: st, next: nx ? dayComposite(nx) : null };
+  }).filter(r => r.state != null);
+  if (rows.length < 5) return { ok: false, n: rows.length, items: [] };
+
+  const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const NUM = [
+    { key:'sl',   val:c=>+c.sl||0,        more:'высыпаешься',       less:'спишь мало',        act:'Защити сон — раньше ложись в будни.' },
+    { key:'mv',   val:c=>+c.mv||0,        more:'больше двигаешься', less:'мало движения',     act:'Добавь короткую активность в день.' },
+    { key:'calm', val:c=>10-(+c.st||0),   more:'меньше стресса',    less:'больше стресса',    act:'Заложи время на разгрузку.' },
+  ];
+  const BOOL = [
+    { key:'caf', label:'кофеин',   act:'Понаблюдай за кофеином во второй половине дня.' },
+    { key:'alc', label:'алкоголь', act:'Попробуй несколько дней без алкоголя.' },
+    { key:'nic', label:'никотин',  act:'Отметь, как никотин сказывается на состоянии.' },
+  ];
+  const raw = [];
+  NUM.forEach(f => {
+    // сортируем по фактору и берём равные половины по индексу (устойчиво к ничьим)
+    const srt = rows.slice().sort((a, b) => f.val(a.c) - f.val(b.c));
+    const h = Math.floor(srt.length / 2);
+    const lo = srt.slice(0, h), hi = srt.slice(srt.length - h);
+    if (hi.length < 2 || lo.length < 2) return;
+    // фактор должен реально различаться между половинами, иначе связь мнимая
+    if (mean(hi.map(r => f.val(r.c))) - mean(lo.map(r => f.val(r.c))) < 0.5) return;
+    const dSame = mean(hi.map(r => r.state)) - mean(lo.map(r => r.state));
+    const hiN = hi.filter(r => r.next != null), loN = lo.filter(r => r.next != null);
+    const dNext = (hiN.length >= 2 && loN.length >= 2)
+      ? mean(hiN.map(r => r.next)) - mean(loN.map(r => r.next)) : null;
+    raw.push({ kind:'num', f, dSame, dNext, n: Math.min(hi.length, lo.length), strength: Math.abs(dSame) });
+  });
+  BOOL.forEach(b => {
+    const on = rows.filter(r => r.c[b.key]), off = rows.filter(r => !r.c[b.key]);
+    if (on.length < 2 || off.length < 2) return;
+    const dSame = mean(on.map(r => r.state)) - mean(off.map(r => r.state));
+    raw.push({ kind:'bool', b, dSame, n: Math.min(on.length, off.length), strength: Math.abs(dSame) });
+  });
+  const items = raw.filter(o => o.strength >= 0.5)
+    .sort((a, b) => b.strength - a.strength).slice(0, 3).map(o => {
+      const conf = confLabel(o.n), pos = o.dSame > 0;
+      if (o.kind === 'num') {
+        let text = `Когда ${pos ? o.f.more : o.f.less}, состояние ${pos ? 'выше' : 'ниже'} на ${Math.abs(o.dSame).toFixed(1)} балла`;
+        if (o.dNext != null && Math.sign(o.dNext) === Math.sign(o.dSame) && Math.abs(o.dNext) >= 0.4) text += ' — и на следующий день тоже';
+        return { text: text + '.', action: o.f.act, conf, pos };
+      }
+      return { text: `В дни с «${o.b.label}» состояние ${pos ? 'выше' : 'ниже'} на ${Math.abs(o.dSame).toFixed(1)} балла.`, action: o.b.act, conf, pos };
+    });
+  return { ok: true, n: rows.length, items };
+}
+function rSmartInsights(elId) {
+  const el = $(elId); if (!el) return;
+  const { ok, n, items } = smartInsights();
+  if (!ok || !items.length) {
+    const need = Math.max(0, 5 - n);
+    el.innerHTML = `<div class="si-empty">Действенные выводы появятся${need?` после ещё ${need} ${pl(need,'чек-ина','чек-инов','чек-инов')}`:', когда наберётся заметная разница в днях'} — честно, на малых данных выводы ненадёжны.</div>`;
+    return;
+  }
+  el.innerHTML = items.map(it => `<div class="si-row">
+    <div class="si-dot ${it.pos?'pos':'neg'}"></div>
+    <div class="si-body"><div class="si-text">${esc(it.text)}</div>
+      <div class="si-act">→ ${esc(it.action)}</div></div>
+    <span class="si-conf ${it.conf.cls}">${it.conf.t}</span>
+  </div>`).join('');
 }
 
 function rCorrelations(elId) {
