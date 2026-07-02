@@ -1285,6 +1285,79 @@ function rTrends() {
   </div>`;
 }
 
+// ─── ТЕПЛОВАЯ КАРТА НАСТРОЕНИЯ (механика Daylio) ─────────────────
+// Один квадрат = день, цвет = композит состояния. Тап по дню → чек-ин.
+const dayComposite = c => c ? (c.cl + c.mv + (10 - c.st)) / 3 : null;   // 0–10
+function moodColor(v) {
+  if (v == null) return 'var(--hm0,#1E2740)';
+  if (v < 4)  return 'var(--rose,#FB7185)';
+  if (v < 5.5) return 'var(--gold,#F5B84B)';
+  if (v < 7)  return 'var(--blue-t,#4C8DFF)';
+  if (v < 8.5) return 'var(--teal,#2DD4BF)';
+  return 'var(--green,#34D399)';
+}
+function rHeatmap(elId, days) {
+  const el = $(elId); if (!el) return;
+  days = days || 90;
+  const map = {}; DB.checkins.forEach(c => { if (c.date) map[c.date] = c; });
+  const cells = [];
+  for (let i = days-1; i >= 0; i--) { const d = dayAgo(i); cells.push({ d, v: dayComposite(map[d]) }); }
+  const logged = cells.filter(c => c.v != null);
+  const n = logged.length;
+  const avg = n ? (logged.reduce((a,c)=>a+c.v,0)/n) : 0;
+  const cols = days > 45 ? 15 : 10;
+  const grid = cells.map(c =>
+    `<div class="hc" title="${c.d}${c.v!=null?' · '+c.v.toFixed(1):''}" style="background:${moodColor(c.v)}"${c.v!=null?` onclick="openDayCheckin('${c.d}')"`:''}></div>`
+  ).join('');
+  el.innerHTML =
+    `<div class="hm-head"><div class="t">${n?'Настроение · '+days+' дн':'Настроение'}</div>` +
+    `<div class="n">${n?'ср. '+avg.toFixed(1)+' / 10 · '+n+' '+pl(n,'день','дня','дней'):'нет данных'}</div></div>` +
+    `<div class="hm" style="grid-template-columns:repeat(${cols},1fr)">${grid}</div>`;
+}
+function openDayCheckin(d) {
+  const c = DB.checkins.find(x => x.date === d);
+  if (!c) return;
+  const rows = [['Сон', (c.sl||0)+' ч'], ['Ясность', (c.cl||0)+'/10'], ['Стресс', (c.st||0)+'/10'],
+               ['Движение', (c.mv||0)+'/10'], ['Спокойствие', (10-(c.st||0))+'/10']];
+  const comp = dayComposite(c);
+  toast(`${dispDate(c)} · состояние ${comp!=null?comp.toFixed(1):'—'}/10 · сон ${c.sl||0}ч`, 'ok');
+}
+
+// ─── КОРРЕЛЯЦИИ (killer-функция Daylio; честно по n) ─────────────
+// Пирсон между двумя рядами по дням, где есть оба значения.
+function pearson(xs, ys) {
+  const n = xs.length; if (n < 3) return null;
+  const mx = xs.reduce((a,b)=>a+b,0)/n, my = ys.reduce((a,b)=>a+b,0)/n;
+  let sxy=0, sxx=0, syy=0;
+  for (let i=0;i<n;i++){ const dx=xs[i]-mx, dy=ys[i]-my; sxy+=dx*dy; sxx+=dx*dx; syy+=dy*dy; }
+  if (sxx===0 || syy===0) return null;
+  return sxy / Math.sqrt(sxx*syy);
+}
+// Метка честности по n (мало данных — «наблюдение», не «вывод»)
+function confLabel(n) {
+  if (n < 5)  return { t:'мало данных', cls:'cf-low' };
+  if (n < 12) return { t:'наблюдение', cls:'cf-mid' };
+  return { t:'устойчивая связь', cls:'cf-hi' };
+}
+function correlations() {
+  const list = DB.checkins.filter(c => c.date && c.sl != null);
+  const pairs = { sleep:[], calm:[], move:[], clarity:[] };
+  const comp = [];
+  list.forEach(c => {
+    const v = dayComposite(c); if (v == null) return;
+    comp.push(v);
+    pairs.sleep.push(+c.sl||0); pairs.calm.push(10-(+c.st||0));
+    pairs.move.push(+c.mv||0); pairs.clarity.push(+c.cl||0);
+  });
+  const n = comp.length;
+  const defs = [['sleep','Сон'], ['calm','Спокойствие'], ['move','Движение'], ['clarity','Ясность']];
+  const out = defs.map(([k,label]) => {
+    const r = pearson(pairs[k], comp);
+    return r==null ? null : { key:k, label, r:+r.toFixed(2), conf:confLabel(n) };
+  }).filter(Boolean).sort((a,b)=>Math.abs(b.r)-Math.abs(a.r));
+  return { n, items: out };
+}
+
 // ─── ДАЙДЖЕСТ ────────────────────────────────────────────────────
 function rDig() {
   const el = $('dg-list');
