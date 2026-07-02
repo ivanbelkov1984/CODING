@@ -344,7 +344,7 @@ function updateDomainLabel() {
 }
 
 // ─── НАВИГАЦИЯ ───────────────────────────────────────────────────
-const TITLES = {home:'Архитектор', insights:'Инсайты', book:CFG.domainLabel||'Книга', vit:'Жизнь', sys:'Система', map:'Карта'};
+const TITLES = {home:'Сегодня', insights:'Инсайты', book:CFG.domainLabel||'Книга', vit:'Сферы', sys:'Итоги', map:'Разум'};
 function goTo(tab, el) {
   document.querySelectorAll('.pg').forEach(p => p.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
@@ -352,11 +352,11 @@ function goTo(tab, el) {
   if (pg) pg.classList.add('on');
   const nb = $('nt-'+tab) || el;
   if (nb) nb.classList.add('on');
-  $('ptitle').textContent = tab==='book' ? (CFG.domainLabel||'Книга') : (TITLES[tab]||tab);
+  $('ptitle').textContent = TITLES[tab] || tab;
   hpt();
-  if (tab==='vit') rVit();
+  if (tab==='vit') { rSpheres(); rVit(); }
   if (tab==='sys') rDig();
-  if (tab==='book') rBook();
+  if (tab==='map') rIns();
 }
 function msub(tab, el) {
   document.querySelectorAll('[id^="ms-"]').forEach(t => t.style.display='none');
@@ -366,12 +366,12 @@ function msub(tab, el) {
   if (el) el.classList.add('on');
   hpt();
   if (tab==='evolution') rEvoList($('evo-more'));
+  if (tab==='insights')  rIns();
+  if (tab==='book')      rBook();
   if (tab==='patterns')  rPats();
   if (tab==='dreams')    rDrms();
   if (tab==='spiritual') rSpi();
-  if (tab==='spheres')   rSpheres();
   if (tab==='graph')     rGraph();
-  if (tab==='settings')  rCfgAxes();
 }
 
 // ─── ОВЕРЛЕИ ────────────────────────────────────────────────────
@@ -664,7 +664,7 @@ function rKPIs() {
   const today = dateRU();
   const rc = DB.insights.filter(i => i.date===today).length;
   const b = $('tbadge');
-  if (rc>0) { b.style.display='flex'; b.textContent=rc; } else b.style.display='none';
+  if (b) { if (rc>0) { b.style.display='flex'; b.textContent=rc; } else b.style.display='none'; }
 }
 
 // ─── ИНСАЙТ ROW ──────────────────────────────────────────────────
@@ -675,7 +675,7 @@ function iRow(ins) {
     <div class="ins-row" id="ir-${ins.id}" onclick="showDet(${ins.id})">
       <div class="ins-stripe" style="background:${stripe}"></div>
       <div class="ins-body">
-        <div class="ins-meta"><span class="tag ${TC[ins.tag]||'tg-personal'}">${TL[ins.tag]||ins.tag}</span><span class="pips">${pips(ins.w||1)}</span><span class="ins-date">${ins.date}</span></div>
+        <div class="ins-meta"><span class="tag ${TC[ins.tag]||'tg-personal'}">${TL[ins.tag]||ins.tag}</span><span class="pips">${pips(ins.w||1)}</span><span class="ins-date">${esc(ins.date || dispDate(ins) || '')}</span></div>
         <div class="ins-title">${esc(ins.title)}</div>
         <div class="ins-text">${esc(ins.body)}</div>
       </div>
@@ -1255,7 +1255,8 @@ function rBook() {
 
 // ─── КАРТА: РЕНДЕРЫ ──────────────────────────────────────────────
 function rBots() {
-  $('bot-tasks').innerHTML = DB.bots.map(t =>
+  const bt = $('bot-tasks'); if (!bt) return;   // раздел «Бот» убран из навигации
+  bt.innerHTML = DB.bots.map(t =>
     `<div class="task" onclick="toggleBot(${t.id})">
       <div class="tck${t.done?' dn':''}">
         ${t.done?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="width:11px;height:11px;color:#fff"><polyline points="20 6 9 17 4 12"/></svg>':''}
