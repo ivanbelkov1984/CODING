@@ -632,3 +632,16 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .si-conf.cf-low{color:var(--t3);background:var(--bg3)}
 .si-conf.cf-mid{color:var(--blue-t);background:var(--blue-l)}
 .si-conf.cf-hi{color:var(--green);background:var(--green-l)}
+
+/* ── ПОСТОЯНСТВО (прощающая метрика вместо жёсткого стрика) ─────── */
+.cons{display:flex;align-items:center;gap:var(--s3);margin-top:var(--s2);padding:var(--s3) var(--s4);
+  background:var(--bg2);border:1px solid var(--bd);border-radius:16px}
+.cons-ring{--p:0;position:relative;width:52px;height:52px;border-radius:50%;flex:none;display:grid;place-items:center;
+  background:conic-gradient(var(--rng,#4C8DFF) calc(var(--p)*1%),var(--bg3) 0)}
+.cons-ring::before{content:"";position:absolute;width:40px;height:40px;border-radius:50%;background:var(--bg2)}
+.cons-ring b{position:relative;font-size:var(--tx4);font-weight:800;color:var(--t1)}
+.cons.good{--rng:var(--green,#34D399)}
+.cons.mid{--rng:var(--blue-t,#4C8DFF)}
+.cons.low{--rng:var(--gold,#F5B84B)}
+.cons-lbl{font-size:var(--tx4);font-weight:700;color:var(--t1)}
+.cons-sub{font-size:var(--tx2);font-weight:600;color:var(--t3);margin-top:2px}

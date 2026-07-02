@@ -484,16 +484,34 @@ function calcBestStreak() {
   }
   return best;
 }
+// «Прощающая» метрика постоянства (0–100) — по запросу пользователей
+// категории: пропуск НЕ обнуляет, а лишь слегка снижает. Взвешенная
+// приверженность за окно с большим весом свежих дней; один пропуск среди
+// многих отметок почти не влияет, восстанавливается по мере отметок.
+function calcConsistency(window) {
+  window = window || 21;
+  const logged = new Set(DB.checkins.map(c => c.date).filter(Boolean));
+  let num = 0, den = 0;
+  for (let i = 0; i < window; i++) {
+    const w = window - i;                 // свежие дни весомее
+    den += w;
+    if (logged.has(dayAgo(i))) num += w;
+  }
+  return den ? Math.round(100 * num / den) : 0;
+}
 function rStreak() {
   const el = $('h-streak-wrap');
   if (!el) return;
-  const s = calcStreak(), best = calcBestStreak();
-  if (s < 2 && best < 2) { el.innerHTML = ''; return; }
-  const bestLbl = best > s ? `<span class="h-streak-best">рекорд ${best}</span>` : '';
-  el.innerHTML = `<div class="h-streak">
-    <span class="h-streak-n">${s}</span>
-    <span class="h-streak-l">${s >= 2 ? 'дней подряд 🔥' : 'начни серию заново'}</span>
-    ${bestLbl}
+  if (!DB.checkins.length) { el.innerHTML = ''; return; }
+  const s = calcStreak(), best = calcBestStreak(), cons = calcConsistency(21);
+  // Лид — постоянство (не обнуляется); стрик вторичен, без вины за пропуск.
+  const tone = cons >= 70 ? 'good' : cons >= 40 ? 'mid' : 'low';
+  const lbl  = cons >= 70 ? 'ты в ритме' : cons >= 40 ? 'держишь курс' : 'набираешь ритм';
+  const chip = s >= 2 ? `🔥 ${s} подряд` : best >= 3 ? `рекорд ${best}` : '';
+  el.innerHTML = `<div class="cons ${tone}">
+    <div class="cons-ring" style="--p:${cons}"><b>${cons}</b></div>
+    <div class="cons-body"><div class="cons-lbl">Постоянство · ${lbl}</div>
+      <div class="cons-sub">за 3 недели${chip ? ' · ' + chip : ''}</div></div>
   </div>`;
 }
 
