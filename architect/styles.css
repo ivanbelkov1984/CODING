@@ -761,3 +761,15 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .rec-btn.rec{background:var(--rose,#FB7185);border-color:var(--rose,#FB7185);color:#fff;animation:recpulse 1s ease-in-out infinite}
 @keyframes recpulse{0%,100%{opacity:1}50%{opacity:.65}}
 .det-audio{width:100%;height:40px;margin:2px 0}
+
+/* ── ОНБОРДИНГ-ТУР ─────────────────────────────────────────────── */
+.tour-sheet{text-align:center}
+.tour-slide{padding:var(--s3) 0 var(--s4)}
+.tour-ic{font-size:3.2rem;line-height:1;margin-bottom:var(--s3);animation:tourpop .4s cubic-bezier(.2,.9,.3,1.3)}
+@keyframes tourpop{from{transform:scale(.5);opacity:0}to{transform:scale(1);opacity:1}}
+.tour-t{font-size:var(--tx7);font-weight:800;color:var(--t1);margin-bottom:var(--s2);letter-spacing:-.02em}
+.tour-d{font-size:var(--tx4);color:var(--t2);line-height:1.55;max-width:300px;margin:0 auto}
+.tour-dots{display:flex;gap:6px;justify-content:center;margin:var(--s3) 0 var(--s4)}
+.tour-dot{width:7px;height:7px;border-radius:50%;background:var(--bd2,#ccc);transition:all .3s}
+.tour-dot.on{background:var(--blue-btn,#1056CC);width:22px;border-radius:4px}
+.tour-skip{background:none;border:none;color:var(--t3);font-size:var(--tx3);font-weight:600;cursor:pointer;margin-top:var(--s3);padding:var(--s2)}

@@ -339,7 +339,27 @@ function finishOnboard() {
   persist();
   closeOv('ov-onboard');
   updateDomainLabel(); rProfileRow();
-  toast('Добро пожаловать, ' + name + '!', 'ok');
+  openOv('ov-tour'); rTour(0);   // короткий тур по сути приложения
+}
+// ─── ПЕРВЫЙ ЗАПУСК: тур (ориентация в сути за 3 шага) ────────────
+const TOUR = [
+  { ic:'🎯', t:'Отмечай день', d:'Быстрый чек-ин: сон, ясность, эмоция. Из этого рождётся твоё состояние и честные выводы — без ручных графиков.' },
+  { ic:'🧩', t:'Заведи свои сферы', d:'Спорт, чтение, практики — что угодно. Каждая со своим трекером: балл, привычка, счётчик или цель.' },
+  { ic:'💡', t:'Смотри, что помогает', d:'Приложение само найдёт связи: «В дни спорта состояние выше». Честно, по твоим данным, а не общими словами.' },
+];
+function rTour(i) {
+  STATE.tourIdx = i;
+  const s = TOUR[i];
+  $('tour-slides').innerHTML = `<div class="tour-slide"><div class="tour-ic">${s.ic}</div><div class="tour-t">${esc(s.t)}</div><div class="tour-d">${esc(s.d)}</div></div>`;
+  $('tour-dots').innerHTML = TOUR.map((_, k) => `<span class="tour-dot${k===i?' on':''}"></span>`).join('');
+  $('tour-btn').textContent = i === TOUR.length - 1 ? 'Сделать первый чек-ин' : 'Далее';
+}
+function nextTour() { if (STATE.tourIdx < TOUR.length - 1) rTour(STATE.tourIdx + 1); else finishTour(true); }
+function finishTour(doCheckin) {
+  try { localStorage.setItem('arch5_tour_done', '1'); } catch(e){}
+  closeOv('ov-tour');
+  if (doCheckin) { openOv('ov-ci'); }
+  else toast('Готово — начинай отмечать день', 'ok');
 }
 function updateDomainLabel() {
   const lbl = CFG.domainLabel || 'Книга';
