@@ -557,21 +557,50 @@ function rHome() {
   rOnThisDay();
   rHIns();
 }
-// «Год назад» — ретроспектива: запись годичной давности (±3 дня).
+// ─── ПАМЯТЬ НА ГОДЫ: ресёрфейсинг (волна 2, механика Rosebud) ────
+// Движок сам поднимает релевантную запись прошлого: похожее состояние /
+// годовщина / важная забытая мысль. «Держит в уме на годы» — люди не
+// перечитывают старое, а движок делает это за них в нужный момент.
+function resurface() {
+  const now = Date.now();
+  const MIN_AGE = 30 * 864e5;                       // минимум месяц — это «прошлое»
+  const v = DB.vit;
+  const todayState = (v && v.ci) ? (v.cl + v.mv + (10 - v.st)) / 3 : null;
+  const stateOn = {}; DB.checkins.forEach(c => { if (c.date) stateOn[c.date] = dayComposite(c); });
+  const cands = (DB.insights || []).filter(i => {
+    const t = Date.parse(i.createdAt); return t && (now - t) >= MIN_AGE && (i.body || i.title);
+  }).map(i => {
+    const t = Date.parse(i.createdAt), ageDays = (now - t) / 864e5, w = i.w || 1;
+    const day = i.day || String(i.createdAt || '').slice(0, 10);
+    let resonance = 0, reason = 'важная мысль из прошлого';
+    const past = stateOn[day];
+    if (todayState != null && past != null && Math.abs(todayState - past) <= 1.2) {
+      resonance = 2; reason = 'ты был в похожем состоянии';
+    }
+    const yr = ageDays / 365;                        // годовщина ±4 дня
+    if (Math.round(yr) >= 1 && Math.abs(yr - Math.round(yr)) * 365 <= 4) {
+      resonance += 1.5; reason = Math.round(yr) === 1 ? 'ровно год назад' : `${Math.round(yr)} года назад`;
+    }
+    return { ins: i, score: w * (1 + resonance) * Math.log10(ageDays + 10), reason, resonant: resonance > 0, ageDays: Math.round(ageDays) };
+  });
+  if (!cands.length) return null;
+  cands.sort((a, b) => b.score - a.score);
+  // Контекстное совпадение (состояние/годовщина) всегда важнее — не ротируем его.
+  if (cands[0].resonant) return cands[0];
+  // Иначе среди «важных забытых» ротируем по дню, чтобы возвращались разные.
+  const top = cands.slice(0, 3);
+  const doy = Math.floor((now - Date.UTC(new Date().getUTCFullYear(), 0, 0)) / 864e5);
+  return top[doy % top.length];
+}
 function rOnThisDay() {
   const el = $('h-onthisday'); if (!el) return;
-  const now = new Date();
-  const target = new Date(now.getFullYear()-1, now.getMonth(), now.getDate()).getTime();
-  const old = Date.now() - 300*864e5;
-  const within = iso => { const t = Date.parse(iso); return t && Math.abs(t - target) <= 3*864e5 && t < old; };
-  const ins = DB.insights.find(i => within(i.createdAt));
-  const drm = ins ? null : DB.dreams.find(d => within(d.createdAt));
-  const hit = ins || drm;
-  if (!hit) { el.innerHTML = ''; return; }
-  el.innerHTML = `<div class="otd mx mb"${ins ? ` onclick="showDet(${hit.id})" role="button"` : ''}>
-    <div class="otd-h">📅 Год назад${ins ? '' : ' · сон'}</div>
-    <div class="otd-t">${esc(hit.title)}</div>
-    <div class="otd-b">${esc((hit.body||'').slice(0,140))}</div>
+  const r = resurface();
+  if (!r) { el.innerHTML = ''; return; }
+  const i = r.ins;
+  el.innerHTML = `<div class="otd mx mb" onclick="showDet(${i.id})" role="button">
+    <div class="otd-h">🧠 ${esc(r.reason)}</div>
+    <div class="otd-t">${esc(i.title)}</div>
+    <div class="otd-b">${esc((i.body||'').slice(0,140))}</div>
   </div>`;
 }
 // Управляемая рефлексия: тап по вопросу открывает инсайт с этим вопросом.
