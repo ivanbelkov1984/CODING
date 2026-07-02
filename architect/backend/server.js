@@ -9,6 +9,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import pg from 'pg';
+import mountPush from './push.js';   // Web Push (под VAPID-guard; без ключей — no-op)
 
 const { Pool } = pg;
 const PORT = process.env.PORT || 3000;
@@ -63,6 +64,9 @@ app.use('/api', rateLimit({
   standardHeaders: true, legacyHeaders: false,
   message: { error: 'Слишком много запросов, попробуй позже' },
 }));
+
+// Web Push — аддитивно и защищённо: любая ошибка не роняет сервер/синхронизацию.
+try { mountPush(app, pool); } catch (e) { console.error('push mount failed:', e.message); }
 
 const isUuid = s => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s || '');
 const isObj  = v => v && typeof v === 'object' && !Array.isArray(v);
