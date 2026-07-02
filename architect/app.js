@@ -553,6 +553,7 @@ function rHome() {
   const M  = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
   $('h-date').textContent = `${D2[now.getDay()]}, ${now.getDate()} ${M[now.getMonth()]} ${now.getFullYear()}`;
   rHState(); rStreak(); detectPatterns();
+  rNudge();
   rStateHero(); rSmartInsights('home-smart'); rHeatmap('home-heatmap', 90); rGraph('home-graph', 190, true);
   rPrompts();
   rOnThisDay();
@@ -648,6 +649,48 @@ function statePromptBucket() {
   const comp = (v.cl + v.mv + (10 - v.st)) / 3;
   return comp < 4.5 ? 'low' : comp <= 6.5 ? 'mid' : 'high';
 }
+// ─── КОНТЕКСТНЫЙ НАДЖ (напоминания: контекст, не будильник — №4) ──
+// Один уместный подсказ по состоянию/пропускам, вопросом, а не командой;
+// закрывается на день. (Web Push позже — логика уже здесь.)
+function smartNudge() {
+  const today = todayKey();
+  if (localStorage.getItem('arch5_nudge_dismiss') === today) return null;
+  const v = DB.vit, hour = new Date().getHours();
+  // 1. Не отмечен день (после полудня)
+  if ((!v || !v.ci || v.date !== today) && hour >= 11)
+    return { icon:'📝', text:'Хороший момент отметить день?', cta:'Чек-ин', act:"openOv('ov-ci')" };
+  // 2. Привычка-сфера давно без отметки
+  for (const s of (DB.spheres || [])) {
+    if (s.type !== 'habit') continue;
+    const logs = DB.sphereLogs.filter(l => l.sphereId === s.id && l.value).map(l => l.date).filter(Boolean).sort();
+    if (logs.length < 3) continue;
+    const last = logs[logs.length - 1];
+    const gap = Math.round((Date.now() - Date.parse(last + 'T00:00:00')) / 864e5);
+    if (gap >= 3 && gap < 30)
+      return { icon:s.icon||'○', text:`«${s.name}» ждёт ${gap} ${pl(gap,'день','дня','дней')} — отметить сегодня?`, cta:'Отметить', act:`openSphereLog(${s.id})` };
+  }
+  // 3. Состояние сегодня: рефрейминг спада / закрепление подъёма
+  if (v && v.ci && v.date === today) {
+    const comp = (v.cl + v.mv + (10 - v.st)) / 3;
+    if (comp < 4.5) {
+      const r = resurface();
+      return { icon:'🌊', text:'Тяжёлый день — это временно. Что помогало раньше?',
+        cta: r ? 'Вспомнить' : 'Записать', act: r ? `showDet(${r.ins.id})` : "reflectPromptText('Что помогало мне в похожий день?')" };
+    }
+    if (comp > 7.5) return { icon:'✨', text:'Ты в ресурсе — зафиксируй, что сработало?', cta:'Записать', act:"reflectPromptText('Что дало мне энергию сегодня?')" };
+  }
+  return null;
+}
+function rNudge() {
+  const el = $('h-nudge'); if (!el) return;
+  const n = smartNudge();
+  if (!n) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="nudge"><span class="nudge-ic">${n.icon}</span>
+    <span class="nudge-tx">${esc(n.text)}</span>
+    <button class="nudge-cta" onclick="${n.act}">${esc(n.cta)}</button>
+    <button class="nudge-x" onclick="dismissNudge()" aria-label="Скрыть">✕</button></div>`;
+}
+function dismissNudge() { localStorage.setItem('arch5_nudge_dismiss', todayKey()); rNudge(); }
 function rPrompts() {
   const el = $('h-oq'); if (!el) return;
   const bucket = statePromptBucket();

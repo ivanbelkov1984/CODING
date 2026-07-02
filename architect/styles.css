@@ -690,3 +690,12 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 
 /* Динамические промпты рефлексии под состояние */
 .oqpulse.oq-dyn{background:var(--teal,#2DD4BF);box-shadow:0 0 0 3px var(--teal-l,rgba(45,212,191,.2))}
+
+/* ── КОНТЕКСТНЫЙ НАДЖ ──────────────────────────────────────────── */
+.nudge{display:flex;align-items:center;gap:var(--s2);margin:var(--s2) var(--s4) 0;padding:var(--s3);
+  background:linear-gradient(120deg,var(--blue-l),var(--bg2));border:1px solid var(--blue);border-left-width:3px;border-radius:14px}
+.nudge-ic{font-size:1.1rem;flex:none}
+.nudge-tx{flex:1;min-width:0;font-size:var(--tx3);font-weight:600;color:var(--t1);line-height:1.35}
+.nudge-cta{flex:none;border:none;background:var(--blue-btn,#1056CC);color:#fff;border-radius:12px;padding:6px 12px;font-size:var(--tx2);font-weight:700;cursor:pointer}
+.nudge-cta:active{transform:scale(.96)}
+.nudge-x{flex:none;background:none;border:none;color:var(--t3);font-size:.9rem;cursor:pointer;padding:2px 4px}
