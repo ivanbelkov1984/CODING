@@ -53,3 +53,22 @@ self.addEventListener('fetch', e => {
     })
   );
 });
+
+// ─── PUSH-УВЕДОМЛЕНИЯ ───────────────────────────────────────────
+// Показываем уведомление из payload сервера (активируется backend'ом).
+self.addEventListener('push', e => {
+  let d = { title: 'Архитектор', body: 'Хороший момент отметить день?' };
+  try { if (e.data) d = Object.assign(d, e.data.json()); } catch (_) {}
+  e.waitUntil(self.registration.showNotification(d.title, {
+    body: d.body, icon: './icon-192.png', badge: './icon-192.png',
+    tag: d.tag || 'arch-reminder', data: { url: d.url || './' }, renotify: true,
+  }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || './';
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for (const c of list) if ('focus' in c) return c.focus();
+    if (clients.openWindow) return clients.openWindow(url);
+  }));
+});

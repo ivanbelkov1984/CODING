@@ -381,7 +381,7 @@ function goTo(tab, el) {
   $('ptitle').textContent = TITLES[tab] || tab;
   hpt();
   if (tab==='vit') { rSpheres(); rVit(); }
-  if (tab==='sys') { rDig(); rReview(30); }
+  if (tab==='sys') { rDig(); rReview(30); rPushStatus(); }
   if (tab==='map') rIns();
 }
 function msub(tab, el) {
@@ -2345,6 +2345,43 @@ function handleImport(input) {
 // ═════════════════════════════════════════════════════════════════
 function apiBase() {
   return (CFG.apiUrl || window.ARCHITECT_API || '').trim().replace(/\/+$/, '');
+}
+
+// ─── PUSH-УВЕДОМЛЕНИЯ (клиент) ──────────────────────────────────
+function pushSupported() { return 'serviceWorker' in navigator && 'PushManager' in window && typeof Notification !== 'undefined'; }
+function urlB64ToUint8Array(b64) {
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const s = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(s); const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+async function enableNotifications() {
+  if (!pushSupported()) { toast('Браузер не поддерживает уведомления', 'warn'); return; }
+  const base = apiBase();
+  if (!base) { toast('Сначала подключи backend', 'warn'); return; }
+  let vapid;
+  try {
+    const r = await fetch(base + '/api/push/vapid');
+    if (r.status === 501 || r.status === 404) { toast('Пуш ещё не активирован на сервере — скажи, включу', 'warn'); return; }
+    if (!r.ok) throw new Error('vapid ' + r.status);
+    vapid = (await r.json()).publicKey;
+  } catch (e) { toast('Нет связи с сервером уведомлений', 'warn'); return; }
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') { toast('Уведомления не разрешены', 'warn'); return; }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(vapid) });
+    await fetch(base + '/api/push/subscribe', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ spaceKey: CFG.spaceKey || null, subscription: sub }) });
+    localStorage.setItem('arch5_push', '1'); rPushStatus();
+    toast('Уведомления включены', 'ok');
+  } catch (e) { toast('Не удалось подписаться: ' + e.message, 'warn'); }
+}
+function rPushStatus() {
+  const el = $('push-status'); if (!el) return;
+  const on = typeof Notification !== 'undefined' && Notification.permission === 'granted' && localStorage.getItem('arch5_push') === '1';
+  el.textContent = on ? 'Включены' : 'Выключены';
 }
 
 // ─── ЛОГ (кольцевой буфер последних 50 событий) ──────────────────
