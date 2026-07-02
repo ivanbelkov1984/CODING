@@ -892,7 +892,9 @@ async function rAddMedia() {
   if (!ids.length) { el.innerHTML = ''; return; }
   const items = await Promise.all(ids.map(async id => {
     const m = await idbGet(id).catch(() => null);
-    return m ? `<div class="mth"><img src="${m.data}" alt=""><button class="mth-x" onclick="removeAddMedia('${id}')" aria-label="Убрать">✕</button></div>` : '';
+    if (!m) return '';
+    const inner = m.type === 'audio' ? `<span class="mth-a-ic">🎤</span>` : `<img src="${m.data}" alt="">`;
+    return `<div class="mth${m.type==='audio'?' mth-a':''}">${inner}<button class="mth-x" onclick="removeAddMedia('${id}')" aria-label="Убрать">✕</button></div>`;
   }));
   el.innerHTML = items.join('');
 }
@@ -903,9 +905,39 @@ async function rDetMedia(ins) {
   if (!ids.length) { el.innerHTML = ''; return; }
   const items = await Promise.all(ids.map(async id => {
     const m = await idbGet(id).catch(() => null);
-    return m ? `<img class="det-photo" src="${m.data}" alt="">` : '';
+    if (!m) return '';
+    return m.type === 'audio' ? `<audio class="det-audio" controls src="${m.data}"></audio>` : `<img class="det-photo" src="${m.data}" alt="">`;
   }));
   el.innerHTML = items.join('');
+}
+// ── Голосовые заметки (MediaRecorder → IndexedDB) ──
+let _rec = null, _recChunks = [];
+function blobToDataURL(blob) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(blob); }); }
+async function storeAudioBlob(blob) {
+  const data = await blobToDataURL(blob);
+  const key = 'm' + uid();
+  await idbPut(key, { data, type: 'audio', createdAt: nowISO() });
+  STATE.addMedia = STATE.addMedia || []; STATE.addMedia.push(key);
+  rAddMedia();
+}
+async function toggleRec(btn) {
+  if (_rec && _rec.state === 'recording') { _rec.stop(); return; }
+  if (!navigator.mediaDevices || !window.MediaRecorder) { toast('Запись не поддерживается браузером', 'warn'); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { toast('Нет доступа к микрофону', 'warn'); return; }
+  try {
+    _rec = new MediaRecorder(stream); _recChunks = [];
+    _rec.ondataavailable = e => { if (e.data && e.data.size) _recChunks.push(e.data); };
+    _rec.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      if (btn) { btn.classList.remove('rec'); const l = btn.querySelector('.rec-lbl'); if (l) l.textContent = 'Голос'; }
+      try { await storeAudioBlob(new Blob(_recChunks, { type: _rec.mimeType || 'audio/webm' })); }
+      catch (e) { toast('Не удалось сохранить запись', 'warn'); }
+    };
+    _rec.start(); btn && btn.classList.add('rec');
+    const l = btn && btn.querySelector('.rec-lbl'); if (l) l.textContent = 'Стоп ●';
+  } catch (e) { stream.getTracks().forEach(t => t.stop()); toast('Ошибка записи', 'warn'); }
 }
 function saveIns() {
   const tx = $('add-tx').value.trim();

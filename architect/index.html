@@ -358,8 +358,9 @@
       <div id="add-media" class="add-media"></div>
       <div style="display:flex;gap:var(--s2)">
         <label class="btn btn-s btn-sm" style="flex:1;cursor:pointer"><i data-lucide="image"></i>Фото<input type="file" accept="image/*" style="display:none" onchange="addPhoto(this)"></label>
-        <button class="btn btn-s btn-sm" style="flex:2" id="deeper-btn" onclick="goDeeper()"><i data-lucide="sparkles"></i>Копни глубже</button>
+        <button class="btn btn-s btn-sm rec-btn" style="flex:1" onclick="toggleRec(this)"><i data-lucide="mic"></i><span class="rec-lbl">Голос</span></button>
       </div>
+      <button class="btn btn-s btn-full btn-sm" id="deeper-btn" onclick="goDeeper()"><i data-lucide="sparkles"></i>Копни глубже</button>
       <div id="deeper-out"></div>
       <div>
         <div class="f-lbl">Источник (необязательно)</div>
