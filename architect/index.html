@@ -213,6 +213,7 @@
     <div class="snpill" onclick="msub('patterns',this)"><i data-lucide="git-branch" style="width:13px;height:13px"></i>Паттерны</div>
     <div class="snpill" onclick="msub('dreams',this)"><i data-lucide="moon" style="width:13px;height:13px"></i>Сны</div>
     <div class="snpill" onclick="msub('spiritual',this)"><i data-lucide="sparkles" style="width:13px;height:13px"></i>Духовное</div>
+    <div class="snpill" onclick="msub('graph',this)"><i data-lucide="share-2" style="width:13px;height:13px"></i>Связи</div>
     <div class="snpill" onclick="msub('evolution',this)"><i data-lucide="trending-up" style="width:13px;height:13px"></i>Эволюция</div>
     <div class="snpill" onclick="msub('settings',this)"><i data-lucide="settings" style="width:13px;height:13px"></i>Настройки</div>
   </div>
@@ -240,6 +241,12 @@
     <div style="padding:var(--s4);display:flex;gap:var(--s2)">
       <button class="btn btn-s btn-sm" onclick="openOv('ov-spi-add')"><i data-lucide="plus"></i>Запись</button>
     </div>
+    <div style="height:5rem"></div>
+  </div>
+  <div id="ms-graph" style="display:none">
+    <div class="sec-lbl">Карта связей</div>
+    <div class="card mx"><div id="graph-canvas" class="graph-wrap"></div></div>
+    <div class="graph-hint mx">Связывай мысли через <code>[[слово]]</code> — крупные узлы упоминаются чаще. Тапни узел, чтобы открыть инсайт.</div>
     <div style="height:5rem"></div>
   </div>
   <div id="ms-evolution" style="display:none">

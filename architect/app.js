@@ -367,6 +367,7 @@ function msub(tab, el) {
   if (tab==='patterns')  rPats();
   if (tab==='dreams')    rDrms();
   if (tab==='spiritual') rSpi();
+  if (tab==='graph')     rGraph();
   if (tab==='settings')  rCfgAxes();
 }
 
@@ -759,6 +760,98 @@ function openLink(term) {
   const hit = DB.insights.find(i => matchLink(term, i));
   if (hit) { showDet(hit.id); }
   else { closeOv('ov-det'); openOv('ov-search'); const s=$('search-in'); if (s) { s.value=term; runSearch(term); } }
+}
+
+// ─── КАРТА СВЯЗЕЙ (граф [[…]]) ───────────────────────────────────
+// Узлы — инсайты, участвующие хотя бы в одной связи; рёбра — [[ссылки]]
+// между заголовками (через тот же matchLink, что и бэклинки).
+function buildGraph() {
+  const ins = DB.insights || [];
+  const edges = [];
+  const deg = {};
+  const seen = new Set();
+  ins.forEach(a => {
+    (a.links || []).forEach(l => {
+      const b = ins.find(x => x.id !== a.id && matchLink(l, x));
+      if (!b) return;
+      const key = a.id < b.id ? a.id+'-'+b.id : b.id+'-'+a.id;
+      if (seen.has(key)) return;
+      seen.add(key);
+      edges.push({ a: a.id, b: b.id });
+      deg[a.id] = (deg[a.id]||0) + 1;
+      deg[b.id] = (deg[b.id]||0) + 1;
+    });
+  });
+  const ids = new Set();
+  edges.forEach(e => { ids.add(e.a); ids.add(e.b); });
+  const nodes = ins.filter(i => ids.has(i.id))
+    .map(i => ({ id: i.id, title: i.title, tag: i.tag, deg: deg[i.id]||0 }));
+  return { nodes, edges };
+}
+// Детерминированная силовая раскладка (Fruchterman–Reingold, фикс. число шагов).
+function layoutGraph(nodes, edges, W, H) {
+  const n = nodes.length; if (!n) return;
+  const cx = W/2, cy = H/2, R = Math.min(W, H)/2 - 34;
+  nodes.forEach((nd, i) => {
+    const a = (i / n) * Math.PI * 2;
+    nd.x = cx + Math.cos(a) * R * 0.7;
+    nd.y = cy + Math.sin(a) * R * 0.7;
+    nd.vx = 0; nd.vy = 0;
+  });
+  const byId = {}; nodes.forEach(nd => byId[nd.id] = nd);
+  const k = Math.max(38, R / Math.sqrt(n));       // идеальная длина ребра
+  const ITER = 220;
+  for (let it = 0; it < ITER; it++) {
+    for (let i = 0; i < n; i++) for (let j = i+1; j < n; j++) {
+      const A = nodes[i], B = nodes[j];
+      let dx = A.x-B.x, dy = A.y-B.y, d = Math.hypot(dx, dy) || 0.01;
+      const f = (k*k) / d; dx /= d; dy /= d;
+      A.vx += dx*f; A.vy += dy*f; B.vx -= dx*f; B.vy -= dy*f;
+    }
+    edges.forEach(e => {
+      const A = byId[e.a], B = byId[e.b];
+      let dx = A.x-B.x, dy = A.y-B.y, d = Math.hypot(dx, dy) || 0.01;
+      const f = (d*d) / k; dx /= d; dy /= d;
+      A.vx -= dx*f; A.vy -= dy*f; B.vx += dx*f; B.vy += dy*f;
+    });
+    const t = 0.85 * (1 - it / (ITER + 20));       // остывание
+    nodes.forEach(nd => {
+      nd.vx += (cx - nd.x) * 0.03; nd.vy += (cy - nd.y) * 0.03;  // к центру
+      const vm = Math.hypot(nd.vx, nd.vy) || 0.01;
+      const step = Math.min(vm, k) * t;
+      nd.x += (nd.vx / vm) * step; nd.y += (nd.vy / vm) * step;
+      nd.vx *= 0.5; nd.vy *= 0.5;
+      nd.x = Math.max(28, Math.min(W-28, nd.x));
+      nd.y = Math.max(24, Math.min(H-30, nd.y));
+    });
+  }
+}
+function rGraph() {
+  const el = $('graph-canvas'); if (!el) return;
+  const { nodes, edges } = buildGraph();
+  if (!nodes.length) {
+    el.innerHTML = `<div class="empty"><div class="em-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:26px;height:26px;color:var(--t3)"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div><div class="em-t">Связей пока нет</div><div class="em-d">Напиши <code>[[слово]]</code> в тексте инсайта — узлы соединятся тут</div></div>`;
+    return;
+  }
+  const W = el.clientWidth || 340, H = 380;
+  layoutGraph(nodes, edges, W, H);
+  const byId = {}; nodes.forEach(nd => byId[nd.id] = nd);
+  const lines = edges.map(e => {
+    const A = byId[e.a], B = byId[e.b];
+    return `<line x1="${A.x.toFixed(1)}" y1="${A.y.toFixed(1)}" x2="${B.x.toFixed(1)}" y2="${B.y.toFixed(1)}" class="gedge"/>`;
+  }).join('');
+  const circ = nodes.map(nd => {
+    const r = 6 + Math.min(nd.deg, 6) * 2;
+    const c = SC[nd.tag] || 'var(--t3)';
+    const short = nd.title.length > 16 ? nd.title.slice(0, 15) + '…' : nd.title;
+    return `<g class="gnode" onclick="showDet(${nd.id})">
+      <circle cx="${nd.x.toFixed(1)}" cy="${nd.y.toFixed(1)}" r="${r}" fill="${c}"/>
+      <text x="${nd.x.toFixed(1)}" y="${(nd.y + r + 11).toFixed(1)}" class="glbl">${esc(short)}</text>
+    </g>`;
+  }).join('');
+  el.innerHTML =
+    `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" class="graph-svg" preserveAspectRatio="xMidYMid meet">${lines}${circ}</svg>` +
+    `<div class="graph-meta">${nodes.length} ${pl(nodes.length,'мысль','мысли','мыслей')} · ${edges.length} ${pl(edges.length,'связь','связи','связей')}</div>`;
 }
 
 // ─── ДЕТАЛИ ──────────────────────────────────────────────────────

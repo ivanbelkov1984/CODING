@@ -546,3 +546,15 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .otd-h{font-size:var(--tx2);font-weight:700;color:var(--gold,#B45309);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
 .otd-t{font-size:var(--tx4);font-weight:600;color:var(--t1);line-height:1.3}
 .otd-b{font-size:var(--tx3);color:var(--t2);line-height:1.5;margin-top:2px}
+
+/* ── КАРТА СВЯЗЕЙ (граф [[…]]) ─────────────────────────────────── */
+.graph-wrap{position:relative;min-height:120px}
+.graph-svg{display:block;width:100%;touch-action:pan-y;overflow:visible}
+.gedge{stroke:var(--brd,#D5DBE6);stroke-width:1.4;opacity:.7}
+.gnode{cursor:pointer}
+.gnode circle{transition:transform .12s ease;transform-origin:center;transform-box:fill-box}
+.gnode:active circle{transform:scale(1.25)}
+.glbl{fill:var(--t2);font-size:10.5px;font-weight:600;text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:var(--bg1,#fff);stroke-width:3px}
+.graph-meta{text-align:center;font-size:var(--tx2);font-weight:600;color:var(--t3);margin-top:var(--s2)}
+.graph-hint{font-size:var(--tx2);color:var(--t3);line-height:1.5;margin-top:var(--s3);padding:0 var(--s1)}
+.graph-hint code{background:var(--bg2);padding:1px 5px;border-radius:5px;font-size:.9em}
