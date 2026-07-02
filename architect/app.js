@@ -355,7 +355,7 @@ function goTo(tab, el) {
   $('ptitle').textContent = TITLES[tab] || tab;
   hpt();
   if (tab==='vit') { rSpheres(); rVit(); }
-  if (tab==='sys') rDig();
+  if (tab==='sys') { rDig(); rReview(30); }
   if (tab==='map') rIns();
 }
 function msub(tab, el) {
@@ -1907,6 +1907,60 @@ function saveSphereLog(id) {
   logSphere(id, value, note);
   closeOv('ov-sphere-log'); rSpheres(); rHome && rHome(); hptMed && hptMed();
   toast('Записано', 'ok');
+}
+
+// ─── ОБЗОР ПЕРИОДА (месяц/год) — синтез из данных (волна 3) ───────
+function periodReview(days) {
+  const since = dayAgo(days), comp = c => (c.cl + c.mv + (10 - c.st)) / 3;
+  const cks = DB.checkins.filter(c => c.date && c.date > since);
+  const wc = cks.map(c => ({ d: c.date, v: comp(c) }));
+  const n = wc.length;
+  const avg = n ? wc.reduce((a, x) => a + x.v, 0) / n : null;
+  const prevSince = dayAgo(days * 2);
+  const prev = DB.checkins.filter(c => c.date && c.date > prevSince && c.date <= since).map(comp);
+  const prevAvg = prev.length ? prev.reduce((a, b) => a + b, 0) / prev.length : null;
+  const delta = (avg != null && prevAvg != null) ? avg - prevAvg : null;
+  let best = null, worst = null;
+  wc.forEach(x => { if (!best || x.v > best.v) best = x; if (!worst || x.v < worst.v) worst = x; });
+  const adherence = Math.round(100 * new Set(cks.map(c => c.date)).size / days);
+  const spheres = (DB.spheres || []).map(s => ({ s, st: sphereStats(s.id, days) }));
+  const insightsN = DB.insights.filter(i => { const t = Date.parse(i.createdAt); return t && t > Date.now() - days * 864e5; }).length;
+  const si = smartInsights();
+  return { days, n, avg, delta, best, worst, adherence, spheres, insightsN,
+    checkins: cks.length, topHelp: si.ok ? si.items.slice(0, 2) : [] };
+}
+function rReview(days) {
+  const el = $('review-out'); if (!el) return;
+  document.querySelectorAll('#review-btns .rv-b').forEach(b => b.classList.toggle('on', +b.dataset.d === days));
+  const r = periodReview(days);
+  if (r.n < 3) {
+    el.innerHTML = `<div class="rv-empty">Мало данных за ${days===30?'месяц':'год'} (${r.n} ${pl(r.n,'чек-ин','чек-ина','чек-инов')}). Делай отметки — обзор соберётся сам.</div>`;
+    return;
+  }
+  const dEl = r.delta==null ? '' : `<span class="rv-delta ${r.delta>=0?'up':'down'}">${r.delta>=0?'↑':'↓'} ${Math.abs(r.delta).toFixed(1)}</span>`;
+  const fmtD = d => { const p = String(d).split('-'); return p[2]+'.'+p[1]; };
+  const spheresHtml = r.spheres.map(({s, st}) => {
+    if (!st) return '';
+    let val;
+    if (s.type==='habit') val = (st.consistency||0)+'% постоянство';
+    else if (s.type==='counter') val = (st.sum||0)+' '+esc(s.unit||'');
+    else if (s.type==='goal') val = (st.progress!=null?st.progress+'% к цели':'—');
+    else if (s.type==='score') val = (st.avg!=null?'ср. '+st.avg.toFixed(1):'—');
+    else val = ((st.entries||[]).length||0)+' записей';
+    return `<div class="rv-sph"><span>${esc(s.icon||'●')} ${esc(s.name)}</span><b style="color:${s.color}">${val}</b></div>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="rv-hero"><div><div class="rv-lbl">Среднее состояние</div>
+      <div class="rv-avg">${r.avg.toFixed(1)}<span>/10</span> ${dEl}</div></div>
+      <div class="rv-adh"><div class="rv-adh-n">${r.adherence}%</div><div class="rv-adh-l">отмечено дней</div></div></div>
+    <div class="rv-tiles">
+      <div class="rv-tile"><b style="color:var(--green)">${r.best?r.best.v.toFixed(1):'—'}</b><span>лучший · ${r.best?fmtD(r.best.d):''}</span></div>
+      <div class="rv-tile"><b style="color:var(--orange)">${r.worst?r.worst.v.toFixed(1):'—'}</b><span>трудный · ${r.worst?fmtD(r.worst.d):''}</span></div>
+      <div class="rv-tile"><b>${r.insightsN}</b><span>инсайтов</span></div>
+      <div class="rv-tile"><b>${r.checkins}</b><span>чек-инов</span></div>
+    </div>
+    ${r.topHelp.length?`<div class="rv-help"><div class="rv-help-t">Что тебе помогало</div>${r.topHelp.map(h=>`<div class="rv-help-r">• ${esc(h.text)}</div>`).join('')}</div>`:''}
+    ${spheresHtml?`<div class="rv-sph-wrap"><div class="rv-help-t">Сферы</div>${spheresHtml}</div>`:''}`;
 }
 
 // ─── ДАЙДЖЕСТ ────────────────────────────────────────────────────

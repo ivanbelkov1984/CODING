@@ -198,6 +198,12 @@
   <div id="cmd-out">
     <div class="card"><div style="padding:1rem" id="cmd-res"></div></div>
   </div>
+  <div class="sec-lbl">Обзор периода</div>
+  <div class="rv-switch mx" id="review-btns">
+    <button class="rv-b on" data-d="30" onclick="rReview(30)">Месяц</button>
+    <button class="rv-b" data-d="365" onclick="rReview(365)">Год</button>
+  </div>
+  <div class="card mx mb"><div id="review-out"></div></div>
   <div class="sec-lbl">Дайджесты</div>
   <div class="card mx"><div id="dg-list"></div></div>
   <div style="padding:1rem;display:flex;gap:.625rem;flex-wrap:wrap">

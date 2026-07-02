@@ -699,3 +699,27 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .nudge-cta{flex:none;border:none;background:var(--blue-btn,#1056CC);color:#fff;border-radius:12px;padding:6px 12px;font-size:var(--tx2);font-weight:700;cursor:pointer}
 .nudge-cta:active{transform:scale(.96)}
 .nudge-x{flex:none;background:none;border:none;color:var(--t3);font-size:.9rem;cursor:pointer;padding:2px 4px}
+
+/* ── ОБЗОР ПЕРИОДА ─────────────────────────────────────────────── */
+.rv-switch{display:flex;gap:var(--s2);margin-bottom:var(--s2)}
+.rv-b{flex:1;padding:8px;border:1px solid var(--bd);background:var(--bg2);color:var(--t2);border-radius:12px;font-size:var(--tx3);font-weight:700;cursor:pointer}
+.rv-b.on{background:var(--blue-btn,#1056CC);border-color:var(--blue-btn,#1056CC);color:#fff}
+.rv-empty{font-size:var(--tx3);color:var(--t3);text-align:center;padding:var(--s3) 0;line-height:1.5}
+.rv-hero{display:flex;justify-content:space-between;align-items:center;padding-bottom:var(--s3);border-bottom:1px solid var(--bd)}
+.rv-lbl{font-size:var(--tx2);font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.05em}
+.rv-avg{font-size:2rem;font-weight:800;color:var(--t1);line-height:1;margin-top:2px}
+.rv-avg span{font-size:.8rem;color:var(--t3);font-weight:600}
+.rv-delta{font-size:.8rem;font-weight:700;padding:2px 7px;border-radius:12px;margin-left:4px}
+.rv-delta.up{color:var(--green);background:var(--green-l)}
+.rv-delta.down{color:var(--orange);background:var(--orange-l)}
+.rv-adh{text-align:center}
+.rv-adh-n{font-size:1.5rem;font-weight:800;color:var(--teal)}
+.rv-adh-l{font-size:var(--tx2);color:var(--t3);font-weight:600}
+.rv-tiles{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:var(--s2);padding:var(--s3) 0}
+.rv-tile{text-align:center}
+.rv-tile b{display:block;font-size:1.25rem;font-weight:800;color:var(--t1)}
+.rv-tile span{font-size:10px;color:var(--t3);font-weight:600}
+.rv-help,.rv-sph-wrap{padding-top:var(--s3);border-top:1px solid var(--bd)}
+.rv-help-t{font-size:var(--tx2);font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:var(--s2)}
+.rv-help-r{font-size:var(--tx3);color:var(--t2);line-height:1.5;margin-bottom:3px}
+.rv-sph{display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:var(--tx3);color:var(--t1);font-weight:600}
