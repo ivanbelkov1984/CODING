@@ -230,7 +230,8 @@
 <!-- ── КАРТА ───────────────────────────────────────────────────── -->
 <section class="pg" id="pg-map">
   <div class="subnav" id="subnav">
-    <div class="snpill on" onclick="msub('bot',this)"><i data-lucide="bot" style="width:13px;height:13px"></i>Бот</div>
+    <div class="snpill on" onclick="msub('spheres',this)"><i data-lucide="layers" style="width:13px;height:13px"></i>Сферы</div>
+    <div class="snpill" onclick="msub('bot',this)"><i data-lucide="bot" style="width:13px;height:13px"></i>Бот</div>
     <div class="snpill" onclick="msub('patterns',this)"><i data-lucide="git-branch" style="width:13px;height:13px"></i>Паттерны</div>
     <div class="snpill" onclick="msub('dreams',this)"><i data-lucide="moon" style="width:13px;height:13px"></i>Сны</div>
     <div class="snpill" onclick="msub('spiritual',this)"><i data-lucide="sparkles" style="width:13px;height:13px"></i>Духовное</div>
@@ -238,7 +239,15 @@
     <div class="snpill" onclick="msub('evolution',this)"><i data-lucide="trending-up" style="width:13px;height:13px"></i>Эволюция</div>
     <div class="snpill" onclick="msub('settings',this)"><i data-lucide="settings" style="width:13px;height:13px"></i>Настройки</div>
   </div>
-  <div id="ms-bot">
+  <div id="ms-spheres">
+    <div class="sec-lbl">Твои сферы жизни</div>
+    <div id="spheres-list" class="mx"></div>
+    <div style="padding:var(--s4);display:flex;gap:var(--s2)">
+      <button class="btn btn-p btn-sm" onclick="openSphereEdit()"><i data-lucide="plus"></i>Новая сфера</button>
+    </div>
+    <div style="height:5rem"></div>
+  </div>
+  <div id="ms-bot" style="display:none">
     <div class="sec-lbl">Задачи бота</div>
     <div class="card mx"><div id="bot-tasks"></div></div>
     <div style="height:5rem"></div>
@@ -488,6 +497,53 @@
       <textarea class="field" id="pat-tx" placeholder="Что повторяется? Опиши паттерн…" rows="4"></textarea>
       <button class="btn btn-p btn-full" onclick="savePat()"><i data-lucide="git-branch"></i>Сохранить паттерн</button>
     </div>
+  </div>
+</div>
+
+<!-- СОЗДАТЬ/ПРАВИТЬ СФЕРУ -->
+<div class="ov" id="ov-sphere-edit" onclick="if(event.target===this)closeOv('ov-sphere-edit')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title" id="sphere-edit-title">Новая сфера</div>
+    <div class="sh-form">
+      <div class="sph-row2">
+        <div style="flex:none;width:78px">
+          <div class="f-lbl">Значок</div>
+          <input class="field sph-icon" id="sphere-icon" value="●" maxlength="2" placeholder="🏃">
+        </div>
+        <div style="flex:1">
+          <div class="f-lbl">Название</div>
+          <input class="field" id="sphere-name" placeholder="Спорт, Чтение, Медитация…">
+        </div>
+      </div>
+      <div>
+        <div class="f-lbl">Цвет</div>
+        <div class="trow" id="sphere-colors"></div>
+      </div>
+      <div>
+        <div class="f-lbl">Как отслеживать</div>
+        <div class="sph-types" id="sphere-types"></div>
+      </div>
+      <div id="sphere-unit-wrap" style="display:none">
+        <div class="f-lbl">Единица (страниц, км, минут…)</div>
+        <input class="field" id="sphere-unit" placeholder="страниц">
+      </div>
+      <div id="sphere-target-wrap" style="display:none">
+        <div class="f-lbl">Цель (число)</div>
+        <input class="field" id="sphere-target" type="number" inputmode="decimal" placeholder="12">
+      </div>
+      <button class="btn btn-p btn-full" onclick="saveSphere()"><i data-lucide="check"></i>Сохранить сферу</button>
+      <button class="btn btn-s btn-full" id="sphere-del-btn" style="display:none;color:var(--rose,#B00)" onclick="confirmDeleteSphere()"><i data-lucide="trash-2"></i>Удалить сферу</button>
+    </div>
+  </div>
+</div>
+
+<!-- ОТМЕТИТЬ СФЕРУ ЗА ДЕНЬ -->
+<div class="ov" id="ov-sphere-log" onclick="if(event.target===this)closeOv('ov-sphere-log')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title" id="sphere-log-title">Отметить</div>
+    <div class="sh-form" id="sphere-log-body"></div>
   </div>
 </div>
 

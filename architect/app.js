@@ -55,6 +55,8 @@ const DEFAULT_DB = {
   evolution: [],
   spiritual: [],
   checkins: [],
+  spheres: [],        // пользовательские сферы жизни (тип трекера у каждой)
+  sphereLogs: [],     // дневные записи по сферам: {sphereId, date, value, note}
   bots: [
     {id:1, title:'Первая задача — добавь свою', prio:'high', done:false},
   ],
@@ -367,6 +369,7 @@ function msub(tab, el) {
   if (tab==='patterns')  rPats();
   if (tab==='dreams')    rDrms();
   if (tab==='spiritual') rSpi();
+  if (tab==='spheres')   rSpheres();
   if (tab==='graph')     rGraph();
   if (tab==='settings')  rCfgAxes();
 }
@@ -1525,6 +1528,242 @@ function rCorrelations(elId) {
   }).join('');
 }
 
+// ═════════════════════════════════════════════════════════════════
+//  СФЕРЫ ЖИЗНИ (ядро): пользователь создаёт свои сферы, каждая — со
+//  своим типом трекера. Умный движок затем работает по любым сферам.
+// ═════════════════════════════════════════════════════════════════
+const SPHERE_TYPES = {
+  score:   { lbl:'Балл 0–10',      hint:'самочувствие, удовлетворённость', icon:'📊' },
+  habit:   { lbl:'Привычка да/нет', hint:'медитация, зарядка, без сахара',  icon:'✓'  },
+  counter: { lbl:'Счётчик',         hint:'страниц, км, минут за день',      icon:'#'  },
+  goal:    { lbl:'Цель-значение',   hint:'вес, «12 книг за год»',           icon:'◎'  },
+  log:     { lbl:'Лог-заметки',     hint:'дневник сферы, свободные записи', icon:'✎'  },
+};
+const SPHERE_TEMPLATES = [
+  { name:'Спорт',     icon:'🏃', color:'#1A7F3C', type:'habit'   },
+  { name:'Сон',       icon:'😴', color:'#6B21A8', type:'score'   },
+  { name:'Медитация', icon:'🧘', color:'#0E7490', type:'habit'   },
+  { name:'Чтение',    icon:'📖', color:'#B45309', type:'counter', unit:'страниц' },
+  { name:'Настроение',icon:'🙂', color:'#1056CC', type:'score'   },
+  { name:'Вода',      icon:'💧', color:'#0E7490', type:'counter', unit:'стаканов' },
+];
+const uid = () => Date.now() * 1000 + Math.floor(Math.random() * 1000);
+function createSphere({ name, icon, color, type, unit, target }) {
+  const s = { id: uid(), name: String(name||'').trim() || 'Сфера', icon: icon || '●',
+    color: color || '#1056CC', type: type || 'score', unit: unit || '',
+    target: (target === '' || target == null) ? null : +target,
+    createdAt: nowISO(), sv: SCHEMA_VERSION, _u: Date.now() };
+  DB.spheres.push(s); persist(); return s;
+}
+function updateSphere(id, patch) {
+  const s = DB.spheres.find(x => x.id === id); if (!s) return;
+  Object.assign(s, patch); if (patch.target === '' ) s.target = null; else if (patch.target != null) s.target = +patch.target;
+  s._u = Date.now(); persist();
+}
+function deleteSphere(id) {
+  tomb(id);
+  DB.spheres = DB.spheres.filter(x => x.id !== id);
+  DB.sphereLogs.filter(l => l.sphereId === id).forEach(l => tomb(l.id));
+  DB.sphereLogs = DB.sphereLogs.filter(l => l.sphereId !== id);
+  persist();
+}
+// Записать/обновить значение сферы за день (по умолчанию — сегодня).
+function logSphere(sphereId, value, note, date) {
+  date = date || todayKey();
+  const ex = DB.sphereLogs.find(l => l.sphereId === sphereId && l.date === date);
+  if (ex) { ex.value = value; if (note != null) ex.note = note; ex._u = Date.now(); }
+  else DB.sphereLogs.push({ id: uid(), sphereId, date, value,
+    note: note || '', createdAt: nowISO(), sv: SCHEMA_VERSION, _u: Date.now() });
+  persist();
+}
+function sphereLogsOf(id) {
+  return DB.sphereLogs.filter(l => l.sphereId === id && l.date)
+    .sort((a, b) => a.date < b.date ? -1 : 1);
+}
+// Сводка по сфере под её тип — то, что рисуем и подаём в умный движок.
+function sphereStats(id, window) {
+  window = window || 30;
+  const s = DB.spheres.find(x => x.id === id); if (!s) return null;
+  const logs = sphereLogsOf(id);
+  const byDate = {}; logs.forEach(l => byDate[l.date] = l);
+  const today = byDate[todayKey()];
+  const inWin = logs.filter(l => l.date > dayAgo(window));
+  const nums = inWin.map(l => +l.value || 0);
+  const out = { sphere: s, type: s.type, today: today ? today.value : null, n: logs.length, series: [] };
+  // серия за окно для спарклайна (по дням, null на пропуск)
+  for (let i = window - 1; i >= 0; i--) { const d = dayAgo(i); const l = byDate[d]; out.series.push(l ? (+l.value || 0) : null); }
+  if (s.type === 'score' || s.type === 'counter') {
+    out.avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+    out.sum = nums.reduce((a, b) => a + b, 0);
+    out.last = logs.length ? +logs[logs.length - 1].value || 0 : null;
+  } else if (s.type === 'habit') {
+    const done = new Set(logs.filter(l => l.value).map(l => l.date));
+    let num = 0, den = 0;
+    for (let i = 0; i < 21; i++) { const w = 21 - i; den += w; if (done.has(dayAgo(i))) num += w; }
+    out.consistency = den ? Math.round(100 * num / den) : 0;
+    out.doneCount = done.size;
+    out.doneToday = !!(today && today.value);
+  } else if (s.type === 'goal') {
+    out.last = logs.length ? +logs[logs.length - 1].value || 0 : 0;
+    out.target = s.target;
+    out.progress = s.target ? Math.max(0, Math.min(100, Math.round(100 * out.last / s.target))) : null;
+  } else if (s.type === 'log') {
+    out.entries = logs.filter(l => (l.note || String(l.value || '')).trim()).slice(-5).reverse();
+  }
+  return out;
+}
+
+// ─── СФЕРЫ: РЕНДЕР И ВЗАИМОДЕЙСТВИЕ ──────────────────────────────
+const SPHERE_COLORS = ['#1056CC','#1A7F3C','#6B21A8','#B45309','#0E7490','#92400E','#B00020','#4C8DFF'];
+let _sphereEdit = { id:null, type:'score', color:'#1056CC' };
+function miniSpark(series, color) {
+  const pts = series.map((v,i)=>({v,i})).filter(p=>p.v!=null);
+  if (pts.length < 2) return '';
+  const vals = pts.map(p=>p.v), mn = Math.min(...vals), mx = Math.max(...vals), rng = mx-mn || 1;
+  const W=90, H=24, n=series.length;
+  const d = pts.map(p=>`${(p.i/(n-1)*W).toFixed(1)},${(H-((p.v-mn)/rng)*H).toFixed(1)}`).join(' ');
+  return `<svg class="sph-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><polyline points="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+function progRing(pct, color, txt) {
+  return `<div class="sph-ring" style="--p:${pct||0};--rc:${color}"><b>${txt}</b></div>`;
+}
+function rSpheres() {
+  const el = $('spheres-list'); if (!el) return;
+  const list = DB.spheres || [];
+  if (!list.length) {
+    el.innerHTML = `<div class="sph-empty">
+      <div class="sph-empty-t">Заведи свои сферы жизни</div>
+      <div class="sph-empty-d">Любые направления — приложение подберёт правильный трекер и будет искать, что тебе помогает. Быстрый старт:</div>
+      <div class="sph-tpl">${SPHERE_TEMPLATES.map((t,i)=>`<button class="sph-tpl-b" style="--tc:${t.color}" onclick="addSphereTemplate(${i})">${t.icon} ${esc(t.name)}</button>`).join('')}</div>
+    </div>`;
+    return;
+  }
+  el.innerHTML = list.map(sphereCard).join('');
+}
+function sphereCard(s) {
+  const st = sphereStats(s.id, 30) || {};
+  let body = '', action = '';
+  if (s.type === 'score') {
+    const val = st.today != null ? st.today : (st.last != null ? st.last : '—');
+    body = `<div class="sph-big" style="color:${s.color}">${val}${val!=='—'?'<span>/10</span>':''}</div>${miniSpark(st.series||[], s.color)}`;
+    action = `<button class="sph-log" onclick="event.stopPropagation();openSphereLog(${s.id})">Отметить</button>`;
+  } else if (s.type === 'habit') {
+    body = progRing(st.consistency||0, s.color, (st.consistency||0));
+    action = `<button class="sph-log ${st.doneToday?'done':''}" onclick="event.stopPropagation();toggleHabitToday(${s.id})">${st.doneToday?'✓ сегодня':'Отметить'}</button>`;
+  } else if (s.type === 'counter') {
+    body = `<div class="sph-big" style="color:${s.color}">${st.sum||0}<span>${esc(s.unit||'')} · 30д</span></div>${miniSpark(st.series||[], s.color)}`;
+    action = `<button class="sph-log" onclick="event.stopPropagation();openSphereLog(${s.id})">+ добавить</button>`;
+  } else if (s.type === 'goal') {
+    const p = st.progress!=null ? st.progress : 0;
+    body = `${progRing(p, s.color, p+'%')}<div class="sph-goal-txt">${st.last||0}${s.target?' / '+s.target:''} ${esc(s.unit||'')}</div>`;
+    action = `<button class="sph-log" onclick="event.stopPropagation();openSphereLog(${s.id})">Обновить</button>`;
+  } else { // log
+    const last = (st.entries&&st.entries[0]) ? (st.entries[0].note || String(st.entries[0].value||'')) : '';
+    body = `<div class="sph-logtxt">${last?esc(last.slice(0,80)):'<i>нет записей</i>'}</div>`;
+    action = `<button class="sph-log" onclick="event.stopPropagation();openSphereLog(${s.id})">Запись</button>`;
+  }
+  return `<div class="sph-card" style="--sc:${s.color}" onclick="openSphereLog(${s.id})">
+    <div class="sph-head"><span class="sph-ic">${esc(s.icon||'●')}</span><span class="sph-name">${esc(s.name)}</span>
+      <button class="sph-edit" onclick="event.stopPropagation();openSphereEdit(${s.id})" aria-label="Правка">✎</button></div>
+    <div class="sph-body">${body}</div>
+    <div class="sph-foot"><span class="sph-type">${SPHERE_TYPES[s.type]?.lbl||s.type}</span>${action}</div>
+  </div>`;
+}
+function addSphereTemplate(i) {
+  const t = SPHERE_TEMPLATES[i]; if (!t) return;
+  createSphere({ ...t }); rSpheres(); hptMed && hptMed(); toast(`Сфера «${t.name}» создана`, 'ok');
+}
+function toggleHabitToday(id) {
+  const st = sphereStats(id); const now = !(st && st.doneToday);
+  logSphere(id, now); rSpheres(); hpt && hpt();
+}
+// ── Создание/правка ──
+function openSphereEdit(id) {
+  const s = id ? DB.spheres.find(x=>x.id===id) : null;
+  _sphereEdit = { id: s?s.id:null, type: s?s.type:'score', color: s?s.color:SPHERE_COLORS[0] };
+  $('sphere-edit-title').textContent = s ? 'Правка сферы' : 'Новая сфера';
+  $('sphere-icon').value = s ? (s.icon||'●') : '●';
+  $('sphere-name').value = s ? s.name : '';
+  $('sphere-unit').value = s ? (s.unit||'') : '';
+  $('sphere-target').value = s && s.target!=null ? s.target : '';
+  $('sphere-del-btn').style.display = s ? '' : 'none';
+  renderSphereEditForm();
+  openOv('ov-sphere-edit');
+}
+function renderSphereEditForm() {
+  $('sphere-colors').innerHTML = SPHERE_COLORS.map(c =>
+    `<button class="tp sph-col ${c===_sphereEdit.color?'on':''}" style="--c:${c}" onclick="_sphereEdit.color='${c}';renderSphereEditForm()"></button>`).join('');
+  $('sphere-types').innerHTML = Object.keys(SPHERE_TYPES).map(k => {
+    const t = SPHERE_TYPES[k];
+    return `<button class="sph-type-b ${k===_sphereEdit.type?'on':''}" onclick="_sphereEdit.type='${k}';renderSphereEditForm()">
+      <b>${t.lbl}</b><span>${t.hint}</span></button>`;
+  }).join('');
+  $('sphere-unit-wrap').style.display   = (_sphereEdit.type==='counter'||_sphereEdit.type==='goal') ? '' : 'none';
+  $('sphere-target-wrap').style.display = (_sphereEdit.type==='goal') ? '' : 'none';
+}
+function saveSphere() {
+  const name = $('sphere-name').value.trim();
+  if (!name) { toast('Назови сферу', 'warn'); return; }
+  const patch = { name, icon:$('sphere-icon').value.trim()||'●', color:_sphereEdit.color,
+    type:_sphereEdit.type, unit:$('sphere-unit').value.trim(), target:$('sphere-target').value };
+  if (_sphereEdit.id) updateSphere(_sphereEdit.id, patch);
+  else createSphere(patch);
+  closeOv('ov-sphere-edit'); rSpheres(); rHome && rHome(); hptMed && hptMed();
+  toast('Сфера сохранена', 'ok');
+}
+function confirmDeleteSphere() {
+  if (!_sphereEdit.id) return;
+  const s = DB.spheres.find(x=>x.id===_sphereEdit.id);
+  if (!confirm(`Удалить сферу «${s?s.name:''}» со всеми записями?`)) return;
+  deleteSphere(_sphereEdit.id);
+  closeOv('ov-sphere-edit'); rSpheres(); toast('Сфера удалена', 'ok');
+}
+// ── Отметка за день ──
+function openSphereLog(id) {
+  const s = DB.spheres.find(x=>x.id===id); if (!s) return;
+  const st = sphereStats(id); const cur = st && st.today != null ? st.today : '';
+  $('sphere-log-title').textContent = `${s.icon||''} ${s.name}`.trim();
+  const b = $('sphere-log-body');
+  if (s.type === 'score') {
+    b.innerHTML = `<div class="f-lbl">Балл сегодня (0–10)</div>
+      <input class="field" id="sph-log-val" type="number" min="0" max="10" inputmode="decimal" value="${cur}" placeholder="7">
+      ${logNoteField(st)}<button class="btn btn-p btn-full" onclick="saveSphereLog(${id})">Сохранить</button>`;
+  } else if (s.type === 'counter') {
+    b.innerHTML = `<div class="f-lbl">Сколько сегодня${s.unit?' ('+esc(s.unit)+')':''}</div>
+      <input class="field" id="sph-log-val" type="number" inputmode="decimal" value="${cur}" placeholder="0">
+      ${logNoteField(st)}<button class="btn btn-p btn-full" onclick="saveSphereLog(${id})">Сохранить</button>`;
+  } else if (s.type === 'goal') {
+    b.innerHTML = `<div class="f-lbl">Текущее значение${s.unit?' ('+esc(s.unit)+')':''}${s.target?' · цель '+s.target:''}</div>
+      <input class="field" id="sph-log-val" type="number" inputmode="decimal" value="${cur}" placeholder="0">
+      ${logNoteField(st)}<button class="btn btn-p btn-full" onclick="saveSphereLog(${id})">Сохранить</button>`;
+  } else if (s.type === 'habit') {
+    const done = st && st.doneToday;
+    b.innerHTML = `<div class="sph-habit-big">${done?'Сегодня отмечено ✓':'Отметить выполнение сегодня?'}</div>
+      <button class="btn ${done?'btn-s':'btn-p'} btn-full" onclick="logSphere(${id},${!done});closeOv('ov-sphere-log');rSpheres()">${done?'Снять отметку':'Да, выполнено'}</button>`;
+  } else { // log
+    b.innerHTML = `<div class="f-lbl">Запись</div>
+      <textarea class="field" id="sph-log-note" rows="4" placeholder="Что сегодня в этой сфере? Можно [[связать]] с инсайтом.">${st&&st.today?esc(String(st.today)):''}</textarea>
+      <button class="btn btn-p btn-full" onclick="saveSphereLog(${id})">Сохранить</button>`;
+  }
+  openOv('ov-sphere-log');
+}
+function logNoteField(st) {
+  const v = (st && st.today && typeof st.today === 'object') ? '' : '';
+  return `<div class="f-lbl" style="margin-top:.5rem">Заметка (необязательно)</div>
+    <input class="field" id="sph-log-note" placeholder="контекст дня…">`;
+}
+function saveSphereLog(id) {
+  const s = DB.spheres.find(x=>x.id===id); if (!s) return;
+  const noteEl = $('sph-log-note'), valEl = $('sph-log-val');
+  const note = noteEl ? noteEl.value.trim() : '';
+  let value;
+  if (s.type === 'log') value = note;
+  else { value = valEl && valEl.value!=='' ? +valEl.value : null; if (value==null){ toast('Введи значение','warn'); return; } }
+  logSphere(id, value, note);
+  closeOv('ov-sphere-log'); rSpheres(); rHome && rHome(); hptMed && hptMed();
+  toast('Записано', 'ok');
+}
+
 // ─── ДАЙДЖЕСТ ────────────────────────────────────────────────────
 function rDig() {
   const el = $('dg-list');
@@ -1761,7 +2000,7 @@ async function decryptPayload(blob, pass) {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','bots','digests'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','bots','digests','spheres','sphereLogs'];
 function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
 function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
 const _ru = r => r._u || r.id || 0;   // «когда обновлено» с откатом на id (id = Date.now())
