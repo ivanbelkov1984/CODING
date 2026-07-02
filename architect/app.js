@@ -390,6 +390,7 @@ function openOv(id) {
   if (id==='ov-evo')      rEvoList($('evo-sh'));
   if (id==='ov-axis-all') rAxisSliders();
   if (id==='ov-cfg')      rCfgForm();
+  if (id==='ov-ci')       rEmoPicker();
 }
 function closeOv(id) {
   $(id).classList.remove('on');
@@ -1079,6 +1080,28 @@ function sEL(b)     { document.querySelectorAll('#evo-lvls .wp').forEach(x=>x.cl
 function sAxColor(b){ document.querySelectorAll('#ov-axis-new .tp').forEach(x=>x.classList.remove('on')); b.classList.add('on'); STATE.newAxColor=b.dataset.ac; }
 
 // ─── CHECK-IN ────────────────────────────────────────────────────
+// ─── RULER: называние эмоций (механика How We Feel, низкое трение) ──
+// Сетка эмоций по квадрантам «энергия × приятность». Повышает
+// эмоциональную грамотность; сохраняется в чек-ин как emo.
+const EMOTIONS = [
+  { c:'#F5B84B', list:['Радость','Воодушевление','Энергичность'] }, // высокая энергия · приятно
+  { c:'#FB7185', list:['Злость','Тревога','Раздражение'] },          // высокая энергия · неприятно
+  { c:'#34D399', list:['Спокойствие','Умиротворение','Благодарность'] }, // низкая · приятно
+  { c:'#4C8DFF', list:['Грусть','Усталость','Опустошённость'] },     // низкая · неприятно
+];
+function rEmoPicker() {
+  const el = $('ci-emo'); if (!el) return;
+  STATE.ciEmo = (DB.vit && DB.vit.date === todayKey() && DB.vit.emo) ? DB.vit.emo : '';
+  el.innerHTML = EMOTIONS.map(g => g.list.map(e =>
+    `<button class="emo${e===STATE.ciEmo?' on':''}" style="--ec:${g.c}" data-e="${esc(e)}" onclick="sEmo(this)">${esc(e)}</button>`
+  ).join('')).join('');
+}
+function sEmo(btn) {
+  const wasOn = btn.classList.contains('on');
+  document.querySelectorAll('#ci-emo .emo').forEach(x => x.classList.remove('on'));
+  if (!wasOn) { btn.classList.add('on'); STATE.ciEmo = btn.dataset.e; } else STATE.ciEmo = '';
+  if (typeof hpt === 'function') hpt();
+}
 function saveCI() {
   const v = {
     sl: parseFloat($('ci-sl').value), sq: parseInt($('ci-sq').value),
@@ -1086,7 +1109,7 @@ function saveCI() {
     nic: $('tog-nic').classList.contains('on'),
     caf: $('tog-caf').classList.contains('on'),
     alc: $('tog-alc').classList.contains('on'),
-    act: STATE.ciAct, tone: STATE.ciTone, note: $('ci-note').value, ci: true, date: todayKey(),
+    act: STATE.ciAct, tone: STATE.ciTone, emo: STATE.ciEmo || '', note: $('ci-note').value, ci: true, date: todayKey(),
     createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
   };
   DB.vit = v;

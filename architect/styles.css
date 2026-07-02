@@ -734,3 +734,12 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .rv-conf.cf-low{color:var(--t3);background:var(--bg3)}
 .rv-conf.cf-mid{color:var(--blue-t);background:var(--blue-l)}
 .rv-conf.cf-hi{color:var(--green);background:var(--green-l)}
+
+/* ── RULER эмоции ──────────────────────────────────────────────── */
+.ruler{display:flex;flex-wrap:wrap;gap:6px}
+.emo{border:1.5px solid var(--ec);color:var(--t1);background:var(--bg2);border-radius:16px;
+  padding:6px 12px;font-size:var(--tx3);font-weight:600;cursor:pointer;position:relative}
+.emo::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ec);margin-right:6px;vertical-align:middle}
+.emo.on{background:var(--ec);color:#fff}
+.emo.on::before{background:#fff}
+.emo:active{transform:scale(.95)}
