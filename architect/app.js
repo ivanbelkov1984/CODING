@@ -554,9 +554,7 @@ function rHome() {
   $('h-date').textContent = `${D2[now.getDay()]}, ${now.getDate()} ${M[now.getMonth()]} ${now.getFullYear()}`;
   rHState(); rStreak(); detectPatterns();
   rStateHero(); rSmartInsights('home-smart'); rHeatmap('home-heatmap', 90); rGraph('home-graph', 190, true);
-  $('h-oq').innerHTML = DB.oq.map((q,i) =>
-    `<div class="oqrow" onclick="reflectOn(${i})" role="button"><div class="oqpulse"></div><span>${esc(q)}</span><svg class="oq-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>`
-  ).join('');
+  rPrompts();
   rOnThisDay();
   rHIns();
 }
@@ -612,6 +610,63 @@ function reflectOn(i) {
   hpt();
   openOv('ov-add');
   STATE.addTag = 'personal';
+  document.querySelectorAll('#add-tags .tp').forEach(x => { x.className='tp'; if (x.dataset.t==='personal') x.className='tp a-personal'; });
+  const ta = $('add-tx');
+  if (ta) { ta.value = q + '\n\n'; ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch(e){} }
+  const sr = $('add-src'); if (sr) sr.value = 'Рефлексия';
+}
+// ─── ПРОМПТЫ РЕФЛЕКСИИ ПОД СОСТОЯНИЕ (механика Rosebud/Stoic, №5) ──
+// Релевантные текущему состоянию вопросы (рамка CBT/ACT), ротация по дням.
+const PROMPT_BANK = {
+  low: [
+    'Что сейчас забирает больше всего сил?',
+    'Что помогало тебе в похожий тяжёлый день раньше?',
+    'Какая одна маленькая вещь сделает сегодня чуть легче?',
+    'Что из этого — факт, а что — мысль о факте?',
+  ],
+  mid: [
+    'Что сегодня стоит внимания, но ускользает?',
+    'Где ты был на автопилоте?',
+    'Что бы ты хотел, чтобы завтра было иначе?',
+    'Какой маленький шаг приблизит к важному?',
+  ],
+  high: [
+    'Что дало тебе энергию — как это повторить?',
+    'Что сейчас получается — как закрепить?',
+    'За что ты благодарен прямо сейчас?',
+    'Кому ты мог бы передать этот подъём?',
+  ],
+  none: [
+    'Что самое важное прямо сейчас?',
+    'Что мешает двигаться вперёд?',
+    'Что ты хочешь запомнить об этом дне?',
+  ],
+};
+function statePromptBucket() {
+  const v = DB.vit;
+  if (!v || !v.ci) return 'none';
+  const comp = (v.cl + v.mv + (10 - v.st)) / 3;
+  return comp < 4.5 ? 'low' : comp <= 6.5 ? 'mid' : 'high';
+}
+function rPrompts() {
+  const el = $('h-oq'); if (!el) return;
+  const bucket = statePromptBucket();
+  const bank = PROMPT_BANK[bucket];
+  const doy = Math.floor((Date.now() - Date.UTC(new Date().getUTCFullYear(), 0, 0)) / 864e5);
+  // 2 динамических промпта под состояние (ротация по дню) + свои вопросы пользователя
+  const dyn = [bank[doy % bank.length], bank[(doy + 1) % bank.length]];
+  const own = (DB.oq || []).slice(0, 3);
+  const rows = [];
+  dyn.forEach(q => rows.push({ q, dyn: true }));
+  own.forEach((q, i) => { if (!dyn.includes(q)) rows.push({ q, dyn: false, i }); });
+  el.innerHTML = rows.map(r =>
+    `<div class="oqrow" onclick="${r.dyn ? `reflectPromptText(decodeURIComponent('${encodeURIComponent(r.q)}'))` : `reflectOn(${r.i})`}" role="button">
+      <div class="oqpulse${r.dyn ? ' oq-dyn' : ''}"></div><span>${esc(r.q)}</span>
+      <svg class="oq-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>`
+  ).join('');
+}
+function reflectPromptText(q) {
+  hpt(); openOv('ov-add'); STATE.addTag = 'personal';
   document.querySelectorAll('#add-tags .tp').forEach(x => { x.className='tp'; if (x.dataset.t==='personal') x.className='tp a-personal'; });
   const ta = $('add-tx');
   if (ta) { ta.value = q + '\n\n'; ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch(e){} }
@@ -1487,12 +1542,18 @@ function smartInsights() {
   // Состояние берём из чек-инов; сопоставляем со значением сферы в тот же день.
   (DB.spheres || []).forEach(s => {
     const byDate = {}; DB.sphereLogs.filter(l => l.sphereId === s.id && l.date).forEach(l => byDate[l.date] = l);
+    // lagged: сравниваем состояние СЛЕДУЮЩЕГО дня (механика Bearable)
+    const lag = (a, b) => {
+      const an = a.filter(r => r.next != null), bn = b.filter(r => r.next != null);
+      return (an.length >= 2 && bn.length >= 2) ? mean(an.map(r => r.next)) - mean(bn.map(r => r.next)) : null;
+    };
     if (s.type === 'habit') {
       const on = rows.filter(r => { const l = byDate[r.d]; return l && l.value; });
       const off = rows.filter(r => { const l = byDate[r.d]; return !(l && l.value); });
       if (on.length < 2 || off.length < 2) return;
       const dSame = mean(on.map(r => r.state)) - mean(off.map(r => r.state));
-      raw.push({ kind:'sph-habit', s, dSame, n: Math.min(on.length, off.length), strength: Math.abs(dSame) });
+      const dNext = lag(on, off);
+      raw.push({ kind:'sph-habit', s, dSame, dNext, n: Math.min(on.length, off.length), strength: Math.max(Math.abs(dSame), Math.abs(dNext||0)) });
     } else if (s.type === 'score' || s.type === 'counter' || s.type === 'goal') {
       const wv = rows.map(r => ({ r, v: byDate[r.d] ? +byDate[r.d].value : null })).filter(x => x.v != null && !Number.isNaN(x.v));
       if (wv.length < 5) return;
@@ -1501,7 +1562,8 @@ function smartInsights() {
       if (hi.length < 2 || lo.length < 2) return;
       if (mean(hi.map(x => x.v)) - mean(lo.map(x => x.v)) < 0.001) return;
       const dSame = mean(hi.map(x => x.r.state)) - mean(lo.map(x => x.r.state));
-      raw.push({ kind:'sph-num', s, dSame, n: Math.min(hi.length, lo.length), strength: Math.abs(dSame) });
+      const dNext = lag(hi.map(x=>x.r), lo.map(x=>x.r));
+      raw.push({ kind:'sph-num', s, dSame, dNext, n: Math.min(hi.length, lo.length), strength: Math.max(Math.abs(dSame), Math.abs(dNext||0)) });
     }
   });
   const items = raw.filter(o => o.strength >= 0.5)
@@ -1513,13 +1575,21 @@ function smartInsights() {
         if (o.dNext != null && Math.sign(o.dNext) === Math.sign(o.dSame) && Math.abs(o.dNext) >= 0.4) text += ' — и на следующий день тоже';
         return { text: text + '.', action: o.f.act, conf, pos };
       }
-      if (o.kind === 'sph-habit') {
-        return { text: `В дни с «${esc(o.s.name)}» состояние ${pos ? 'выше' : 'ниже'} на ${amt} балла.`,
-          action: pos ? `«${o.s.name}» тебе помогает — держи ритм.` : `Присмотрись к «${o.s.name}».`, conf, pos };
-      }
-      if (o.kind === 'sph-num') {
-        return { text: `Когда больше «${esc(o.s.name)}», состояние ${pos ? 'выше' : 'ниже'} на ${amt} балла.`,
-          action: pos ? `Больше «${o.s.name}» — тебе лучше.` : `Проверь, не перебор ли с «${o.s.name}».`, conf, pos };
+      if (o.kind === 'sph-habit' || o.kind === 'sph-num') {
+        // выбираем ведущий эффект: сегодня или назавтра (lagged, Bearable)
+        const delayed = o.dNext != null && Math.abs(o.dNext) > Math.abs(o.dSame) * 1.4;
+        const dEff = delayed ? o.dNext : o.dSame;
+        const up = dEff > 0, aE = Math.abs(dEff).toFixed(1);
+        const lead = o.kind === 'sph-habit' ? `В дни с «${esc(o.s.name)}»` : `Когда больше «${esc(o.s.name)}»`;
+        let text;
+        if (delayed) text = `${lead} состояние ${up ? 'выше' : 'ниже'} на ${aE} балла на следующий день.`;
+        else {
+          text = `${lead} состояние ${up ? 'выше' : 'ниже'} на ${aE} балла`;
+          if (o.dNext != null && Math.sign(o.dNext) === Math.sign(o.dSame) && Math.abs(o.dNext) >= 0.4) text += ' — и назавтра тоже';
+          text += '.';
+        }
+        const action = up ? `«${o.s.name}» тебе помогает — держи ритм.` : `Присмотрись к «${o.s.name}».`;
+        return { text, action, conf, pos: up };
       }
       return { text: `В дни с «${o.b.label}» состояние ${pos ? 'выше' : 'ниже'} на ${amt} балла.`, action: o.b.act, conf, pos };
     });

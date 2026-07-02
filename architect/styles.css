@@ -687,3 +687,6 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .sph-type-b b{display:block;font-size:var(--tx4);color:var(--t1)}
 .sph-type-b span{font-size:var(--tx2);color:var(--t3)}
 .sph-habit-big{font-size:var(--tx5);font-weight:700;color:var(--t1);text-align:center;padding:var(--s3) 0}
+
+/* Динамические промпты рефлексии под состояние */
+.oqpulse.oq-dyn{background:var(--teal,#2DD4BF);box-shadow:0 0 0 3px var(--teal-l,rgba(45,212,191,.2))}
