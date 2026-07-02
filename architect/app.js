@@ -1049,6 +1049,43 @@ function deriveAxes() {
     n: a.n,
   };
 }
+// Композитный балл состояния 0–100 из чек-инов + сравнение с личной базой
+// (механика Oura: последние 3 дня против 14-дневной базы). Каждый contributor
+// прозрачен — видно под-балл и отклонение от базы. Честно при малом n.
+function stateScore() {
+  const win = DB.checkins.filter(c => c.date > dayAgo(14) && c.date);
+  if (win.length < 3) return { ok:false, n:win.length };
+  // под-баллы 0–100 из одного чек-ина
+  const sub = c => ({
+    sleep: Math.max(0, Math.min(100, (+c.sl||0) / 8 * 100)),   // 8ч ≈ 100
+    calm:  Math.max(0, Math.min(100, (10 - (+c.st||0)) * 10)), // низкий стресс
+    clarity: Math.max(0, Math.min(100, (+c.cl||0) * 10)),
+    move:  Math.max(0, Math.min(100, (+c.mv||0) * 10)),
+  });
+  const compOf = c => { const s = sub(c); return (s.sleep + s.calm + s.clarity + s.move) / 4; };
+  const avgComp = list => list.reduce((a,c)=>a+compOf(c),0) / list.length;
+  const recent = win.filter(c => c.date > dayAgo(3));
+  const cur = recent.length ? avgComp(recent) : compOf(win[win.length-1]);
+  const base = avgComp(win);
+  // усреднённые contributors по недавнему окну для разбора
+  const avgSub = list => {
+    const acc = {sleep:0,calm:0,clarity:0,move:0};
+    list.forEach(c => { const s = sub(c); for (const k in acc) acc[k]+=s[k]; });
+    for (const k in acc) acc[k] = Math.round(acc[k]/list.length);
+    return acc;
+  };
+  const rs = avgSub(recent.length?recent:[win[win.length-1]]);
+  const bs = avgSub(win);
+  const CN = { sleep:'Сон', calm:'Спокойствие', clarity:'Ясность', move:'Движение' };
+  const contributors = Object.keys(CN).map(k => ({ key:k, label:CN[k], score:rs[k], delta:rs[k]-bs[k] }))
+    .sort((a,b)=>a.score-b.score);   // слабое — первым
+  return {
+    ok:true, n:win.length,
+    score: Math.round(cur),
+    delta: Math.round(cur - base),   // «↑/↓ за неделю» относительно своей базы
+    contributors,
+  };
+}
 function applyDerivedAxes() {
   const d = deriveAxes();
   if (!d) { toast('Мало чек-инов для расчёта (нужно ≥3 за 2 недели)', 'warn'); return; }
