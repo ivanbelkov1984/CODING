@@ -2088,6 +2088,40 @@ function exportData() {
   a.click();
   toast('Данные экспортированы', 'ok');
 }
+// Экспорт в Markdown — человекочитаемый дневник (портируемо в Obsidian и т.п.)
+function exportMarkdown() {
+  const d = new Date().toISOString().slice(0,10);
+  const L = [`# Архитектор — выгрузка ${d}`, ''];
+  const r = periodReview(30);
+  if (r.n >= 3) {
+    L.push('## Обзор месяца', '',
+      `- Среднее состояние: **${r.avg.toFixed(1)}/10**${r.delta!=null?` (${r.delta>=0?'↑':'↓'}${Math.abs(r.delta).toFixed(1)} к прошлому)`:''}`,
+      `- Отмечено дней: ${r.adherence}% · чек-инов: ${r.checkins} · инсайтов: ${r.insightsN}`);
+    if (r.topHelp.length) { L.push('', '**Что помогало:**'); r.topHelp.forEach(h => L.push(`- ${h.text}`)); }
+    L.push('');
+  }
+  if ((DB.spheres||[]).length) {
+    L.push('## Сферы', '');
+    DB.spheres.forEach(s => {
+      const st = sphereStats(s.id, 30) || {};
+      let v = '';
+      if (s.type==='habit') v = `${st.consistency||0}% постоянство`;
+      else if (s.type==='counter') v = `${st.sum||0} ${s.unit||''} за 30д`;
+      else if (s.type==='goal') v = st.progress!=null?`${st.progress}% к цели ${s.target||''}`:'';
+      else if (s.type==='score') v = st.avg!=null?`ср. ${st.avg.toFixed(1)}/10`:'';
+      L.push(`- **${s.icon||''} ${s.name}** — ${v} _(${SPHERE_TYPES[s.type]?.lbl||s.type})_`);
+    });
+    L.push('');
+  }
+  L.push('## Инсайты', '');
+  (DB.insights||[]).slice().sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))).forEach(i => {
+    L.push(`### ${i.title||'—'}`, `*${dispDate(i)||''} · ${TL[i.tag]||i.tag||''}${i.src?' · '+i.src:''}*`, '', (i.body||''), '');
+  });
+  const blob = new Blob([L.join('\n')], {type:'text/markdown'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `architect-${d}.md`; a.click();
+  toast('Экспортировано в Markdown', 'ok');
+}
 function handleImport(input) {
   const file = input.files[0];
   if (!file) return;
@@ -2417,6 +2451,34 @@ function getAiKey() { try { return localStorage.getItem(aiKeyName()) || ''; } ca
 function setAiKey(k) { try { k ? localStorage.setItem(aiKeyName(), k) : localStorage.removeItem(aiKeyName()); } catch(e) {} }
 
 // Один вызов Claude Messages API из браузера.
+// ─── AI «КОПНИ ГЛУБЖЕ» (механика Rosebud, №5/AI-диалог) ──────────
+// По черновику записи Claude задаёт ОДИН углубляющий вопрос (CBT/ACT),
+// который помогает дойти до корня. Opt-in: нужен ключ Anthropic.
+async function goDeeper() {
+  const ta = $('add-tx'); if (!ta) return;
+  const draft = ta.value.trim();
+  if (draft.length < 10) { toast('Напиши хотя бы пару фраз — тогда копнём', 'warn'); return; }
+  if (!getAiKey()) { toast('Добавь ключ Anthropic в Итоги → Настройки', 'warn'); closeOv('ov-add'); goTo('sys'); return; }
+  const btn = $('deeper-btn'), out = $('deeper-out');
+  const prev = btn.innerHTML; btn.innerHTML = 'Думаю…'; btn.disabled = true;
+  try {
+    const q = await callClaude({
+      system: 'Ты — вдумчивый дневник-коуч в духе CBT/ACT. По записи пользователя задай ОДИН короткий открытый вопрос (до 15 слов), который помогает копнуть глубже к корню чувства или паттерна. Только вопрос, без преамбулы, по-русски.',
+      user: draft, maxTokens: 120,
+    });
+    const clean = String(q).trim().replace(/^["«]|["»]$/g, '');
+    out.innerHTML = `<div class="deeper-q" onclick="appendDeeper(decodeURIComponent('${encodeURIComponent(clean)}'))">
+      <span>💭 ${esc(clean)}</span><b>ответить →</b></div>`;
+  } catch (e) {
+    toast(e.noKey ? 'Нужен ключ Anthropic' : ('AI: ' + e.message), 'warn');
+  } finally { btn.innerHTML = prev; btn.disabled = false; }
+}
+function appendDeeper(q) {
+  const ta = $('add-tx'); if (!ta) return;
+  ta.value = ta.value.replace(/\s+$/, '') + '\n\n' + q + '\n';
+  $('deeper-out').innerHTML = '';
+  ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch(e){}
+}
 async function callClaude({ system, user, maxTokens = 1024, schema = null }) {
   const key = getAiKey();
   if (!key) { const e = new Error('Не задан API-ключ Anthropic'); e.noKey = true; throw e; }

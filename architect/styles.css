@@ -723,3 +723,9 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .rv-help-t{font-size:var(--tx2);font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:var(--s2)}
 .rv-help-r{font-size:var(--tx3);color:var(--t2);line-height:1.5;margin-bottom:3px}
 .rv-sph{display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:var(--tx3);color:var(--t1);font-weight:600}
+
+/* AI «копни глубже» */
+.deeper-q{display:flex;align-items:center;gap:var(--s2);margin-top:var(--s2);padding:var(--s3);
+  background:var(--purple-l,#F5EEFF);border:1px solid var(--purple,#6B21A8);border-radius:12px;cursor:pointer}
+.deeper-q span{flex:1;font-size:var(--tx3);font-weight:600;color:var(--t1);line-height:1.4}
+.deeper-q b{flex:none;font-size:var(--tx2);font-weight:700;color:var(--purple,#6B21A8)}
