@@ -1445,15 +1445,16 @@ function smartInsights() {
     const c = map[d], st = dayComposite(c);
     const nd = new Date(d + 'T00:00:00'); nd.setDate(nd.getDate() + 1);
     const nx = map[nd.toISOString().slice(0, 10)];
-    return { c, state: st, next: nx ? dayComposite(nx) : null };
+    return { d, c, state: st, next: nx ? dayComposite(nx) : null };
   }).filter(r => r.state != null);
   if (rows.length < 5) return { ok: false, n: rows.length, items: [] };
 
   const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+  // Только НЕзависимые от композита факторы (сон/качество сна), иначе связь
+  // тавтологична: движение/ясность/спокойствие сами входят в состояние.
   const NUM = [
-    { key:'sl',   val:c=>+c.sl||0,        more:'высыпаешься',       less:'спишь мало',        act:'Защити сон — раньше ложись в будни.' },
-    { key:'mv',   val:c=>+c.mv||0,        more:'больше двигаешься', less:'мало движения',     act:'Добавь короткую активность в день.' },
-    { key:'calm', val:c=>10-(+c.st||0),   more:'меньше стресса',    less:'больше стресса',    act:'Заложи время на разгрузку.' },
+    { key:'sl', val:c=>+c.sl||0, more:'высыпаешься',      less:'спишь мало',  act:'Защити сон — раньше ложись в будни.' },
+    { key:'sq', val:c=>+c.sq||0, more:'сон качественный', less:'сон плохой',  act:'Гигиена сна: без экрана перед сном, темнота, прохлада.' },
   ];
   const BOOL = [
     { key:'caf', label:'кофеин',   act:'Понаблюдай за кофеином во второй половине дня.' },
@@ -1481,15 +1482,45 @@ function smartInsights() {
     const dSame = mean(on.map(r => r.state)) - mean(off.map(r => r.state));
     raw.push({ kind:'bool', b, dSame, n: Math.min(on.length, off.length), strength: Math.abs(dSame) });
   });
+  // Сферы как факторы — единый смысл через все сферы (механика Exist).
+  // Состояние берём из чек-инов; сопоставляем со значением сферы в тот же день.
+  (DB.spheres || []).forEach(s => {
+    const byDate = {}; DB.sphereLogs.filter(l => l.sphereId === s.id && l.date).forEach(l => byDate[l.date] = l);
+    if (s.type === 'habit') {
+      const on = rows.filter(r => { const l = byDate[r.d]; return l && l.value; });
+      const off = rows.filter(r => { const l = byDate[r.d]; return !(l && l.value); });
+      if (on.length < 2 || off.length < 2) return;
+      const dSame = mean(on.map(r => r.state)) - mean(off.map(r => r.state));
+      raw.push({ kind:'sph-habit', s, dSame, n: Math.min(on.length, off.length), strength: Math.abs(dSame) });
+    } else if (s.type === 'score' || s.type === 'counter' || s.type === 'goal') {
+      const wv = rows.map(r => ({ r, v: byDate[r.d] ? +byDate[r.d].value : null })).filter(x => x.v != null && !Number.isNaN(x.v));
+      if (wv.length < 5) return;
+      const srt = wv.slice().sort((a, b) => a.v - b.v);
+      const h = Math.floor(srt.length / 2), lo = srt.slice(0, h), hi = srt.slice(srt.length - h);
+      if (hi.length < 2 || lo.length < 2) return;
+      if (mean(hi.map(x => x.v)) - mean(lo.map(x => x.v)) < 0.001) return;
+      const dSame = mean(hi.map(x => x.r.state)) - mean(lo.map(x => x.r.state));
+      raw.push({ kind:'sph-num', s, dSame, n: Math.min(hi.length, lo.length), strength: Math.abs(dSame) });
+    }
+  });
   const items = raw.filter(o => o.strength >= 0.5)
     .sort((a, b) => b.strength - a.strength).slice(0, 3).map(o => {
       const conf = confLabel(o.n), pos = o.dSame > 0;
+      const amt = Math.abs(o.dSame).toFixed(1);
       if (o.kind === 'num') {
-        let text = `Когда ${pos ? o.f.more : o.f.less}, состояние ${pos ? 'выше' : 'ниже'} на ${Math.abs(o.dSame).toFixed(1)} балла`;
+        let text = `Когда ${pos ? o.f.more : o.f.less}, состояние ${pos ? 'выше' : 'ниже'} на ${amt} балла`;
         if (o.dNext != null && Math.sign(o.dNext) === Math.sign(o.dSame) && Math.abs(o.dNext) >= 0.4) text += ' — и на следующий день тоже';
         return { text: text + '.', action: o.f.act, conf, pos };
       }
-      return { text: `В дни с «${o.b.label}» состояние ${pos ? 'выше' : 'ниже'} на ${Math.abs(o.dSame).toFixed(1)} балла.`, action: o.b.act, conf, pos };
+      if (o.kind === 'sph-habit') {
+        return { text: `В дни с «${esc(o.s.name)}» состояние ${pos ? 'выше' : 'ниже'} на ${amt} балла.`,
+          action: pos ? `«${o.s.name}» тебе помогает — держи ритм.` : `Присмотрись к «${o.s.name}».`, conf, pos };
+      }
+      if (o.kind === 'sph-num') {
+        return { text: `Когда больше «${esc(o.s.name)}», состояние ${pos ? 'выше' : 'ниже'} на ${amt} балла.`,
+          action: pos ? `Больше «${o.s.name}» — тебе лучше.` : `Проверь, не перебор ли с «${o.s.name}».`, conf, pos };
+      }
+      return { text: `В дни с «${o.b.label}» состояние ${pos ? 'выше' : 'ниже'} на ${amt} балла.`, action: o.b.act, conf, pos };
     });
   return { ok: true, n: rows.length, items };
 }
