@@ -793,3 +793,8 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .amb-conf.cf-low{color:var(--t3);background:var(--bg3)}
 .amb-conf.cf-mid{color:var(--blue-t);background:var(--blue-l)}
 .amb-conf.cf-hi{color:var(--green);background:var(--green-l)}
+
+/* ── ЖИВАЯ КАРТА ЖИЗНИ (AI-синтез, Слой 2) ─────────────────────── */
+.lmap-t{font-size:var(--tx4);color:var(--t1);line-height:1.6;white-space:pre-wrap}
+.lmap-meta{font-size:var(--tx2);font-weight:600;color:var(--t3);margin-top:var(--s2)}
+.lmap-empty{font-size:var(--tx3);color:var(--t3);line-height:1.5}

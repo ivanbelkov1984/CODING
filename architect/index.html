@@ -192,6 +192,11 @@
 
 <!-- ── СИСТЕМА ─────────────────────────────────────────────────── -->
 <section class="pg" id="pg-sys">
+  <div class="sec-lbl">Живая карта жизни</div>
+  <div class="card mx mb">
+    <div id="livingmap-out"></div>
+    <div style="padding-top:var(--s2)"><button class="btn btn-s btn-xs" id="livingmap-btn" onclick="aiLivingMap(true)"><i data-lucide="sparkles"></i>Собрать заново (AI)</button></div>
+  </div>
   <div class="sec-lbl">Обзор периода</div>
   <div class="rv-switch mx" id="review-btns">
     <button class="rv-b on" data-d="30" onclick="rReview(30)">Месяц</button>

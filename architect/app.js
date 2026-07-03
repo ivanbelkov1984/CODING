@@ -410,7 +410,7 @@ function goTo(tab, el) {
   $('ptitle').textContent = TITLES[tab] || tab;
   hpt();
   if (tab==='vit') { rSpheres(); rVit(); }
-  if (tab==='sys') { rDig(); rReview(30); }
+  if (tab==='sys') { rLivingMap('livingmap-out'); rDig(); rReview(30); }
   if (tab==='map') rIns();
   if (tab==='settings') { rProfileRow(); checkApiStatus(); rPushStatus(); }
 }
@@ -1346,6 +1346,58 @@ function rAmbient(elId) {
         <div class="amb-sub">Живая связь · <span class="amb-conf ${conf.cls}">${conf.t}</span></div></div>
     </div>`;
   }).join('');
+}
+
+// ─── СЛОЙ 2: AI-СИНТЕЗ «ЖИВАЯ КАРТА ЖИЗНИ» ──────────────────────
+// Claude читает готовые кросс-доменные сигналы (Слой 1) и пишет связный
+// нарратив: как связаны сферы/состояние/темы. Кэш в DB.livingMap,
+// обновляется при заметном изменении данных; амбиентно (1 раз за сессию).
+function livingMapContext() {
+  const links = livingLinks().slice(0, 6).map(l => '— ' + l.text);
+  const si = smartInsights(); const helps = (si.items || []).map(i => '— ' + i.text);
+  const sph = (DB.spheres || []).map(s => {
+    const st = sphereStats(s.id) || {};
+    let v = ''; if (s.type === 'habit') v = 'постоянство ' + (st.consistency||0) + '%';
+    else if (st.avg != null) v = 'сред. ' + st.avg.toFixed(1);
+    else if (st.last != null) v = '' + st.last;
+    return `— ${s.name} (${SPHERE_TYPES[s.type]?.lbl || s.type}${v ? ', ' + v : ''})`;
+  });
+  return 'Связи (сферы/состояние/темы):\n' + (links.length ? links.join('\n') : '— мало данных') +
+    '\n\nЧто помогает:\n' + (helps.length ? helps.join('\n') : '— мало данных') +
+    '\n\nСферы:\n' + (sph.length ? sph.join('\n') : '— нет');
+}
+function livingMapSig() { return (DB.insights||[]).length + '-' + (DB.checkins||[]).length + '-' + (DB.sphereLogs||[]).length; }
+async function aiLivingMap(force) {
+  if (!getAiKey()) { if (force) { toast('Добавь ключ Anthropic в Настройки', 'warn'); goTo('settings'); } return; }
+  const el = $('livingmap-out'), btn = $('livingmap-btn');
+  if (el && !(DB.livingMap && DB.livingMap.text)) el.innerHTML = `<div class="deeper deeper-load">Claude собирает живую карту…</div>`;
+  if (btn) btn.disabled = true;
+  try {
+    const user = livingMapContext() +
+      '\n\nНапиши тёплый связный текст (4–6 предложений): как СЕЙЧАС связана моя жизнь — покажи, как темы, состояние и сферы влияют друг на друга; назови 1–2 глубоких паттерна через разные области. По-русски, на «ты», без клише и морализаторства. Заверши одним мягким вопросом.';
+    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 420 });
+    const t = (text || '').trim(); if (!t) throw new Error('пустой ответ');
+    DB.livingMap = { text: t, ts: Date.now(), sig: livingMapSig() };
+    persist(); rLivingMap('livingmap-out'); if (typeof hptMed === 'function') hptMed();
+  } catch (e) {
+    if (e.noKey) goTo('settings');
+    toast('AI: ' + e.message, 'warn');
+    if (el && !(DB.livingMap && DB.livingMap.text)) el.innerHTML = '';
+  } finally { if (btn) btn.disabled = false; }
+}
+let _livingMapTried = false;
+function rLivingMap(elId) {
+  const el = $(elId); if (!el) return;
+  const lm = DB.livingMap, stale = !lm || lm.sig !== livingMapSig();
+  if (lm && lm.text) {
+    const age = Math.round((Date.now() - lm.ts) / 864e5);
+    el.innerHTML = `<div class="lmap-t">${esc(lm.text)}</div>` +
+      `<div class="lmap-meta">🕸 Живая карта · ${age === 0 ? 'сегодня' : age + ' дн назад'}${stale ? ' · есть новые данные' : ''}</div>`;
+  } else {
+    el.innerHTML = `<div class="lmap-empty">Живая карта соберётся из связей между твоими записями, состоянием и сферами${getAiKey() ? '' : ' — добавь ключ Anthropic в Настройках'}.</div>`;
+  }
+  // амбиентно: один раз за сессию дособираем, если ключ есть и данные изменились
+  if (stale && getAiKey() && !_livingMapTried && livingLinks().length >= 2) { _livingMapTried = true; aiLivingMap(false); }
 }
 // AI-разбор сохранённой записи: тёплая интерпретация + мягкий вопрос.
 async function aiAnalyzeDet() {
