@@ -594,7 +594,7 @@ function rHome() {
   $('h-date').textContent = `${D2[now.getDay()]}, ${now.getDate()} ${M[now.getMonth()]} ${now.getFullYear()}`;
   rHState(); rStreak(); detectPatterns();
   rNudge();
-  rStateHero(); rSmartInsights('home-smart'); rHeatmap('home-heatmap', 90); rGraph('home-graph', 190, true);
+  rStateHero(); rAmbient('home-ambient'); rSmartInsights('home-smart'); rHeatmap('home-heatmap', 90); rGraph('home-graph', 190, true);
   rPrompts();
   rOnThisDay();
   rHIns();
@@ -1215,6 +1215,92 @@ function relatedByTheme(ins, limit) {
     let overlap = 0; kw.forEach(w => { if (mine.has(w)) overlap++; });
     return { ins: x, overlap };
   }).filter(s => s.overlap >= 2).sort((a, b) => b.overlap - a.overlap).slice(0, limit || 5);
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  ЖИВАЯ СЕТЬ (AI в ДНК): непрерывно находит кросс-доменные связи
+//  между темами записей, чек-инами и сферами. Локально, честно по n.
+// ═════════════════════════════════════════════════════════════════
+const _mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+// Карта «стем → читаемая словоформа» для показа человеку (не стем «выгоран»,
+// а «выгорание»). Берём самую короткую встреченную форму — близка к базовой.
+function themeForms() {
+  const forms = {};
+  (DB.insights || []).forEach(i => {
+    String((i.title || '') + ' ' + (i.body || '')).toLowerCase().replace(/[^а-яёa-z0-9\s]/gi, ' ')
+      .split(/\s+/).filter(w => w.length >= 4 && !RU_STOP.has(w)).forEach(w => {
+        const s = stemRu(w); if (s.length < 3) return;
+        if (!forms[s] || w.length < forms[s].length) forms[s] = w;
+      });
+  });
+  return forms;
+}
+function livingLinks() {
+  const out = [];
+  const forms = themeForms();
+  const show = s => forms[s] || s;
+  const dayState = {}; (DB.checkins || []).forEach(c => { if (c.date) { const v = dayComposite(c); if (v != null) dayState[c.date] = v; } });
+  const stateDays = Object.keys(dayState);
+  // A) Тема записей ↔ состояние в тот же день (кросс: смысл ↔ самочувствие)
+  if (stateDays.length >= 6) {
+    const themeDays = {};
+    (DB.insights || []).forEach(i => {
+      const d = i.day || String(i.createdAt || '').slice(0, 10);
+      if (!dayState[d]) return;
+      keywords((i.title || '') + ' ' + (i.body || '')).forEach(w => (themeDays[w] || (themeDays[w] = new Set())).add(d));
+    });
+    Object.keys(themeDays).forEach(w => {
+      const inDays = [...themeDays[w]];
+      if (inDays.length < 3) return;
+      const outDays = stateDays.filter(d => !themeDays[w].has(d));
+      if (outDays.length < 3) return;
+      const diff = _mean(inDays.map(d => dayState[d])) - _mean(outDays.map(d => dayState[d]));
+      if (Math.abs(diff) >= 0.8) out.push({ kind: 'theme-state', theme: w, n: inDays.length, strength: Math.abs(diff),
+        text: `Когда всплывает тема «${show(w)}», твоё состояние ${diff > 0 ? 'выше' : 'ниже'} на ${Math.abs(diff).toFixed(1)} балла` });
+    });
+  }
+  // B) Сфера ↔ сфера (кросс: одна область жизни тянет другую)
+  const numSph = (DB.spheres || []).filter(s => ['score', 'counter', 'goal'].includes(s.type));
+  const valByDate = s => { const m = {}; DB.sphereLogs.filter(l => l.sphereId === s.id && l.date).forEach(l => { const v = +l.value; if (!Number.isNaN(v)) m[l.date] = v; }); return m; };
+  for (let i = 0; i < numSph.length; i++) for (let j = i + 1; j < numSph.length; j++) {
+    const A = valByDate(numSph[i]), B = valByDate(numSph[j]);
+    const days = Object.keys(A).filter(d => d in B);
+    if (days.length < 5) continue;
+    const r = pearson(days.map(d => A[d]), days.map(d => B[d]));
+    if (r != null && Math.abs(r) >= 0.4) out.push({ kind: 'sphere-sphere', n: days.length, strength: Math.abs(r),
+      text: `В дни, когда больше «${numSph[i].name}», ${r > 0 ? 'больше' : 'меньше'} и «${numSph[j].name}»` });
+  }
+  // C) Повтор темы по дню недели (кросс: смысл ↔ время)
+  const WD = ['воскресеньям', 'понедельникам', 'вторникам', 'средам', 'четвергам', 'пятницам', 'субботам'];
+  const themeWd = {};
+  (DB.insights || []).forEach(i => {
+    const d = i.day || String(i.createdAt || '').slice(0, 10); const t = Date.parse(d + 'T00:00:00'); if (!t) return;
+    const wd = new Date(t).getDay();
+    keywords((i.title || '') + ' ' + (i.body || '')).forEach(w => { const o = themeWd[w] || (themeWd[w] = { total: 0, wd: {} }); o.total++; o.wd[wd] = (o.wd[wd] || 0) + 1; });
+  });
+  Object.keys(themeWd).forEach(w => {
+    const o = themeWd[w]; if (o.total < 4) return;
+    const top = Object.keys(o.wd).sort((a, b) => o.wd[b] - o.wd[a])[0];
+    if (o.wd[top] >= 3 && o.wd[top] / o.total >= 0.6) out.push({ kind: 'theme-weekday', n: o.total, strength: 0.6 + o.wd[top] / o.total,
+      text: `Тема «${show(w)}» чаще всего всплывает по ${WD[top]} (${o.wd[top]} из ${o.total})` });
+  });
+  return out.sort((a, b) => b.strength - a.strength);
+}
+function rAmbient(elId) {
+  const el = $(elId); if (!el) return;
+  const links = livingLinks();
+  if (!links.length) { el.innerHTML = ''; return; }
+  // Разные типы связей — чтобы читалось как сеть, а не повтор одной находки.
+  const top = [], usedKind = new Set();
+  for (const l of links) { if (usedKind.has(l.kind)) continue; usedKind.add(l.kind); top.push(l); if (top.length === 2) break; }
+  el.innerHTML = top.map(l => {
+    const conf = confLabel(l.n);
+    return `<div class="amb" onclick="goTo('map');msub('graph')" role="button">
+      <div class="amb-ic">🕸</div>
+      <div class="amb-body"><div class="amb-t">${esc(l.text)}</div>
+        <div class="amb-sub">Живая связь · <span class="amb-conf ${conf.cls}">${conf.t}</span></div></div>
+    </div>`;
+  }).join('');
 }
 // AI-разбор сохранённой записи: тёплая интерпретация + мягкий вопрос.
 async function aiAnalyzeDet() {
