@@ -197,6 +197,49 @@ function hydrate() {
   }
 }
 
+// ─── СНИМКИ (авто-бэкап с глубиной) ─────────────────────────────
+// Ежедневный снимок данных, хранится последние 7 дней. Даёт возможность
+// откатиться, даже если что-то удалил или данные повредились.
+const snapPrefix = id => 'arch5_snap_' + id + '_';
+function snapshotDaily() {
+  const id = activeId(); if (dbCount(DB) === 0) return;
+  const key = snapPrefix(id) + todayKey();
+  try {
+    if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(DB));
+    const keys = Object.keys(localStorage).filter(k => k.startsWith(snapPrefix(id))).sort();
+    while (keys.length > 7) { const k = keys.shift(); try { localStorage.removeItem(k); } catch (e) {} }
+  } catch (e) {}
+}
+function listSnapshots() {
+  const id = activeId(), pre = snapPrefix(id);
+  return Object.keys(localStorage).filter(k => k.startsWith(pre))
+    .map(k => { let n = 0; try { n = dbCount(JSON.parse(localStorage.getItem(k))); } catch (e) {} return { key: k, date: k.slice(pre.length), n }; })
+    .sort((a, b) => a.date < b.date ? 1 : -1);
+}
+function restoreSnapshot(key) {
+  let snap = null; try { snap = JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) {}
+  if (!snap || dbCount(snap) === 0) { toast('Копия пуста или повреждена', 'warn'); return; }
+  if (!confirm(`Восстановить копию от ${key.split('_').pop()}? Текущие данные заменятся (записей в копии: ${dbCount(snap)}).`)) return;
+  DB = { ...DEFAULT_DB, ...snap };
+  persist();
+  if (typeof renderAfterSync === 'function') renderAfterSync(); else rHome();
+  closeOv('ov-backups');
+  hptMed && hptMed(); toast('Данные восстановлены из копии', 'ok');
+}
+function openBackups() { rBackups(); openOv('ov-backups'); }
+function rBackups() {
+  const el = $('backups-list'); if (!el) return;
+  const snaps = listSnapshots();
+  const cur = dbCount(DB);
+  let html = `<div class="bk-cur">Сейчас в приложении: <b>${cur}</b> ${pl(cur,'запись','записи','записей')}</div>`;
+  html += snaps.length
+    ? snaps.map(s => `<div class="srow"><div class="bk-info"><span class="sl2">${s.date === todayKey() ? 'Сегодня' : s.date}</span><span class="sv2">${s.n} ${pl(s.n,'запись','записи','записей')}</span></div>
+        <button class="btn btn-s btn-xs" onclick="restoreSnapshot('${s.key}')">Восстановить</button></div>`).join('')
+    : `<div class="bk-empty">Снимки появятся автоматически по мере пользования (хранятся 7 дней).</div>`;
+  html += `<div style="padding-top:var(--s3)"><button class="btn btn-p btn-sm btn-full" onclick="exportData()"><i data-lucide="download"></i>Скачать копию на устройство (JSON)</button></div>`;
+  el.innerHTML = html;
+}
+
 // Идемпотентная миграция: бэкфилл ISO-меток в старые записи.
 // id создавался как Date.now(), поэтому служит надёжным источником createdAt.
 function migrateRecords() {
@@ -3208,6 +3251,7 @@ function initAll() {
   checkApiStatus();
   initSync();
   smartTriggers();
+  snapshotDaily();          // авто-снимок дня (защита данных)
 }
 
 document.addEventListener('DOMContentLoaded', () => {

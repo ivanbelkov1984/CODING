@@ -798,3 +798,10 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .lmap-t{font-size:var(--tx4);color:var(--t1);line-height:1.6;white-space:pre-wrap}
 .lmap-meta{font-size:var(--tx2);font-weight:600;color:var(--t3);margin-top:var(--s2)}
 .lmap-empty{font-size:var(--tx3);color:var(--t3);line-height:1.5}
+
+/* ── РЕЗЕРВНЫЕ КОПИИ ────────────────────────────────────────────── */
+.bk-cur{font-size:var(--tx3);color:var(--t2);font-weight:600;padding:var(--s2) 0 var(--s3)}
+.bk-cur b{color:var(--t1)}
+.bk-info{display:flex;flex-direction:column}
+.bk-empty{font-size:var(--tx3);color:var(--t3);line-height:1.5;padding:var(--s2) 0}
+#backups-list .srow{cursor:default}
