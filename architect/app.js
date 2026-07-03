@@ -136,11 +136,33 @@ function ensureProfiles() {
 // ─── PERSIST / HYDRATE (профиль-зависимые) ──────────────────────
 // persistLocal — «тихая» запись в localStorage (без авто-синка),
 // используется движком синхронизации, чтобы не зациклиться.
+const bakKey = id => 'arch5_bak_' + id;
+// Считает ПОЛЬЗОВАТЕЛЬСКИЕ записи — для защиты от перезаписи данных пустотой.
+// Исключены bots/chapters/oq (они не пусты в DEFAULT_DB, иначе защита не сработает).
+function dbCount(db) {
+  if (!db || typeof db !== 'object') return 0;
+  let n = 0;
+  ['insights','checkins','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests']
+    .forEach(c => { if (Array.isArray(db[c])) n += db[c].length; });
+  return n;
+}
+let _allowEmptyWrite = false;   // выставляется только при намеренном сбросе
 function persistLocal() {
   const id = activeId();
   try {
-    localStorage.setItem(dbKey(id),  JSON.stringify(DB));
+    const key = dbKey(id), cur = dbCount(DB);
+    // ЗАЩИТА ДАННЫХ: не затираем непустое (или повреждённое) хранилище пустым
+    // состоянием — иначе сбой парсинга/памяти уничтожал бы данные.
+    if (cur === 0 && !_allowEmptyWrite) {
+      let prev = 0;
+      try { prev = dbCount(JSON.parse(localStorage.getItem(key) || 'null')); }
+      catch (e) { prev = 1; }   // повреждено → считаем, что данные были, не трогаем
+      if (prev > 0) { if (typeof log === 'function') log('warn', 'persist: запись пустого состояния заблокирована (защита данных)'); return; }
+    }
+    const json = JSON.stringify(DB);
+    localStorage.setItem(key, json);
     localStorage.setItem(cfgKey(id), JSON.stringify(CFG));
+    if (cur > 0) { try { localStorage.setItem(bakKey(id), json); } catch (e) {} }  // резервная копия
   } catch(e) {}
 }
 // persist — вызывается после любой правки пользователя: помечает
@@ -155,17 +177,24 @@ function persist() {
 function hydrate() {
   ensureProfiles();
   const id = activeId();
-  try {
-    const db  = JSON.parse(localStorage.getItem(dbKey(id))  || 'null');
-    const cfg = JSON.parse(localStorage.getItem(cfgKey(id)) || 'null');
-    DB  = db  ? {...DEFAULT_DB,  ...db} : JSON.parse(JSON.stringify(DEFAULT_DB));
-    CFG = cfg ? {...DEFAULT_CFG, ...cfg, axes: {...DEFAULT_CFG.axes, ...(cfg.axes||{})}}
-              : JSON.parse(JSON.stringify(DEFAULT_CFG));
-  } catch(e) {
-    DB  = JSON.parse(JSON.stringify(DEFAULT_DB));
-    CFG = JSON.parse(JSON.stringify(DEFAULT_CFG));
+  // undefined = слот повреждён (JSON не распарсился); null = пусто
+  const read = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return undefined; } };
+  let db = read(dbKey(id)), recovered = false;
+  // Восстановление: основной слот повреждён/пуст, но есть бэкап с данными.
+  if (db === undefined || dbCount(db) === 0) {
+    const bak = read(bakKey(id));
+    if (bak && dbCount(bak) > 0) { db = bak; recovered = true; }
+    else if (db === undefined) db = null;   // повреждён без бэкапа — стартуем чисто, persistLocal НЕ затрёт слот
   }
-  migrateRecords();
+  let cfg = null; try { cfg = JSON.parse(localStorage.getItem(cfgKey(id)) || 'null'); } catch (e) {}
+  DB  = db  ? {...DEFAULT_DB,  ...db} : JSON.parse(JSON.stringify(DEFAULT_DB));
+  CFG = cfg ? {...DEFAULT_CFG, ...cfg, axes: {...DEFAULT_CFG.axes, ...(cfg.axes||{})}}
+            : JSON.parse(JSON.stringify(DEFAULT_CFG));
+  try { migrateRecords(); } catch (e) {}     // миграция не должна ронять загрузку
+  if (recovered) {
+    try { persistLocal(); } catch (e) {}
+    setTimeout(() => { if (typeof toast === 'function') toast('Данные восстановлены из резервной копии', 'ok'); }, 900);
+  }
 }
 
 // Идемпотентная миграция: бэкфилл ISO-меток в старые записи.
@@ -1057,7 +1086,15 @@ function extractLinks(body) {
 }
 // Лёгкий стем: отсекаем хвостовые гласные/ь/ъ/й, чтобы [[выгорании]]
 // находило заголовок «Выгорание…» (устойчивость к падежам).
-const stemRu = w => String(w||'').toLowerCase().trim().replace(/[ауеыоэяиюёйьъ]+$/,'');
+// Лёгкий стем: сначала отсекаем частые падежные окончания на согласную
+// (спортом→спорт, домами→дом), затем хвостовые гласные/ь/ъ/й (устойчивость
+// к падежам для тематического сопоставления).
+const _STEM_ENDS = ['иями','ями','ами','иях','ях','ах','ов','ев','ем','ом','ам','ям','ых','их','ий','ый','ой','ей'];
+const stemRu = w => {
+  w = String(w || '').toLowerCase().trim();
+  for (const s of _STEM_ENDS) { if (w.length - s.length >= 3 && w.endsWith(s)) { w = w.slice(0, -s.length); break; } }
+  return w.replace(/[ауеыоэяиюёйьъ]+$/, '');
+};
 const matchLink = (term, ins) => {
   const s = stemRu(term);
   return s.length >= 3 && ins.title.toLowerCase().includes(s);
@@ -1077,32 +1114,35 @@ function openLink(term) {
 // ─── КАРТА СВЯЗЕЙ (граф [[…]]) ───────────────────────────────────
 // Узлы — инсайты, участвующие хотя бы в одной связи; рёбра — [[ссылки]]
 // между заголовками (через тот же matchLink, что и бэклинки).
+// Живой граф-мешок: узлы — И мысли, И сферы; рёбра — темы, упоминания,
+// корреляции. «Всё одной сетью», наполняется сам (AI в ДНК).
 function buildGraph() {
   const ins = DB.insights || [];
-  const edges = [];
-  const deg = {};
-  const seen = new Set();
-  const addEdge = (a, b) => {
-    const key = a < b ? a+'-'+b : b+'-'+a;
-    if (seen.has(key)) return;
-    seen.add(key);
-    edges.push({ a, b });
-    deg[a] = (deg[a]||0) + 1; deg[b] = (deg[b]||0) + 1;
-  };
-  // Ручные [[ссылки]] (обратная совместимость)
-  ins.forEach(a => {
-    (a.links || []).forEach(l => {
-      const b = ins.find(x => x.id !== a.id && matchLink(l, x));
-      if (b) addEdge(a.id, b.id);
-    });
+  const sph = DB.spheres || [];
+  const nm = {};                    // key → node
+  const edges = []; const seen = new Set();
+  const iK = id => 'i' + id, sK = id => 's' + id;
+  const addIns = i => { const k = iK(i.id); if (!nm[k]) nm[k] = { key:k, type:'insight', eid:i.id, title:i.title, color:SC[i.tag]||'var(--t3)', deg:0 }; return k; };
+  const addSph = s => { const k = sK(s.id); if (!nm[k]) nm[k] = { key:k, type:'sphere', eid:s.id, title:(s.icon?s.icon+' ':'')+s.name, color:s.color||'var(--blue-t)', deg:0 }; return k; };
+  const addEdge = (a, b) => { if (a === b) return; const key = a < b ? a+'|'+b : b+'|'+a; if (seen.has(key)) return; seen.add(key); edges.push({ a, b }); nm[a].deg++; nm[b].deg++; };
+  // мысль ↔ мысль: ручные [[ссылки]] + автосвязи по темам
+  ins.forEach(a => (a.links || []).forEach(l => { const b = ins.find(x => x.id !== a.id && matchLink(l, x)); if (b) { addIns(a); addIns(b); addEdge(iK(a.id), iK(b.id)); } }));
+  ins.forEach(a => relatedByTheme(a, 4).forEach(r => { addIns(a); addIns(r.ins); addEdge(iK(a.id), iK(r.ins.id)); }));
+  // мысль ↔ сфера: текст записи задевает тему сферы
+  sph.forEach(s => {
+    const skw = new Set(keywords(s.name)); if (!skw.size) return;
+    ins.forEach(i => { if (keywords((i.title||'') + ' ' + (i.body||'')).some(w => skw.has(w))) { addSph(s); addIns(i); addEdge(sK(s.id), iK(i.id)); } });
   });
-  // Автосвязи по общим темам — граф наполняется сам, без ручной разметки
-  ins.forEach(a => { relatedByTheme(a, 4).forEach(r => addEdge(a.id, r.ins.id)); });
-  const ids = new Set();
-  edges.forEach(e => { ids.add(e.a); ids.add(e.b); });
-  const nodes = ins.filter(i => ids.has(i.id))
-    .map(i => ({ id: i.id, title: i.title, tag: i.tag, deg: deg[i.id]||0 }));
-  return { nodes, edges };
+  // сфера ↔ сфера: статистическая связь по дням
+  const numSph = sph.filter(s => ['score','counter','goal'].includes(s.type));
+  const vbd = s => { const m = {}; DB.sphereLogs.filter(l => l.sphereId === s.id && l.date).forEach(l => { const v = +l.value; if (!Number.isNaN(v)) m[l.date] = v; }); return m; };
+  for (let a = 0; a < numSph.length; a++) for (let b = a+1; b < numSph.length; b++) {
+    const A = vbd(numSph[a]), B = vbd(numSph[b]); const days = Object.keys(A).filter(d => d in B);
+    if (days.length < 5) continue;
+    const r = pearson(days.map(d => A[d]), days.map(d => B[d]));
+    if (r != null && Math.abs(r) >= 0.4) { addSph(numSph[a]); addSph(numSph[b]); addEdge(sK(numSph[a].id), sK(numSph[b].id)); }
+  }
+  return { nodes: Object.values(nm), edges };
 }
 // Детерминированная силовая раскладка (Fruchterman–Reingold, фикс. число шагов).
 function layoutGraph(nodes, edges, W, H) {
@@ -1114,7 +1154,7 @@ function layoutGraph(nodes, edges, W, H) {
     nd.y = cy + Math.sin(a) * R * 0.7;
     nd.vx = 0; nd.vy = 0;
   });
-  const byId = {}; nodes.forEach(nd => byId[nd.id] = nd);
+  const byId = {}; nodes.forEach(nd => byId[nd.key] = nd);
   const k = Math.max(38, R / Math.sqrt(n));       // идеальная длина ребра
   const ITER = 220;
   for (let it = 0; it < ITER; it++) {
@@ -1146,28 +1186,33 @@ function rGraph(elId, height, compact) {
   const el = $(elId || 'graph-canvas'); if (!el) return;
   const { nodes, edges } = buildGraph();
   if (!nodes.length) {
-    el.innerHTML = `<div class="empty"><div class="em-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:26px;height:26px;color:var(--t3)"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div><div class="em-t">Связей пока нет</div><div class="em-d">Напиши <code>[[слово]]</code> в тексте инсайта — узлы соединятся тут</div></div>`;
+    el.innerHTML = `<div class="empty"><div class="em-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:26px;height:26px;color:var(--t3)"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div><div class="em-t">Сеть пока пуста</div><div class="em-d">Добавляй записи и сферы — связи между ними появятся здесь сами, по общим темам</div></div>`;
     return;
   }
   const W = el.clientWidth || 340, H = height || 380;
   layoutGraph(nodes, edges, W, H);
-  const byId = {}; nodes.forEach(nd => byId[nd.id] = nd);
+  const byId = {}; nodes.forEach(nd => byId[nd.key] = nd);
   const lines = edges.map(e => {
     const A = byId[e.a], B = byId[e.b];
     return `<line x1="${A.x.toFixed(1)}" y1="${A.y.toFixed(1)}" x2="${B.x.toFixed(1)}" y2="${B.y.toFixed(1)}" class="gedge"/>`;
   }).join('');
   const circ = nodes.map(nd => {
     const r = 6 + Math.min(nd.deg, 6) * 2;
-    const c = SC[nd.tag] || 'var(--t3)';
     const short = nd.title.length > 16 ? nd.title.slice(0, 15) + '…' : nd.title;
     const label = compact ? '' : `<text x="${nd.x.toFixed(1)}" y="${(nd.y + r + 11).toFixed(1)}" class="glbl">${esc(short)}</text>`;
-    return `<g class="gnode" onclick="event.stopPropagation();showDet(${nd.id})">
-      <circle cx="${nd.x.toFixed(1)}" cy="${nd.y.toFixed(1)}" r="${r}" fill="${c}"/>${label}
-    </g>`;
+    const click = nd.type === 'sphere' ? `openSphereLog(${nd.eid})` : `showDet(${nd.eid})`;
+    // сферы — скруглённый квадрат (узел жизни), мысли — круг
+    const shape = nd.type === 'sphere'
+      ? `<rect x="${(nd.x-r).toFixed(1)}" y="${(nd.y-r).toFixed(1)}" width="${(r*2)}" height="${(r*2)}" rx="${(r*0.5).toFixed(1)}" fill="${nd.color}"/>`
+      : `<circle cx="${nd.x.toFixed(1)}" cy="${nd.y.toFixed(1)}" r="${r}" fill="${nd.color}"/>`;
+    return `<g class="gnode" onclick="event.stopPropagation();${click}">${shape}${label}</g>`;
   }).join('');
+  const nIns = nodes.filter(n => n.type === 'insight').length, nSph = nodes.filter(n => n.type === 'sphere').length;
+  const meta = [nIns ? nIns + ' ' + pl(nIns,'мысль','мысли','мыслей') : '', nSph ? nSph + ' ' + pl(nSph,'сфера','сферы','сфер') : '']
+    .filter(Boolean).join(' + ') + ` · ${edges.length} ${pl(edges.length,'связь','связи','связей')}` + (compact ? ' · открыть карту →' : '');
   el.innerHTML =
     `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" class="graph-svg" preserveAspectRatio="xMidYMid meet">${lines}${circ}</svg>` +
-    `<div class="graph-meta">${nodes.length} ${pl(nodes.length,'мысль','мысли','мыслей')} · ${edges.length} ${pl(edges.length,'связь','связи','связей')}${compact?' · открыть карту →':''}</div>`;
+    `<div class="graph-meta">${meta}</div>`;
 }
 
 // ─── ДЕТАЛИ ──────────────────────────────────────────────────────
