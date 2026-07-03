@@ -773,3 +773,9 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .tour-dot{width:7px;height:7px;border-radius:50%;background:var(--bd2,#ccc);transition:all .3s}
 .tour-dot.on{background:var(--blue-btn,#1056CC);width:22px;border-radius:4px}
 .tour-skip{background:none;border:none;color:var(--t3);font-size:var(--tx3);font-weight:600;cursor:pointer;margin-top:var(--s3);padding:var(--s2)}
+
+/* ── AI-разбор записи (в деталях инсайта) ──────────────────────── */
+.deeper{margin-top:var(--s3);padding:var(--s3);border:1px solid var(--purple,#6B21A8);border-left-width:3px;
+  border-radius:var(--r12,12px);background:var(--purple-l,#F5EEFF)}
+.deeper-load{color:var(--purple,#6B21A8);font-size:var(--tx3);font-weight:600;font-style:italic}
+.deeper-an{font-size:var(--tx4);color:var(--t1);line-height:1.6;white-space:pre-wrap}

@@ -370,7 +370,7 @@ function updateDomainLabel() {
 }
 
 // ─── НАВИГАЦИЯ ───────────────────────────────────────────────────
-const TITLES = {home:'Сегодня', insights:'Инсайты', book:CFG.domainLabel||'Книга', vit:'Сферы', sys:'Итоги', map:'Разум'};
+const TITLES = {home:'Сегодня', insights:'Инсайты', book:CFG.domainLabel||'Книга', vit:'Сферы', sys:'Итоги', map:'Разум', settings:'Настройки'};
 function goTo(tab, el) {
   document.querySelectorAll('.pg').forEach(p => p.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
@@ -381,8 +381,9 @@ function goTo(tab, el) {
   $('ptitle').textContent = TITLES[tab] || tab;
   hpt();
   if (tab==='vit') { rSpheres(); rVit(); }
-  if (tab==='sys') { rDig(); rReview(30); rPushStatus(); }
+  if (tab==='sys') { rDig(); rReview(30); }
   if (tab==='map') rIns();
+  if (tab==='settings') { rProfileRow(); checkApiStatus(); rPushStatus(); }
 }
 function msub(tab, el) {
   document.querySelectorAll('[id^="ms-"]').forEach(t => t.style.display='none');
@@ -1081,18 +1082,22 @@ function buildGraph() {
   const edges = [];
   const deg = {};
   const seen = new Set();
+  const addEdge = (a, b) => {
+    const key = a < b ? a+'-'+b : b+'-'+a;
+    if (seen.has(key)) return;
+    seen.add(key);
+    edges.push({ a, b });
+    deg[a] = (deg[a]||0) + 1; deg[b] = (deg[b]||0) + 1;
+  };
+  // Ручные [[ссылки]] (обратная совместимость)
   ins.forEach(a => {
     (a.links || []).forEach(l => {
       const b = ins.find(x => x.id !== a.id && matchLink(l, x));
-      if (!b) return;
-      const key = a.id < b.id ? a.id+'-'+b.id : b.id+'-'+a.id;
-      if (seen.has(key)) return;
-      seen.add(key);
-      edges.push({ a: a.id, b: b.id });
-      deg[a.id] = (deg[a.id]||0) + 1;
-      deg[b.id] = (deg[b.id]||0) + 1;
+      if (b) addEdge(a.id, b.id);
     });
   });
+  // Автосвязи по общим темам — граф наполняется сам, без ручной разметки
+  ins.forEach(a => { relatedByTheme(a, 4).forEach(r => addEdge(a.id, r.ins.id)); });
   const ids = new Set();
   edges.forEach(e => { ids.add(e.a); ids.add(e.b); });
   const nodes = ins.filter(i => ids.has(i.id))
@@ -1174,15 +1179,67 @@ function showDet(id) {
   $('det-title').textContent = ins.title;
   $('det-body').innerHTML    = renderBody(ins.body);
   rDetMedia(ins);
-  // исходящие связи + бэклинки (кто ссылается сюда)
+  // Связи находятся АВТОМАТИЧЕСКИ по темам (общие ключевые слова), плюс
+  // ручные [[ссылки]]/бэклинки, если есть. Ничего вписывать не нужно.
+  const related = relatedByTheme(ins, 5);
   const out  = ins.links || [];
   const back = DB.insights.filter(x => x.id !== ins.id && (x.links||[]).some(l => matchLink(l, ins)));
   let html = '';
-  if (out.length)  html += `<div class="det-rel"><b>Ссылается на</b> ${out.map(l => `<span class="wl" onclick="openLink(decodeURIComponent('${encodeURIComponent(l)}'))">[[${esc(l)}]]</span>`).join(' ')}</div>`;
+  if (related.length) html += `<div class="det-rel"><b>Похожие по теме</b> ${related.map(r => `<span class="wl" onclick="showDet(${r.ins.id})">${esc(r.ins.title)}</span>`).join(' · ')}</div>`;
+  if (out.length)  html += `<div class="det-rel"><b>Ссылается на</b> ${out.map(l => `<span class="wl" onclick="openLink(decodeURIComponent('${encodeURIComponent(l)}'))">${esc(l)}</span>`).join(' · ')}</div>`;
   if (back.length) html += `<div class="det-rel"><b>Упоминается в</b> ${back.map(x => `<span class="wl" onclick="showDet(${x.id})">${esc(x.title)}</span>`).join(' · ')}</div>`;
-  if (!out.length && !back.length) html = `<div class="det-hint">Свяжи мысли: напиши <code>[[слово]]</code> в тексте инсайта — появятся связи и бэклинки.</div>`;
+  if (!html) html = `<div class="det-hint">Пересечений с другими записями пока нет — они появятся сами, когда темы начнут повторяться.</div>`;
   $('det-links').innerHTML = html;
+  const da = $('det-analysis'); if (da) da.innerHTML = '';
   openOv('ov-det');
+}
+// ─── АВТОСВЯЗИ ПО ТЕМАМ (без ручных [[…]]) ──────────────────────
+// Стоп-слова + лёгкий стем: находим записи с общими значимыми словами.
+const RU_STOP = new Set(('и в во не что он на я с со как а то все она так его но да ты к у же вы за бы по ' +
+  'только ее мне было вот от меня еще нет о из ему теперь когда даже ну вдруг ли если уже или ни быть был ' +
+  'него до вас нибудь опять уж вам ведь там потом себя ничего ей может они тут где есть надо ней для мы ' +
+  'тебя их чем была сам чтоб без будто чего раз тоже себе под будет тогда кто этот того потому этого какой ' +
+  'совсем ним здесь этом один почти мой тем чтобы нее сейчас были куда зачем всех никогда можно при наконец ' +
+  'два об другой хоть после над больше тот через эти нас про всего них какая много разве три эту моя впрочем ' +
+  'хорошо свою этой перед иногда лучше чуть том нельзя такой более всегда конечно всю между это очень нужно ' +
+  'этих своей своих свои есть быть меня очень просто').split(/\s+/));
+function keywords(text) {
+  return [...new Set(String(text || '').toLowerCase().replace(/[^а-яёa-z0-9\s]/gi, ' ')
+    .split(/\s+/).filter(w => w.length >= 4 && !RU_STOP.has(w)).map(stemRu).filter(w => w.length >= 3))];
+}
+function relatedByTheme(ins, limit) {
+  const mine = new Set(keywords((ins.title || '') + ' ' + (ins.body || '')));
+  if (mine.size < 2) return [];
+  return (DB.insights || []).filter(x => x.id !== ins.id).map(x => {
+    const kw = keywords((x.title || '') + ' ' + (x.body || ''));
+    let overlap = 0; kw.forEach(w => { if (mine.has(w)) overlap++; });
+    return { ins: x, overlap };
+  }).filter(s => s.overlap >= 2).sort((a, b) => b.overlap - a.overlap).slice(0, limit || 5);
+}
+// AI-разбор сохранённой записи: тёплая интерпретация + мягкий вопрос.
+async function aiAnalyzeDet() {
+  const ins = DB.insights.find(x => x.id === STATE.detId);
+  if (!ins) return;
+  if (!getAiKey()) { toast('Добавь ключ Anthropic в Настройки', 'warn'); closeOv('ov-det'); goTo('settings'); return; }
+  const slot = $('det-analysis'), btn = $('det-ai-btn');
+  if (slot) slot.innerHTML = `<div class="deeper deeper-load">Claude вчитывается…</div>`;
+  if (btn) btn.disabled = true;
+  try {
+    const rel = relatedByTheme(ins, 4).map(r => r.ins.title);
+    const user = `Моя запись:\nЗаголовок: ${ins.title}` +
+      (ins.body && ins.body !== ins.title ? `\nТекст: ${ins.body}` : '') +
+      (rel.length ? `\n\nПохожие мои записи по теме: ${rel.join('; ')}.` : '') +
+      `\n\nСделай короткий тёплый разбор (3–4 предложения): что здесь на самом деле про меня — чувство/потребность/паттерн под текстом; если видно повторение с похожими записями — назови его бережно. Заверши одним мягким вопросом. По-русски, без клише и морализаторства.`;
+    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 320 });
+    const t = (text || '').trim();
+    if (!t) throw new Error('пустой ответ');
+    if (slot) slot.innerHTML = `<div class="deeper"><div class="deeper-an">${esc(t)}</div></div>`;
+    hpt();
+  } catch (e) {
+    if (e.noKey) { closeOv('ov-det'); goTo('settings'); }
+    if (slot) slot.innerHTML = '';
+    toast('AI: ' + e.message, 'warn');
+  } finally { if (btn) btn.disabled = false; }
 }
 function shareIns() {
   const ins = DB.insights.find(x=>x.id===STATE.detId);
