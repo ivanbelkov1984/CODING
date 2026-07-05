@@ -2461,7 +2461,7 @@ function rDig() {
           <div class="dg-stat"><b>${d.stateAvg ?? '—'}</b><span>состояние ${arrow}</span></div>
           <div class="dg-stat"><b>${d.dreams}</b><span>снов</span></div>
         </div>
-        ${d.ai ? `<div class="dg-ai"><div class="dg-ai-badge">✨ AI-обзор</div>${esc(d.ai)}</div>` : ''}
+        ${d.ai ? `<div class="dg-ai"><div class="dg-ai-badge">✨ Живой обзор недели</div>${esc(d.ai)}</div>` : ''}
         ${d.top && d.top.length ? `<div class="dg-sub">Сильнейшие инсайты</div>${d.top.map(t=>`<div class="dg-top"><span class="tag ${TC[t.tag]||'tg-personal'}">${TL[t.tag]||t.tag}</span> ${esc(t.title)}</div>`).join('')}` : ''}
         ${d.themes && d.themes.length ? `<div class="chips" style="margin-top:var(--s3)">${d.themes.map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div>` : ''}
       </div>`;
