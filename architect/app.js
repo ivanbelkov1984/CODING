@@ -2500,7 +2500,18 @@ async function mkDig() {
     stateAvg: aW ? +aW.comp.toFixed(1) : null, stateDelta,
     dreams, patterns: DB.patterns.length, themes, top,
   });
-  persist(); rDig(); hptMed(); toast('Дайджест готов', 'ok');
+  persist(); rDig(); hptMed(); toast('Обзор недели готов', 'ok');
+  // Автономно: если есть ключ — Claude тихо дописывает живой обзор (без кнопок).
+  if (getAiKey()) enrichDigestAutonomously(now);
+}
+async function enrichDigestAutonomously(digId) {
+  try {
+    const user = weekContextForAI() +
+      '\n\nНапиши тёплый живой обзор недели (4–6 предложений): что заметно в инсайтах и состоянии, какая динамика, на что обратить внимание. Заверши одним мягким вопросом. Без клише.';
+    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 700 });
+    const d = (DB.digests || []).find(x => x.id === digId) || DB.digests[0];
+    if (d && text) { d.ai = text.trim(); persist(); rDig(); }
+  } catch (e) { /* тихо: AI — необязательный фоновый слой */ }
 }
 
 // ─── КОНФИГ ──────────────────────────────────────────────────────
