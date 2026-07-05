@@ -843,3 +843,14 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
   .cons-ring, .sph-ring { transition: none; }
   .pg.on { animation: none; }
 }
+
+/* ═══ ВОЛНА 2 — дисциплина поверхностей (Linear/Oura) ═══ */
+/* Иконки без цветной заливки-подложки: форма — иконка, цвет — на самой иконке */
+.qa-ic{background:var(--bg3)!important;border:1px solid var(--bd)}
+[data-theme="dark"] .qa-ic{background:var(--bg4,#34343A)!important;border-color:var(--hair)}
+.sic{background:var(--bg3)!important}
+[data-theme="dark"] .sic{background:var(--bg4,#34343A)!important}
+/* Тепловая карта: лёгкая текстура-градиент в ячейке вместо плоского цвета */
+.hc{background-image:linear-gradient(150deg,rgba(255,255,255,.14),rgba(0,0,0,.10))}
+/* «Что помогает» — акцентная подсветка рамки (сигнатурный момент) */
+.si-card{border-left:3px solid var(--teal)}
