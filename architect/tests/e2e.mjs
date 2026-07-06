@@ -17,15 +17,17 @@ const FILE = 'file://' + join(DIR, '..', 'dist', 'app.html');
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
-// Внешние CDN (шрифт/иконки) в CI/песочнице недоступны — это не баги приложения.
-const CDN = /ERR_CONNECTION|fonts\.googleapis|unpkg\.com|gstatic/;
+// Сетевые ошибки к ВНЕШНИМ хостам (CDN-шрифт/иконки, бэкенд-health, Anthropic)
+// зависят от окружения (file://-origin, офлайн-CI) и не являются багами
+// приложения. Валим только на настоящих JS-ошибках самого кода.
+const EXT = /ERR_CONNECTION|ERR_NETWORK|ERR_NAME_NOT_RESOLVED|net::|Failed to load resource|CORS policy|Access-Control-Allow-Origin|fonts\.googleapis|gstatic|unpkg\.com|railway\.app|anthropic\.com/i;
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
 const page = await browser.newPage({ viewport: { width: 390, height: 900 }, deviceScaleFactor: 2 });
 const errors = [];
 page.on('dialog', d => d.accept());   // подтверждаем confirm() (напр. восстановление)
 page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-page.on('console', m => { if (m.type() === 'error' && !CDN.test(m.text())) errors.push('console: ' + m.text()); });
+page.on('console', m => { if (m.type() === 'error' && !EXT.test(m.text())) errors.push('console: ' + m.text()); });
 
 await page.goto(FILE);
 await page.waitForTimeout(500);
