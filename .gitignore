@@ -1,4 +1,4 @@
 /.vscode
 architect/dist/
-architect/node_modules/
-node_modules/
+architect/node_modules
+node_modules
