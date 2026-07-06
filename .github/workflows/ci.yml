@@ -1,0 +1,29 @@
+name: CI — Архитектор
+
+# Регрессионная сеть: собирает приложение и гоняет E2E в Chromium
+# на каждый push/PR. Защищает курс после инцидента с потерей данных.
+
+on:
+  push:
+    branches: [ MAIN, "claude/**" ]
+    paths: [ "architect/**" ]
+  pull_request:
+    paths: [ "architect/**" ]
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: architect
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install deps
+        run: npm install
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Build + E2E
+        run: npm test

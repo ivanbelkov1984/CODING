@@ -1,0 +1,15 @@
+{
+  "name": "architect-web",
+  "version": "5.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Архитектор — умный дневник жизни (фронтенд: сборка и E2E-тесты)",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:test": "node build.mjs --combined dist/app.html",
+    "test": "node build.mjs --combined dist/app.html && node tests/e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.0"
+  }
+}
