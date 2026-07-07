@@ -130,6 +130,14 @@ const lucide = await page.evaluate(() => ({
 }));
 ok(lucide.lib === 'object' && lucide.icons > 10, `lucide загружен локально и рисует иконки (${lucide.icons})`);
 
+// ── Самохостинг шрифта Inter (латиница + кириллица, без Google Fonts) ──
+const font = await page.evaluate(async () => {
+  if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  return { avail: !!(document.fonts && document.fonts.check('16px Inter')),
+           loaded: document.fonts ? [...document.fonts].filter(f => f.status === 'loaded').length : 0 };
+});
+ok(font.avail && font.loaded >= 1, `Inter загружен локально (faces: ${font.loaded})`);
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
