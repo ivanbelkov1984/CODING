@@ -123,6 +123,13 @@ const restored = await page.evaluate(() => {
 });
 ok(restored.ok, `снапшот→восстановление возвращает данные (${restored.after}/${restored.before})`);
 
+// ── Самохостинг иконок lucide (без внешнего CDN) ──
+const lucide = await page.evaluate(() => ({
+  lib: typeof window.lucide,
+  icons: document.querySelectorAll('svg.lucide, svg[class*="lucide-"]').length,
+}));
+ok(lucide.lib === 'object' && lucide.icons > 10, `lucide загружен локально и рисует иконки (${lucide.icons})`);
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
