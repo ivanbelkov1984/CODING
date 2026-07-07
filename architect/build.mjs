@@ -13,9 +13,19 @@
 import { readFile, writeFile, mkdir, copyFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { createHash } from 'crypto';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 const STATIC = ['manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon-180.png'];
+
+// Версия сборки = короткий хеш контента (детерминированно): одинаковый код →
+// одинаковая версия → SW не «обновляется» зря, а изменённый код всегда даёт
+// новую версию кэша. Гармонично с уже работающим механизмом sw.js.
+async function contentVersion() {
+  const h = createHash('sha256');
+  for (const f of ['index.html', 'styles.css', 'app.js', 'sw.js']) h.update(await readFile(join(DIR, f)));
+  return 'v' + h.digest('hex').slice(0, 10);
+}
 
 // Инлайн CSS/JS в HTML. Замена через функцию — чтобы `$` в коде трактовался
 // буквально (в строке-замене `$&`, `$1` и т.п. — специальные).
@@ -41,7 +51,7 @@ async function main() {
     console.log('combined →', out);
     return;
   }
-  const build = args[0] || 'v' + new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12);
+  const build = args[0] || await contentVersion();
   const dist = join(DIR, 'dist');
   await mkdir(dist, { recursive: true });
   await writeFile(join(dist, 'index.html'), await buildCombined());

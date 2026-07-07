@@ -1,0 +1,44 @@
+name: Deploy — gh-pages
+
+# Публикация в прод СТРОГО после зелёного CI на MAIN: если тесты упали —
+# деплой не запускается, сломанный код в прод не попадёт (защита курса).
+# Собирает dist/ (build.mjs, детерминированная версия по хешу контента)
+# и force-push в ветку gh-pages (артефактная ветка сборки).
+
+on:
+  workflow_run:
+    workflows: ["CI — Архитектор"]
+    types: [completed]
+    branches: [MAIN]
+  workflow_dispatch:        # можно запустить вручную
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: MAIN
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build dist
+        working-directory: architect
+        run: node build.mjs
+      - name: Publish to gh-pages
+        working-directory: architect/dist
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init -q -b gh-pages
+          git add -A
+          git -c user.name="deploy-bot" -c user.email="deploy@architect.app" commit -qm "deploy: ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages:gh-pages
