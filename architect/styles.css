@@ -1031,3 +1031,7 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 /* Жесты: строки-свайпы; красная подложка видна только во время жеста */
 .ins-row{touch-action:pan-y}
 .ins-del-bg{opacity:0;transition:opacity .12s var(--e)}
+
+/* Группировка списков по датам (Сегодня/Вчера/Ранее) */
+.grp-lbl{font-size:.72rem;font-weight:500;letter-spacing:.05em;text-transform:uppercase;color:var(--t3);padding:14px 16px 6px}
+.grp-lbl:first-child{padding-top:10px}

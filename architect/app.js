@@ -924,7 +924,18 @@ function rIns() {
     </div>`;
     return;
   }
-  el.innerHTML = list.map(iRow).join('');
+  // Группировка по датам (референс Claude Code): СЕГОДНЯ / ВЧЕРА / РАНЕЕ.
+  // Только при сортировке по дате; иначе — плоский список.
+  if (STATE.sort === 'date') {
+    const today = todayKey(), yest = dayAgo(1);
+    const dayOf = i => (i.day || String(i.createdAt || '').slice(0, 10));
+    const g = { t: [], y: [], e: [] };
+    list.forEach(i => { const d = dayOf(i); (d === today ? g.t : d === yest ? g.y : g.e).push(i); });
+    const sec = (lbl, arr) => arr.length ? `<div class="grp-lbl">${lbl} · ${arr.length}</div>` + arr.map(iRow).join('') : '';
+    el.innerHTML = sec('Сегодня', g.t) + sec('Вчера', g.y) + sec('Ранее', g.e);
+  } else {
+    el.innerHTML = list.map(iRow).join('');
+  }
   icons({nodes:[el]});
 }
 function flt(tag, el) {
