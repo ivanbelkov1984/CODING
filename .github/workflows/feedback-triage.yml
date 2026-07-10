@@ -1,0 +1,27 @@
+name: Feedback — AI-триаж
+
+# Классификация обратной связи (FEEDBACK_SPEC.md): каждые 6 часов + вручную.
+# Без секретов — мягкий SKIP, не красный.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: architect/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --omit=dev
+      - name: Triage
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node triage.mjs
