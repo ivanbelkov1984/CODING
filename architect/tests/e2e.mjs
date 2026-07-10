@@ -128,6 +128,22 @@ await page.waitForTimeout(250);
 ok(await page.evaluate(() => JSON.parse(localStorage.getItem('arch5_fb_sent') || '[]').includes(7)), 'фидбэк отправлен, id сохранён для замыкания цикла');
 ok(await page.evaluate(() => !document.querySelector('#ov-feedback.on')), 'форма фидбэка закрывается после отправки');
 
+// ── Lagged-паттерн сферы: эффект «на следующий день» (Bearable) ──
+const lagged = await page.evaluate(() => {
+  const DAY = 864e5, iso = n => new Date(Date.now() - n * DAY).toISOString().slice(0, 10);
+  DB.spheres = []; DB.sphereLogs = []; DB.checkins = [];
+  // спорт в день i (i%3==0) → состояние высокое НАЗАВТРА (день i-1); в сам день — нейтрально
+  for (let i = 0; i < 21; i++) {
+    const hi = i % 3 === 2;
+    DB.checkins.push({ id: 900 + i, date: iso(i), sl: 7, sq: 7, cl: hi ? 9 : 5, mv: hi ? 8 : 5, st: hi ? 2 : 5, ci: true });
+  }
+  const sp = createSphere({ name: 'Спорт', type: 'habit' });
+  for (let i = 0; i < 21; i++) if (i % 3 === 0) logSphere(sp.id, true, '', iso(i));
+  const items = smartInsights().items || [];
+  return items.map(x => x.text).join(' | ');
+});
+ok(/Спорт/.test(lagged) && /следующий день|назавтра/.test(lagged), `lagged-эффект сферы формулируется («${lagged.slice(0, 80)}…»)`);
+
 // ── Защита данных: снапшот → потеря → восстановление ──
 const restored = await page.evaluate(() => {
   const before = DB.insights.length + DB.spheres.length;
