@@ -451,6 +451,9 @@ function goTo(tab, el) {
   const nb = $('nt-'+tab) || el;
   if (nb) nb.classList.add('on');
   $('ptitle').textContent = TITLES[tab] || tab;
+  document.querySelectorAll('.navlink').forEach(n => n.classList.toggle('on', n.dataset.tab === tab));
+  if (typeof closeNav === 'function') closeNav();
+  if (typeof rSidebar === 'function') rSidebar();
   hpt();
   if (tab==='vit') { rSpheres(); rVit(); }
   if (tab==='sys') { rLivingMap('livingmap-out'); rDig(); rReview(30); }
@@ -3271,3 +3274,76 @@ document.addEventListener('DOMContentLoaded', () => {
   initSplash();
   initAll();
 });
+
+
+// ═══ SHELL: drawer-навигация, блок аккаунта, жесты ═══════════════
+function openNav()  { rSidebar(); document.body.classList.add('nav-open'); }
+function closeNav() { document.body.classList.remove('nav-open'); }
+function toggleNav(){ document.body.classList.toggle('nav-open'); hpt(); }
+// Блок аккаунта в сайдбаре: имя профиля, инициал, статус-точка синка
+function rSidebar() {
+  try {
+    const p = (typeof activeProfile === 'function' && activeProfile()) || null;
+    const n = (CFG.userName || (p && p.name) || 'Профиль');
+    const ava = $('acct-ava'); if (ava && ava.firstChild) ava.firstChild.nodeValue = (n[0] || 'А').toUpperCase();
+    const nm = $('acct-name'); if (nm) nm.textContent = n;
+    const sub = $('acct-sub'); if (sub) sub.textContent = CFG.spaceKey ? 'синхронизация включена' : 'данные на устройстве';
+    const dot = $('acct-dot'); if (dot) dot.className = 'acct-dot ' + (!navigator.onLine ? 'off' : (CFG.spaceKey ? 'ok' : 'idle'));
+  } catch (e) {}
+}
+// Жесты: край→drawer, свайп-влево по строке→удаление, шторка-вниз→закрыть.
+// Вертикаль отменяет; input/textarea/canvas игнорируются.
+(function initGestures() {
+  let sx = 0, sy = 0, mode = null, sheet = null, ovId = null, row = null;
+  const mobile = () => window.innerWidth <= 900;
+  document.addEventListener('touchstart', e => {
+    const t = e.touches[0]; sx = t.clientX; sy = t.clientY;
+    mode = null; sheet = null; ovId = null; row = null;
+    const el = e.target;
+    if (el.closest && el.closest('input,textarea,canvas,select')) return;
+    const grip = el.closest && el.closest('.sh-pull');
+    if (grip) { mode = 'sheet'; sheet = grip.closest('.sheet'); const ov = grip.closest('.ov'); ovId = ov && ov.id; return; }
+    const r = el.closest && el.closest('.ins-row');
+    if (r) { mode = 'row'; row = r; return; }
+    if (mobile() && !document.body.classList.contains('nav-open') && sx < 36) { mode = 'edge'; return; }
+    if (mobile() && document.body.classList.contains('nav-open')) { mode = 'closer'; }
+  }, { passive: true });
+  document.addEventListener('touchmove', e => {
+    if (!mode) return;
+    const t = e.touches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+    if (mode === 'row' && row) {
+      if (Math.abs(dy) > Math.abs(dx) + 4) { row.style.transform = ''; row.style.transition = ''; mode = null; return; }
+      const x = Math.max(-120, Math.min(0, dx));
+      row.style.transition = 'none'; row.style.transform = 'translateX(' + x + 'px)';
+      const bg = row.parentElement && row.parentElement.querySelector('.ins-del-bg');
+      if (bg) bg.style.opacity = Math.abs(x) > 6 ? '1' : '0';
+      row.dataset.armed = x <= -64 ? '1' : '';
+    } else if (mode === 'sheet' && sheet) {
+      const y = Math.max(0, dy);
+      sheet.style.transition = 'none'; sheet.style.transform = 'translateY(' + y + 'px)';
+      sheet.dataset.dy = y;
+    }
+  }, { passive: true });
+  document.addEventListener('touchend', e => {
+    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+    if (mode === 'edge' && dx >= 56 && Math.abs(dx) > Math.abs(dy)) openNav();
+    else if (mode === 'closer' && dx <= -56 && Math.abs(dx) > Math.abs(dy)) closeNav();
+    else if (mode === 'row' && row) {
+      const armed = row.dataset.armed === '1';
+      row.style.transition = ''; row.style.transform = '';
+      const bg = row.parentElement && row.parentElement.querySelector('.ins-del-bg');
+      if (bg) bg.style.opacity = '';
+      row.dataset.armed = '';
+      if (armed) { const id = +String(row.id).replace('ir-', ''); if (id && typeof deleteIns === 'function') deleteIns(id); } // с undo-тостом
+    } else if (mode === 'sheet' && sheet) {
+      const y = +(sheet.dataset.dy || 0);
+      sheet.style.transition = ''; sheet.dataset.dy = '';
+      sheet.style.transform = '';
+      if (y > 100 && ovId) closeOv(ovId);
+    }
+    mode = null; row = null; sheet = null; ovId = null;
+  }, { passive: true });
+  window.addEventListener('online',  () => rSidebar());
+  window.addEventListener('offline', () => rSidebar());
+  rSidebar();
+})();

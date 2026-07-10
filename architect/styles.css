@@ -70,8 +70,19 @@
   --dur1:80ms; --dur2:120ms; --dur3:150ms;
 }
 
-/* Тема единственная: dark — канон. Атрибут data-theme визуально инертен. */
-[data-theme="dark"], [data-theme="light"] { color-scheme: dark; }
+[data-theme="dark"]{color-scheme:dark}
+/* ── СВЕТЛАЯ ТЕМА (равноценная; тёплая, как референсы) ──────────── */
+[data-theme="light"]{
+  color-scheme:light;
+  --bg-base:#F2F1EC; --bg-panel:#FBFAF7; --bg-surface-2:#FFFFFF;
+  --bg-surface-3:#F1EFE9; --bg-surface-4:#FFFFFF;
+  --border-subtle:#E7E4DE; --border-medium:#D9D6CE; --border-strong:#C8C5BC;
+  --t1:#1C1B17; --t2:#4A4842; --t3:#8B887F; --t4:#B7B4AB;
+  --green:#1F8A3C; --green-l:rgba(31,138,60,.10);
+  --red:#D64545; --red-l:rgba(214,69,69,.10);
+  --orange:#B0722A; --orange-l:rgba(176,114,42,.10);
+  --gold:rgba(94,106,210,.55); --rose:rgba(94,106,210,.30); --hm0:#E9E7E1;
+}
 
 /* ── RESET ─────────────────────────────────────────────────────── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -944,8 +955,8 @@ body{font-size:.9375rem;line-height:1.5}
 /* Иконки: monoline, по умолчанию третичные */
 .ib svg,.qa-ic svg{stroke-width:1.75}
 
-/* Тема единственная: переключатель скрыт (dark — канон) */
-.srow:has(#thv){display:none}
+
+
 
 /* Тепловая карта: индиго-рампа интенсивности задана токенами (--rose/--gold/--blue-t/--teal), верх — функциональный зелёный */
 .hm-card{background:var(--sf)}
@@ -984,3 +995,39 @@ body{font-size:.9375rem;line-height:1.5}
 /* Пилюли уровней/весов — чипы 4px */
 .wp{border-radius:4px;font-weight:500}
 .wp.on{background:rgba(94,106,210,.13);border-color:var(--accent);color:var(--accent-light)}
+
+/* ═══ SHELL: сайдбар (desktop) / drawer (≤900px) ═══════════════ */
+body{display:flex;min-height:100dvh;overflow:hidden}
+.sidebar{width:264px;flex-shrink:0;background:var(--sf);border-right:1px solid var(--bd);padding:16px 12px calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px;height:100dvh}
+.side-brand{display:flex;align-items:center;gap:10px;padding:6px 8px 14px;font-weight:650;font-size:1rem;color:var(--t1)}
+.acct{display:flex;align-items:center;gap:10px;padding:10px;border-radius:11px;cursor:pointer;border:1px solid var(--bd);background:var(--bg2);-webkit-tap-highlight-color:transparent}
+.acct:active{background:var(--bg3)}
+.acct-ava{position:relative;width:38px;height:38px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:650;flex-shrink:0}
+.acct-dot{position:absolute;right:-1px;bottom:-1px;width:11px;height:11px;border-radius:50%;border:2px solid var(--sf);background:var(--t4)}
+.acct-dot.ok{background:var(--green)}
+.acct-dot.idle{background:var(--accent-light)}
+.acct-col{min-width:0;flex:1}
+.acct-name{font-size:.9rem;font-weight:650;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acct-sub{font-size:.75rem;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#nav{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding-top:8px}
+.navlink{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:11px;font-size:.9rem;font-weight:500;color:color-mix(in srgb,var(--t1) 60%,transparent);text-align:left;transition:background var(--dur1) var(--e),color var(--dur1) var(--e)}
+.navlink svg{width:20px;height:20px;stroke-width:1.9;flex-shrink:0}
+.navlink:hover,.navlink.on{background:var(--bg2);color:var(--t1)}
+.navlink.on svg{color:var(--accent)}
+.side-div{height:1px;background:var(--bd);margin:8px 4px;flex-shrink:0}
+.side-foot{border-top:1px solid var(--bd);padding-top:10px;text-align:center;flex-shrink:0}
+.side-status{font-size:.72rem;color:var(--t4)}
+#app{flex:1;max-width:none;margin:0;min-width:0}
+.content>.pg{max-width:940px;margin:0 auto;width:100%}
+.burger{display:none}
+.scrim{position:fixed;inset:0;background:rgba(6,7,20,.5);opacity:0;pointer-events:none;transition:opacity .3s var(--e);z-index:55}
+@media(max-width:900px){
+  .sidebar{position:fixed;left:0;top:0;bottom:0;height:auto;width:min(300px,84vw);transform:translateX(-100%);transition:transform .3s var(--e);z-index:60;padding-top:calc(20px + env(safe-area-inset-top))}
+  body.nav-open .sidebar{transform:none}
+  body.nav-open .scrim{opacity:1;pointer-events:auto}
+  .burger{display:flex}
+}
+@media(min-width:901px){.topbar .top-brand .top-dot{display:none}}
+/* Жесты: строки-свайпы; красная подложка видна только во время жеста */
+.ins-row{touch-action:pan-y}
+.ins-del-bg{opacity:0;transition:opacity .12s var(--e)}

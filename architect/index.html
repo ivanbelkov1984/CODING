@@ -18,6 +18,31 @@
 </head>
 <body>
 
+<!-- ══ SHELL: SCRIM + SIDEBAR (drawer ≤900px) ═══════════════════ -->
+<div class="scrim" id="scrim" onclick="closeNav()"></div>
+<aside class="sidebar" id="sidebar">
+  <div class="side-brand">
+    <div class="top-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="12,2 22,8.5 22,15.5 12,22 2,15.5 2,8.5"/><line x1="12" y1="2" x2="12" y2="22" opacity=".45"/></svg></div>
+    <span>Архитектор</span>
+  </div>
+  <div class="acct" onclick="openProfiles()" role="button" aria-label="Профиль">
+    <div class="acct-ava" id="acct-ava">А<span class="acct-dot" id="acct-dot"></span></div>
+    <div class="acct-col">
+      <div class="acct-name" id="acct-name">Профиль</div>
+      <div class="acct-sub" id="acct-sub">данные на устройстве</div>
+    </div>
+  </div>
+  <nav id="nav">
+    <button class="navlink on" data-tab="home" onclick="goTo('home')"><i data-lucide="sun"></i>Сегодня</button>
+    <button class="navlink" data-tab="vit" onclick="goTo('vit')"><i data-lucide="layers"></i>Сферы</button>
+    <button class="navlink" data-tab="map" onclick="goTo('map')"><i data-lucide="brain"></i>Разум</button>
+    <button class="navlink" data-tab="sys" onclick="goTo('sys')"><i data-lucide="bar-chart-3"></i>Итоги</button>
+    <div class="side-div"></div>
+    <button class="navlink" data-tab="settings" onclick="goTo('settings')"><i data-lucide="settings"></i>Настройки</button>
+  </nav>
+  <div class="side-foot"><span class="side-status" id="side-status">офлайн-first · зашифровано</span></div>
+</aside>
+
 <!-- ══ ONBOARDING ════════════════════════════════════════════════ -->
 <div class="ov" id="ov-onboard">
   <div class="onboard-sheet">
@@ -73,6 +98,7 @@
 
 <!-- TOPBAR -->
 <header class="topbar">
+  <button class="ib burger" id="burger" onclick="toggleNav()" aria-label="Меню"><i data-lucide="menu"></i></button>
   <div class="top-brand">
     <div class="top-dot">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
@@ -319,15 +345,6 @@
 
 </main>
 
-<!-- TAB BAR -->
-<nav class="tabbar">
-  <div class="tabbar-inner">
-    <button class="tab on" id="nt-home" onclick="goTo('home',this)" aria-label="Сегодня"><i data-lucide="sun"></i><span class="tab-lbl">Сегодня</span></button>
-    <button class="tab" id="nt-vit" onclick="goTo('vit',this)" aria-label="Сферы"><i data-lucide="layers"></i><span class="tab-lbl">Сферы</span></button>
-    <button class="tab" id="nt-map" onclick="goTo('map',this)" aria-label="Разум"><i data-lucide="brain"></i><span class="tab-lbl">Разум</span></button>
-    <button class="tab" id="nt-sys" onclick="goTo('sys',this)" aria-label="Итоги"><i data-lucide="bar-chart-3"></i><span class="tab-lbl">Итоги</span><span class="tbadge" id="tbadge" style="display:none"></span></button>
-  </div>
-</nav>
 </div><!-- end #app -->
 
 <!-- ══ OVERLAYS ══════════════════════════════════════════════════ -->

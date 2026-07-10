@@ -50,8 +50,13 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(300);
 
-// ── Навигация: 4 вкладки ──
-ok(await page.locator('.tabbar-inner .tab').count() === 4, '4 вкладки в навигации');
+// ── Навигация: сайдбар/drawer (нижнего таббара нет по спеку) ──
+ok(await page.locator('#sidebar .navlink').count() >= 5, 'сайдбар: пункты навигации (4 раздела + настройки)');
+ok(await page.locator('.tabbar').count() === 0, 'нижний таббар снят');
+await page.evaluate(() => openNav());
+ok(await page.evaluate(() => document.body.classList.contains('nav-open')), 'drawer открывается (openNav)');
+await page.evaluate(() => closeNav());
+ok(await page.evaluate(() => !document.body.classList.contains('nav-open')), 'drawer закрывается (closeNav)');
 for (const t of ['home', 'vit', 'map', 'sys']) {
   await page.evaluate(x => goTo(x), t);
   ok(await page.locator('#pg-' + t + '.on').count() === 1, `вкладка ${t} открывается`);
