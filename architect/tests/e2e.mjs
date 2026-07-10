@@ -116,6 +116,18 @@ await page.waitForTimeout(120);
 ok(await page.evaluate(() => document.querySelectorAll('#ov-ci .emo, #ci-emotions > *, #ov-ci [onclick*="Emo"]').length) > 0, 'чек-ин: есть RULER-палитра эмоций');
 await page.evaluate(() => closeOv('ov-ci'));
 
+// ── Обратная связь: форма → отправка (мок API) → id сохранён ──
+await page.evaluate(() => {
+  window.fetch = (u) => String(u).includes('/api/feedback')
+    ? Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 7 }) })
+    : Promise.reject(new Error('offline'));
+  openOv('ov-feedback'); $('fb-text').value = 'Отличное приложение, спасибо!';
+  return sendFeedback();
+});
+await page.waitForTimeout(250);
+ok(await page.evaluate(() => JSON.parse(localStorage.getItem('arch5_fb_sent') || '[]').includes(7)), 'фидбэк отправлен, id сохранён для замыкания цикла');
+ok(await page.evaluate(() => !document.querySelector('#ov-feedback.on')), 'форма фидбэка закрывается после отправки');
+
 // ── Защита данных: снапшот → потеря → восстановление ──
 const restored = await page.evaluate(() => {
   const before = DB.insights.length + DB.spheres.length;

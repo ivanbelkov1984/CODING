@@ -39,6 +39,7 @@
     <button class="navlink" data-tab="sys" onclick="goTo('sys')"><i data-lucide="bar-chart-3"></i>Итоги</button>
     <div class="side-div"></div>
     <button class="navlink" data-tab="settings" onclick="goTo('settings')"><i data-lucide="settings"></i>Настройки</button>
+    <button class="navlink" onclick="closeNav();openOv('ov-feedback')"><i data-lucide="message-square"></i>Обратная связь</button>
   </nav>
   <div class="side-foot"><span class="side-status" id="side-status">офлайн-first · зашифровано</span></div>
 </aside>
@@ -346,6 +347,21 @@
 </main>
 
 </div><!-- end #app -->
+
+<!-- ОБРАТНАЯ СВЯЗЬ -->
+<div class="ov" id="ov-feedback" onclick="if(event.target===this)closeOv('ov-feedback')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Обратная связь</div>
+    <div class="sh-form">
+      <div class="f-lbl">Что расскажешь?</div>
+      <textarea class="field" id="fb-text" rows="4" placeholder="Похвала, идея, жалоба или ошибка — своими словами"></textarea>
+      <label class="fb-ctx-row"><input type="checkbox" id="fb-ctx" checked>Приложить тех-контекст: версия, экран, устройство</label>
+      <button class="btn btn-p btn-full" onclick="sendFeedback()">Отправить</button>
+      <button class="btn btn-s btn-full" onclick="closeOv('ov-feedback')">Позже</button>
+    </div>
+  </div>
+</div>
 
 <!-- ══ OVERLAYS ══════════════════════════════════════════════════ -->
 

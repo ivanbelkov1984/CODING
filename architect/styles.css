@@ -1035,3 +1035,7 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 /* Группировка списков по датам (Сегодня/Вчера/Ранее) */
 .grp-lbl{font-size:.72rem;font-weight:500;letter-spacing:.05em;text-transform:uppercase;color:var(--t3);padding:14px 16px 6px}
 .grp-lbl:first-child{padding-top:10px}
+
+/* Обратная связь */
+.fb-ctx-row{display:flex;align-items:center;gap:8px;font-size:.8125rem;color:var(--t3);cursor:pointer}
+.fb-ctx-row input{width:16px;height:16px;accent-color:var(--accent)}

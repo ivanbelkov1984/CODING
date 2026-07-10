@@ -3358,3 +3358,65 @@ function rSidebar() {
   window.addEventListener('offline', () => rSidebar());
   rSidebar();
 })();
+
+// ═══ ОБРАТНАЯ СВЯЗЬ (см. FEEDBACK_SPEC.md) ═══════════════════════
+// errorBuffer: кольцевой буфер последних JS-ошибок (только локально;
+// уходит на сервер ТОЛЬКО при явной отправке формы с включённым чекбоксом).
+const ERRBUF_KEY = 'arch5_errbuf';
+function pushErr(m) {
+  try {
+    const b = JSON.parse(localStorage.getItem(ERRBUF_KEY) || '[]');
+    b.push({ m: String(m).slice(0, 300), ts: nowISO() });
+    while (b.length > 10) b.shift();
+    localStorage.setItem(ERRBUF_KEY, JSON.stringify(b));
+  } catch (e) {}
+}
+window.addEventListener('error', e => pushErr((e.message || 'error') + ' @' + (e.filename || '').split('/').pop() + ':' + (e.lineno || 0)));
+window.addEventListener('unhandledrejection', e => pushErr('promise: ' + ((e.reason && e.reason.message) || e.reason)));
+
+function fbContext() {
+  let screen = '';
+  try { screen = (document.querySelector('.ov.on') || document.querySelector('.pg.on') || {}).id || ''; } catch (e) {}
+  return {
+    screen, lang: navigator.language, online: navigator.onLine,
+    ua: navigator.userAgent.slice(0, 200), viewport: innerWidth + 'x' + innerHeight,
+    ts: nowISO(), lastErrors: (JSON.parse(localStorage.getItem(ERRBUF_KEY) || '[]')).slice(-3),
+  };
+}
+async function sendFeedback() {
+  const ta = $('fb-text'); const t = (ta && ta.value.trim()) || '';
+  if (t.length < 3) { toast('Напиши хотя бы пару слов', 'warn'); return; }
+  const withCtx = !$('fb-ctx') || $('fb-ctx').checked;
+  let ver = ''; try { ver = ((await caches.keys()) || []).find(k => k.startsWith('arch-')) || ''; } catch (e) {}
+  const payload = { text: t, context: withCtx ? { ...fbContext(), appVersion: ver } : { ts: nowISO() } };
+  const base = (typeof apiBase === 'function' && apiBase()) || window.ARCHITECT_API || '';
+  try {
+    const r = await fetch(base + '/api/feedback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    const sent = JSON.parse(localStorage.getItem('arch5_fb_sent') || '[]');
+    sent.push(d.id); localStorage.setItem('arch5_fb_sent', JSON.stringify(sent.slice(-20)));
+    ta.value = ''; closeOv('ov-feedback'); if (typeof hptMed === 'function') hptMed();
+    toast('Спасибо! Мы читаем каждое сообщение', 'ok');
+  } catch (e) {
+    // офлайн/сбой → outbox, фоновая доотправка при подключении
+    const ob = JSON.parse(localStorage.getItem('arch5_fb_outbox') || '[]');
+    ob.push(payload); localStorage.setItem('arch5_fb_outbox', JSON.stringify(ob.slice(-10)));
+    ta.value = ''; closeOv('ov-feedback');
+    toast('Сохранено — отправлю при подключении', 'ok');
+  }
+}
+async function flushFeedbackOutbox() {
+  try {
+    const ob = JSON.parse(localStorage.getItem('arch5_fb_outbox') || '[]');
+    if (!ob.length || !navigator.onLine) return;
+    const base = (typeof apiBase === 'function' && apiBase()) || window.ARCHITECT_API || '';
+    const rest = [];
+    for (const p of ob) {
+      try { const r = await fetch(base + '/api/feedback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(p) }); if (!r.ok) rest.push(p); }
+      catch (e) { rest.push(p); }
+    }
+    localStorage.setItem('arch5_fb_outbox', JSON.stringify(rest));
+  } catch (e) {}
+}
+window.addEventListener('online', flushFeedbackOutbox);
+setTimeout(flushFeedbackOutbox, 4000);
