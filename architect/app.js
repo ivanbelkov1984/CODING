@@ -3420,3 +3420,23 @@ async function flushFeedbackOutbox() {
 }
 window.addEventListener('online', flushFeedbackOutbox);
 setTimeout(flushFeedbackOutbox, 4000);
+
+// Замыкание цикла (FEEDBACK_SPEC.md): раз в запуск спрашиваем статус
+// отправленных отзывов; «fixed» → благодарим и убираем из ожидания.
+async function checkFeedbackStatus() {
+  try {
+    if (!navigator.onLine) return;
+    const sent = JSON.parse(localStorage.getItem('arch5_fb_sent') || '[]');
+    if (!sent.length) return;
+    const base = (typeof apiBase === 'function' && apiBase()) || window.ARCHITECT_API || '';
+    const r = await fetch(base + '/api/feedback/status?ids=' + sent.join(','));
+    if (!r.ok) return;
+    const d = await r.json();
+    const fixedIds = (d.items || []).filter(i => i.status === 'fixed').map(i => +i.id);
+    if (fixedIds.length) {
+      toast('Твой отзыв учтён — уже исправлено ✓', 'ok');
+      localStorage.setItem('arch5_fb_sent', JSON.stringify(sent.filter(id => !fixedIds.includes(+id))));
+    }
+  } catch (e) {}
+}
+setTimeout(checkFeedbackStatus, 6000);

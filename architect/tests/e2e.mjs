@@ -128,6 +128,16 @@ await page.waitForTimeout(250);
 ok(await page.evaluate(() => JSON.parse(localStorage.getItem('arch5_fb_sent') || '[]').includes(7)), 'фидбэк отправлен, id сохранён для замыкания цикла');
 ok(await page.evaluate(() => !document.querySelector('#ov-feedback.on')), 'форма фидбэка закрывается после отправки');
 
+// ── Замыкание цикла: статус «fixed» чистит список ожидания ──
+await page.evaluate(async () => {
+  localStorage.setItem('arch5_fb_sent', JSON.stringify([7]));
+  window.fetch = (u) => String(u).includes('/api/feedback/status')
+    ? Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [{ id: 7, status: 'fixed', type: 'bug' }] }) })
+    : Promise.reject(new Error('offline'));
+  await checkFeedbackStatus();
+});
+ok(await page.evaluate(() => !JSON.parse(localStorage.getItem('arch5_fb_sent') || '[]').includes(7)), 'замыкание цикла: «fixed» убирает id из ожидания');
+
 // ── Lagged-паттерн сферы: эффект «на следующий день» (Bearable) ──
 const lagged = await page.evaluate(() => {
   const DAY = 864e5, iso = n => new Date(Date.now() - n * DAY).toISOString().slice(0, 10);

@@ -36,11 +36,26 @@ export default function mountFeedback(app, pool) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // Статус для замыкания цикла (v1: до триажа всё «received»).
+  // Статус для замыкания цикла: received → triaged → fixed.
+  // Таблицы триажа создаёт cron (triage.mjs); до первого запуска их нет —
+  // тогда честно отвечаем «received», не падаем.
   app.get('/api/feedback/status', async (req, res) => {
     try {
       const ids = String(req.query.ids || '').split(',').map(n => +n).filter(n => n > 0).slice(0, 50);
-      res.json({ items: ids.map(id => ({ id, status: 'received' })) });
+      if (!ids.length) return res.json({ items: [] });
+      let rows = [];
+      try {
+        rows = (await pool.query(
+          `SELECT c.feedback_id AS id, c.type, p.status AS pstatus
+             FROM classified_feedback c LEFT JOIN patterns p ON p.id = c.pattern_id
+            WHERE c.feedback_id = ANY($1)`, [ids])).rows;
+      } catch (e) { /* триаж ещё не создавал таблиц */ }
+      const m = new Map(rows.map(r => [+r.id, r]));
+      res.json({ items: ids.map(id => {
+        const r = m.get(id);
+        return r ? { id, status: r.pstatus === 'fixed' ? 'fixed' : 'triaged', type: r.type }
+                 : { id, status: 'received' };
+      }) });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 }

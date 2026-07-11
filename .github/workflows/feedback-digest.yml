@@ -1,0 +1,32 @@
+name: Feedback — недельный дайджест
+
+# Сводка обратной связи владельцу (FEEDBACK_SPEC.md, шаг 5):
+# каждый понедельник 08:00 UTC → GitHub Issue с чекбоксами решений.
+# Без секрета DATABASE_URL — мягкий SKIP, не красный.
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: architect/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --omit=dev
+      - name: Digest
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node digest.mjs
