@@ -116,6 +116,19 @@ await page.waitForTimeout(120);
 ok(await page.evaluate(() => document.querySelectorAll('#ov-ci .emo, #ci-emotions > *, #ov-ci [onclick*="Emo"]').length) > 0, 'чек-ин: есть RULER-палитра эмоций');
 await page.evaluate(() => closeOv('ov-ci'));
 
+// ── Живой отклик: приложение отвечает на запись, а не молчит ──
+await page.evaluate(() => {
+  setAiKey('');                                    // локальный отклик, без AI-вызова
+  openOv('ov-add'); $('add-tx').value = 'Снова выгорание мешает начать важный проект — корень в страхе.';
+  saveIns();
+});
+await page.waitForTimeout(250);
+ok(await page.evaluate(() => document.querySelectorAll('#react-card.on .rc-row').length >= 1), 'после сохранения инсайта появляется карточка-отклик');
+ok(await page.evaluate(() => /Перекликается|мысль|записей|запись/.test(document.getElementById('react-card').textContent)), 'отклик содержательный (эхо/темп/тема)');
+ok(await page.evaluate(() => !!document.querySelector('#h-vector .vec-card')), 'виджет «Вектор недели» построен');
+ok(await page.evaluate(() => /запис/.test(document.querySelector('#h-vector .vec-sub').textContent)), 'вектор показывает движение за неделю');
+await page.evaluate(() => rcClose());
+
 // ── Обратная связь: форма → отправка (мок API) → id сохранён ──
 await page.evaluate(() => {
   window.fetch = (u) => String(u).includes('/api/feedback')

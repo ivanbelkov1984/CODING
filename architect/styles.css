@@ -1039,3 +1039,27 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 /* Обратная связь */
 .fb-ctx-row{display:flex;align-items:center;gap:8px;font-size:.8125rem;color:var(--t3);cursor:pointer}
 .fb-ctx-row input{width:16px;height:16px;accent-color:var(--accent)}
+
+/* ── ЖИВОЙ ОТКЛИК: карточка-реакция после сохранения записи ────── */
+.react-card{position:fixed;left:50%;transform:translateX(-50%) translateY(14px);bottom:max(env(safe-area-inset-bottom),16px);width:min(440px,calc(100vw - 24px));background:var(--bg-surface-4,var(--bg2));border:1px solid var(--border-medium,var(--bd2));border-radius:12px;padding:var(--s3) var(--s4);z-index:520;opacity:0;transition:all var(--dur2) var(--e);box-shadow:none}
+.react-card.on{opacity:1;transform:translateX(-50%)}
+.rc-head{display:flex;align-items:center;justify-content:space-between;font-size:var(--tx2);font-weight:510;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+.rc-x{background:none;border:none;color:var(--t3);font-size:var(--tx3);cursor:pointer;padding:2px 6px;line-height:1}
+.rc-x:active{opacity:.6}
+.rc-row{font-size:var(--tx3);color:var(--t2);line-height:1.5;padding:3px 0}
+.rc-row.tap{cursor:pointer;color:var(--t1)}
+.rc-row.tap:active{opacity:.6}
+.rc-row i{font-style:normal;color:var(--t4);margin-left:6px;font-size:var(--tx2)}
+.rc-ai:empty{display:none}
+.rc-think{font-size:var(--tx2);color:var(--t4)}
+.rc-mentor{margin-top:var(--s2);padding-top:var(--s2);border-top:1px solid var(--bd);font-size:var(--tx3);color:var(--t1);line-height:1.55}
+
+/* ── ВЕКТОР НЕДЕЛИ: направление одним взглядом ────────────────── */
+.vec-card{background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:var(--s3) var(--s4);cursor:pointer}
+.vec-card:active{opacity:.75}
+.vec-dir{display:flex;align-items:center;gap:var(--s2);font-size:var(--tx4);font-weight:510;color:var(--t1)}
+.vec-ar{font-size:var(--tx5);line-height:1}
+.vec-dir.up .vec-ar{color:var(--green)}
+.vec-dir.flat .vec-ar{color:var(--t3)}
+.vec-dir.down .vec-ar{color:var(--orange)}
+.vec-sub{font-size:var(--tx3);color:var(--t3);line-height:1.5;margin-top:2px}

@@ -669,7 +669,7 @@ function rHome() {
   $('h-date').textContent = `${D2[now.getDay()]}, ${now.getDate()} ${M[now.getMonth()]} ${now.getFullYear()}`;
   rHState(); rStreak(); detectPatterns();
   rNudge();
-  rStateHero(); rAmbient('home-ambient'); rSmartInsights('home-smart'); rHeatmap('home-heatmap', 90); rGraph('home-graph', 190, true);
+  rStateHero(); rVector(); rAmbient('home-ambient'); rSmartInsights('home-smart'); rHeatmap('home-heatmap', 90); rGraph('home-graph', 190, true);
   rPrompts();
   rOnThisDay();
   rHIns();
@@ -1060,8 +1060,8 @@ function saveIns() {
   $('add-tx').value=''; $('add-src').value='';
   closeOv('ov-add'); persist(); rIns(); rHIns(); rKPIs(); detectPatterns();
   hptMed(); toast('Инсайт сохранён', 'ok');
-  const same = DB.insights.filter(i=>i.tag===STATE.addTag).length;
-  if (same>=3 && STATE.addTag!=='pattern') toast(`${same} инсайта «${TL[STATE.addTag]}» — рассмотри как паттерн`);
+  reactToInsight(DB.insights[0]);          // живой отклик вместо молчания
+  try { rVector(); } catch (e) {}
 }
 function openEdit(id) {
   const ins = DB.insights.find(x=>x.id==id);
@@ -1547,6 +1547,8 @@ function saveCI() {
   const avg = (v.cl + v.mv + (10-v.st)) / 3;
   if (avg < 5) toast('Состояние ниже 5 — восстановление в приоритете', 'warn');
   else { hptMed(); toast('Check-in сохранён', 'ok'); }
+  reactToCheckin();                        // живой отклик вместо молчания
+  try { rVector(); } catch (e) {}
 }
 
 // ─── СОН ─────────────────────────────────────────────────────────
@@ -1560,6 +1562,8 @@ function saveDrm() {
   $('drm-tx').value=''; $('drm-arch').value='';
   closeOv('ov-drm'); persist(); rDrms(); rIns(); rHIns(); rKPIs();
   hptMed(); toast('Сон зафиксирован', 'ok');
+  reactToDream(DB.dreams[0]);              // живой отклик вместо молчания
+  try { rVector(); } catch (e) {}
 }
 function deleteDrm(id) {
   delUndo('dreams', id, rDrms, 'Сон удалён');
@@ -3440,3 +3444,119 @@ async function checkFeedbackStatus() {
   } catch (e) {}
 }
 setTimeout(checkFeedbackStatus, 6000);
+
+// ═══ ЖИВОЙ ОТКЛИК ════════════════════════════════════════════════
+// Дневник не должен молчать. После каждой записи — карточка-отклик:
+// связи с прошлым, зреющие темы, динамика. С AI-ключом добавляется
+// живая реакция наставника (напрямую браузер→Anthropic, как весь AI-слой).
+const RC_STOP = new Set(('и в на не что как это я ты он она мы вы они а но или же ли бы то у к с о от до по за из для при про был была было были есть быть меня тебя себя мне тебе всё все еще ещё уже только очень когда где чтобы если потому просто снова опять день дня дней раз сегодня вчера завтра свой своя мой моя твой хочу надо нужно можно нет да там тут вот даже почему зачем такой такая такое очень').split(' '));
+const rcDay = i => i.day || String(i.createdAt || '').slice(0, 10);
+function rcWords(s) {
+  return new Set(String(s || '').toLowerCase().replace(/[^a-zа-яё0-9\s-]/gi, ' ').split(/\s+/)
+    .filter(w => w.length >= 4 && !RC_STOP.has(w)));
+}
+// Лучшее «эхо» из прошлого: пересечение значимых слов ≥2.
+function rcRelated(text, excludeId) {
+  const w = rcWords(text); if (w.size < 2) return null;
+  let best = null, bs = 0;
+  for (const i of (DB.insights || [])) {
+    if (i.id === excludeId) continue;
+    const ov = [...rcWords((i.title || '') + ' ' + (i.body || ''))].filter(x => w.has(x)).length;
+    if (ov > bs) { bs = ov; best = i; }
+  }
+  return bs >= 2 ? best : null;
+}
+function rcClose() {
+  const el = $('react-card'); if (!el) return;
+  el.classList.remove('on'); setTimeout(() => el.remove(), 250);
+}
+function reactCard(rows) {
+  rows = (rows || []).filter(Boolean).slice(0, 4);
+  if (!rows.length) return;
+  rcClose(); clearTimeout(window.__rcT);
+  const el = document.createElement('div');
+  el.className = 'react-card'; el.id = 'react-card';
+  el.innerHTML = `<div class="rc-head"><span>Отклик</span><button class="rc-x" onclick="rcClose()" aria-label="Закрыть">✕</button></div>` +
+    rows.map(r => `<div class="rc-row${r.act ? ' tap' : ''}"${r.act ? ` onclick="${r.act}" role="button"` : ''}>${r.html}</div>`).join('') +
+    `<div class="rc-ai" id="rc-ai"></div>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  window.__rcT = setTimeout(rcClose, 14000);
+}
+// AI-реакция наставника — только при заданном пользовательском ключе.
+async function rcAI(text) {
+  try {
+    if (!getAiKey() || !navigator.onLine || !text || text.length < 10) return;
+    const slot = () => document.getElementById('rc-ai');
+    if (!slot()) return;
+    slot().innerHTML = '<span class="rc-think">⚡ читаю…</span>';
+    const a = await callClaude({
+      system: 'Ты — живой дневник-наставник приложения «Архитектор». Пользователь только что сохранил запись. Отреагируй по-русски: 1–2 коротких предложения по сути (отрази главное, без пустых похвал и воды) и один короткий вопрос в конце.',
+      user: text, maxTokens: 220,
+    });
+    const s = slot(); if (!s) return;
+    s.innerHTML = `<div class="rc-mentor">${esc(String(a).trim())}</div>`;
+    clearTimeout(window.__rcT); window.__rcT = setTimeout(rcClose, 22000);
+  } catch (e) { const s = document.getElementById('rc-ai'); if (s) s.innerHTML = ''; }
+}
+function reactToInsight(ins) {
+  const rows = [];
+  const rel = rcRelated((ins.title || '') + ' ' + (ins.body || ''), ins.id);
+  if (rel) rows.push({ html: `🔗 Перекликается с «${esc(rel.title)}»<i>${esc(rel.date || '')}</i>`, act: `rcClose();showDet(${rel.id})` });
+  const m30 = DB.insights.filter(i => i.tag === ins.tag && rcDay(i) > dayAgo(30)).length;
+  if (m30 >= 2) rows.push({ html: `📚 ${m30}-я мысль о «${TL[ins.tag] || ins.tag}» за месяц — тема зреет` });
+  if (m30 >= 3 && ins.tag !== 'pattern') rows.push({ html: `⚡ Похоже на паттерн — предложение уже на главной` });
+  const wk = DB.insights.filter(i => rcDay(i) > dayAgo(7)).length;
+  const pw = DB.insights.filter(i => rcDay(i) > dayAgo(14) && rcDay(i) <= dayAgo(7)).length;
+  if (wk >= 2) rows.push({ html: pw ? `📈 Темп: ${wk} ${pl(wk, 'запись', 'записи', 'записей')} за неделю (было ${pw})` : `📈 ${wk} ${pl(wk, 'запись', 'записи', 'записей')} за эту неделю` });
+  if (!rows.length) rows.push({ html: `🌱 Мысль №${DB.insights.length} в базе — граф связей растёт` });
+  reactCard(rows);
+  rcAI(ins.body || ins.title || '');
+}
+function reactToCheckin() {
+  const rows = [];
+  const s = stateScore();
+  if (s.ok) {
+    rows.push({ html: `📊 Состояние ${s.score}/100 — ${s.delta > 0 ? 'выше' : s.delta < 0 ? 'ниже' : 'ровно по'} твоей норме${s.delta ? ` на ${Math.abs(s.delta)}` : ''}`, act: `rcClose();goTo('vit')` });
+    const weak = s.contributors && s.contributors[0];
+    if (weak && weak.score < 60) rows.push({ html: `🎯 Слабое звено сейчас — ${weak.label.toLowerCase()} (${weak.score}/100)` });
+  }
+  const st = typeof calcStreak === 'function' ? calcStreak() : 0;
+  if (st >= 2) rows.push({ html: `🔥 ${st} ${pl(st, 'день', 'дня', 'дней')} подряд с чек-ином` });
+  try {
+    const si = smartInsights();
+    if (si && si.items && si.items.length) rows.push({ html: `💡 ${esc(si.items[0].text)}` });
+  } catch (e) {}
+  if (!rows.length) rows.push({ html: '📊 Данные копятся — ещё пара чек-инов, и покажу твою динамику' });
+  reactCard(rows);
+}
+function reactToDream(d) {
+  const rows = [];
+  const rel = rcRelated(d.body || '', null);
+  if (rel) rows.push({ html: `🔗 Сон перекликается с «${esc(rel.title)}»`, act: `rcClose();showDet(${rel.id})` });
+  rows.push({ html: `🌙 ${DB.dreams.length}-й сон в дневнике${d.arch ? ` · архетип «${esc(d.arch)}»` : ''}` });
+  reactCard(rows);
+  rcAI('Сон: ' + (d.body || ''));
+}
+// ─── ВЕКТОР НЕДЕЛИ: «куда я еду» одним взглядом ───────────────────
+function rVector() {
+  const el = $('h-vector'); if (!el) return;
+  const all = [...(DB.insights || []), ...(DB.dreams || []), ...(DB.spiritual || [])];
+  const wk = all.filter(i => rcDay(i) > dayAgo(7)).length + (DB.checkins || []).filter(c => c.date > dayAgo(7)).length;
+  const pw = all.filter(i => rcDay(i) > dayAgo(14) && rcDay(i) <= dayAgo(7)).length + (DB.checkins || []).filter(c => c.date > dayAgo(14) && c.date <= dayAgo(7)).length;
+  const s = stateScore();
+  if (!wk && !s.ok) { el.innerHTML = ''; return; }
+  const dir = s.ok ? (s.delta >= 3 ? 'up' : s.delta <= -3 ? 'down' : 'flat') : (wk > pw ? 'up' : wk < pw ? 'down' : 'flat');
+  const HEAD = { up: ['↗', 'Ты набираешь ход'], flat: ['→', 'Ровный ход'], down: ['↘', 'Сбавляешь — это тоже данные'] };
+  const cnt = {};
+  DB.insights.filter(i => rcDay(i) > dayAgo(7)).forEach(i => { cnt[i.tag] = (cnt[i.tag] || 0) + 1; });
+  const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0];
+  const bits = [`${wk} ${pl(wk, 'запись', 'записи', 'записей')} за 7 дней${pw ? ` (было ${pw})` : ''}`];
+  if (top && top[1] >= 2) bits.push(`главная тема — «${TL[top[0]] || top[0]}» (${top[1]})`);
+  if (s.ok) bits.push(`состояние ${s.score}/100${s.delta ? ` (${s.delta > 0 ? '+' : ''}${s.delta} к норме)` : ''}`);
+  el.innerHTML = `<div class="sec-lbl">Вектор недели</div>
+    <div class="vec-card mx mb" onclick="goTo('sys')" role="button">
+      <div class="vec-dir ${dir}"><span class="vec-ar">${HEAD[dir][0]}</span>${HEAD[dir][1]}</div>
+      <div class="vec-sub">${bits.join(' · ')}</div>
+    </div>`;
+}
