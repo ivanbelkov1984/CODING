@@ -255,6 +255,15 @@ function migrateRecords() {
       }
     });
   });
+  // Заголовки, начинавшиеся с вопроса-промпта, переименовываем в суть ответа
+  // (иначе половина записей называется одинаково — «Что самое важное…»).
+  (DB.insights || []).forEach(i => {
+    const lines = String(i.body || '').split('\n').map(s => s.trim()).filter(Boolean);
+    if (lines.length > 1 && /\?$/.test(lines[0]) && String(i.title || '').slice(0, 20) === lines[0].slice(0, 20)) {
+      const t = lines.slice(1).join(' ');
+      if (t.length >= 3) { i.title = t.slice(0, 80) + (t.length > 80 ? '…' : ''); changed = true; }
+    }
+  });
   if (changed) persistLocal();
 }
 
@@ -1046,13 +1055,22 @@ async function toggleRec(btn) {
     const l = btn && btn.querySelector('.rec-lbl'); if (l) l.textContent = 'Стоп ●';
   } catch (e) { stream.getTracks().forEach(t => t.stop()); toast('Ошибка записи', 'warn'); }
 }
+// Заголовок из текста: если запись начинается с вопроса-промпта, заголовок —
+// суть ответа, а не вопрос (иначе все записи из рефлексии называются одинаково).
+function titleFrom(tx) {
+  const lines = String(tx || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const t = (lines.length > 1 && /\?$/.test(lines[0]))
+    ? lines.slice(1).join(' ')
+    : String(tx || '').replace(/\s+/g, ' ').trim();
+  return t.slice(0, 80) + (t.length > 80 ? '…' : '');
+}
 function saveIns() {
   const tx = $('add-tx').value.trim();
   if (!tx) { toast('Введи текст инсайта', 'warn'); return; }
   const src = $('add-src').value.trim();
   DB.insights.unshift({
     id: Date.now(), tag: STATE.addTag, w: STATE.addW,
-    title: tx.slice(0,80)+(tx.length>80?'…':''), body: tx,
+    title: titleFrom(tx), body: tx,
     date: dateRU(), createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION,
     src: src||'Вручную', links: extractLinks(tx), media: STATE.addMedia || [],
   });
@@ -1081,7 +1099,7 @@ function saveEdit() {
   const ins = DB.insights.find(x=>x.id===id);
   if (!ins) return;
   ins.tag = STATE.editTag; ins.w = STATE.editW;
-  ins.title = tx.slice(0,80)+(tx.length>80?'…':'');
+  ins.title = titleFrom(tx);
   ins.body  = tx; ins.src = $('edit-src').value.trim()||ins.src;
   ins.links = extractLinks(tx);
   touch(ins);
@@ -1182,13 +1200,29 @@ function buildGraph() {
   const addIns = i => { const k = iK(i.id); if (!nm[k]) nm[k] = { key:k, type:'insight', eid:i.id, title:i.title, color:SC[i.tag]||'var(--t3)', deg:0 }; return k; };
   const addSph = s => { const k = sK(s.id); if (!nm[k]) nm[k] = { key:k, type:'sphere', eid:s.id, title:(s.icon?s.icon+' ':'')+s.name, color:s.color||'var(--blue-t)', deg:0 }; return k; };
   const addEdge = (a, b) => { if (a === b) return; const key = a < b ? a+'|'+b : b+'|'+a; if (seen.has(key)) return; seen.add(key); edges.push({ a, b }); nm[a].deg++; nm[b].deg++; };
-  // мысль ↔ мысль: ручные [[ссылки]] + автосвязи по темам
+  // мысль ↔ мысль: ручные [[ссылки]] всегда; автосвязи — только сильные
+  // (по редким общим темам, tf-idf) и не более 3 на узел, чтобы граф
+  // показывал структуру, а не «всё со всем» (опыт Obsidian/Reflect).
   ins.forEach(a => (a.links || []).forEach(l => { const b = ins.find(x => x.id !== a.id && matchLink(l, x)); if (b) { addIns(a); addIns(b); addEdge(iK(a.id), iK(b.id)); } }));
-  ins.forEach(a => relatedByTheme(a, 4).forEach(r => { addIns(a); addIns(r.ins); addEdge(iK(a.id), iK(r.ins.id)); }));
+  const T = themeIndex();
+  const cand = [];
+  for (let i = 0; i < ins.length; i++) for (let j = i + 1; j < ins.length; j++) {
+    const { hits, score } = themeOverlap(T.kws.get(ins[i].id), T.kws.get(ins[j].id), T);
+    if (hits >= 2) cand.push({ a: ins[i], b: ins[j], score });
+  }
+  cand.sort((x, y) => y.score - x.score);
+  const autoDeg = {};
+  cand.forEach(c => {
+    const ka = iK(c.a.id), kb = iK(c.b.id);
+    if ((autoDeg[ka] || 0) >= 3 || (autoDeg[kb] || 0) >= 3) return;
+    const before = edges.length;
+    addIns(c.a); addIns(c.b); addEdge(ka, kb);
+    if (edges.length > before) { autoDeg[ka] = (autoDeg[ka] || 0) + 1; autoDeg[kb] = (autoDeg[kb] || 0) + 1; }
+  });
   // мысль ↔ сфера: текст записи задевает тему сферы
   sph.forEach(s => {
     const skw = new Set(keywords(s.name)); if (!skw.size) return;
-    ins.forEach(i => { if (keywords((i.title||'') + ' ' + (i.body||'')).some(w => skw.has(w))) { addSph(s); addIns(i); addEdge(sK(s.id), iK(i.id)); } });
+    ins.forEach(i => { if ((T.kws.get(i.id) || []).some(w => skw.has(w))) { addSph(s); addIns(i); addEdge(sK(s.id), iK(i.id)); } });
   });
   // сфера ↔ сфера: статистическая связь по дням
   const numSph = sph.filter(s => ['score','counter','goal'].includes(s.type));
@@ -1201,19 +1235,70 @@ function buildGraph() {
   }
   return { nodes: Object.values(nm), edges };
 }
-// Детерминированная силовая раскладка (Fruchterman–Reingold, фикс. число шагов).
+// Детерминированная силовая раскладка. Несвязанные компоненты в FR
+// разлетаются по углам, поэтому каждая раскладывается отдельно и
+// занимает свою ячейку сетки (так делают Gephi/Obsidian), затем общий
+// проход коллизий следит, чтобы узлы и подписи не наезжали.
 function layoutGraph(nodes, edges, W, H) {
   const n = nodes.length; if (!n) return;
-  const cx = W/2, cy = H/2, R = Math.min(W, H)/2 - 34;
+  const byId = {}; nodes.forEach(nd => byId[nd.key] = nd);
+  const adj = {}; nodes.forEach(nd => adj[nd.key] = []);
+  edges.forEach(e => { adj[e.a].push(e.b); adj[e.b].push(e.a); });
+  const comps = [], compOf = {};
+  nodes.forEach(nd => {
+    if (compOf[nd.key] != null) return;
+    const c = [], st = [nd.key]; compOf[nd.key] = comps.length;
+    while (st.length) { const k = st.pop(); c.push(byId[k]); adj[k].forEach(m => { if (compOf[m] == null) { compOf[m] = comps.length; st.push(m); } }); }
+    comps.push(c);
+  });
+  comps.sort((a, b) => b.length - a.length);
+  const mx = 30, myT = 26, myB = 42;                 // снизу запас под подписи
+  const cols = Math.ceil(Math.sqrt(comps.length)), rows = Math.ceil(comps.length / cols);
+  const cw = (W - mx * 2) / cols, ch = (H - myT - myB) / rows;
+  comps.forEach((comp, ci) => {
+    const bx = mx + (ci % cols) * cw, by = myT + Math.floor(ci / cols) * ch;
+    const inC = new Set(comp.map(nd => nd.key));
+    fdLayout(comp, edges.filter(e => inC.has(e.a)), byId, cw, ch);
+    // нормализуем компоненту в её ячейку (внутренний отступ 16)
+    const pad = 16;
+    const xs = comp.map(nd => nd.x), ys = comp.map(nd => nd.y);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    comp.forEach(nd => {
+      nd.x = bx + (x1 - x0 > 1 ? pad + (nd.x - x0) / (x1 - x0) * (cw - pad * 2) : cw / 2);
+      nd.y = by + (y1 - y0 > 1 ? pad + (nd.y - y0) / (y1 - y0) * (ch - pad * 2) : ch / 2);
+    });
+  });
+  // Финальные проходы коллизий: узлы (с запасом под подпись) не наезжают.
+  for (let p = 0; p < 40; p++) {
+    let moved = false;
+    for (let i = 0; i < n; i++) for (let j = i+1; j < n; j++) {
+      const A = nodes[i], B = nodes[j];
+      const min = (A.r || 10) + (B.r || 10) + 12;
+      let dx = B.x - A.x, dy = B.y - A.y, d = Math.hypot(dx, dy) || 0.01;
+      if (d < min) {
+        const push = (min - d) / 2; dx /= d; dy /= d; moved = true;
+        A.x = Math.max(mx, Math.min(W - mx, A.x - dx * push));
+        A.y = Math.max(myT, Math.min(H - myB, A.y - dy * push));
+        B.x = Math.max(mx, Math.min(W - mx, B.x + dx * push));
+        B.y = Math.max(myT, Math.min(H - myB, B.y + dy * push));
+      }
+    }
+    if (!moved) break;
+  }
+}
+// Fruchterman–Reingold для одной компоненты в виртуальном боксе W×H.
+function fdLayout(nodes, edges, byId, W, H) {
+  const n = nodes.length;
+  const cx = W / 2, cy = H / 2, R = Math.min(W, H) / 2;
   nodes.forEach((nd, i) => {
     const a = (i / n) * Math.PI * 2;
-    nd.x = cx + Math.cos(a) * R * 0.7;
-    nd.y = cy + Math.sin(a) * R * 0.7;
+    nd.x = cx + Math.cos(a) * R * 0.6;
+    nd.y = cy + Math.sin(a) * R * 0.6;
     nd.vx = 0; nd.vy = 0;
   });
-  const byId = {}; nodes.forEach(nd => byId[nd.key] = nd);
-  const k = Math.max(38, R / Math.sqrt(n));       // идеальная длина ребра
-  const ITER = 220;
+  if (n === 1) return;
+  const k = Math.max(46, Math.min(W, H) / Math.sqrt(n) * 0.9);   // длина ребра
+  const ITER = 180;
   for (let it = 0; it < ITER; it++) {
     for (let i = 0; i < n; i++) for (let j = i+1; j < n; j++) {
       const A = nodes[i], B = nodes[j];
@@ -1229,13 +1314,11 @@ function layoutGraph(nodes, edges, W, H) {
     });
     const t = 0.85 * (1 - it / (ITER + 20));       // остывание
     nodes.forEach(nd => {
-      nd.vx += (cx - nd.x) * 0.03; nd.vy += (cy - nd.y) * 0.03;  // к центру
+      nd.vx += (cx - nd.x) * 0.015; nd.vy += (cy - nd.y) * 0.015;  // к центру
       const vm = Math.hypot(nd.vx, nd.vy) || 0.01;
       const step = Math.min(vm, k) * t;
       nd.x += (nd.vx / vm) * step; nd.y += (nd.vy / vm) * step;
       nd.vx *= 0.5; nd.vy *= 0.5;
-      nd.x = Math.max(28, Math.min(W-28, nd.x));
-      nd.y = Math.max(24, Math.min(H-30, nd.y));
     });
   }
 }
@@ -1247,29 +1330,61 @@ function rGraph(elId, height, compact) {
     return;
   }
   const W = el.clientWidth || 340, H = height || 380;
+  nodes.forEach(nd => { nd.r = 5 + Math.min(nd.deg, 5) * 1.6; });   // компактнее: max ~13
   layoutGraph(nodes, edges, W, H);
   const byId = {}; nodes.forEach(nd => byId[nd.key] = nd);
+  // Выбор узла (тап): подсвечиваем окружение, остальное гасим (паттерн Obsidian).
+  if (_gSel && !byId[_gSel]) _gSel = null;
+  const sel = _gSel ? byId[_gSel] : null;
+  const neigh = new Set();
+  if (sel) edges.forEach(e => { if (e.a === _gSel) neigh.add(e.b); if (e.b === _gSel) neigh.add(e.a); });
   const lines = edges.map(e => {
     const A = byId[e.a], B = byId[e.b];
-    return `<line x1="${A.x.toFixed(1)}" y1="${A.y.toFixed(1)}" x2="${B.x.toFixed(1)}" y2="${B.y.toFixed(1)}" class="gedge"/>`;
+    const cls = sel ? (e.a === _gSel || e.b === _gSel ? 'gedge on' : 'gedge dim') : 'gedge';
+    return `<line x1="${A.x.toFixed(1)}" y1="${A.y.toFixed(1)}" x2="${B.x.toFixed(1)}" y2="${B.y.toFixed(1)}" class="${cls}"/>`;
   }).join('');
+  // Подписи: приоритет крупным узлам, жадное размещение без наездов.
+  const lblOf = {}, placed = [];
+  if (!compact) {
+    [...nodes].sort((a, b) => b.deg - a.deg).slice(0, 12).forEach(nd => {
+      const short = nd.title.length > 18 ? nd.title.slice(0, 17) + '…' : nd.title;
+      const w = short.length * 5.6 + 8, y = nd.y + nd.r + 11;
+      const x = Math.max(w / 2 + 4, Math.min(W - w / 2 - 4, nd.x));   // не за край
+      const box = { x1: x - w / 2, x2: x + w / 2, y1: y - 9, y2: y + 3 };
+      if (placed.some(b => !(box.x2 < b.x1 || box.x1 > b.x2 || box.y2 < b.y1 || box.y1 > b.y2))) return;
+      placed.push(box); lblOf[nd.key] = { short, y, x };
+    });
+  }
+  const eid = elId || 'graph-canvas';
   const circ = nodes.map(nd => {
-    const r = 6 + Math.min(nd.deg, 6) * 2;
-    const short = nd.title.length > 16 ? nd.title.slice(0, 15) + '…' : nd.title;
-    const label = compact ? '' : `<text x="${nd.x.toFixed(1)}" y="${(nd.y + r + 11).toFixed(1)}" class="glbl">${esc(short)}</text>`;
-    const click = nd.type === 'sphere' ? `openSphereLog(${nd.eid})` : `showDet(${nd.eid})`;
+    const r = nd.r;
+    const lb = lblOf[nd.key];
+    const label = lb ? `<text x="${lb.x.toFixed(1)}" y="${lb.y.toFixed(1)}" class="glbl">${esc(lb.short)}</text>` : '';
+    const click = compact
+      ? (nd.type === 'sphere' ? `openSphereLog(${nd.eid})` : `showDet(${nd.eid})`)
+      : `gSelect('${nd.key}','${eid}',${H})`;
+    const dim = sel && nd.key !== _gSel && !neigh.has(nd.key) ? ' gdim' : '';
+    const ring = nd.key === _gSel ? `<circle cx="${nd.x.toFixed(1)}" cy="${nd.y.toFixed(1)}" r="${r + 4}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>` : '';
     // сферы — скруглённый квадрат (узел жизни), мысли — круг
     const shape = nd.type === 'sphere'
       ? `<rect x="${(nd.x-r).toFixed(1)}" y="${(nd.y-r).toFixed(1)}" width="${(r*2)}" height="${(r*2)}" rx="${(r*0.5).toFixed(1)}" fill="${nd.color}"/>`
       : `<circle cx="${nd.x.toFixed(1)}" cy="${nd.y.toFixed(1)}" r="${r}" fill="${nd.color}"/>`;
-    return `<g class="gnode" onclick="event.stopPropagation();${click}">${shape}${label}</g>`;
+    return `<g class="gnode${dim}" onclick="event.stopPropagation();${click}">${ring}${shape}${label}</g>`;
   }).join('');
   const nIns = nodes.filter(n => n.type === 'insight').length, nSph = nodes.filter(n => n.type === 'sphere').length;
   const meta = [nIns ? nIns + ' ' + pl(nIns,'мысль','мысли','мыслей') : '', nSph ? nSph + ' ' + pl(nSph,'сфера','сферы','сфер') : '']
     .filter(Boolean).join(' + ') + ` · ${edges.length} ${pl(edges.length,'связь','связи','связей')}` + (compact ? ' · открыть карту →' : '');
+  // Инфопанель выбранного узла: полный заголовок + переход к записи.
+  const info = sel
+    ? `<div class="ginfo"><div class="gi-t">${esc(sel.title)}<i>${neigh.size} ${pl(neigh.size,'связь','связи','связей')}</i></div><button class="gi-open" onclick="${sel.type === 'sphere' ? `openSphereLog(${sel.eid})` : `showDet(${sel.eid})`}">Открыть →</button></div>`
+    : `<div class="graph-meta">${meta}${compact ? '' : ' · тапни узел'}</div>`;
   el.innerHTML =
-    `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" class="graph-svg" preserveAspectRatio="xMidYMid meet">${lines}${circ}</svg>` +
-    `<div class="graph-meta">${meta}</div>`;
+    `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" class="graph-svg" preserveAspectRatio="xMidYMid meet"${compact ? '' : ` onclick="gSelect(null,'${eid}',${H})"`}>${lines}${circ}</svg>` + info;
+}
+let _gSel = null;
+function gSelect(key, elId, h) {
+  _gSel = (key && _gSel !== key) ? key : null;
+  hpt(); rGraph(elId, h, false);
 }
 
 // ─── ДЕТАЛИ ──────────────────────────────────────────────────────
@@ -1309,14 +1424,38 @@ function keywords(text) {
   return [...new Set(String(text || '').toLowerCase().replace(/[^а-яёa-z0-9\s]/gi, ' ')
     .split(/\s+/).filter(w => w.length >= 4 && !RU_STOP.has(w)).map(stemRu).filter(w => w.length >= 3))];
 }
+// Вес слова обратен его частоте (tf-idf): слово из вопросов-промптов или
+// общеупотребимое встречается почти везде и темой НЕ является. Иначе граф
+// связывает «всё со всем» через буллерплейт — каша вместо смысла.
+function themeIndex() {
+  const list = DB.insights || [];
+  const N = list.length, df = {}, kws = new Map();
+  list.forEach(i => {
+    const kw = keywords((i.title || '') + ' ' + (i.body || ''));
+    kws.set(i.id, kw);
+    kw.forEach(w => { df[w] = (df[w] || 0) + 1; });
+  });
+  const cut = Math.max(2, Math.ceil(N * 0.4));       // в ≥40% записей — фон
+  return {
+    kws, N,
+    informative: w => N < 5 || (df[w] || 0) <= cut,
+    idf: w => Math.log(1 + N / (df[w] || 1)),
+  };
+}
+function themeOverlap(aKw, bKw, T) {
+  const bs = new Set(bKw || []);
+  let hits = 0, score = 0;
+  (aKw || []).forEach(w => { if (bs.has(w) && T.informative(w)) { hits++; score += T.idf(w); } });
+  return { hits, score };
+}
 function relatedByTheme(ins, limit) {
-  const mine = new Set(keywords((ins.title || '') + ' ' + (ins.body || '')));
-  if (mine.size < 2) return [];
+  const T = themeIndex();
+  const mine = T.kws.get(ins.id) || keywords((ins.title || '') + ' ' + (ins.body || ''));
+  if (mine.length < 2) return [];
   return (DB.insights || []).filter(x => x.id !== ins.id).map(x => {
-    const kw = keywords((x.title || '') + ' ' + (x.body || ''));
-    let overlap = 0; kw.forEach(w => { if (mine.has(w)) overlap++; });
-    return { ins: x, overlap };
-  }).filter(s => s.overlap >= 2).sort((a, b) => b.overlap - a.overlap).slice(0, limit || 5);
+    const { hits, score } = themeOverlap(mine, T.kws.get(x.id), T);
+    return { ins: x, overlap: hits, score };
+  }).filter(s => s.overlap >= 2).sort((a, b) => b.score - a.score).slice(0, limit || 5);
 }
 
 // ═════════════════════════════════════════════════════════════════

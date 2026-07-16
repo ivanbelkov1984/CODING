@@ -129,6 +129,38 @@ ok(await page.evaluate(() => !!document.querySelector('#h-vector .vec-card')), '
 ok(await page.evaluate(() => /запис/.test(document.querySelector('#h-vector .vec-sub').textContent)), 'вектор показывает движение за неделю');
 await page.evaluate(() => rcClose());
 
+// ── Карта связей: смысл вместо каши (tf-idf + лимит связей на узел) ──
+const graph = await page.evaluate(() => {
+  const Q = 'Что самое важное прямо сейчас?';
+  DB.insights = [
+    { id: 11, tag: 'personal', title: '', body: Q + '\nСтрах провала на работе держит меня', links: [], createdAt: nowISO(), day: todayKey(), date: '' },
+    { id: 12, tag: 'personal', title: '', body: Q + '\nРабота съедает вечера, страх подвести', links: [], createdAt: nowISO(), day: todayKey(), date: '' },
+    { id: 13, tag: 'vitality', title: '', body: Q + '\nПробежка утром даёт энергию на день', links: [], createdAt: nowISO(), day: todayKey(), date: '' },
+    { id: 14, tag: 'vitality', title: '', body: Q + '\nЭнергия после пробежки лучше кофе', links: [], createdAt: nowISO(), day: todayKey(), date: '' },
+    { id: 15, tag: 'project', title: '', body: Q + '\nЧитаю книгу про архитектуру пайплайнов', links: [], createdAt: nowISO(), day: todayKey(), date: '' },
+  ];
+  DB.insights.forEach(i => { i.title = i.body.split('\n')[1].slice(0, 80); });
+  DB.spheres = []; DB.sphereLogs = [];
+  const g = buildGraph();
+  return {
+    edges: g.edges.length, full: g.nodes.length * (g.nodes.length - 1) / 2,
+    pair1: g.edges.some(e => [e.a, e.b].sort().join() === 'i11,i12'),
+    pair2: g.edges.some(e => [e.a, e.b].sort().join() === 'i13,i14'),
+  };
+});
+ok(graph.edges > 0 && graph.edges < graph.full, `граф не «всё со всем»: ${graph.edges} связей из ${graph.full} возможных`);
+ok(graph.pair1 && graph.pair2, 'связи только по общим редким темам (страх/работа, пробежка/энергия)');
+const gTitle = await page.evaluate(() => {
+  openOv('ov-add'); $('add-tx').value = 'Что мешает двигаться вперёд?\nБоюсь показать черновик наставнику';
+  saveIns(); rcClose();
+  return DB.insights[0].title;
+});
+ok(/^Боюсь показать/.test(gTitle), `заголовок — суть ответа, не вопрос-промпт («${gTitle}»)`);
+await page.evaluate(() => { goTo('map'); msub('graph'); rGraph('graph-canvas', 380, false); gSelect('i11', 'graph-canvas', 380); });
+ok(await page.evaluate(() => !!document.querySelector('#graph-canvas .ginfo')), 'тап по узлу: инфопанель с полным заголовком и «Открыть»');
+ok(await page.evaluate(() => document.querySelectorAll('#graph-canvas .gnode.gdim').length >= 1), 'тап по узлу гасит несвязанное (фокус на окружении)');
+await page.evaluate(() => { gSelect(null, 'graph-canvas', 380); goTo('home'); });
+
 // ── Живое обновление PWA: баннер + «Что нового» + кликабельные тосты ──
 await page.evaluate(() => showUpdateToast());
 ok(await page.evaluate(() => {

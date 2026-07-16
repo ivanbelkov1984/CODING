@@ -588,7 +588,16 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .gnode{cursor:pointer}
 .gnode circle{transition:transform .12s ease;transform-origin:center;transform-box:fill-box}
 .gnode:active circle{transform:scale(1.25)}
-.glbl{fill:var(--t2);font-size:10.5px;font-weight:500;text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:var(--bg1,#fff);stroke-width:3px}
+.glbl{fill:var(--t2);font-size:10.5px;font-weight:500;text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:var(--bg);stroke-width:3px}
+.gedge.on{stroke:var(--accent);opacity:1;stroke-width:1.6}
+.gedge.dim{opacity:.12}
+.gnode.gdim{opacity:.16}
+.gnode.gdim text{display:none}
+.ginfo{display:flex;align-items:center;gap:var(--s3);justify-content:space-between;margin-top:var(--s2);padding:var(--s2) var(--s3);background:var(--bg2);border:1px solid var(--bd);border-radius:8px}
+.gi-t{font-size:var(--tx3);font-weight:500;color:var(--t1);line-height:1.35;min-width:0}
+.gi-t i{display:block;font-style:normal;font-size:var(--tx2);color:var(--t3);margin-top:1px}
+.gi-open{background:var(--accent);color:#fff;border:none;border-radius:4px;padding:7px 12px;font-size:var(--tx2);font-weight:510;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.gi-open:active{opacity:.75}
 .graph-meta{text-align:center;font-size:var(--tx2);font-weight:500;color:var(--t3);margin-top:var(--s2)}
 .graph-hint{font-size:var(--tx2);color:var(--t3);line-height:1.5;margin-top:var(--s3);padding:0 var(--s1)}
 .graph-hint code{background:var(--bg2);padding:1px 5px;border-radius:4px;font-size:.9em}
