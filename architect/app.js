@@ -3470,13 +3470,14 @@ function rcClose() {
   const el = $('react-card'); if (!el) return;
   el.classList.remove('on'); setTimeout(() => el.remove(), 250);
 }
-function reactCard(rows) {
+function reactCard(rows, title) {
   rows = (rows || []).filter(Boolean).slice(0, 4);
   if (!rows.length) return;
-  rcClose(); clearTimeout(window.__rcT);
+  clearTimeout(window.__rcT);
+  const old = document.getElementById('react-card'); if (old) old.remove();  // сразу, без анимации — id должен быть один
   const el = document.createElement('div');
   el.className = 'react-card'; el.id = 'react-card';
-  el.innerHTML = `<div class="rc-head"><span>Отклик</span><button class="rc-x" onclick="rcClose()" aria-label="Закрыть">✕</button></div>` +
+  el.innerHTML = `<div class="rc-head"><span>${esc(title || 'Отклик')}</span><button class="rc-x" onclick="rcClose()" aria-label="Закрыть">✕</button></div>` +
     rows.map(r => `<div class="rc-row${r.act ? ' tap' : ''}"${r.act ? ` onclick="${r.act}" role="button"` : ''}>${r.html}</div>`).join('') +
     `<div class="rc-ai" id="rc-ai"></div>`;
   document.body.appendChild(el);
@@ -3560,3 +3561,47 @@ function rVector() {
       <div class="vec-sub">${bits.join(' · ')}</div>
     </div>`;
 }
+
+// ═══ ЖИВОЕ ОБНОВЛЕНИЕ PWA + «ЧТО НОВОГО» ═════════════════════════
+// Запущенное PWA живёт в памяти со старым кодом и само не узнаёт о
+// новой версии. Здесь: проверка при каждом возвращении в приложение,
+// баннер «Обновить» и карточка «Что нового» после обновления — чтобы
+// изменения были ВИДНЫ, а не молчали.
+const APP_CHANGES = [
+  '🗣 Живой отклик: приложение отвечает на каждую запись — эхо из прошлого, зреющие темы, твой темп',
+  '🧭 «Вектор недели» на главной: направление (↗/→/↘), движение и главная тема',
+  '⚡ AI-наставник в отклике — при твоём ключе Anthropic (Итоги → Настройки)',
+  '💬 Обратная связь из меню — и уведомление, когда твой отзыв исправлен',
+];
+async function currentAppVersion() {
+  try { return ((await caches.keys()) || []).find(k => /^arch-v/.test(k)) || ''; } catch (e) { return ''; }
+}
+async function maybeWhatsNew(cur) {
+  cur = cur || await currentAppVersion();
+  if (!cur) return;
+  const seen = localStorage.getItem('arch5_ver');
+  localStorage.setItem('arch5_ver', cur);
+  if (!seen || seen === cur) return;       // первый запуск или версия не менялась
+  reactCard(APP_CHANGES.map(t => ({ html: esc(t) })), 'Что нового');
+  clearTimeout(window.__rcT); window.__rcT = setTimeout(rcClose, 25000);
+}
+function showUpdateToast() {
+  if (document.getElementById('upd-toast')) return;
+  const el = document.createElement('div');
+  el.className = 'toast t-undo on'; el.id = 'upd-toast';
+  el.innerHTML = `<span>Вышла новая версия</span><button class="toast-undo" onclick="location.reload()">Обновить</button>`;
+  $('toasts').appendChild(el);
+}
+(function initSWUpdates() {
+  if (!('serviceWorker' in navigator)) { return; }
+  const hadController = !!navigator.serviceWorker.controller;
+  // Новый SW взял контроль (skipWaiting) → свежая версия готова.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController) showUpdateToast();
+  });
+  const poke = () => navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(() => {});
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') poke(); });
+  window.addEventListener('online', poke);
+  setInterval(poke, 30 * 60 * 1000);
+})();
+setTimeout(() => { try { maybeWhatsNew(); } catch (e) {} }, 2500);

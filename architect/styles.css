@@ -1063,3 +1063,7 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .vec-dir.flat .vec-ar{color:var(--t3)}
 .vec-dir.down .vec-ar{color:var(--orange)}
 .vec-sub{font-size:var(--tx3);color:var(--t3);line-height:1.5;margin-top:2px}
+
+/* Тосты должны быть кликабельны (кнопки «Отменить»/«Обновить»):
+   контейнер прозрачен для касаний, сам тост — нет. */
+.toast{pointer-events:auto}

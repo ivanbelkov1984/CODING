@@ -129,6 +129,22 @@ ok(await page.evaluate(() => !!document.querySelector('#h-vector .vec-card')), '
 ok(await page.evaluate(() => /запис/.test(document.querySelector('#h-vector .vec-sub').textContent)), 'вектор показывает движение за неделю');
 await page.evaluate(() => rcClose());
 
+// ── Живое обновление PWA: баннер + «Что нового» + кликабельные тосты ──
+await page.evaluate(() => showUpdateToast());
+ok(await page.evaluate(() => {
+  const b = document.querySelector('#upd-toast .toast-undo');
+  return !!b && getComputedStyle(b.closest('.toast')).pointerEvents === 'auto';
+}), 'баннер «Вышла новая версия» показан и кликабелен');
+await page.evaluate(() => document.getElementById('upd-toast').remove());
+await page.evaluate(async () => { localStorage.setItem('arch5_ver', 'arch-vOLD'); await maybeWhatsNew('arch-vNEW'); });
+await page.waitForTimeout(150);
+ok(await page.evaluate(() => {
+  const c = document.getElementById('react-card');
+  return !!c && /Что нового/.test(c.textContent) && document.querySelectorAll('#react-card .rc-row').length >= 3
+    && localStorage.getItem('arch5_ver') === 'arch-vNEW';
+}), 'после обновления показывается «Что нового» и версия запоминается');
+await page.evaluate(() => rcClose());
+
 // ── Обратная связь: форма → отправка (мок API) → id сохранён ──
 await page.evaluate(() => {
   window.fetch = (u) => String(u).includes('/api/feedback')
