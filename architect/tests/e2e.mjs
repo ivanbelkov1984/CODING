@@ -129,6 +129,19 @@ ok(await page.evaluate(() => !!document.querySelector('#h-vector .vec-card')), '
 ok(await page.evaluate(() => /запис/.test(document.querySelector('#h-vector .vec-sub').textContent)), 'вектор показывает движение за неделю');
 await page.evaluate(() => rcClose());
 
+// ── Обзор недели: плотность смысла, результат не исчезает ──
+const dig = await page.evaluate(async () => {
+  DB.digests = [];
+  await mkDig();
+  const d = DB.digests[0] || {};
+  return { n: DB.digests.length, cause: (d.cause || []).length,
+           hasCe: !!document.querySelector('#dg-list .dg-ce'),
+           marked: !!document.querySelector('#dg-list .dg-new') };
+});
+ok(dig.n === 1 && dig.cause >= 1, `обзор недели содержит «Причины → следствия» (${dig.cause})`);
+ok(dig.hasCe, 'блок «Причины → следствия» отрендерен в карточке обзора');
+ok(dig.marked, 'свежий обзор подсвечен (не мелькает тостом)');
+
 // ── Карта связей: смысл вместо каши (tf-idf + лимит связей на узел) ──
 const graph = await page.evaluate(() => {
   const Q = 'Что самое важное прямо сейчас?';

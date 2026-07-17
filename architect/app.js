@@ -2619,6 +2619,7 @@ function rDig() {
           <div class="dg-stat"><b>${d.dreams}</b><span>снов</span></div>
         </div>
         ${d.ai ? `<div class="dg-ai"><div class="dg-ai-badge">✨ Живой обзор недели</div>${esc(d.ai)}</div>` : ''}
+        ${d.cause && d.cause.length ? `<div class="dg-sub">Причины → следствия</div>${d.cause.map(t=>`<div class="dg-ce">→ ${esc(t)}</div>`).join('')}` : ''}
         ${d.top && d.top.length ? `<div class="dg-sub">Сильнейшие инсайты</div>${d.top.map(t=>`<div class="dg-top"><span class="tag ${TC[t.tag]||'tg-personal'}">${TL[t.tag]||t.tag}</span> ${esc(t.title)}</div>`).join('')}` : ''}
         ${d.themes && d.themes.length ? `<div class="chips" style="margin-top:var(--s3)">${d.themes.map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div>` : ''}
       </div>`;
@@ -2648,6 +2649,11 @@ async function mkDig() {
   const counts = {}; insW.forEach(i => counts[i.tag] = (counts[i.tag]||0)+1);
   const themes = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([t])=>TL[t]||t);
   const dreams = DB.dreams.filter(d => wk(d.createdAt)).length;
+  // Причины → следствия: главные действенные связи из движков — сердце
+  // обзора («что я делаю → что получаю»), а не просто счётчики.
+  let cause = [];
+  try { cause = (smartInsights().items || []).slice(0, 3).map(x => x.text); } catch (e) {}
+  try { crossLinks().forEach(l => { if (cause.length < 5 && !cause.includes(l.text)) cause.push(l.text); }); } catch (e) {}
   const M = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
   const d0 = new Date(now-6*864e5), d1 = new Date(now);
   const week = `${d0.getDate()} ${M[d0.getMonth()]} – ${d1.getDate()} ${M[d1.getMonth()]}`;
@@ -2655,9 +2661,16 @@ async function mkDig() {
     id: now, createdAt: nowISO(), sv: SCHEMA_VERSION, week,
     cnt: insW.length, adherence: ciW.length,
     stateAvg: aW ? +aW.comp.toFixed(1) : null, stateDelta,
-    dreams, patterns: DB.patterns.length, themes, top,
+    dreams, patterns: DB.patterns.length, themes, top, cause,
   });
   persist(); rDig(); hptMed(); toast('Обзор недели готов', 'ok');
+  // Обзор не должен «мелькнуть и уйти»: скроллим к свежей карточке и подсвечиваем.
+  const fresh = document.querySelector('#dg-list .dg');
+  if (fresh) {
+    fresh.classList.add('dg-new');
+    try { fresh.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+    setTimeout(() => fresh.classList.remove('dg-new'), 2600);
+  }
   // Автономно: если есть ключ — Claude тихо дописывает живой обзор (без кнопок).
   if (getAiKey()) enrichDigestAutonomously(now);
 }
