@@ -200,6 +200,27 @@ const prov = await page.evaluate(async () => {
 ok(/api\.openai\.com/.test(prov.u0) && prov.m0 === 'gpt-4o-mini', `провайдер GPT: свой endpoint и модель (${prov.m0})`);
 ok(/generativelanguage\.googleapis\.com/.test(prov.u1) && /gemini-2\.5-pro/.test(prov.u1) && prov.both, 'провайдер Gemini: работает и берёт свою deep-модель');
 
+// ── Психологический контур: метод «Зачем?» владельца ──
+const psy = await page.evaluate(async () => {
+  setAiKey('sk-test'); CFG.aiProvider = 'anthropic';
+  DB.insights.unshift({ id: 501, tag: 'personal', title: 'Опять жду её сообщения весь вечер', body: 'Опять жду её сообщения весь вечер и не могу заняться делом, тревога накрывает.', links: [], createdAt: nowISO(), day: todayKey(), date: '' });
+  window.fetch = (u) => String(u).includes('anthropic')
+    ? Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify({ items: [{ id: 501, symptom: 'жду сообщения, тревога', func: 'сохранить связь', gain: 'не оставаться с пустотой', need: 'близость', ego: 'Ребёнок', emotion: 'тревога', game: null, conf: 80 }] }) }], usage: { input_tokens: 200, output_tokens: 100 } }) })
+    : Promise.reject(new Error('offline'));
+  await psyAutoRun();
+  const i = DB.insights.find(x => x.id === 501);
+  STATE.mapView = 'psy'; goTo('map'); msub('graph');
+  const view = (document.getElementById('graph-canvas') || {}).textContent || '';
+  showDet(501);
+  const det = (document.getElementById('det-links') || {}).textContent || '';
+  closeOv('ov-det'); goTo('home'); STATE.mapView = 'themes';
+  return { need: i.psy && i.psy.need, ego: i.psy && i.psy.ego, view, det, sys: /Зачем/.test(CHAT_SYSTEM) && /вторичную выгоду/.test(CHAT_SYSTEM) };
+});
+ok(psy.need === 'близость' && psy.ego === 'Ребёнок', 'ИИ осознанно размечает записи по методу «Зачем?» (потребность, состояние Я)');
+ok(/близость/.test(psy.view) && /Ребёнок/.test(psy.view), 'вью «Психика»: потребности и состояния Я — системная структура');
+ok(/Функция/.test(psy.det) && /Вторичная выгода/.test(psy.det), 'в деталях записи — разбор: симптом → функция → вторичная выгода');
+ok(psy.sys, 'диалог-наставник ведёт по алгоритму метода «Зачем?»');
+
 // ── RULER ──
 await page.evaluate(() => openOv('ov-ci'));
 await page.waitForTimeout(120);

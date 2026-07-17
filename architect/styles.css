@@ -1158,3 +1158,25 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .tm-row b{color:var(--t1);font-weight:510}
 .tm-cta{color:var(--accent-light,var(--accent));font-weight:510;cursor:pointer;border-bottom:1px dashed var(--accent)}
 .tm-cta:active{opacity:.6}
+
+/* ── ПСИХОЛОГИЧЕСКИЙ КОНТУР (метод «Зачем?») ───────────────────── */
+.psy-wrap{padding:var(--s2) 0}
+.psy-sec{font-size:var(--tx1,.6875rem);font-weight:510;color:var(--t4);text-transform:uppercase;letter-spacing:.06em;padding:var(--s3) 0 var(--s2);border-top:1px solid var(--bd);margin-top:var(--s2)}
+.psy-need{padding:var(--s2) 0;cursor:pointer}
+.psy-need-h{display:flex;justify-content:space-between;font-size:var(--tx3);color:var(--t1);font-weight:500}
+.psy-need-h i{font-style:normal;color:var(--t3)}
+.psy-bar{height:4px;border-radius:2px;background:var(--bd);margin-top:4px;overflow:hidden}
+.psy-bar div{height:100%;background:var(--accent);border-radius:2px}
+.psy-recs{margin-top:var(--s2);font-size:var(--tx2);line-height:1.8;color:var(--t2)}
+.psy-ego{display:flex;gap:var(--s2)}
+.psy-ego-i{flex:1;background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:var(--s2);text-align:center}
+.psy-ego-i b{display:block;font-size:var(--tx4);font-weight:510;color:var(--t1)}
+.psy-ego-i span{font-size:var(--tx2);color:var(--t3)}
+.psy-game{font-size:var(--tx3);color:var(--t2);padding:3px 0}
+.psy-chain{font-size:var(--tx2);color:var(--t2);line-height:1.5;padding:5px 0;border-bottom:1px solid var(--bd);cursor:pointer}
+.psy-chain em{font-style:normal;color:var(--accent)}
+.psy-box{margin-top:var(--s3);background:var(--bg2);border:1px solid var(--bd);border-left:3px solid var(--accent);border-radius:8px;padding:var(--s3)}
+.psy-box-t{font-size:var(--tx1,.6875rem);font-weight:510;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:var(--s2)}
+.psy-row{display:flex;gap:var(--s3);font-size:var(--tx2);line-height:1.5;padding:3px 0}
+.psy-row span{flex:0 0 108px;color:var(--t4)}
+.psy-row div{color:var(--t1)}

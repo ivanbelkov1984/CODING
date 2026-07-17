@@ -1409,6 +1409,17 @@ function showDet(id) {
   if (out.length)  html += `<div class="det-rel"><b>Ссылается на</b> ${out.map(l => `<span class="wl" onclick="openLink(decodeURIComponent('${encodeURIComponent(l)}'))">${esc(l)}</span>`).join(' · ')}</div>`;
   if (back.length) html += `<div class="det-rel"><b>Упоминается в</b> ${back.map(x => `<span class="wl" onclick="showDet(${x.id})">${esc(x.title)}</span>`).join(' · ')}</div>`;
   if (!html) html = `<div class="det-hint">Пересечений с другими записями пока нет — они появятся сами, когда темы начнут повторяться.</div>`;
+  // Психологический разбор по методу «Зачем?» (если ИИ уже разметил)
+  if (ins.psy && (ins.psy.func || ins.psy.need)) {
+    const p = ins.psy;
+    const row = (k, v) => v ? `<div class="psy-row"><span>${k}</span><div>${esc(v)}</div></div>` : '';
+    const rel = psyRelated(ins, 3);
+    html += `<div class="psy-box"><div class="psy-box-t">Разбор по методу «Зачем?»</div>
+      ${row('Симптом', p.symptom)}${row('Функция', p.func)}${row('Вторичная выгода', p.gain)}
+      ${row('Потребность', p.need)}${row('Состояние Я', p.ego)}${row('Эмоция', p.emotion)}${row('Игра', p.game)}
+      ${rel.length ? `<div class="psy-row"><span>Та же потребность</span><div>${rel.map(r => `<span class="wl" onclick="showDet(${r.id})">${esc(r.title.slice(0, 34))}</span>`).join(' · ')}</div></div>` : ''}
+    </div>`;
+  }
   html += `<div style="margin-top:var(--s3)"><button class="btn btn-s btn-sm" onclick="closeOv('ov-det');openChatFor(${ins.id})">💬 Обсудить глубже</button></div>`;
   $('det-links').innerHTML = html;
   const da = $('det-analysis'); if (da) da.innerHTML = '';
@@ -3193,8 +3204,8 @@ const AI_PROVIDER_MODELS = {
   openai: { light: 'gpt-4o-mini', deep: 'gpt-4o' },
   gemini: { light: 'gemini-2.0-flash', deep: 'gemini-2.5-pro' },
 };
-const AI_TASKS = { react: 'Отклик наставника', deeper: 'Вопрос вглубь', prompts: 'Вопросы рефлексии', digest: 'Обзор недели', map: 'Живая карта', analysis: 'Разбор записи', chat: 'Диалог вглубь', other: 'Прочее' };
-const AI_TASK_CLASS = { react: 'light', deeper: 'light', prompts: 'light' };   // остальные — deep
+const AI_TASKS = { react: 'Отклик наставника', deeper: 'Вопрос вглубь', prompts: 'Вопросы рефлексии', digest: 'Обзор недели', map: 'Живая карта', analysis: 'Разбор записи', chat: 'Диалог вглубь', psy: 'Психоконтур («Зачем?»)', other: 'Прочее' };
+const AI_TASK_CLASS = { react: 'light', deeper: 'light', prompts: 'light', psy: 'light' };   // остальные — deep
 function aiModelFor(task) {
   const cls = AI_TASK_CLASS[task] || 'deep';
   const prov = CFG.aiProvider || 'anthropic';
@@ -3976,7 +3987,10 @@ setTimeout(() => { try { maybeWhatsNew(); } catch (e) {} }, 2500);
 // Диалог сохраняется в DB.chats (синк/бэкап как у всех коллекций),
 // а «Завершить» сжимает его в инсайт — вывод попадает в граф, паттерны
 // и будущие переклички. Ничего не проходит бесследно.
-const CHAT_SYSTEM = 'Ты — вдумчивый психолог-наставник дневника «Архитектор» (рамка CBT/ACT). Веди диалог вглубь ОДНОЙ темы: коротко отражай суть сказанного (1–3 предложения, без пересказа), затем задавай ОДИН точный открытый вопрос, который ведёт ближе к корню — чувству, потребности, убеждению под ситуацией. Не давай советов, пока не попросят. Если человек дошёл до ядра — помоги назвать его словами. Тепло, по-русски, на «ты».';
+// Диалог ведётся по методу «Зачем?» владельца (его научно-методический
+// труд): симптом → серия «Зачем?» → функция → вторичная выгода → цена →
+// альтернативный способ закрыть потребность → закрепление выбора.
+const CHAT_SYSTEM = 'Ты — наставник дневника «Архитектор». Работаешь строго по методу «Зачем?» (интеграция: логотерапия Франкла, транзактный анализ Бёрна, теория привязанности Боулби, эмоциональная регуляция Гоулмана). Алгоритм диалога: 1) зафиксируй симптом словами человека; 2) последовательно спрашивай «Зачем?» — по ОДНОЙ итерации за ход, всего 3–5, двигаясь от жалобы к ФУНКЦИИ переживания (вопрос «зачем», не «почему»: не причина в прошлом, а функция сейчас); 3) когда функция видна — назови её и вторичную выгоду (payoff, Бёрн); 4) мягко покажи цену симптома; 5) спроси, каким другим способом можно удовлетворить ту же глубинную потребность; 6) помоги закрепить новый выбор. Замечай состояния Я (Ребёнок/Родитель/Взрослый) и психологические игры — называй их бережно. За один ход: короткое отражение (1–3 предложения) + ОДИН вопрос. Без советов, пока не попросят. Тепло, без осуждения, по-русски, на «ты».';
 // Модель диалога выбирается как в Perplexity: список моделей трёх
 // провайдеров, выбранная раскрыта с описанием и тумблером «С рассуждением».
 // Диалог идёт на выбранной (дефолт — sonnet, дёшево); а вот ЗАКЛЮЧЕНИЕ
@@ -4083,18 +4097,29 @@ async function chatFinish() {
   toast('Собираю вывод диалога…');
   try {
     const dialog = c.msgs.map(m => (m.r === 'u' ? 'Я: ' : 'Наставник: ') + m.t).join('\n');
-    // Заключение — работа для СИЛЬНОЙ модели (deep-маршрут, opus):
-    // именно этот вывод разносится по всей системе.
+    // Заключение — работа для СИЛЬНОЙ модели (deep-маршрут, opus): вывод
+    // сразу размечается по методу «Зачем?» и разносится по системе.
+    const schema = { type: 'object', additionalProperties: false,
+      required: ['text', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game'],
+      properties: {
+        text: { type: 'string' },
+        symptom: { type: ['string', 'null'] }, func: { type: ['string', 'null'] }, gain: { type: ['string', 'null'] },
+        need: { type: ['string', 'null'], enum: [...PSY_NEEDS, null] },
+        ego: { type: ['string', 'null'], enum: [...PSY_EGO, null] },
+        emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
+      } };
     const out = await callClaude({
-      system: 'Сожми диалог в личный вывод от первого лица: 2–4 предложения — что я понял о себе, корень темы и один конкретный следующий шаг. Без воды и пересказа, по-русски.',
-      user: dialog, maxTokens: 300, task: 'analysis',
+      system: 'Сожми диалог по методу «Зачем?». text: личный вывод от первого лица (2–4 предложения — что я понял, корень темы, один следующий шаг). Плюс структура метода: симптом, функция симптома, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без воды.',
+      user: dialog, maxTokens: 500, task: 'analysis', schema,
     });
-    const t = String(out).trim(); if (!t) return;
+    let parsed; try { parsed = JSON.parse(out); } catch (e) { parsed = { text: String(out).trim() }; }
+    const t = String(parsed.text || '').trim(); if (!t) return;
     c.summarized = true; touch(c);
     DB.insights.unshift({
       id: Date.now(), tag: 'personal', w: 2, title: titleFrom(t), body: t,
       date: dateRU(), createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION,
       src: 'Диалог', links: [], chatId: c.id,
+      psy: parsed.need || parsed.func ? { symptom: parsed.symptom, func: parsed.func, gain: parsed.gain, need: parsed.need, ego: parsed.ego, emotion: parsed.emotion, game: parsed.game, conf: 85, at: nowISO() } : undefined,
     });
     persist(); rIns(); rHIns(); rKPIs();
     toast('Вывод диалога сохранён в инсайты', 'ok');
@@ -4200,16 +4225,20 @@ function themeGapWrite(a, b) {
 }
 function setMapView(v) { STATE.mapView = v; rMap(); if (typeof hpt === 'function') hpt(); }
 function rMap() {
-  const themes = (STATE.mapView || 'themes') === 'themes';
-  const bt = $('mt-themes'), bn = $('mt-notes');
-  if (bt) bt.classList.toggle('on', themes);
-  if (bn) bn.classList.toggle('on', !themes);
+  const v = STATE.mapView || 'themes';
+  const bt = $('mt-themes'), bp = $('mt-psy'), bn = $('mt-notes');
+  if (bt) bt.classList.toggle('on', v === 'themes');
+  if (bp) bp.classList.toggle('on', v === 'psy');
+  if (bn) bn.classList.toggle('on', v === 'notes');
   const hint = $('graph-hint');
-  if (hint) hint.textContent = themes
+  if (hint) hint.textContent = v === 'themes'
     ? 'Карта строится сама из твоих записей: размер — как часто тема встречается, цвет — группа связанных тем, линия — темы появляются вместе.'
-    : 'Связи находятся сами — по общим темам твоих записей. Крупные узлы упоминаются чаще. Тапни узел — фокус на его окружении.';
+    : v === 'psy'
+      ? 'ИИ осознанно размечает записи по методу «Зачем?»: функция симптома, вторичная выгода, глубинная потребность, состояние Я, игры. Связи — по психологии, не по словам.'
+      : 'Связи находятся сами — по общим темам твоих записей. Крупные узлы упоминаются чаще. Тапни узел — фокус на его окружении.';
   const ti = $('theme-insights');
-  if (themes) rThemeMap('graph-canvas');
+  if (v === 'themes') rThemeMap('graph-canvas');
+  else if (v === 'psy') rPsyView('graph-canvas');
   else { if (ti) ti.innerHTML = ''; rGraph('graph-canvas', 380, false); }
 }
 let _tmSel = null;
@@ -4269,4 +4298,101 @@ function rThemeMap(elId) {
       ? `<div class="sec-lbl">Что видно по карте</div><div class="tm-card mx mb">${ins.map(x => `<div class="tm-row"><span>${x.ic}</span><div>${x.html}</div></div>`).join('')}</div>`
       : '';
   }
+}
+
+// ═══ ПСИХОЛОГИЧЕСКИЙ КОНТУР — метод «Зачем?» владельца ═══════════
+// Основа: научно-методический труд владельца (интеграция логотерапии
+// Франкла, транзактного анализа Бёрна, теории привязанности Боулби,
+// эмоциональной регуляции Гоулмана). ИИ ОСОЗНАННО размечает каждую
+// запись по схеме метода: симптом → функция → вторичная выгода →
+// потребность → состояние Я → эмоция → игра. Связи между записями
+// строятся по ПОТРЕБНОСТЯМ и ИГРАМ — системно, а не по словам.
+const PSY_NEEDS = ['безопасность', 'принятие', 'значимость', 'автономия', 'смысл', 'близость', 'контроль', 'покой', 'новизна'];
+const PSY_EGO = ['Ребёнок', 'Родитель', 'Взрослый'];
+const PSY_SYSTEM = 'Ты — психолог-аналитик дневника «Архитектор». Работаешь строго по методу «Зачем?» (интеграция: логотерапия Франкла — у симптома есть функция и смысл; транзактный анализ Бёрна — игры, скрытый выигрыш, состояния Я; теория привязанности Боулби; эмоциональная регуляция Гоулмана). Для каждой записи осознанно определи: симптом (что болит/повторяется, словами автора), функцию симптома (ЗАЧЕМ он нужен психике), вторичную выгоду (payoff), глубинную потребность (из списка), состояние Я, ядровую эмоцию и психологическую игру, если она видна. НЕ выдумывай: если по тексту не видно — ставь null и снижай confidence.';
+let _psyBusy = false;
+async function psyAutoRun() {
+  try {
+    if (_psyBusy || !getAiKey() || !navigator.onLine) return;
+    const todo = (DB.insights || []).filter(i => !i.psy && String(i.body || '').length >= 25).slice(0, 5);
+    if (!todo.length) return;
+    _psyBusy = true;
+    const schema = { type: 'object', additionalProperties: false, required: ['items'], properties: { items: { type: 'array', items: {
+      type: 'object', additionalProperties: false,
+      required: ['id', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game', 'conf'],
+      properties: {
+        id: { type: 'integer' },
+        symptom: { type: ['string', 'null'] }, func: { type: ['string', 'null'] }, gain: { type: ['string', 'null'] },
+        need: { type: ['string', 'null'], enum: [...PSY_NEEDS, null] },
+        ego: { type: ['string', 'null'], enum: [...PSY_EGO, null] },
+        emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
+        conf: { type: 'integer', minimum: 0, maximum: 100 },
+      } } } } };
+    const user = 'Записи дневника (id, текст):\n' + JSON.stringify(todo.map(i => ({ id: i.id, text: (i.title + '. ' + (i.body || '')).slice(0, 600) }))) +
+      '\n\nРазметь каждую по методу «Зачем?». Кратко, по-русски, без пересказа.';
+    const text = await callClaude({ system: PSY_SYSTEM, user, maxTokens: 1400, schema, task: 'psy' });
+    const out = JSON.parse(text);
+    let n = 0;
+    (out.items || []).forEach(m => {
+      const i = DB.insights.find(x => x.id === m.id);
+      if (!i) return;
+      i.psy = { symptom: m.symptom, func: m.func, gain: m.gain, need: m.need, ego: m.ego, emotion: m.emotion, game: m.game, conf: m.conf, at: nowISO() };
+      touch(i); n++;
+    });
+    if (n) { persist(); log('info', `психоконтур: размечено ${n} записей`); }
+  } catch (e) { log('warn', 'психоконтур: ' + e.message); }
+  _psyBusy = false;
+}
+setTimeout(psyAutoRun, 9000);
+setInterval(psyAutoRun, 10 * 60 * 1000);
+// Осознанные связи: записи с той же глубинной потребностью.
+function psyRelated(ins, limit) {
+  if (!ins.psy || !ins.psy.need) return [];
+  return (DB.insights || []).filter(x => x.id !== ins.id && x.psy && x.psy.need === ins.psy.need).slice(0, limit || 3);
+}
+// Вью «Психика»: системная структура вместо графа — потребности,
+// состояния Я, повторяющиеся игры, свежие «симптом → функция → выгода».
+let _psySel = null;
+function psySelect(need) { _psySel = _psySel === need ? null : need; rPsyView('graph-canvas'); if (typeof hpt === 'function') hpt(); }
+function rPsyView(elId) {
+  const el = $(elId); if (!el) return;
+  const ti = $('theme-insights'); if (ti) ti.innerHTML = '';
+  const marked = (DB.insights || []).filter(i => i.psy);
+  if (!marked.length) {
+    el.innerHTML = `<div class="empty"><div class="em-t">Психика ещё не размечена</div><div class="em-d">${getAiKey() ? 'ИИ размечает записи по методу «Зачем?» в фоне — загляни через пару минут' : 'Добавь AI-ключ в Настройках — ИИ начнёт осознанно размечать записи по методу «Зачем?»: функция, выгода, потребность, состояние Я'}</div></div>`;
+    return;
+  }
+  // потребности
+  const byNeed = {};
+  marked.forEach(i => { const n = i.psy.need; if (n) (byNeed[n] = byNeed[n] || []).push(i); });
+  const needRows = Object.entries(byNeed).sort((a, b) => b[1].length - a[1].length).map(([n, list]) => {
+    const open = _psySel === n;
+    const w = Math.round(list.length / marked.length * 100);
+    return `<div class="psy-need${open ? ' open' : ''}" onclick="psySelect('${n}')" role="button">
+      <div class="psy-need-h"><span>${esc(n)}</span><i>${list.length}</i></div>
+      <div class="psy-bar"><div style="width:${w}%"></div></div>
+      ${open ? `<div class="psy-recs">${list.slice(0, 5).map(r => `<span class="wl" onclick="event.stopPropagation();showDet(${r.id})">${esc(r.title.slice(0, 40))}</span>`).join('<br>')}</div>` : ''}
+    </div>`;
+  }).join('');
+  // состояния Я
+  const ego = { 'Ребёнок': 0, 'Родитель': 0, 'Взрослый': 0 };
+  marked.forEach(i => { if (i.psy.ego && ego[i.psy.ego] != null) ego[i.psy.ego]++; });
+  const egoN = ego['Ребёнок'] + ego['Родитель'] + ego['Взрослый'];
+  const egoHtml = egoN ? `<div class="psy-sec">Состояния Я (Бёрн)</div>
+    <div class="psy-ego">${PSY_EGO.map(k => `<div class="psy-ego-i"><b>${Math.round(ego[k] / egoN * 100)}%</b><span>${k}</span></div>`).join('')}</div>` : '';
+  // повторяющиеся игры
+  const games = {};
+  marked.forEach(i => { const g = (i.psy.game || '').trim(); if (g) (games[g] = games[g] || []).push(i); });
+  const rep = Object.entries(games).filter(([, l]) => l.length >= 2).sort((a, b) => b[1].length - a[1].length).slice(0, 3);
+  const gamesHtml = rep.length ? `<div class="psy-sec">Повторяющиеся игры (вскрыть = ослабить)</div>` +
+    rep.map(([g, l]) => `<div class="psy-game">🎭 «${esc(g)}» — ${l.length} ${pl(l.length, 'раз', 'раза', 'раз')}</div>`).join('') : '';
+  // свежие разборы: симптом → функция → выгода
+  const fresh = marked.filter(i => i.psy.func).slice(0, 3);
+  const freshHtml = fresh.length ? `<div class="psy-sec">Симптом → функция → выгода</div>` +
+    fresh.map(i => `<div class="psy-chain" onclick="showDet(${i.id})" role="button">${esc((i.psy.symptom || i.title).slice(0, 44))} <em>→</em> ${esc((i.psy.func || '').slice(0, 50))}${i.psy.gain ? ` <em>→</em> ${esc(i.psy.gain.slice(0, 44))}` : ''}</div>`).join('') : '';
+  el.innerHTML = `<div class="psy-wrap">
+    <div class="psy-sec" style="border-top:0;padding-top:0">Глубинные потребности · размечено ${marked.length} из ${(DB.insights || []).length}</div>
+    ${needRows || '<div class="ai-sp-empty">Потребности пока не определены</div>'}
+    ${egoHtml}${gamesHtml}${freshHtml}
+  </div>`;
 }
