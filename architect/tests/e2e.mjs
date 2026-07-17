@@ -285,6 +285,21 @@ ok(tmap.n >= 4 && tmap.e >= 2, `карта тем: понятия + связи �
 ok(/Ядро карты/.test(tmap.txt), 'вывод «ядро карты» — главная тема внимания');
 ok(/Разрыв/.test(tmap.txt), 'структурный разрыв между группами тем найден (InfraNodus)');
 ok(tmap.rendered && tmap.svg >= 4, 'блок «Что видно по карте» и граф тем отрендерены');
+// служебные слова («которые», «нужно», «просто») не становятся темами
+const clean = await page.evaluate(() => {
+  const mk = (id, body) => ({ id, tag: 'personal', title: body.slice(0, 50), body, links: [], createdAt: nowISO(), day: todayKey(), date: '' });
+  const keep = DB.insights;
+  DB.insights = [
+    mk(31, 'Мысли которые мешают просто нужно отпустить вместе со страхом'),
+    mk(32, 'Слова которые я должен сказать просто вызывают страх'),
+    mk(33, 'Планы которые нужно сделать просто висят из-за страха'),
+  ];
+  const stems = buildThemeGraph().nodes.map(n => n.stem);
+  DB.insights = keep;
+  return stems;
+});
+ok(!clean.some(s => ['котор', 'нужн', 'прост', 'должен', 'должн'].includes(s)) && clean.includes('страх'),
+  `служебные слова отфильтрованы, смысловые остаются (темы: ${clean.join(', ') || '—'})`);
 await page.evaluate(() => goTo('home'));
 
 // ── Живое обновление PWA: баннер + «Что нового» + кликабельные тосты ──
