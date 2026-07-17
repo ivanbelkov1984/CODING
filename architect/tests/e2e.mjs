@@ -112,6 +112,36 @@ await page.waitForTimeout(300);
 ok(await page.locator('#deeper-out .deeper-q').count() === 1, 'goDeeper рендерит вопрос');
 await page.evaluate(() => closeOv('ov-add'));
 
+// ── AI: маршрутизация по классам задач + леджер расходов + бюджет ──
+const ai = await page.evaluate(async () => {
+  localStorage.removeItem('arch5_ai_ledger');
+  setAiKey('sk-test'); CFG.aiRoutes = null; CFG.aiBudgetUSD = 0;
+  const bodies = [];
+  window.fetch = (u, o) => {
+    if (String(u).includes('anthropic')) {
+      bodies.push(JSON.parse(o.body));
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({
+        content: [{ type: 'text', text: 'ок' }], usage: { input_tokens: 1000, output_tokens: 200 } }) });
+    }
+    return Promise.reject(new Error('offline'));
+  };
+  await callClaude({ user: 'тест', task: 'react' });
+  await callClaude({ user: 'тест', task: 'digest' });
+  const led = JSON.parse(localStorage.getItem('arch5_ai_ledger') || '[]');
+  rAiSpend();
+  const spendHtml = (document.getElementById('ai-spend') || {}).textContent || '';
+  CFG.aiBudgetUSD = 0.000001;
+  let blocked = false;
+  try { await callClaude({ user: 'тест', task: 'react' }); } catch (e) { blocked = !!e.budget; }
+  CFG.aiBudgetUSD = 0;
+  return { m0: bodies[0].model, m1: bodies[1].model, n: led.length, ti: led[0] && led[0].ti, spendHtml, blocked };
+});
+ok(ai.m0 === 'claude-haiku-4-5', `лёгкая задача → дешёвая модель (${ai.m0})`);
+ok(ai.m1 === 'claude-opus-4-8', `глубокая задача → сильная модель (${ai.m1})`);
+ok(ai.n === 2 && ai.ti === 1000, 'каждый AI-вызов записан в леджер с токенами');
+ok(/Отклик наставника/.test(ai.spendHtml) && /\$/.test(ai.spendHtml), 'экран «Расходы AI»: разбивка по задачам и стоимость');
+ok(ai.blocked, 'исчерпанный месячный бюджет блокирует AI-вызовы');
+
 // ── RULER ──
 await page.evaluate(() => openOv('ov-ci'));
 await page.waitForTimeout(120);

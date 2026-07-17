@@ -12,6 +12,9 @@ if (!DB || !KEY) {
   process.exit(0);
 }
 const pool = new Pool({ connectionString: DB, ssl: { rejectUnauthorized: false } });
+// Классификация — задача для дешёвой модели (AI_ROUTING_BRIEF, этап 4);
+// переопределяется без деплоя через переменную TRIAGE_MODEL.
+const MODEL = process.env.TRIAGE_MODEL || 'claude-haiku-4-5';
 
 await pool.query(`CREATE TABLE IF NOT EXISTS patterns (
   id BIGSERIAL PRIMARY KEY, summary TEXT NOT NULL, module TEXT NOT NULL,
@@ -53,7 +56,7 @@ const user = 'Сообщения пользователей (id, текст, э�
 const resp = await fetch('https://api.anthropic.com/v1/messages', {
   method:'POST',
   headers:{ 'x-api-key':KEY, 'anthropic-version':'2023-06-01', 'content-type':'application/json' },
-  body: JSON.stringify({ model:'claude-opus-4-8', max_tokens:2000,
+  body: JSON.stringify({ model: MODEL, max_tokens:2000,
     system:'Ты — триаж обратной связи приложения-дневника «Архитектор». Точность важнее уверенности: сомневаешься — снижай confidence.',
     messages:[{ role:'user', content:user }],
     output_config:{ format:{ type:'json_schema', schema } } })

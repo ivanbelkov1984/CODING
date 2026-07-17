@@ -1572,7 +1572,7 @@ async function aiLivingMap(force) {
   try {
     const user = livingMapContext() +
       '\n\nНапиши тёплый связный текст (4–6 предложений): как СЕЙЧАС связана моя жизнь — покажи, как темы, состояние и сферы влияют друг на друга; назови 1–2 глубоких паттерна через разные области. По-русски, на «ты», без клише и морализаторства. Заверши одним мягким вопросом.';
-    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 420 });
+    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 420, task: 'map' });
     const t = (text || '').trim(); if (!t) throw new Error('пустой ответ');
     DB.livingMap = { text: t, ts: Date.now(), sig: livingMapSig() };
     persist(); rLivingMap('livingmap-out'); if (typeof hptMed === 'function') hptMed();
@@ -1610,7 +1610,7 @@ async function aiAnalyzeDet() {
       (ins.body && ins.body !== ins.title ? `\nТекст: ${ins.body}` : '') +
       (rel.length ? `\n\nПохожие мои записи по теме: ${rel.join('; ')}.` : '') +
       `\n\nСделай короткий тёплый разбор (3–4 предложения): что здесь на самом деле про меня — чувство/потребность/паттерн под текстом; если видно повторение с похожими записями — назови его бережно. Заверши одним мягким вопросом. По-русски, без клише и морализаторства.`;
-    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 320 });
+    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 320, task: 'analysis' });
     const t = (text || '').trim();
     if (!t) throw new Error('пустой ответ');
     if (slot) slot.innerHTML = `<div class="deeper"><div class="deeper-an">${esc(t)}</div></div>`;
@@ -2685,7 +2685,7 @@ async function enrichDigestAutonomously(digId) {
   try {
     const user = weekContextForAI() +
       '\n\nНапиши тёплый живой обзор недели (4–6 предложений): что заметно в инсайтах и состоянии, какая динамика, на что обратить внимание. Заверши одним мягким вопросом. Без клише.';
-    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 700 });
+    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 700, task: 'digest' });
     const d = (DB.digests || []).find(x => x.id === digId) || DB.digests[0];
     if (d && text) { d.ai = text.trim(); persist(); rDig(); }
   } catch (e) { /* тихо: AI — необязательный фоновый слой */ }
@@ -2703,6 +2703,10 @@ function rCfgForm() {
   updateEncStatus();
   const ak = $('cfg-aikey');   if (ak) ak.value = getAiKey();
   const am = $('cfg-aimodel'); if (am) am.value = CFG.aiModel || AI_MODEL_DEFAULT;
+  const al = $('cfg-ai-light'); if (al) al.value = (CFG.aiRoutes && CFG.aiRoutes.light) || AI_MODEL_LIGHT_DEFAULT;
+  const ad = $('cfg-ai-deep');  if (ad) ad.value = (CFG.aiRoutes && CFG.aiRoutes.deep) || CFG.aiModel || AI_MODEL_DEFAULT;
+  const ab = $('cfg-ai-budget'); if (ab) ab.value = CFG.aiBudgetUSD || '';
+  rAiSpend();
   updateAiStatus();
   rCfgAxes();
 }
@@ -3150,9 +3154,81 @@ function updateEncStatus() {
 //  сервер; ключ хранится локально в профиле, opt-in).
 // ═════════════════════════════════════════════════════════════════
 const AI_MODEL_DEFAULT = 'claude-opus-4-8';
+const AI_MODEL_LIGHT_DEFAULT = 'claude-haiku-4-5';
 const aiKeyName = () => 'arch5_aikey_' + activeId();
 function getAiKey() { try { return localStorage.getItem(aiKeyName()) || ''; } catch(e) { return ''; } }
 function setAiKey(k) { try { k ? localStorage.setItem(aiKeyName(), k) : localStorage.removeItem(aiKeyName()); } catch(e) {} }
+
+// ─── МАРШРУТИЗАЦИЯ МОДЕЛЕЙ + УЧЁТ РАСХОДОВ (AI_ROUTING_BRIEF) ────
+// Лёгкие частые задачи ходят на дешёвую модель, глубокий анализ — на
+// сильную. Каждый вызов записывается в леджер: задача, модель, токены,
+// стоимость — «за что сколько снято». Цены: USD за 1M токенов (вх/вых).
+const AI_PRICES = {
+  'claude-haiku-4-5': { i: 1,  o: 5  },
+  'claude-sonnet-5':  { i: 3,  o: 15 },
+  'claude-opus-4-8':  { i: 5,  o: 25 },
+  'claude-fable-5':   { i: 10, o: 50 },
+};
+const AI_TASKS = { react: 'Отклик наставника', deeper: 'Вопрос вглубь', prompts: 'Вопросы рефлексии', digest: 'Обзор недели', map: 'Живая карта', analysis: 'Разбор записи', other: 'Прочее' };
+const AI_TASK_CLASS = { react: 'light', deeper: 'light', prompts: 'light' };   // остальные — deep
+function aiModelFor(task) {
+  const r = CFG.aiRoutes || {};
+  if ((AI_TASK_CLASS[task] || 'deep') === 'light') return r.light || AI_MODEL_LIGHT_DEFAULT;
+  return r.deep || CFG.aiModel || AI_MODEL_DEFAULT;
+}
+function aiPriceOf(model) {
+  const k = Object.keys(AI_PRICES).find(p => String(model).startsWith(p));
+  return k ? AI_PRICES[k] : null;
+}
+const AI_LEDGER_KEY = 'arch5_ai_ledger';
+function aiLedger() { try { return JSON.parse(localStorage.getItem(AI_LEDGER_KEY) || '[]'); } catch (e) { return []; } }
+function aiLedgerAdd(rec) {
+  try {
+    const l = aiLedger(); l.push(rec);
+    while (l.length > 500) l.shift();
+    localStorage.setItem(AI_LEDGER_KEY, JSON.stringify(l));
+  } catch (e) {}
+}
+function aiCostUSD(rec) {
+  const p = aiPriceOf(rec.model); if (!p) return 0;
+  return ((rec.ti || 0) * p.i + (rec.to || 0) * p.o) / 1e6;
+}
+function aiSpend(sinceMs) {
+  let cost = 0, n = 0; const byTask = {}, byModel = {};
+  aiLedger().forEach(r => {
+    if (r.ts < sinceMs) return;
+    const c = aiCostUSD(r); cost += c; n++;
+    const t = byTask[r.task] || (byTask[r.task] = { n: 0, cost: 0, tok: 0 });
+    t.n++; t.cost += c; t.tok += (r.ti || 0) + (r.to || 0);
+    const m = byModel[r.model] || (byModel[r.model] = { n: 0, cost: 0 });
+    m.n++; m.cost += c;
+  });
+  return { cost, n, byTask, byModel };
+}
+function aiMonthSpend() { const d = new Date(); return aiSpend(new Date(d.getFullYear(), d.getMonth(), 1).getTime()); }
+// Мягкий месячный бюджет: 80% — предупреждение раз в день, 100% — стоп
+// AI-слоя (локальные движки продолжают работать).
+function aiBudgetState() {
+  const b = +CFG.aiBudgetUSD || 0; if (!b) return { ok: true, budget: 0 };
+  const s = aiMonthSpend().cost;
+  return { ok: s < b, warn: s >= b * 0.8, spent: s, budget: b };
+}
+// Экран «Расходы AI» в Настройках: сегодня/месяц, по задачам и моделям.
+function rAiSpend() {
+  const el = $('ai-spend'); if (!el) return;
+  const day = aiSpend(Date.now() - 864e5), mon = aiMonthSpend();
+  if (!mon.n) { el.innerHTML = '<div class="ai-sp-empty">Расходов пока нет — леджер заполнится с первым AI-вызовом</div>'; return; }
+  const fmt = c => c >= 0.01 ? '$' + c.toFixed(2) : '<$0.01';
+  const rows = Object.entries(mon.byTask).sort((a, b) => b[1].cost - a[1].cost).map(([t, v]) =>
+    `<div class="ai-sp-row"><span>${esc(AI_TASKS[t] || t)}</span><i>${v.n} выз. · ${v.tok >= 1000 ? Math.round(v.tok / 1000) + 'K' : v.tok} ток.</i><b>${fmt(v.cost)}</b></div>`).join('');
+  const models = Object.entries(mon.byModel).sort((a, b) => b[1].cost - a[1].cost).map(([m, v]) =>
+    `<div class="ai-sp-row"><span>${esc(String(m).replace('claude-', ''))}</span><i>${v.n} выз.</i><b>${fmt(v.cost)}</b></div>`).join('');
+  const bs = aiBudgetState();
+  el.innerHTML =
+    `<div class="ai-sp-hero">Сутки: <b>${fmt(day.cost)}</b> · Месяц: <b>${fmt(mon.cost)}</b>${bs.budget ? ` из $${bs.budget}` : ''}</div>` +
+    `<div class="ai-sp-t">По задачам</div>${rows}` +
+    `<div class="ai-sp-t">По моделям</div>${models}`;
+}
 
 // Один вызов Claude Messages API из браузера.
 // ─── AI «КОПНИ ГЛУБЖЕ» (механика Rosebud, №5/AI-диалог) ──────────
@@ -3168,7 +3244,7 @@ async function goDeeper() {
   try {
     const q = await callClaude({
       system: 'Ты — вдумчивый дневник-коуч в духе CBT/ACT. По записи пользователя задай ОДИН короткий открытый вопрос (до 15 слов), который помогает копнуть глубже к корню чувства или паттерна. Только вопрос, без преамбулы, по-русски.',
-      user: draft, maxTokens: 120,
+      user: draft, maxTokens: 120, task: 'deeper',
     });
     const clean = String(q).trim().replace(/^["«]|["»]$/g, '');
     out.innerHTML = `<div class="deeper-q" onclick="appendDeeper(decodeURIComponent('${encodeURIComponent(clean)}'))">
@@ -3183,46 +3259,69 @@ function appendDeeper(q) {
   $('deeper-out').innerHTML = '';
   ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch(e){}
 }
-async function callClaude({ system, user, maxTokens = 1024, schema = null }) {
+// Провайдерская абстракция: единый интерфейс call() → {text, ti, to}.
+// Первый провайдер — Anthropic; другие ИИ подключаются адаптерами с тем
+// же интерфейсом, ключи per-провайдер хранятся локально.
+const AI_PROVIDERS = {
+  anthropic: {
+    name: 'Anthropic',
+    async call({ key, model, system, user, maxTokens, schema }) {
+      const body = { model, max_tokens: maxTokens, messages: [{ role: 'user', content: user }] };
+      if (system) body.system = system;
+      if (schema) body.output_config = { format: { type: 'json_schema', schema } };
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 60000);
+      let r;
+      try {
+        r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-api-key': key,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+          },
+          body: JSON.stringify(body),
+          signal: ctrl.signal,
+        });
+      } catch (e) {
+        clearTimeout(to);
+        throw new Error(e.name === 'AbortError' ? 'Таймаут запроса к Claude' : 'Нет соединения с Claude');
+      }
+      clearTimeout(to);
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        const msg = (data && data.error && data.error.message) || _httpMsg(r.status);
+        log('error', 'Claude ' + r.status, msg);
+        const e = new Error(msg); e.status = r.status; throw e;
+      }
+      if (data.stop_reason === 'refusal') throw new Error('Модель отклонила запрос');
+      const u = data.usage || {};
+      return {
+        text: (data.content || []).filter(b => b.type === 'text').map(b => b.text).join(''),
+        ti: +u.input_tokens || 0, to: +u.output_tokens || 0,
+      };
+    },
+  },
+};
+async function callClaude({ system, user, maxTokens = 1024, schema = null, task = 'other' }) {
   const key = getAiKey();
   if (!key) { const e = new Error('Не задан API-ключ Anthropic'); e.noKey = true; throw e; }
-  const body = {
-    model: (CFG.aiModel || AI_MODEL_DEFAULT),
-    max_tokens: maxTokens,
-    messages: [{ role: 'user', content: user }],
-  };
-  if (system) body.system = system;
-  if (schema) body.output_config = { format: { type: 'json_schema', schema } };
-  const ctrl = new AbortController();
-  const to = setTimeout(() => ctrl.abort(), 60000);
-  let r;
-  try {
-    r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
-    });
-  } catch (e) {
-    clearTimeout(to);
-    throw new Error(e.name === 'AbortError' ? 'Таймаут запроса к Claude' : 'Нет соединения с Claude');
+  const bs = aiBudgetState();
+  if (!bs.ok) {
+    const e = new Error(`Бюджет AI на месяц исчерпан ($${bs.spent.toFixed(2)} из $${bs.budget}) — увеличь в Настройках`);
+    e.budget = true; throw e;
   }
-  clearTimeout(to);
-  const data = await r.json().catch(() => null);
-  if (!r.ok) {
-    const msg = (data && data.error && data.error.message) || _httpMsg(r.status);
-    log('error', 'Claude ' + r.status, msg);
-    const e = new Error(msg); e.status = r.status; throw e;
+  if (bs.warn && localStorage.getItem('arch5_ai_budget_warned') !== todayKey()) {
+    try { localStorage.setItem('arch5_ai_budget_warned', todayKey()); } catch (e) {}
+    setTimeout(() => toast(`AI: потрачено ${Math.round(bs.spent / bs.budget * 100)}% месячного бюджета`, 'warn'), 400);
   }
-  if (data.stop_reason === 'refusal') throw new Error('Модель отклонила запрос');
-  const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
-  log('info', 'Claude ✓ ' + (data.usage ? data.usage.output_tokens : 0) + ' ток.');
-  return text;
+  const model = aiModelFor(task);
+  const provider = AI_PROVIDERS[CFG.aiProvider || 'anthropic'] || AI_PROVIDERS.anthropic;
+  const res = await provider.call({ key, model, system, user, maxTokens, schema });
+  aiLedgerAdd({ ts: Date.now(), task, model, ti: res.ti, to: res.to });
+  log('info', `Claude ✓ ${AI_TASKS[task] || task} · ${String(model).replace('claude-', '')} · ${res.to} ток.`);
+  return res.text;
 }
 
 // Контекст недели для AI (агрегаты + тексты за 7 дней).
@@ -3252,7 +3351,7 @@ async function aiDigest() {
   try {
     const user = weekContextForAI() +
       '\n\nНапиши тёплый живой обзор недели (4–6 предложений): что заметно в инсайтах и состоянии, какая динамика, на что стоит обратить внимание. Заверши одним мягким вопросом для размышления. Без клише и морализаторства.';
-    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 700 });
+    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 700, task: 'digest' });
     await mkDig();
     if (DB.digests[0]) { DB.digests[0].ai = text.trim(); persist(); rDig(); }
     hptMed(); toast('AI-обзор готов', 'ok');
@@ -3271,7 +3370,7 @@ async function aiQuestions() {
       '\n\nСформулируй 3 коротких, личных и небанальных вопроса для саморефлексии, опираясь на эти данные. Каждый — одно предложение.';
     const schema = { type:'object', additionalProperties:false, required:['questions'],
       properties:{ questions:{ type:'array', items:{ type:'string' } } } };
-    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 400, schema });
+    const text = await callClaude({ system: AI_SYSTEM, user, maxTokens: 400, schema, task: 'prompts' });
     let qs = [];
     try { qs = (JSON.parse(text).questions || []).filter(Boolean).slice(0, 3); } catch(e) {}
     if (!qs.length) throw new Error('пустой ответ');
@@ -3289,8 +3388,13 @@ function saveAiCfg() {
   const k = $('cfg-aikey')?.value.trim() || '';
   setAiKey(k);
   CFG.aiModel = $('cfg-aimodel')?.value.trim() || AI_MODEL_DEFAULT;
+  CFG.aiRoutes = {
+    light: $('cfg-ai-light')?.value || AI_MODEL_LIGHT_DEFAULT,
+    deep:  $('cfg-ai-deep')?.value  || (CFG.aiModel || AI_MODEL_DEFAULT),
+  };
+  CFG.aiBudgetUSD = Math.max(0, +($('cfg-ai-budget')?.value || 0)) || 0;
   persist();
-  updateAiStatus();
+  updateAiStatus(); rAiSpend();
   toast(k ? 'AI подключён' : 'AI-ключ убран', 'ok');
 }
 function updateAiStatus() {
@@ -3652,7 +3756,7 @@ async function rcAI(text) {
     slot().innerHTML = '<span class="rc-think">⚡ читаю…</span>';
     const a = await callClaude({
       system: 'Ты — живой дневник-наставник приложения «Архитектор». Пользователь только что сохранил запись. Отреагируй по-русски: 1–2 коротких предложения по сути (отрази главное, без пустых похвал и воды) и один короткий вопрос в конце.',
-      user: text, maxTokens: 220,
+      user: text, maxTokens: 220, task: 'react',
     });
     const s = slot(); if (!s) return;
     s.innerHTML = `<div class="rc-mentor">${esc(String(a).trim())}</div>`;
