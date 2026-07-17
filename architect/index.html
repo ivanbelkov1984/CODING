@@ -284,6 +284,7 @@
       <div class="sn-row">
         <div class="snpill on" data-sub="insights" onclick="msub('insights',this)"><i data-lucide="sparkles" style="width:13px;height:13px"></i>Инсайты</div>
         <div class="snpill" data-sub="dreams" onclick="msub('dreams',this)"><i data-lucide="moon" style="width:13px;height:13px"></i>Сны</div>
+        <div class="snpill" data-sub="chats" onclick="msub('chats',this)"><i data-lucide="message-circle" style="width:13px;height:13px"></i>Диалоги</div>
       </div></div>
     <div class="sn-grp"><span class="sn-glbl">Связи</span>
       <div class="sn-row">
@@ -334,6 +335,11 @@
     <div class="card mx"><div id="drm-list"></div></div>
     <div style="height:5rem"></div>
   </div>
+  <div id="ms-chats" style="display:none">
+    <div class="sec-lbl">Диалоги вглубь</div>
+    <div class="card mx"><div id="chats-list"></div></div>
+    <div style="height:5rem"></div>
+  </div>
   <div id="ms-spiritual" style="display:none">
     <div class="sec-lbl">Духовный путь</div>
     <div class="card mx"><div id="spi-list"></div></div>
@@ -363,6 +369,22 @@
 </div><!-- end #app -->
 
 <!-- ОБРАТНАЯ СВЯЗЬ -->
+<!-- ── ДИАЛОГ ВГЛУБЬ: чат с наставником (стиль Claude/GPT) ──────── -->
+<div class="ov" id="ov-chat">
+  <div class="sheet sh-chat">
+    <div class="sh-pull"></div>
+    <div class="chat-head">
+      <b id="chat-title">Диалог</b>
+      <button class="chat-done" onclick="chatFinish()">Завершить</button>
+    </div>
+    <div class="chat-msgs" id="chat-msgs"></div>
+    <div class="chat-inrow">
+      <textarea id="chat-in" class="chat-in" rows="1" placeholder="Напиши…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();chatSendMsg()}"></textarea>
+      <button class="chat-send" onclick="chatSendMsg()" aria-label="Отправить"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" style="width:16px;height:16px"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+    </div>
+  </div>
+</div>
+
 <div class="ov" id="ov-feedback" onclick="if(event.target===this)closeOv('ov-feedback')">
   <div class="sheet">
     <div class="sh-pull"></div>
@@ -737,7 +759,15 @@
       </div>
       <div class="sec-lbl" style="padding:var(--s2) 0 0">AI (Claude)</div>
       <div>
-        <div class="f-lbl">API-ключ Anthropic</div>
+        <div class="f-lbl">Провайдер ИИ</div>
+        <select class="field" id="cfg-ai-provider" onchange="aiProviderChanged()">
+          <option value="anthropic">Anthropic (Claude) — рекомендуем</option>
+          <option value="openai">OpenAI (GPT)</option>
+          <option value="gemini">Google (Gemini)</option>
+        </select>
+      </div>
+      <div>
+        <div class="f-lbl" id="cfg-aikey-lbl">API-ключ Anthropic</div>
         <input class="field" id="cfg-aikey" type="password" placeholder="sk-ant-…" autocapitalize="off" autocorrect="off" spellcheck="false">
         <div id="cfg-ai-status" style="font-size:var(--tx2);color:var(--t3);margin-top:var(--s2)"></div>
       </div>

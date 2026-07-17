@@ -20,7 +20,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
 // Сетевые ошибки к ВНЕШНИМ хостам (CDN-шрифт/иконки, бэкенд-health, Anthropic)
 // зависят от окружения (file://-origin, офлайн-CI) и не являются багами
 // приложения. Валим только на настоящих JS-ошибках самого кода.
-const EXT = /ERR_CONNECTION|ERR_NETWORK|ERR_NAME_NOT_RESOLVED|net::|Failed to load resource|CORS policy|Access-Control-Allow-Origin|fonts\.googleapis|gstatic|unpkg\.com|railway\.app|anthropic\.com/i;
+const EXT = /ERR_CONNECTION|ERR_NETWORK|ERR_NAME_NOT_RESOLVED|net::|Failed to load resource|CORS policy|Access-Control-Allow-Origin|fonts\.googleapis|gstatic|unpkg\.com|railway\.app|anthropic\.com|openai\.com|googleapis\.com/i;
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
 const page = await browser.newPage({ viewport: { width: 390, height: 900 }, deviceScaleFactor: 2 });
@@ -141,6 +141,45 @@ ok(ai.m1 === 'claude-opus-4-8', `глубокая задача → сильна�
 ok(ai.n === 2 && ai.ti === 1000, 'каждый AI-вызов записан в леджер с токенами');
 ok(/Отклик наставника/.test(ai.spendHtml) && /\$/.test(ai.spendHtml), 'экран «Расходы AI»: разбивка по задачам и стоимость');
 ok(ai.blocked, 'исчерпанный месячный бюджет блокирует AI-вызовы');
+
+// ── Диалог вглубь: чат → накопление → вывод в инсайты ──
+await page.evaluate(() => {
+  DB.chats = []; CFG.aiProvider = 'anthropic'; setAiKey('sk-test');
+  window.fetch = (u) => String(u).includes('anthropic')
+    ? Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: 'Слышу тебя. Что за этим страхом?' }], usage: { input_tokens: 90, output_tokens: 40 } }) })
+    : Promise.reject(new Error('offline'));
+  openChatFor(null, 'Боюсь начать большой проект — откладываю неделями');
+});
+await page.waitForTimeout(350);
+ok(await page.evaluate(() => document.querySelectorAll('#chat-msgs .cm').length >= 2), 'чат: моя запись + мгновенный ответ наставника');
+await page.evaluate(() => { $('chat-in').value = 'Кажется, страх провала на глазах у всех'; chatSendMsg(); });
+await page.waitForTimeout(300);
+const chatN = await page.evaluate(() => DB.chats[DB.chats.length - 1].msgs.length);
+ok(chatN >= 4, `диалог накапливается и сохраняется в базе (${chatN} сообщений)`);
+const fin = await page.evaluate(async () => {
+  const n = DB.insights.length; await chatFinish();
+  return { grew: DB.insights.length === n + 1, src: (DB.insights[0] || {}).src };
+});
+ok(fin.grew && fin.src === 'Диалог', 'завершение: вывод диалога сохранён как инсайт (src «Диалог»)');
+ok(await page.evaluate(() => { goTo('map'); msub('chats'); return document.querySelectorAll('#chats-list .chat-row').length >= 1; }), 'история диалогов: Разум → Записи → Диалоги');
+await page.evaluate(() => goTo('home'));
+
+// ── Мультипровайдер: GPT и Gemini через ту же абстракцию ──
+const prov = await page.evaluate(async () => {
+  const urls = [], bodies = [];
+  CFG.aiProvider = 'openai'; setAiKey('sk-oai');
+  window.fetch = (u, o) => { urls.push(String(u)); bodies.push(JSON.parse(o.body));
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ choices: [{ message: { content: 'ок' } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }) }); };
+  const t1 = await callClaude({ user: 'тест', task: 'react' });
+  CFG.aiProvider = 'gemini'; setAiKey('g-key');
+  window.fetch = (u) => { urls.push(String(u));
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ candidates: [{ content: { parts: [{ text: 'ок' }] } }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } }) }); };
+  const t2 = await callClaude({ user: 'тест', task: 'digest' });
+  CFG.aiProvider = 'anthropic';
+  return { u0: urls[0], m0: bodies[0].model, u1: urls[1], both: t1 === 'ок' && t2 === 'ок' };
+});
+ok(/api\.openai\.com/.test(prov.u0) && prov.m0 === 'gpt-4o-mini', `провайдер GPT: свой endpoint и модель (${prov.m0})`);
+ok(/generativelanguage\.googleapis\.com/.test(prov.u1) && /gemini-2\.5-pro/.test(prov.u1) && prov.both, 'провайдер Gemini: работает и берёт свою deep-модель');
 
 // ── RULER ──
 await page.evaluate(() => openOv('ov-ci'));

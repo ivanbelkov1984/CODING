@@ -66,6 +66,7 @@ const DEFAULT_DB = {
     {n:3, title:'Глава 3', st:'todo', flags:[]},
   ],
   digests: [],
+  chats: [],          // диалоги вглубь с AI: {id, insightId, title, msgs:[{r,t,ts}]}
   oq: [
     'Что самое важное прямо сейчас?',
     'Что мешает двигаться вперёд?',
@@ -142,7 +143,7 @@ const bakKey = id => 'arch5_bak_' + id;
 function dbCount(db) {
   if (!db || typeof db !== 'object') return 0;
   let n = 0;
-  ['insights','checkins','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests']
+  ['insights','checkins','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats']
     .forEach(c => { if (Array.isArray(db[c])) n += db[c].length; });
   return n;
 }
@@ -484,6 +485,7 @@ function msub(tab, el) {
   if (tab==='dreams')    rDrms();
   if (tab==='spiritual') rSpi();
   if (tab==='graph')     rGraph();
+  if (tab==='chats')     rChats();
 }
 
 // ─── ОВЕРЛЕИ ────────────────────────────────────────────────────
@@ -1407,6 +1409,7 @@ function showDet(id) {
   if (out.length)  html += `<div class="det-rel"><b>Ссылается на</b> ${out.map(l => `<span class="wl" onclick="openLink(decodeURIComponent('${encodeURIComponent(l)}'))">${esc(l)}</span>`).join(' · ')}</div>`;
   if (back.length) html += `<div class="det-rel"><b>Упоминается в</b> ${back.map(x => `<span class="wl" onclick="showDet(${x.id})">${esc(x.title)}</span>`).join(' · ')}</div>`;
   if (!html) html = `<div class="det-hint">Пересечений с другими записями пока нет — они появятся сами, когда темы начнут повторяться.</div>`;
+  html += `<div style="margin-top:var(--s3)"><button class="btn btn-s btn-sm" onclick="closeOv('ov-det');openChatFor(${ins.id})">💬 Обсудить глубже</button></div>`;
   $('det-links').innerHTML = html;
   const da = $('det-analysis'); if (da) da.innerHTML = '';
   openOv('ov-det');
@@ -2701,7 +2704,8 @@ function rCfgForm() {
   if (ls) ls.textContent = CFG.lastSync ? 'Последняя синхронизация: '+new Date(CFG.lastSync).toLocaleString('ru') : 'Ещё не синхронизировано';
   const pi = $('cfg-pass'); if (pi) pi.value = getPass();
   updateEncStatus();
-  const ak = $('cfg-aikey');   if (ak) ak.value = getAiKey();
+  const ap = $('cfg-ai-provider'); if (ap) ap.value = CFG.aiProvider || 'anthropic';
+  aiProviderChanged();
   const am = $('cfg-aimodel'); if (am) am.value = CFG.aiModel || AI_MODEL_DEFAULT;
   const al = $('cfg-ai-light'); if (al) al.value = (CFG.aiRoutes && CFG.aiRoutes.light) || AI_MODEL_LIGHT_DEFAULT;
   const ad = $('cfg-ai-deep');  if (ad) ad.value = (CFG.aiRoutes && CFG.aiRoutes.deep) || CFG.aiModel || AI_MODEL_DEFAULT;
@@ -2940,7 +2944,7 @@ async function decryptPayload(blob, pass) {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','bots','digests','spheres','sphereLogs'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','bots','digests','spheres','sphereLogs','chats'];
 function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
 function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
 const _ru = r => r._u || r.id || 0;   // «когда обновлено» с откатом на id (id = Date.now())
@@ -3155,7 +3159,8 @@ function updateEncStatus() {
 // ═════════════════════════════════════════════════════════════════
 const AI_MODEL_DEFAULT = 'claude-opus-4-8';
 const AI_MODEL_LIGHT_DEFAULT = 'claude-haiku-4-5';
-const aiKeyName = () => 'arch5_aikey_' + activeId();
+// Ключ хранится per-провайдер (Anthropic — в прежнем слоте, совместимо).
+const aiKeyName = () => 'arch5_aikey_' + ((CFG.aiProvider && CFG.aiProvider !== 'anthropic') ? CFG.aiProvider + '_' : '') + activeId();
 function getAiKey() { try { return localStorage.getItem(aiKeyName()) || ''; } catch(e) { return ''; } }
 function setAiKey(k) { try { k ? localStorage.setItem(aiKeyName(), k) : localStorage.removeItem(aiKeyName()); } catch(e) {} }
 
@@ -3168,12 +3173,29 @@ const AI_PRICES = {
   'claude-sonnet-5':  { i: 3,  o: 15 },
   'claude-opus-4-8':  { i: 5,  o: 25 },
   'claude-fable-5':   { i: 10, o: 50 },
+  // ориентировочные цены других провайдеров (правятся здесь при изменении)
+  'gpt-4o-mini':      { i: 0.15, o: 0.6 },
+  'gpt-4o':           { i: 2.5,  o: 10 },
+  'gemini-2.0-flash': { i: 0.1,  o: 0.4 },
+  'gemini-2.5-pro':   { i: 1.25, o: 10 },
 };
-const AI_TASKS = { react: 'Отклик наставника', deeper: 'Вопрос вглубь', prompts: 'Вопросы рефлексии', digest: 'Обзор недели', map: 'Живая карта', analysis: 'Разбор записи', other: 'Прочее' };
+// Модели по классам для не-Anthropic провайдеров (мини — быстрые задачи,
+// про — глубокий анализ). Выбор провайдера — CFG.aiProvider.
+const AI_PROVIDER_MODELS = {
+  openai: { light: 'gpt-4o-mini', deep: 'gpt-4o' },
+  gemini: { light: 'gemini-2.0-flash', deep: 'gemini-2.5-pro' },
+};
+const AI_TASKS = { react: 'Отклик наставника', deeper: 'Вопрос вглубь', prompts: 'Вопросы рефлексии', digest: 'Обзор недели', map: 'Живая карта', analysis: 'Разбор записи', chat: 'Диалог вглубь', other: 'Прочее' };
 const AI_TASK_CLASS = { react: 'light', deeper: 'light', prompts: 'light' };   // остальные — deep
 function aiModelFor(task) {
+  const cls = AI_TASK_CLASS[task] || 'deep';
+  const prov = CFG.aiProvider || 'anthropic';
+  if (prov !== 'anthropic') {
+    const m = AI_PROVIDER_MODELS[prov] || {};
+    return m[cls] || m.deep || AI_MODEL_DEFAULT;
+  }
   const r = CFG.aiRoutes || {};
-  if ((AI_TASK_CLASS[task] || 'deep') === 'light') return r.light || AI_MODEL_LIGHT_DEFAULT;
+  if (cls === 'light') return r.light || AI_MODEL_LIGHT_DEFAULT;
   return r.deep || CFG.aiModel || AI_MODEL_DEFAULT;
 }
 function aiPriceOf(model) {
@@ -3264,9 +3286,9 @@ function appendDeeper(q) {
 // же интерфейсом, ключи per-провайдер хранятся локально.
 const AI_PROVIDERS = {
   anthropic: {
-    name: 'Anthropic',
-    async call({ key, model, system, user, maxTokens, schema }) {
-      const body = { model, max_tokens: maxTokens, messages: [{ role: 'user', content: user }] };
+    name: 'Anthropic (Claude)',
+    async call({ key, model, system, user, messages, maxTokens, schema }) {
+      const body = { model, max_tokens: maxTokens, messages: messages || [{ role: 'user', content: user }] };
       if (system) body.system = system;
       if (schema) body.output_config = { format: { type: 'json_schema', schema } };
       const ctrl = new AbortController();
@@ -3303,8 +3325,49 @@ const AI_PROVIDERS = {
       };
     },
   },
+  openai: {
+    name: 'OpenAI (GPT)',
+    async call({ key, model, system, user, messages, maxTokens, schema }) {
+      const msgs = [];
+      if (system) msgs.push({ role: 'system', content: system });
+      (messages || [{ role: 'user', content: user }]).forEach(m => msgs.push({ role: m.role, content: m.content }));
+      const body = { model, max_completion_tokens: maxTokens, messages: msgs };
+      if (schema) body.response_format = { type: 'json_schema', json_schema: { name: 'out', schema, strict: true } };
+      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key },
+        body: JSON.stringify(body),
+      }).catch(() => { throw new Error('Нет соединения с OpenAI'); });
+      const data = await r.json().catch(() => null);
+      if (!r.ok) { const e = new Error((data && data.error && data.error.message) || _httpMsg(r.status)); e.status = r.status; throw e; }
+      const u = data.usage || {};
+      return {
+        text: ((data.choices || [])[0] || {}).message?.content || '',
+        ti: +u.prompt_tokens || 0, to: +u.completion_tokens || 0,
+      };
+    },
+  },
+  gemini: {
+    name: 'Google (Gemini)',
+    async call({ key, model, system, user, messages, maxTokens }) {
+      const contents = (messages || [{ role: 'user', content: user }])
+        .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
+      const body = { contents, generationConfig: { maxOutputTokens: maxTokens } };
+      if (system) body.systemInstruction = { parts: [{ text: system }] };
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      }).catch(() => { throw new Error('Нет соединения с Gemini'); });
+      const data = await r.json().catch(() => null);
+      if (!r.ok) { const e = new Error((data && data.error && data.error.message) || _httpMsg(r.status)); e.status = r.status; throw e; }
+      const u = data.usageMetadata || {};
+      return {
+        text: (((data.candidates || [])[0] || {}).content?.parts || []).map(p => p.text || '').join(''),
+        ti: +u.promptTokenCount || 0, to: +u.candidatesTokenCount || 0,
+      };
+    },
+  },
 };
-async function callClaude({ system, user, maxTokens = 1024, schema = null, task = 'other' }) {
+async function callClaude({ system, user, messages = null, maxTokens = 1024, schema = null, task = 'other' }) {
   const key = getAiKey();
   if (!key) { const e = new Error('Не задан API-ключ Anthropic'); e.noKey = true; throw e; }
   const bs = aiBudgetState();
@@ -3318,7 +3381,7 @@ async function callClaude({ system, user, maxTokens = 1024, schema = null, task 
   }
   const model = aiModelFor(task);
   const provider = AI_PROVIDERS[CFG.aiProvider || 'anthropic'] || AI_PROVIDERS.anthropic;
-  const res = await provider.call({ key, model, system, user, maxTokens, schema });
+  const res = await provider.call({ key, model, system, user, messages, maxTokens, schema });
   aiLedgerAdd({ ts: Date.now(), task, model, ti: res.ti, to: res.to });
   log('info', `Claude ✓ ${AI_TASKS[task] || task} · ${String(model).replace('claude-', '')} · ${res.to} ток.`);
   return res.text;
@@ -3384,7 +3447,17 @@ async function aiQuestions() {
 }
 
 // AI-настройки в форме конфигурации.
+// Смена провайдера в селекте: подставляем его ключ и подпись поля.
+function aiProviderChanged() {
+  CFG.aiProvider = $('cfg-ai-provider')?.value || 'anthropic';
+  const lbl = $('cfg-aikey-lbl');
+  const names = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Google AI' };
+  if (lbl) lbl.textContent = 'API-ключ ' + (names[CFG.aiProvider] || '');
+  const ak = $('cfg-aikey'); if (ak) ak.value = getAiKey();
+  updateAiStatus();
+}
 function saveAiCfg() {
+  CFG.aiProvider = $('cfg-ai-provider')?.value || 'anthropic';
   const k = $('cfg-aikey')?.value.trim() || '';
   setAiKey(k);
   CFG.aiModel = $('cfg-aimodel')?.value.trim() || AI_MODEL_DEFAULT;
@@ -3400,7 +3473,8 @@ function saveAiCfg() {
 function updateAiStatus() {
   const el = $('cfg-ai-status'); if (!el) return;
   const on = !!getAiKey();
-  el.textContent = on ? '✨ AI подключён · ' + (CFG.aiModel || AI_MODEL_DEFAULT) : 'AI выключен — вставь ключ Anthropic';
+  const pname = (AI_PROVIDERS[CFG.aiProvider || 'anthropic'] || AI_PROVIDERS.anthropic).name;
+  el.textContent = on ? `✨ AI подключён · ${pname} · ${aiModelFor('react')} / ${aiModelFor('digest')}` : `AI выключен — вставь ключ (${pname})`;
   el.style.color = on ? 'var(--green)' : 'var(--t3)';
 }
 
@@ -3774,6 +3848,7 @@ function reactToInsight(ins) {
   const pw = DB.insights.filter(i => rcDay(i) > dayAgo(14) && rcDay(i) <= dayAgo(7)).length;
   if (wk >= 2) rows.push({ html: pw ? `📈 Темп: ${wk} ${pl(wk, 'запись', 'записи', 'записей')} за неделю (было ${pw})` : `📈 ${wk} ${pl(wk, 'запись', 'записи', 'записей')} за эту неделю` });
   if (!rows.length) rows.push({ html: `🌱 Мысль №${DB.insights.length} в базе — граф связей растёт` });
+  rows.push({ html: `💬 <b>Обсудить глубже</b> — раскрутить тему в диалоге`, act: `rcDiscuss(${ins.id})` });
   reactCard(rows);
   rcAI(ins.body || ins.title || '');
 }
@@ -3868,3 +3943,98 @@ function showUpdateToast() {
   setInterval(poke, 30 * 60 * 1000);
 })();
 setTimeout(() => { try { maybeWhatsNew(); } catch (e) {} }, 2500);
+
+// ═══ ДИАЛОГ ВГЛУБЬ ═══════════════════════════════════════════════
+// Режим чата (как в Claude/GPT): лёгкий отклик → «Обсудить глубже» →
+// полноценный диалог с наставником, раскручивающий тему до корня.
+// Диалог сохраняется в DB.chats (синк/бэкап как у всех коллекций),
+// а «Завершить» сжимает его в инсайт — вывод попадает в граф, паттерны
+// и будущие переклички. Ничего не проходит бесследно.
+const CHAT_SYSTEM = 'Ты — вдумчивый психолог-наставник дневника «Архитектор» (рамка CBT/ACT). Веди диалог вглубь ОДНОЙ темы: коротко отражай суть сказанного (1–3 предложения, без пересказа), затем задавай ОДИН точный открытый вопрос, который ведёт ближе к корню — чувству, потребности, убеждению под ситуацией. Не давай советов, пока не попросят. Если человек дошёл до ядра — помоги назвать его словами. Тепло, по-русски, на «ты».';
+let _chatId = null, _chatBusy = false;
+function openChatFor(insId, seed) {
+  if (!seed && insId) { const i = DB.insights.find(x => x.id === insId); seed = i ? (i.body || i.title) : ''; }
+  let chat = insId ? (DB.chats || []).find(c => c.insightId === insId) : null;
+  if (!chat) {
+    const now = Date.now();
+    chat = { id: now, insightId: insId || null, title: titleFrom(seed || 'Диалог') || 'Диалог',
+             createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, msgs: [] };
+    if (seed) chat.msgs.push({ r: 'u', t: seed, ts: now });
+    (DB.chats = DB.chats || []).push(chat); touch(chat); persist();
+  }
+  _chatId = chat.id;
+  rChat(); openOv('ov-chat');
+  // первый ход наставника — сразу, чтобы диалог не начинался с тишины
+  if (chat.msgs.length === 1 && chat.msgs[0].r === 'u') chatReply();
+  setTimeout(() => { try { $('chat-in').focus(); } catch (e) {} }, 350);
+}
+function chatGet() { return (DB.chats || []).find(c => c.id === _chatId); }
+function rChat() {
+  const c = chatGet(); const box = $('chat-msgs'); if (!c || !box) return;
+  const tt = $('chat-title'); if (tt) tt.textContent = c.title;
+  box.innerHTML = c.msgs.map(m =>
+    `<div class="cm ${m.r === 'u' ? 'cm-u' : 'cm-a'}">${esc(m.t).replace(/\n/g, '<br>')}</div>`).join('') +
+    (_chatBusy ? '<div class="cm cm-a cm-think">думаю…</div>' : '') +
+    (!getAiKey() ? '<div class="cm cm-hint">Диалог оживёт с AI-ключом: Настройки → Конфигурация</div>' : '');
+  box.scrollTop = box.scrollHeight;
+}
+function chatSendMsg() {
+  const ta = $('chat-in'); const t = (ta && ta.value || '').trim(); if (!t || _chatBusy) return;
+  const c = chatGet(); if (!c) return;
+  c.msgs.push({ r: 'u', t, ts: Date.now() }); touch(c); persist();
+  ta.value = ''; ta.style.height = '';
+  rChat(); chatReply();
+}
+async function chatReply() {
+  const c = chatGet(); if (!c || _chatBusy || !getAiKey()) { rChat(); return; }
+  _chatBusy = true; rChat();
+  try {
+    const messages = c.msgs.slice(-24).map(m => ({ role: m.r === 'u' ? 'user' : 'assistant', content: m.t }));
+    const a = await callClaude({ system: CHAT_SYSTEM, messages, maxTokens: 500, task: 'chat' });
+    const t = String(a).trim();
+    if (t) { c.msgs.push({ r: 'a', t, ts: Date.now() }); touch(c); persist(); }
+  } catch (e) { toast(e.budget ? e.message : 'AI: ' + e.message, 'warn'); }
+  _chatBusy = false; rChat();
+  if (typeof hpt === 'function') hpt();
+}
+// Завершение: диалог сжимается в личный вывод и уходит в инсайты —
+// так тема попадает в граф связей, паттерны и будущие переклички.
+async function chatFinish() {
+  const c = chatGet();
+  closeOv('ov-chat');
+  if (!c || c.msgs.length < 3 || !getAiKey()) return;
+  if (c.summarized) return;                      // вывод уже собран
+  toast('Собираю вывод диалога…');
+  try {
+    const dialog = c.msgs.map(m => (m.r === 'u' ? 'Я: ' : 'Наставник: ') + m.t).join('\n');
+    const out = await callClaude({
+      system: 'Сожми диалог в личный вывод от первого лица: 2–4 предложения — что я понял о себе, корень темы и один конкретный следующий шаг. Без воды и пересказа, по-русски.',
+      user: dialog, maxTokens: 300, task: 'chat',
+    });
+    const t = String(out).trim(); if (!t) return;
+    c.summarized = true; touch(c);
+    DB.insights.unshift({
+      id: Date.now(), tag: 'personal', w: 2, title: titleFrom(t), body: t,
+      date: dateRU(), createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION,
+      src: 'Диалог', links: [], chatId: c.id,
+    });
+    persist(); rIns(); rHIns(); rKPIs();
+    toast('Вывод диалога сохранён в инсайты', 'ok');
+  } catch (e) { toast('Вывод не собрался: ' + e.message, 'warn'); }
+}
+// История диалогов: Разум → Записи → Диалоги.
+function rChats() {
+  const el = $('chats-list'); if (!el) return;
+  const list = [...(DB.chats || [])].sort((a, b) => b.id - a.id);
+  if (!list.length) {
+    el.innerHTML = `<div class="empty"><div class="em-t">Диалогов пока нет</div><div class="em-d">Сохрани запись и нажми «Обсудить глубже» в отклике — раскрутим тему до корня</div></div>`;
+    return;
+  }
+  el.innerHTML = list.map(c => `
+    <div class="chat-row" onclick="_chatId=${c.id};rChat();openOv('ov-chat')" role="button">
+      <div class="chat-row-t">${esc(c.title)}</div>
+      <div class="chat-row-m">${c.msgs.length} ${pl(c.msgs.length, 'сообщение', 'сообщения', 'сообщений')} · ${new Date(c.id).toLocaleDateString('ru')}${c.summarized ? ' · вывод сохранён' : ''}</div>
+    </div>`).join('');
+}
+// Кнопка «Обсудить глубже» из карточки отклика.
+function rcDiscuss(insId) { rcClose(); openChatFor(insId); }
