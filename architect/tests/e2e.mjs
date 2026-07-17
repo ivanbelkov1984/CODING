@@ -61,12 +61,14 @@ for (const t of ['home', 'vit', 'map', 'sys']) {
   await page.evaluate(x => goTo(x), t);
   ok(await page.locator('#pg-' + t + '.on').count() === 1, `вкладка ${t} открывается`);
 }
-// Разум subnav
+// Разум subnav (3 смысловые группы, программный msub подсвечивает пилюлю)
 await page.evaluate(() => goTo('map'));
+ok(await page.locator('#subnav .sn-grp').count() === 3, 'подменю «Разума» сгруппировано: Записи / Связи / Развитие');
 for (const s of ['insights', 'graph', 'book', 'patterns', 'dreams', 'spiritual', 'evolution']) {
   await page.evaluate(x => msub(x), s);
   ok(await page.locator('#ms-' + s).isVisible(), `подраздел «Разум» → ${s}`);
 }
+ok(await page.evaluate(() => document.querySelector('#subnav .snpill[data-sub="evolution"]').classList.contains('on')), 'активная пилюля подсвечена и при программном переходе');
 // Сферы на вкладке vit
 await page.evaluate(() => goTo('vit'));
 ok(await page.locator('#pg-vit #spheres-list .sph-card').count() === 2, 'вкладка «Сферы» показывает карточки сфер');

@@ -474,6 +474,7 @@ function msub(tab, el) {
   document.querySelectorAll('#subnav .snpill').forEach(p => p.classList.remove('on'));
   const t = $('ms-'+tab);
   if (t) t.style.display = 'block';
+  if (!el) el = document.querySelector(`#subnav .snpill[data-sub="${tab}"]`);  // программный переход тоже подсвечивает
   if (el) el.classList.add('on');
   hpt();
   if (tab==='evolution') rEvoList($('evo-more'));

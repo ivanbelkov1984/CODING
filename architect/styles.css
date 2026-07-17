@@ -1081,3 +1081,9 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .dg-ce{font-size:var(--tx3);color:var(--t2);line-height:1.55;padding:2px 0}
 .dg-new{animation:dgnew 1.3s var(--e) 2;border-radius:8px}
 @keyframes dgnew{0%,100%{background:transparent}50%{background:rgba(94,106,210,.12)}}
+
+/* ── Подменю «Разума»: 3 смысловые группы, всё видно без скролла ── */
+.subnav{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s5);overflow:visible}
+.sn-grp{display:flex;flex-direction:column;gap:4px}
+.sn-glbl{font-size:var(--tx1,.6875rem);font-weight:510;color:var(--t4);text-transform:uppercase;letter-spacing:.06em;padding-left:2px}
+.sn-row{display:flex;gap:var(--s2)}

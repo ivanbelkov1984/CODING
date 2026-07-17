@@ -277,14 +277,25 @@
 
 <!-- ── КАРТА ───────────────────────────────────────────────────── -->
 <section class="pg" id="pg-map">
+  <!-- Подменю сгруппировано по смыслу (REFACTOR_BRIEF П3): всё видно
+       без горизонтального скролла, любой раздел — в один тап -->
   <div class="subnav" id="subnav">
-    <div class="snpill on" onclick="msub('insights',this)"><i data-lucide="sparkles" style="width:13px;height:13px"></i>Инсайты</div>
-    <div class="snpill" onclick="msub('graph',this)"><i data-lucide="share-2" style="width:13px;height:13px"></i>Связи</div>
-    <div class="snpill" onclick="msub('book',this)"><i data-lucide="book-open" style="width:13px;height:13px"></i>Книга</div>
-    <div class="snpill" onclick="msub('patterns',this)"><i data-lucide="git-branch" style="width:13px;height:13px"></i>Паттерны</div>
-    <div class="snpill" onclick="msub('dreams',this)"><i data-lucide="moon" style="width:13px;height:13px"></i>Сны</div>
-    <div class="snpill" onclick="msub('spiritual',this)"><i data-lucide="sparkles" style="width:13px;height:13px"></i>Духовное</div>
-    <div class="snpill" onclick="msub('evolution',this)"><i data-lucide="trending-up" style="width:13px;height:13px"></i>Эволюция</div>
+    <div class="sn-grp"><span class="sn-glbl">Записи</span>
+      <div class="sn-row">
+        <div class="snpill on" data-sub="insights" onclick="msub('insights',this)"><i data-lucide="sparkles" style="width:13px;height:13px"></i>Инсайты</div>
+        <div class="snpill" data-sub="dreams" onclick="msub('dreams',this)"><i data-lucide="moon" style="width:13px;height:13px"></i>Сны</div>
+      </div></div>
+    <div class="sn-grp"><span class="sn-glbl">Связи</span>
+      <div class="sn-row">
+        <div class="snpill" data-sub="graph" onclick="msub('graph',this)"><i data-lucide="share-2" style="width:13px;height:13px"></i>Карта</div>
+        <div class="snpill" data-sub="patterns" onclick="msub('patterns',this)"><i data-lucide="git-branch" style="width:13px;height:13px"></i>Паттерны</div>
+      </div></div>
+    <div class="sn-grp"><span class="sn-glbl">Развитие</span>
+      <div class="sn-row">
+        <div class="snpill" data-sub="book" onclick="msub('book',this)"><i data-lucide="book-open" style="width:13px;height:13px"></i>Книга</div>
+        <div class="snpill" data-sub="spiritual" onclick="msub('spiritual',this)"><i data-lucide="sparkles" style="width:13px;height:13px"></i>Духовное</div>
+        <div class="snpill" data-sub="evolution" onclick="msub('evolution',this)"><i data-lucide="trending-up" style="width:13px;height:13px"></i>Эволюция</div>
+      </div></div>
   </div>
   <div id="ms-insights">
     <div class="fstrip" id="iflt">
