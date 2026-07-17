@@ -350,8 +350,15 @@
   </div>
   <div id="ms-graph" style="display:none">
     <div class="sec-lbl">Карта связей</div>
+    <!-- Два режима (паттерн InfraNodus): «Темы» — понятия и их пересечения
+         с выводами простым языком; «Записи» — прежний граф заметок -->
+    <div class="map-toggle mx">
+      <button id="mt-themes" class="on" onclick="setMapView('themes')">Темы</button>
+      <button id="mt-notes" onclick="setMapView('notes')">Записи</button>
+    </div>
     <div class="card mx"><div id="graph-canvas" class="graph-wrap"></div></div>
-    <div class="graph-hint mx">Связи находятся сами — по общим темам твоих записей. Крупные узлы упоминаются чаще. Тапни узел, чтобы открыть инсайт.</div>
+    <div id="theme-insights"></div>
+    <div class="graph-hint mx" id="graph-hint">Карта строится сама из твоих записей: размер — как часто тема встречается, цвет — группа связанных тем, линия — темы появляются вместе.</div>
     <div style="height:5rem"></div>
   </div>
   <div id="ms-evolution" style="display:none">

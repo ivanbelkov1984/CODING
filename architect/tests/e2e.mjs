@@ -218,6 +218,8 @@ ok(await page.evaluate(() => /Перекликается|мысль|записе
 ok(await page.evaluate(() => !!document.querySelector('#h-vector .vec-card')), 'виджет «Вектор недели» построен');
 ok(await page.evaluate(() => /запис/.test(document.querySelector('#h-vector .vec-sub').textContent)), 'вектор показывает движение за неделю');
 await page.evaluate(() => rcClose());
+const sphR = await page.evaluate(() => { reactToSphere(DB.spheres[0]); const t = (document.getElementById('react-card') || {}).textContent || ''; rcClose(); return t; });
+ok(/Спорт/.test(sphR), 'живой отклик и на отметку сферы');
 
 // ── Обзор недели: плотность смысла, результат не исчезает ──
 const dig = await page.evaluate(async () => {
@@ -262,10 +264,28 @@ const gTitle = await page.evaluate(() => {
   return DB.insights[0].title;
 });
 ok(/^Боюсь показать/.test(gTitle), `заголовок — суть ответа, не вопрос-промпт («${gTitle}»)`);
-await page.evaluate(() => { goTo('map'); msub('graph'); rGraph('graph-canvas', 380, false); gSelect('i11', 'graph-canvas', 380); });
+await page.evaluate(() => { goTo('map'); STATE.mapView = 'notes'; msub('graph'); gSelect('i11', 'graph-canvas', 380); });
 ok(await page.evaluate(() => !!document.querySelector('#graph-canvas .ginfo')), 'тап по узлу: инфопанель с полным заголовком и «Открыть»');
 ok(await page.evaluate(() => document.querySelectorAll('#graph-canvas .gnode.gdim').length >= 1), 'тап по узлу гасит несвязанное (фокус на окружении)');
-await page.evaluate(() => { gSelect(null, 'graph-canvas', 380); goTo('home'); });
+await page.evaluate(() => { gSelect(null, 'graph-canvas', 380); });
+
+// ── Карта ТЕМ (паттерн InfraNodus): понятия, кластеры, выводы ──
+const tmap = await page.evaluate(() => {
+  const g = buildThemeGraph();
+  const ins = themeMapInsights(g);
+  STATE.mapView = 'themes'; rMap();
+  return {
+    n: g.nodes.length, e: g.edges.length,
+    txt: ins.map(x => x.html).join(' '),
+    rendered: !!document.querySelector('#theme-insights .tm-row'),
+    svg: document.querySelectorAll('#graph-canvas svg circle').length,
+  };
+});
+ok(tmap.n >= 4 && tmap.e >= 2, `карта тем: понятия + связи по совместной встречаемости (${tmap.n} тем, ${tmap.e} связей)`);
+ok(/Ядро карты/.test(tmap.txt), 'вывод «ядро карты» — главная тема внимания');
+ok(/Разрыв/.test(tmap.txt), 'структурный разрыв между группами тем найден (InfraNodus)');
+ok(tmap.rendered && tmap.svg >= 4, 'блок «Что видно по карте» и граф тем отрендерены');
+await page.evaluate(() => goTo('home'));
 
 // ── Живое обновление PWA: баннер + «Что нового» + кликабельные тосты ──
 await page.evaluate(() => showUpdateToast());

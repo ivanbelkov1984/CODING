@@ -484,7 +484,7 @@ function msub(tab, el) {
   if (tab==='patterns')  rPats();
   if (tab==='dreams')    rDrms();
   if (tab==='spiritual') rSpi();
-  if (tab==='graph')     rGraph();
+  if (tab==='graph')     rMap();
   if (tab==='chats')     rChats();
 }
 
@@ -2511,6 +2511,7 @@ function saveSphereLog(id) {
   logSphere(id, value, note);
   closeOv('ov-sphere-log'); rSpheres(); rHome && rHome(); hptMed && hptMed();
   toast('Записано', 'ok');
+  try { reactToSphere(s); rVector(); } catch (e) {}   // живой отклик и на сферы
 }
 
 // ─── СВЯЗИ МЕЖДУ СФЕРАМИ (Exist: «в дни спорта больше читаешь») ───
@@ -3874,6 +3875,22 @@ function reactToCheckin() {
   if (!rows.length) rows.push({ html: '📊 Данные копятся — ещё пара чек-инов, и покажу твою динамику' });
   reactCard(rows);
 }
+function reactToSphere(s) {
+  const rows = [];
+  try {
+    const st = sphereStats(s.id) || {};
+    if (s.type === 'habit' && st.streak >= 2) rows.push({ html: `🔥 «${esc(s.name)}»: ${st.streak} ${pl(st.streak, 'день', 'дня', 'дней')} подряд` });
+    if (s.type === 'goal' && st.progress != null) rows.push({ html: `🎯 «${esc(s.name)}»: ${st.progress}% к цели` });
+    if (s.type === 'counter' && st.sum != null) rows.push({ html: `📈 «${esc(s.name)}»: всего ${st.sum} ${esc(s.unit || '')}` });
+    const cl = crossLinks().find(l => l.text && l.text.includes(s.name));
+    if (cl) rows.push({ html: `🔗 ${esc(cl.text)}` });
+  } catch (e) {}
+  if (!rows.length) {
+    const n = (DB.sphereLogs || []).filter(l => l.sphereId === s.id).length;
+    rows.push({ html: `🌱 «${esc(s.name)}»: ${n} ${pl(n, 'отметка', 'отметки', 'отметок')} — данные копятся` });
+  }
+  reactCard(rows);
+}
 function reactToDream(d) {
   const rows = [];
   const rel = rcRelated(d.body || '', null);
@@ -4095,3 +4112,157 @@ function rChats() {
 }
 // Кнопка «Обсудить глубже» из карточки отклика.
 function rcDiscuss(insId) { rcClose(); openChatFor(insId); }
+
+// ═══ КАРТА ТЕМ (паттерн InfraNodus) ══════════════════════════════
+// Записи → сеть ПОНЯТИЙ: узел — тема (слово-стем в 2+ записях), связь —
+// совместная встречаемость, цвет — кластер (label propagation). Главная
+// ценность — выводы простым языком: ядро внимания, мост между группами,
+// структурный разрыв (несвязанные темы → подсказка записать мысль о связи).
+function buildThemeGraph() {
+  const T = themeIndex(); const forms = themeForms();
+  const N = (DB.insights || []).length;
+  const df = {};
+  T.kws.forEach(kw => kw.forEach(w => { df[w] = (df[w] || 0) + 1; }));
+  const stems = Object.keys(df).filter(w => df[w] >= 2 && T.informative(w))
+    .sort((a, b) => df[b] - df[a]).slice(0, 14);
+  const idx = new Set(stems);
+  const co = {};
+  T.kws.forEach(kw => {
+    const p = kw.filter(w => idx.has(w));
+    for (let i = 0; i < p.length; i++) for (let j = i + 1; j < p.length; j++) {
+      const k = [p[i], p[j]].sort().join('|'); co[k] = (co[k] || 0) + 1;
+    }
+  });
+  const minW = N >= 8 ? 2 : 1;
+  const nodes = stems.map(s => ({ key: 't' + s, stem: s, title: forms[s] || s, df: df[s], deg: 0, cluster: 0 }));
+  const byStem = {}; nodes.forEach(n => byStem[n.stem] = n);
+  const edges = [];
+  Object.entries(co).forEach(([k, w]) => {
+    if (w < minW) return;
+    const [a, b] = k.split('|');
+    if (byStem[a] && byStem[b]) { edges.push({ a: 't' + a, b: 't' + b, w }); byStem[a].deg++; byStem[b].deg++; }
+  });
+  // кластеры тем: label propagation — для малых графов сходится за пару шагов
+  nodes.forEach((n, i) => n.cluster = i);
+  const nb = {}; edges.forEach(e => { (nb[e.a] = nb[e.a] || []).push([e.b, e.w]); (nb[e.b] = nb[e.b] || []).push([e.a, e.w]); });
+  const byKey = {}; nodes.forEach(n => byKey[n.key] = n);
+  for (let it = 0; it < 6; it++) {
+    nodes.forEach(n => {
+      const votes = {};
+      (nb[n.key] || []).forEach(([k, w]) => { const c = byKey[k].cluster; votes[c] = (votes[c] || 0) + w; });
+      const best = Object.entries(votes).sort((x, y) => y[1] - x[1])[0];
+      if (best) n.cluster = +best[0];
+    });
+  }
+  return { nodes, edges, N };
+}
+function themeMapInsights(g) {
+  const out = [];
+  if (!g.nodes.length) return out;
+  const byKey = {}; g.nodes.forEach(n => byKey[n.key] = n);
+  const wdeg = {}; g.edges.forEach(e => { wdeg[e.a] = (wdeg[e.a] || 0) + e.w; wdeg[e.b] = (wdeg[e.b] || 0) + e.w; });
+  const hub = [...g.nodes].sort((a, b) => (wdeg[b.key] || 0) - (wdeg[a.key] || 0))[0];
+  if (hub && wdeg[hub.key]) out.push({ ic: '🎯', html: `Ядро карты — <b>«${esc(hub.title)}»</b>: встречается в ${hub.df} ${pl(hub.df, 'записи', 'записях', 'записях')} и связана с ${hub.deg} темами. Сейчас это главный узел твоего внимания.` });
+  // мост: тема с рёбрами в наибольшее число ЧУЖИХ кластеров
+  let bridge = null, bmax = 1;
+  g.nodes.forEach(n => {
+    const cl = new Set();
+    g.edges.forEach(e => { if (e.a === n.key) cl.add(byKey[e.b].cluster); if (e.b === n.key) cl.add(byKey[e.a].cluster); });
+    cl.delete(n.cluster);
+    if (cl.size > bmax) { bmax = cl.size; bridge = n; }
+  });
+  if (bridge && bridge !== hub) out.push({ ic: '🌉', html: `Мост — <b>«${esc(bridge.title)}»</b>: соединяет разные группы тем. Изменения в ней отзовутся сразу в нескольких областях жизни.` });
+  // структурный разрыв: две крупнейшие группы тем без единой связи
+  const clusters = {};
+  g.nodes.forEach(n => (clusters[n.cluster] = clusters[n.cluster] || []).push(n));
+  const big = Object.values(clusters).filter(c => c.length >= 2).sort((a, b) => b.length - a.length);
+  if (big.length >= 2) {
+    const [A, B] = big;
+    const setA = new Set(A.map(n => n.key)), setB = new Set(B.map(n => n.key));
+    const linked = g.edges.some(e => (setA.has(e.a) && setB.has(e.b)) || (setA.has(e.b) && setB.has(e.a)));
+    if (!linked) out.push({ ic: '🕳', html: `Разрыв: группы <b>«${esc(A[0].title)}»</b> и <b>«${esc(B[0].title)}»</b> у тебя никак не связаны. На таких стыках чаще всего прячутся инсайты — <span class="tm-cta" onclick="themeGapWrite('${encodeURIComponent(A[0].title)}','${encodeURIComponent(B[0].title)}')">написать мысль о связи →</span>` });
+  }
+  // рост: тема с наибольшим числом упоминаний за 7 дней
+  const grow = {};
+  (DB.insights || []).forEach(i => { if (rcDay(i) > dayAgo(7)) keywords((i.title || '') + ' ' + (i.body || '')).forEach(w => { grow[w] = (grow[w] || 0) + 1; }); });
+  const g7 = g.nodes.map(n => [n, grow[n.stem] || 0]).sort((a, b) => b[1] - a[1])[0];
+  if (g7 && g7[1] >= 2) out.push({ ic: '📈', html: `Растёт: <b>«${esc(g7[0].title)}»</b> — ${g7[1]} ${pl(g7[1], 'упоминание', 'упоминания', 'упоминаний')} за последнюю неделю.` });
+  return out;
+}
+function themeGapWrite(a, b) {
+  openOv('ov-add');
+  const ta = $('add-tx');
+  if (ta) { ta.value = `Как связаны «${decodeURIComponent(a)}» и «${decodeURIComponent(b)}» в моей жизни?\n\n`; ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) {} }
+}
+function setMapView(v) { STATE.mapView = v; rMap(); if (typeof hpt === 'function') hpt(); }
+function rMap() {
+  const themes = (STATE.mapView || 'themes') === 'themes';
+  const bt = $('mt-themes'), bn = $('mt-notes');
+  if (bt) bt.classList.toggle('on', themes);
+  if (bn) bn.classList.toggle('on', !themes);
+  const hint = $('graph-hint');
+  if (hint) hint.textContent = themes
+    ? 'Карта строится сама из твоих записей: размер — как часто тема встречается, цвет — группа связанных тем, линия — темы появляются вместе.'
+    : 'Связи находятся сами — по общим темам твоих записей. Крупные узлы упоминаются чаще. Тапни узел — фокус на его окружении.';
+  const ti = $('theme-insights');
+  if (themes) rThemeMap('graph-canvas');
+  else { if (ti) ti.innerHTML = ''; rGraph('graph-canvas', 380, false); }
+}
+let _tmSel = null;
+function tmSelect(stem) { _tmSel = (stem && _tmSel !== stem) ? stem : null; rThemeMap('graph-canvas'); if (typeof hpt === 'function') hpt(); }
+function rThemeMap(elId) {
+  const el = $(elId); if (!el) return;
+  const g = buildThemeGraph();
+  const ti = $('theme-insights');
+  if (g.nodes.length < 3) {
+    el.innerHTML = `<div class="empty"><div class="em-t">Тем пока мало</div><div class="em-d">Пиши записи своими словами (не только ответы на вопросы) — повторяющиеся темы проявятся сами, и карта покажет, как они связаны</div></div>`;
+    if (ti) ti.innerHTML = '';
+    return;
+  }
+  const W = el.clientWidth || 340, H = 340;
+  const PAL = ['var(--accent)', 'var(--teal)', 'var(--gold)', 'var(--rose)', 'var(--green)', 'var(--purple)'];
+  const clOrder = [...new Set(g.nodes.map(n => n.cluster))];
+  const colorOf = c => PAL[clOrder.indexOf(c) % PAL.length];
+  g.nodes.forEach(n => { n.r = 7 + Math.min(n.df, 8) * 1.4; });
+  layoutGraph(g.nodes, g.edges.map(e => ({ a: e.a, b: e.b })), W, H);
+  const byKey = {}; g.nodes.forEach(n => byKey[n.key] = n);
+  if (_tmSel && !byKey['t' + _tmSel]) _tmSel = null;
+  const selKey = _tmSel ? 't' + _tmSel : null;
+  const neigh = new Set();
+  if (selKey) g.edges.forEach(e => { if (e.a === selKey) neigh.add(e.b); if (e.b === selKey) neigh.add(e.a); });
+  const lines = g.edges.map(e => {
+    const A = byKey[e.a], B = byKey[e.b];
+    const cls = selKey ? (e.a === selKey || e.b === selKey ? 'gedge on' : 'gedge dim') : 'gedge';
+    return `<line x1="${A.x.toFixed(1)}" y1="${A.y.toFixed(1)}" x2="${B.x.toFixed(1)}" y2="${B.y.toFixed(1)}" class="${cls}" style="stroke-width:${Math.min(1 + e.w * 0.6, 3)}"/>`;
+  }).join('');
+  const placed = [];
+  const circ = g.nodes.map(nd => {
+    const short = nd.title.length > 14 ? nd.title.slice(0, 13) + '…' : nd.title;
+    const w = short.length * 5.6 + 8, ly = nd.y + nd.r + 11;
+    const lx = Math.max(w / 2 + 4, Math.min(W - w / 2 - 4, nd.x));
+    const box = { x1: lx - w / 2, x2: lx + w / 2, y1: ly - 9, y2: ly + 3 };
+    const clash = placed.some(b => !(box.x2 < b.x1 || box.x1 > b.x2 || box.y2 < b.y1 || box.y1 > b.y2));
+    if (!clash) placed.push(box);
+    const dim = selKey && nd.key !== selKey && !neigh.has(nd.key) ? ' gdim' : '';
+    return `<g class="gnode${dim}" onclick="event.stopPropagation();tmSelect('${nd.stem}')">
+      ${nd.key === selKey ? `<circle cx="${nd.x.toFixed(1)}" cy="${nd.y.toFixed(1)}" r="${nd.r + 4}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>` : ''}
+      <circle cx="${nd.x.toFixed(1)}" cy="${nd.y.toFixed(1)}" r="${nd.r}" fill="${colorOf(nd.cluster)}" fill-opacity=".85"/>
+      ${clash ? '' : `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" class="glbl">${esc(short)}</text>`}
+    </g>`;
+  }).join('');
+  let info;
+  if (_tmSel) {
+    const recs = (DB.insights || []).filter(i => keywords((i.title || '') + ' ' + (i.body || '')).includes(_tmSel)).slice(0, 4);
+    const sel = byKey['t' + _tmSel];
+    info = `<div class="ginfo"><div class="gi-t">Тема «${esc(sel.title)}» · ${sel.df} ${pl(sel.df, 'запись', 'записи', 'записей')}<i>${recs.map(r => `<span class="wl" onclick="showDet(${r.id})">${esc(r.title.slice(0, 38))}</span>`).join(' · ')}</i></div></div>`;
+  } else {
+    info = `<div class="graph-meta">${g.nodes.length} тем · ${g.edges.length} связей · цвет — группа тем · тапни тему</div>`;
+  }
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" class="graph-svg" onclick="tmSelect(null)">${lines}${circ}</svg>` + info;
+  if (ti) {
+    const ins = themeMapInsights(g);
+    ti.innerHTML = ins.length
+      ? `<div class="sec-lbl">Что видно по карте</div><div class="tm-card mx mb">${ins.map(x => `<div class="tm-row"><span>${x.ic}</span><div>${x.html}</div></div>`).join('')}</div>`
+      : '';
+  }
+}
