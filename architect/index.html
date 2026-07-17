@@ -369,12 +369,25 @@
 </div><!-- end #app -->
 
 <!-- ОБРАТНАЯ СВЯЗЬ -->
+<!-- ── МОДЕЛИ ДИАЛОГА: пикер в стиле Perplexity ─────────────────── -->
+<div class="ov" id="ov-models" onclick="if(event.target===this)closeOv('ov-models')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="mdl-head">
+      <div class="sh-title" style="padding:0">Модели</div>
+      <button class="mdl-x" onclick="closeOv('ov-models')" aria-label="Закрыть">✕</button>
+    </div>
+    <div id="models-list" class="mdl-list"></div>
+  </div>
+</div>
+
 <!-- ── ДИАЛОГ ВГЛУБЬ: чат с наставником (стиль Claude/GPT) ──────── -->
 <div class="ov" id="ov-chat">
   <div class="sheet sh-chat">
     <div class="sh-pull"></div>
     <div class="chat-head">
       <b id="chat-title">Диалог</b>
+      <button class="chat-model" id="chat-model-chip" onclick="rModels();openOv('ov-models')">Sonnet 5</button>
       <button class="chat-done" onclick="chatFinish()">Завершить</button>
     </div>
     <div class="chat-msgs" id="chat-msgs"></div>

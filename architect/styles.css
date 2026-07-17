@@ -1120,3 +1120,30 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .chat-row:active{opacity:.7}
 .chat-row-t{font-size:var(--tx3);font-weight:500;color:var(--t1);line-height:1.4}
 .chat-row-m{font-size:var(--tx2);color:var(--t3);margin-top:2px}
+
+/* ── ПИКЕР МОДЕЛЕЙ (стиль Perplexity) ──────────────────────────── */
+.mdl-head{display:flex;align-items:center;justify-content:space-between;padding:var(--s2) var(--s4) var(--s3)}
+.mdl-x{width:32px;height:32px;border-radius:50%;background:var(--bg2);border:1px solid var(--bd);color:var(--t2);font-size:14px;cursor:pointer}
+.mdl-x:active{opacity:.6}
+.mdl-list{padding:0 var(--s3) var(--s4);max-height:70dvh;overflow-y:auto}
+.mdl-row{padding:var(--s3);border-radius:12px;cursor:pointer;margin-bottom:2px}
+.mdl-row.sel{background:var(--bg2);border:1px solid var(--bd)}
+.mdl-row:not(.sel):active{background:var(--bg2)}
+.mdl-main{display:flex;align-items:center;gap:var(--s3)}
+.mdl-ic{width:22px;text-align:center;font-size:15px;color:var(--t2);flex-shrink:0}
+.mdl-main b{font-size:var(--tx4);font-weight:510;color:var(--t1)}
+.mdl-tag{font-size:var(--tx1,.6875rem);font-weight:510;background:rgba(94,106,210,.15);color:var(--accent-light,var(--accent));border-radius:6px;padding:2px 7px}
+.mdl-check{margin-left:auto;color:var(--accent);font-weight:700}
+.mdl-desc{font-size:var(--tx2);color:var(--t3);margin:6px 0 0 34px;line-height:1.45;padding-bottom:var(--s2);border-bottom:1px solid var(--bd)}
+.mdl-nokey{color:var(--orange)}
+.mdl-reason{display:flex;align-items:center;justify-content:space-between;margin:var(--s2) 0 0 34px;font-size:var(--tx3);color:var(--t2)}
+.tgl{width:44px;height:26px;border-radius:13px;background:var(--bd);position:relative;transition:background var(--dur2) var(--e);flex-shrink:0}
+.tgl::after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform var(--dur2) var(--e)}
+.tgl.on{background:var(--accent)}
+.tgl.on::after{transform:translateX(18px)}
+.chat-model{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rF);color:var(--t2);font-size:var(--tx2);font-weight:510;padding:5px 10px;cursor:pointer;white-space:nowrap;flex-shrink:0;margin-left:auto;margin-right:var(--s2)}
+.chat-model:active{opacity:.6}
+.chat-head b{margin-right:auto}
+.mdl-ic.p-anthropic{color:#D97757}
+.mdl-ic.p-openai{color:#74AA9C}
+.mdl-ic.p-gemini{color:#5E8DF7}

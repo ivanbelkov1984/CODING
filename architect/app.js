@@ -3160,9 +3160,10 @@ function updateEncStatus() {
 const AI_MODEL_DEFAULT = 'claude-opus-4-8';
 const AI_MODEL_LIGHT_DEFAULT = 'claude-haiku-4-5';
 // Ключ хранится per-провайдер (Anthropic — в прежнем слоте, совместимо).
-const aiKeyName = () => 'arch5_aikey_' + ((CFG.aiProvider && CFG.aiProvider !== 'anthropic') ? CFG.aiProvider + '_' : '') + activeId();
-function getAiKey() { try { return localStorage.getItem(aiKeyName()) || ''; } catch(e) { return ''; } }
-function setAiKey(k) { try { k ? localStorage.setItem(aiKeyName(), k) : localStorage.removeItem(aiKeyName()); } catch(e) {} }
+const aiKeySlot = p => 'arch5_aikey_' + ((p && p !== 'anthropic') ? p + '_' : '') + activeId();
+function getAiKeyFor(p) { try { return localStorage.getItem(aiKeySlot(p)) || ''; } catch (e) { return ''; } }
+function getAiKey() { return getAiKeyFor(CFG.aiProvider || 'anthropic'); }
+function setAiKey(k) { try { const s = aiKeySlot(CFG.aiProvider || 'anthropic'); k ? localStorage.setItem(s, k) : localStorage.removeItem(s); } catch(e) {} }
 
 // ─── МАРШРУТИЗАЦИЯ МОДЕЛЕЙ + УЧЁТ РАСХОДОВ (AI_ROUTING_BRIEF) ────
 // Лёгкие частые задачи ходят на дешёвую модель, глубокий анализ — на
@@ -3287,10 +3288,13 @@ function appendDeeper(q) {
 const AI_PROVIDERS = {
   anthropic: {
     name: 'Anthropic (Claude)',
-    async call({ key, model, system, user, messages, maxTokens, schema }) {
+    async call({ key, model, system, user, messages, maxTokens, schema, reasoning }) {
       const body = { model, max_tokens: maxTokens, messages: messages || [{ role: 'user', content: user }] };
       if (system) body.system = system;
       if (schema) body.output_config = { format: { type: 'json_schema', schema } };
+      // «С рассуждением»: adaptive thinking на моделях 4.6+ (haiku — без параметра)
+      if (reasoning != null && /claude-(sonnet-5|opus-4-[6-8]|fable)/.test(model))
+        body.thinking = { type: reasoning ? 'adaptive' : 'disabled' };
       const ctrl = new AbortController();
       const to = setTimeout(() => ctrl.abort(), 60000);
       let r;
@@ -3367,9 +3371,10 @@ const AI_PROVIDERS = {
     },
   },
 };
-async function callClaude({ system, user, messages = null, maxTokens = 1024, schema = null, task = 'other' }) {
-  const key = getAiKey();
-  if (!key) { const e = new Error('Не задан API-ключ Anthropic'); e.noKey = true; throw e; }
+async function callClaude({ system, user, messages = null, maxTokens = 1024, schema = null, task = 'other', provider = null, model = null, reasoning = null }) {
+  const provName = provider || CFG.aiProvider || 'anthropic';
+  const key = getAiKeyFor(provName);
+  if (!key) { const e = new Error('Не задан API-ключ ' + ((AI_PROVIDERS[provName] || {}).name || provName)); e.noKey = true; throw e; }
   const bs = aiBudgetState();
   if (!bs.ok) {
     const e = new Error(`Бюджет AI на месяц исчерпан ($${bs.spent.toFixed(2)} из $${bs.budget}) — увеличь в Настройках`);
@@ -3379,11 +3384,11 @@ async function callClaude({ system, user, messages = null, maxTokens = 1024, sch
     try { localStorage.setItem('arch5_ai_budget_warned', todayKey()); } catch (e) {}
     setTimeout(() => toast(`AI: потрачено ${Math.round(bs.spent / bs.budget * 100)}% месячного бюджета`, 'warn'), 400);
   }
-  const model = aiModelFor(task);
-  const provider = AI_PROVIDERS[CFG.aiProvider || 'anthropic'] || AI_PROVIDERS.anthropic;
-  const res = await provider.call({ key, model, system, user, messages, maxTokens, schema });
-  aiLedgerAdd({ ts: Date.now(), task, model, ti: res.ti, to: res.to });
-  log('info', `Claude ✓ ${AI_TASKS[task] || task} · ${String(model).replace('claude-', '')} · ${res.to} ток.`);
+  const mdl = model || aiModelFor(task);
+  const prov = AI_PROVIDERS[provName] || AI_PROVIDERS.anthropic;
+  const res = await prov.call({ key, model: mdl, system, user, messages, maxTokens, schema, reasoning });
+  aiLedgerAdd({ ts: Date.now(), task, model: mdl, ti: res.ti, to: res.to });
+  log('info', `AI ✓ ${AI_TASKS[task] || task} · ${String(mdl).replace('claude-', '')} · ${res.to} ток.`);
   return res.text;
 }
 
@@ -3951,6 +3956,53 @@ setTimeout(() => { try { maybeWhatsNew(); } catch (e) {} }, 2500);
 // а «Завершить» сжимает его в инсайт — вывод попадает в граф, паттерны
 // и будущие переклички. Ничего не проходит бесследно.
 const CHAT_SYSTEM = 'Ты — вдумчивый психолог-наставник дневника «Архитектор» (рамка CBT/ACT). Веди диалог вглубь ОДНОЙ темы: коротко отражай суть сказанного (1–3 предложения, без пересказа), затем задавай ОДИН точный открытый вопрос, который ведёт ближе к корню — чувству, потребности, убеждению под ситуацией. Не давай советов, пока не попросят. Если человек дошёл до ядра — помоги назвать его словами. Тепло, по-русски, на «ты».';
+// Модель диалога выбирается как в Perplexity: список моделей трёх
+// провайдеров, выбранная раскрыта с описанием и тумблером «С рассуждением».
+// Диалог идёт на выбранной (дефолт — sonnet, дёшево); а вот ЗАКЛЮЧЕНИЕ
+// («Завершить» → вывод в систему) — всегда на deep-маршруте (opus):
+// сильная модель включается только там, где решается итог.
+const CHAT_MODELS = [
+  { provider: 'anthropic', model: 'claude-sonnet-5',  name: 'Claude Sonnet 5',  ic: '✳', desc: 'Быстрая модель Anthropic — рекомендуем для диалога', reason: true },
+  { provider: 'anthropic', model: 'claude-opus-4-8',  name: 'Claude Opus 4.8',  ic: '✳', tag: 'max', desc: 'Самая сильная Anthropic — дороже в ~2 раза', reason: true },
+  { provider: 'anthropic', model: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', ic: '✳', desc: 'Самая быстрая и дешёвая Anthropic' },
+  { provider: 'openai',    model: 'gpt-4o',           name: 'GPT-4o',           ic: '❋', desc: 'Флагман OpenAI' },
+  { provider: 'openai',    model: 'gpt-4o-mini',      name: 'GPT-4o mini',      ic: '❋', desc: 'Быстрая и дешёвая OpenAI' },
+  { provider: 'gemini',    model: 'gemini-2.5-pro',   name: 'Gemini 2.5 Pro',   ic: '✦', desc: 'Последняя модель Google' },
+  { provider: 'gemini',    model: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', ic: '✦', desc: 'Быстрая модель Google' },
+];
+const CHAT_MODEL_DEFAULT = { provider: 'anthropic', model: 'claude-sonnet-5', reasoning: true };
+const chatModel = () => CFG.chatModel || CHAT_MODEL_DEFAULT;
+function rModels() {
+  const el = $('models-list'); if (!el) return;
+  const cm = chatModel();
+  el.innerHTML = CHAT_MODELS.map((m, i) => {
+    const sel = m.provider === cm.provider && m.model === cm.model;
+    const hasKey = !!getAiKeyFor(m.provider);
+    return `<div class="mdl-row${sel ? ' sel' : ''}" onclick="chatModelPick(${i})" role="button">
+      <div class="mdl-main"><span class="mdl-ic p-${m.provider}">${m.ic}</span><b>${m.name}</b>${m.tag ? `<span class="mdl-tag">${m.tag}</span>` : ''}${sel ? '<span class="mdl-check">✓</span>' : ''}</div>
+      ${sel ? `<div class="mdl-desc">${m.desc}${hasKey ? '' : ' · <span class="mdl-nokey">нет ключа — добавь в Настройках</span>'}</div>` +
+        (m.reason ? `<div class="mdl-reason" onclick="event.stopPropagation();chatReasonToggle()"><span>С рассуждением</span><span class="tgl${cm.reasoning !== false ? ' on' : ''}"></span></div>` : '') : ''}
+    </div>`;
+  }).join('');
+}
+function chatModelPick(i) {
+  const m = CHAT_MODELS[i]; if (!m) return;
+  const cur = chatModel();
+  if (cur.provider !== m.provider || cur.model !== m.model)
+    CFG.chatModel = { provider: m.provider, model: m.model, reasoning: cur.reasoning !== false };
+  persist(); rModels(); rChatChip(); hpt();
+}
+function chatReasonToggle() {
+  const cm = { ...chatModel() };
+  cm.reasoning = cm.reasoning === false;
+  CFG.chatModel = cm; persist(); rModels();
+}
+function rChatChip() {
+  const chip = $('chat-model-chip'); if (!chip) return;
+  const cm = chatModel();
+  const m = CHAT_MODELS.find(x => x.provider === cm.provider && x.model === cm.model);
+  chip.textContent = m ? m.name.replace('Claude ', '') : cm.model;
+}
 let _chatId = null, _chatBusy = false;
 function openChatFor(insId, seed) {
   if (!seed && insId) { const i = DB.insights.find(x => x.id === insId); seed = i ? (i.body || i.title) : ''; }
@@ -3975,8 +4027,9 @@ function rChat() {
   box.innerHTML = c.msgs.map(m =>
     `<div class="cm ${m.r === 'u' ? 'cm-u' : 'cm-a'}">${esc(m.t).replace(/\n/g, '<br>')}</div>`).join('') +
     (_chatBusy ? '<div class="cm cm-a cm-think">думаю…</div>' : '') +
-    (!getAiKey() ? '<div class="cm cm-hint">Диалог оживёт с AI-ключом: Настройки → Конфигурация</div>' : '');
+    (!getAiKeyFor(chatModel().provider) ? '<div class="cm cm-hint">Для этой модели нет ключа — Настройки → Конфигурация</div>' : '');
   box.scrollTop = box.scrollHeight;
+  rChatChip();
 }
 function chatSendMsg() {
   const ta = $('chat-in'); const t = (ta && ta.value || '').trim(); if (!t || _chatBusy) return;
@@ -3986,11 +4039,13 @@ function chatSendMsg() {
   rChat(); chatReply();
 }
 async function chatReply() {
-  const c = chatGet(); if (!c || _chatBusy || !getAiKey()) { rChat(); return; }
+  const cm = chatModel();
+  const c = chatGet(); if (!c || _chatBusy || !getAiKeyFor(cm.provider)) { rChat(); return; }
   _chatBusy = true; rChat();
   try {
     const messages = c.msgs.slice(-24).map(m => ({ role: m.r === 'u' ? 'user' : 'assistant', content: m.t }));
-    const a = await callClaude({ system: CHAT_SYSTEM, messages, maxTokens: 500, task: 'chat' });
+    // диалог — на выбранной в пикере модели (дёшево); заключение — отдельно
+    const a = await callClaude({ system: CHAT_SYSTEM, messages, maxTokens: 500, task: 'chat', provider: cm.provider, model: cm.model, reasoning: cm.reasoning !== false });
     const t = String(a).trim();
     if (t) { c.msgs.push({ r: 'a', t, ts: Date.now() }); touch(c); persist(); }
   } catch (e) { toast(e.budget ? e.message : 'AI: ' + e.message, 'warn'); }
@@ -4007,9 +4062,11 @@ async function chatFinish() {
   toast('Собираю вывод диалога…');
   try {
     const dialog = c.msgs.map(m => (m.r === 'u' ? 'Я: ' : 'Наставник: ') + m.t).join('\n');
+    // Заключение — работа для СИЛЬНОЙ модели (deep-маршрут, opus):
+    // именно этот вывод разносится по всей системе.
     const out = await callClaude({
       system: 'Сожми диалог в личный вывод от первого лица: 2–4 предложения — что я понял о себе, корень темы и один конкретный следующий шаг. Без воды и пересказа, по-русски.',
-      user: dialog, maxTokens: 300, task: 'chat',
+      user: dialog, maxTokens: 300, task: 'analysis',
     });
     const t = String(out).trim(); if (!t) return;
     c.summarized = true; touch(c);

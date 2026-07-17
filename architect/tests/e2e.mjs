@@ -144,23 +144,42 @@ ok(ai.blocked, 'исчерпанный месячный бюджет блоки�
 
 // ── Диалог вглубь: чат → накопление → вывод в инсайты ──
 await page.evaluate(() => {
-  DB.chats = []; CFG.aiProvider = 'anthropic'; setAiKey('sk-test');
-  window.fetch = (u) => String(u).includes('anthropic')
-    ? Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: 'Слышу тебя. Что за этим страхом?' }], usage: { input_tokens: 90, output_tokens: 40 } }) })
+  DB.chats = []; CFG.aiProvider = 'anthropic'; CFG.chatModel = null; CFG.aiRoutes = null; setAiKey('sk-test');
+  window.__aiBodies = [];
+  window.fetch = (u, o) => String(u).includes('anthropic')
+    ? (window.__aiBodies.push(JSON.parse(o.body)), Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: 'Слышу тебя. Что за этим страхом?' }], usage: { input_tokens: 90, output_tokens: 40 } }) }))
     : Promise.reject(new Error('offline'));
   openChatFor(null, 'Боюсь начать большой проект — откладываю неделями');
 });
 await page.waitForTimeout(350);
 ok(await page.evaluate(() => document.querySelectorAll('#chat-msgs .cm').length >= 2), 'чат: моя запись + мгновенный ответ наставника');
+ok(await page.evaluate(() => window.__aiBodies[0].model === 'claude-sonnet-5'), 'диалог идёт на дешёвой модели (sonnet 5 по умолчанию)');
 await page.evaluate(() => { $('chat-in').value = 'Кажется, страх провала на глазах у всех'; chatSendMsg(); });
 await page.waitForTimeout(300);
 const chatN = await page.evaluate(() => DB.chats[DB.chats.length - 1].msgs.length);
 ok(chatN >= 4, `диалог накапливается и сохраняется в базе (${chatN} сообщений)`);
 const fin = await page.evaluate(async () => {
   const n = DB.insights.length; await chatFinish();
-  return { grew: DB.insights.length === n + 1, src: (DB.insights[0] || {}).src };
+  return { grew: DB.insights.length === n + 1, src: (DB.insights[0] || {}).src,
+           finModel: window.__aiBodies[window.__aiBodies.length - 1].model };
 });
 ok(fin.grew && fin.src === 'Диалог', 'завершение: вывод диалога сохранён как инсайт (src «Диалог»)');
+ok(fin.finModel === 'claude-opus-4-8', `заключение — на сильной модели (${fin.finModel})`);
+// пикер моделей (стиль Perplexity)
+const pick = await page.evaluate(() => {
+  rModels(); openOv('ov-models');
+  const rows = document.querySelectorAll('#models-list .mdl-row').length;
+  const selBefore = document.querySelector('#models-list .mdl-row.sel .mdl-main b').textContent;
+  const gptIdx = 4;                                   // GPT-4o mini
+  chatModelPick(gptIdx);
+  const selAfter = document.querySelector('#models-list .mdl-row.sel .mdl-main b').textContent;
+  const chip = document.getElementById('chat-model-chip').textContent;
+  closeOv('ov-models');
+  CFG.chatModel = null; persist();
+  return { rows, selBefore, selAfter, chip };
+});
+ok(pick.rows === 7 && /Sonnet 5/.test(pick.selBefore), `пикер: 7 моделей трёх провайдеров, выбран Sonnet (${pick.selBefore})`);
+ok(/GPT-4o mini/.test(pick.selAfter) && /GPT-4o mini/.test(pick.chip), 'пикер: смена модели работает, чип в чате обновился');
 ok(await page.evaluate(() => { goTo('map'); msub('chats'); return document.querySelectorAll('#chats-list .chat-row').length >= 1; }), 'история диалогов: Разум → Записи → Диалоги');
 await page.evaluate(() => goTo('home'));
 
