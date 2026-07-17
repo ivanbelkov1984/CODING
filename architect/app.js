@@ -2658,6 +2658,12 @@ async function mkDig() {
   const M = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
   const d0 = new Date(now-6*864e5), d1 = new Date(now);
   const week = `${d0.getDate()} ${M[d0.getMonth()]} – ${d1.getDate()} ${M[d1.getMonth()]}`;
+  // Один обзор на неделю: повторное «Собрать» обновляет карточку, а не
+  // плодит дубли («повторяется одно и то же»). Замещённые — с надгробием,
+  // чтобы синк не воскресил их с другого устройства. Хвост списка ≤ 20.
+  (DB.digests || []).filter(d => d.week === week).forEach(d => tomb(d.id));
+  DB.digests = (DB.digests || []).filter(d => d.week !== week);
+  while (DB.digests.length > 19) tomb(DB.digests.pop().id);
   DB.digests.unshift({
     id: now, createdAt: nowISO(), sv: SCHEMA_VERSION, week,
     cnt: insW.length, adherence: ciW.length,

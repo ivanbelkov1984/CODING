@@ -143,6 +143,9 @@ const dig = await page.evaluate(async () => {
 ok(dig.n === 1 && dig.cause >= 1, `обзор недели содержит «Причины → следствия» (${dig.cause})`);
 ok(dig.hasCe, 'блок «Причины → следствия» отрендерен в карточке обзора');
 ok(dig.marked, 'свежий обзор подсвечен (не мелькает тостом)');
+const dedup = await page.evaluate(async () => { await mkDig(); await mkDig(); return { n: DB.digests.length, tomb: Object.keys(DB._del || {}).length > 0 }; });
+ok(dedup.n === 1, 'повторный «Собрать обзор» обновляет карточку недели, а не дублирует');
+ok(dedup.tomb, 'замещённый обзор получает надгробие (синк не воскресит дубль)');
 
 // ── Карта связей: смысл вместо каши (tf-idf + лимит связей на узел) ──
 const graph = await page.evaluate(() => {
