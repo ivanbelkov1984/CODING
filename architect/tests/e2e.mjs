@@ -882,6 +882,59 @@ ok(stateFlow.riskChatStress && stateFlow.riskChatLonely,
 ok(stateFlow.healthHasSection && stateFlow.digestN >= 1,
   'в «Здоровье» появляется раздел «Психическое состояние» по диалогам');
 
+// ── Приёмы саморегуляции (локальный RAG-lite) + кризисный протокол ──
+const tech = await page.evaluate(() => {
+  const byText = suggestTechniques('не спал всю ночь, злюсь на начальника', 2).map(t => t.id);
+  const craving = suggestTechniques('хочется съесть торт и сорваться', 2).map(t => t.id);
+  const anxiety = suggestTechniques('накрывает тревога перед встречей', 2).map(t => t.id);
+  const lonely = suggestTechniques('пусто и одиноко весь вечер один', 2).map(t => t.id);
+  const empty = suggestTechniques('', 2).length;
+  return { byText, craving, anxiety, lonely, empty };
+});
+ok(tech.byText.includes('sigh') || tech.byText.includes('opposite'), 'ретрив по свободному тексту: «злюсь» → приём на злость/напряжение (без вектор-БД, локально)');
+ok(tech.craving.includes('urgesurf'), '«хочется съесть торт и сорваться» → сёрфинг по тяге (ACT)');
+ok(tech.anxiety.includes('ground54321') || tech.anxiety.includes('box') || tech.anxiety.includes('decatastroph'), '«тревога перед встречей» → заземление/дыхание/декатастрофизация');
+ok(tech.lonely.includes('connect'), '«пусто и одиноко» → шаг к человеку (корневой триггер)');
+ok(tech.empty === 0, 'без запроса приёмы не навязываются');
+
+const techUI = await page.evaluate(() => {
+  openTech('тревога паника');
+  const open = document.getElementById('ov-tech').classList.contains('on');
+  const out = document.getElementById('tech-out').textContent;
+  closeOv('ov-tech');
+  return { open, out };
+});
+ok(techUI.open && /Заземление|Дыхание|Декатастроф/.test(techUI.out), 'шит «Приёмы» открывается и показывает подобранный приём с шагами');
+
+const crisis = await page.evaluate(() => {
+  const hit = crisisScreen('иногда думаю, что не хочу жить');
+  const safe = crisisScreen('устал и злюсь на всех, тяжёлый день');
+  // острый сигнал в свободном тексте приёмов → кризисный протокол, не приём
+  document.getElementById('tech-text').value = 'не хочу жить, сил больше нет';
+  techFromText();
+  const crisisOpen = document.getElementById('ov-crisis').classList.contains('on');
+  const techClosed = !document.getElementById('ov-tech').classList.contains('on');
+  const body = document.getElementById('ov-crisis').textContent;
+  closeOv('ov-crisis');
+  return { hit, safe, crisisOpen, techClosed, body };
+});
+ok(crisis.hit && !crisis.safe, 'кризис-скрин ловит острый сигнал и не срабатывает на обычную усталость/злость');
+ok(crisis.crisisOpen && crisis.techClosed, 'острый сигнал в тексте → кризисный протокол вместо приёма (safety fallback)');
+ok(/не терапевт|скорую|не один/.test(crisis.body), 'кризисная карточка: без диагнозов, ведёт к живому человеку, честно про «не терапевт»');
+
+const crisisCraving = await page.evaluate(() => {
+  DB.cravings = [];
+  openCraving();
+  document.getElementById('cr-trigger').value = 'не хочу жить';
+  saveCraving(false);
+  const crisisOpen = document.getElementById('ov-crisis').classList.contains('on');
+  const noReact = !document.getElementById('react-card');
+  closeOv('ov-crisis'); DB.cravings = [];
+  return { crisisOpen, noReact };
+});
+ok(crisisCraving.crisisOpen && crisisCraving.noReact, 'острый сигнал в триггере тяги → кризисный протокол вместо обычного отклика');
+await page.evaluate(() => { goTo('home'); DB.cravings = []; });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

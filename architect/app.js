@@ -29,6 +29,7 @@ const DEFAULT_CFG = {
   spaceKey: '',
   lastSync: '',
   aiModel: 'claude-opus-4-8',
+  trustedContact: '',   // близкий человек — под рукой в кризисном протоколе
   newAxColor: '#1056CC',
   axes: {
     vitality:   {lbl:'Здоровье',   s:7,   c:'#1A7F3C'},
@@ -805,6 +806,79 @@ function mentalStateDigest() {
 }
 function todayStateNote() {
   return (DB.insights || []).map(i => i.stateNote).find(s => s && s.day === todayKey()) || null;
+}
+// ─── ПРИЁМЫ САМОРЕГУЛЯЦИИ (локальный RAG-lite) ──────────────────
+// Из разбора RAG-LLM: не хардкод правил, а курируемая база доказательных
+// приёмов (CBT/ACT/DBT/соматика) + подбор под состояние. Хостовая
+// вектор-БД (Pinecone/Qdrant) для ~12 приёмов избыточна и тянет данные на
+// сервер; при таком размере ретрив — локальная функция по стем-тегам.
+// Каждый приём: id, заголовок, рамка (когда), шаги, for — стемы состояний.
+const REG_TECHNIQUES = [
+  { id: 'ground54321', title: 'Заземление 5-4-3-2-1', frame: 'при острой тревоге, панике, наплыве',
+    for: ['трев', 'паник', 'страх', 'наплыв', 'накрыв', 'захлёст'],
+    steps: ['Назови 5 вещей, что видишь вокруг', '4 — что слышишь', '3 — к чему можешь прикоснуться', '2 — что чувствуешь запахом', '1 — вкус во рту или один медленный вдох'] },
+  { id: 'sigh', title: 'Физиологический вздох', frame: 'быстрый сброс напряжения телом',
+    for: ['стресс', 'напряж', 'взвинч', 'зл', 'раздраж'],
+    steps: ['Два вдоха носом подряд (второй — короткий добор сверху)', 'Долгий медленный выдох ртом', 'Повтори 3–5 раз — тело выходит из «боевого» режима за минуту'] },
+  { id: 'urgesurf', title: 'Сёрфинг по тяге', frame: 'ACT — пережить пик, не борясь силой воли',
+    for: ['тяг', 'тянет', 'срыв', 'сорв', 'сладк', 'сигарет', 'кур', 'импульс', 'съест', 'торт', 'заед'],
+    steps: ['Замечай тягу как волну, а не как приказ', 'Она растёт, достигает пика и спадает за 5–10 минут', 'Наблюдай ощущение в теле — не борись и не корми его', 'Дай волне пройти: ты не обязан на неё отвечать'] },
+  { id: 'defusion', title: 'Когнитивное расцепление', frame: 'ACT — отделить себя от навязчивой мысли',
+    for: ['навязчив', 'румин', 'мысл', 'самокрит', 'прокруч', 'думаю об'],
+    steps: ['Поймай мысль дословно: «…»', 'Скажи про себя: «У меня есть мысль, что …»', 'Потом: «Я замечаю, что у меня есть мысль, что …»', 'Мысль — событие в уме, а не факт и не приказ'] },
+  { id: 'decatastroph', title: 'Декатастрофизация', frame: 'CBT — вернуть реализм при тревоге о будущем',
+    for: ['катастроф', 'страх', 'будущ', 'бессонниц', 'не усн', 'заснуть', 'встреч'],
+    steps: ['Какой самый худший сценарий?', 'А какой самый реалистичный?', 'Если случится плохое — как ты справишься?', 'Что бы ты сказал другу в этой ситуации?'] },
+  { id: 'behavact', title: 'Поведенческая активация', frame: 'CBT — действие раньше настроения',
+    for: ['упадок', 'апати', 'нет сил', 'подавл', 'лень', 'бессил', 'ничего не хоч'],
+    steps: ['Выбери одно крошечное действие на 5 минут', 'Не жди мотивацию — она приходит в процессе, не до него', 'Сделай и отметь, как чуть сдвинулось состояние'] },
+  { id: 'selfcompassion', title: 'Пауза самосострадания', frame: 'при стыде, вине, самокритике',
+    for: ['стыд', 'вин', 'самокрит', 'провал', 'ничтожеств', 'ненавижу себя'],
+    steps: ['Признай честно: «Сейчас мне тяжело»', '«Тяжело бывает всем — я в этом не один»', 'Рука на грудь; скажи себе то, что сказал бы близкому другу'] },
+  { id: 'box', title: 'Дыхание по квадрату', frame: 'сфокусировать и успокоить перед сложным',
+    for: ['стресс', 'трев', 'взвинч', 'перед', 'волну'],
+    steps: ['Вдох на 4 счёта', 'Задержка на 4', 'Выдох на 4', 'Задержка на 4 — и снова, 4 круга'] },
+  { id: 'opposite', title: 'Противоположное действие', frame: 'DBT — не идти на поводу у импульса эмоции',
+    for: ['зл', 'избега', 'страх', 'импульс', 'обид'],
+    steps: ['Назови эмоцию и что она толкает сделать', 'Если это действие не полезно — сделай мягко противоположное', 'Злость → спокойный тон; страх → маленький шаг навстречу'] },
+  { id: 'tipp', title: 'Резкое охлаждение (TIPP)', frame: 'DBT — сбить сильный аффект через тело',
+    for: ['паник', 'сильн', 'аффект', 'захлёст', 'накрыв', 'трясёт'],
+    steps: ['Холодная вода на лицо или холод к запястьям, 30–60 сек', 'Или быстрая физнагрузка пару минут', 'Тело гасит пик возбуждения — ум проясняется'] },
+  { id: 'name', title: 'Назвать эмоцию', frame: 'аффект-лейблинг снижает накал',
+    for: ['захлёст', 'смятен', 'не понимаю что чувств', 'непонятно', 'трев'],
+    steps: ['Назови эмоцию одним словом', 'Где она в теле? Какого она «размера»?', 'Само называние снижает силу эмоции — это доказанный эффект'] },
+  { id: 'connect', title: 'Шаг к человеку', frame: 'при одиночестве — корневом триггере тяги',
+    for: ['одиночеств', 'один', 'пуст', 'изоляц', 'никто', 'брошен'],
+    steps: ['Напиши или позвони одному человеку — даже коротко', 'Или выйди туда, где есть люди, на 10 минут', 'Одиночество усиливает тягу — живой контакт сбивает её'] },
+];
+// Локальный ретрив: скоринг по вхождению стем-тегов в текст состояния.
+function suggestTechniques(text, limit = 2) {
+  const s = String(text || '').toLowerCase();
+  if (!s.trim()) return [];
+  return REG_TECHNIQUES
+    .map(t => ({ t, score: t.for.reduce((n, stem) => n + (s.includes(stem) ? 1 : 0), 0) }))
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(x => x.t);
+}
+// ─── КРИЗИСНЫЙ ПРОТОКОЛ (safety fallback) ───────────────────────
+// Из разбора: при явных признаках острого кризиса приложение НЕ должно
+// выдавать «приёмчик», а мягко направить к живому человеку. Это
+// намеренно консервативный keyword-детектор (не клинический скрининг):
+// ловит только сильные явные формулировки, тон — без осуждения и
+// диагнозов, «Архитектор» честно говорит, что он не терапевт.
+const CRISIS_RE = /(не хочу жить|незачем жить|нет смысла жить|покончить с собой|свести сч[её]ты с жизнью|убить себя|наложить на себя руки|причинить себе вред|порезать себя|лучше бы (я )?умер|хочу исчезнуть навсегда|жить не хочется)/i;
+function crisisScreen(text) { return CRISIS_RE.test(String(text || '')); }
+function openCrisisCard() {
+  const el = $('crisis-contact');
+  if (el) {
+    const c = (CFG.trustedContact || '').trim();
+    el.innerHTML = c
+      ? `<div class="card" style="padding:1rem;margin:.5rem 0"><div class="si-text" style="font-weight:600;margin-bottom:.35rem">Напиши или позвони близкому:</div><div class="si-text">${esc(c)}</div></div>`
+      : `<div class="card" style="padding:1rem;margin:.5rem 0"><div class="si-text">Добавь близкого человека в Настройках — чтобы в такой момент он был на один тап.</div><button class="btn btn-s btn-sm" style="margin-top:.5rem" onclick="closeOv('ov-crisis');goTo('settings')">Открыть настройки</button></div>`;
+  }
+  openOv('ov-crisis');
 }
 // ─── ПЕРСОНАЛЬНЫЙ АДАПТИВНЫЙ РИСК-СКОРИНГ ТЯГИ ───────────────────
 // Сердце JITAI, которое реально помогает: движок учится на ТВОЕЙ
@@ -1847,6 +1921,39 @@ function orderedTips(list) {
   const c = tipHelpCounts();
   return list.map((t, i) => ({ t, i })).sort((a, b) => (c[b.t.k] || 0) - (c[a.t.k] || 0) || a.i - b.i).map(x => x.t);
 }
+// ─── Шит «Приёмы»: подбор доказательного приёма под состояние ────
+function openTech(seed) {
+  const chips = $('tech-chips'); if (chips) chips.querySelectorAll('.tp').forEach(b => b.classList.remove('a-moss'));
+  const tx = $('tech-text'); if (tx) tx.value = '';
+  renderTechniques(seed || '');
+  openOv('ov-tech');
+  if (seed) renderTechniques(seed);
+}
+function techPick(btn, key) {
+  btn.parentElement.querySelectorAll('.tp').forEach(b => b.classList.remove('a-moss'));
+  btn.classList.add('a-moss');
+  const tx = $('tech-text'); if (tx) tx.value = '';
+  renderTechniques(key); hpt();
+}
+function techFromText() {
+  const tx = $('tech-text'); if (!tx) return;
+  const val = tx.value;
+  // Кризисный протокол — раньше любого приёма (safety fallback).
+  if (crisisScreen(val)) { closeOv('ov-tech'); openCrisisCard(); return; }
+  const chips = $('tech-chips'); if (chips) chips.querySelectorAll('.tp').forEach(b => b.classList.remove('a-moss'));
+  renderTechniques(val);
+}
+function renderTechniques(q) {
+  const out = $('tech-out'); if (!out) return;
+  const techs = suggestTechniques(q, 2);
+  if (!q || !String(q).trim()) { out.innerHTML = `<div class="ai-sp-empty" style="padding:1rem">Выбери, что ближе, или опиши своими словами — подберу доказательный приём под состояние.</div>`; return; }
+  if (!techs.length) { out.innerHTML = `<div class="ai-sp-empty" style="padding:1rem">Не поймал состояние по словам. Попробуй иначе — «тревожно», «тянет сорваться», «нет сил», «злюсь», «пусто и одиноко».</div>`; return; }
+  out.innerHTML = techs.map(t => `<div class="card mx" style="padding:1rem;margin-bottom:.6rem">
+    <div class="si-text" style="font-weight:700">${esc(t.title)}</div>
+    <div class="si-text" style="color:var(--t3);margin:.15rem 0 .5rem">${esc(t.frame)}</div>
+    ${t.steps.map(s => `<div class="cr-tip-row">• ${esc(s)}</div>`).join('')}
+  </div>`).join('');
+}
 function openCraving() {
   STATE.crKind = 'сигарета'; STATE.crOnset = null; STATE.crAlone = null;
   const kindRow = $('cr-kind');
@@ -1877,7 +1984,7 @@ function crIntChange(v) {
   const base = STATE.crOnset === 'tonic' ? CRAVING_TIPS_TONIC : CRAVING_TIPS_CUE;
   const tips = orderedTips(base), cnt = tipHelpCounts();
   tip.innerHTML = +v >= 6
-    ? `<div class="cr-tip-box"><div class="cr-tip-h">Пик тяги обычно держится 3–5 минут — попробуй пережить его так:</div>${tips.map((t, i) => `<div class="cr-tip-row">${t.t}${i === 0 && (cnt[t.k] || 0) > 0 ? ' <span style="color:var(--green)">· помогало тебе</span>' : ''}</div>`).join('')}</div>`
+    ? `<div class="cr-tip-box"><div class="cr-tip-h">Пик тяги обычно держится 3–5 минут — попробуй пережить его так:</div>${tips.map((t, i) => `<div class="cr-tip-row">${t.t}${i === 0 && (cnt[t.k] || 0) > 0 ? ' <span style="color:var(--green)">· помогало тебе</span>' : ''}</div>`).join('')}<div class="cr-tip-row" style="margin-top:.5rem"><a href="javascript:void 0" onclick="closeOv('ov-craving');openTech('${STATE.crOnset === 'tonic' ? 'тяга пусто вечер' : 'тяга импульс'}')">Ещё приёмы под состояние →</a></div></div>`
     : '';
 }
 function saveCraving(held) {
@@ -1889,6 +1996,9 @@ function saveCraving(held) {
     createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION };
   (DB.cravings = DB.cravings || []).unshift(rec);
   persist(); closeOv('ov-craving'); hptMed();
+  // Кризисный протокол важнее обычного отклика: если в триггере — острый
+  // сигнал, ведём к живому человеку, а не к статистике тяги (safety first).
+  if (crisisScreen(trigger)) { try { if (document.getElementById('pg-health').classList.contains('on')) rHealth(); } catch (e) {} openCrisisCard(); return; }
   reactToCraving(rec);
   try { if (document.getElementById('pg-health').classList.contains('on')) rHealth(); } catch (e) {}
 }
@@ -1995,7 +2105,8 @@ function rHealth() {
     }).join('') + `</div>`;
   }
   html += `<div class="sec-lbl">Опора</div>
-    <div class="mx mb"><button class="btn btn-p btn-full" onclick="openCraving()"><i data-lucide="zap"></i>У меня тяга сейчас</button></div>`;
+    <div class="mx mb"><button class="btn btn-p btn-full" onclick="openCraving()"><i data-lucide="zap"></i>У меня тяга сейчас</button></div>
+    <div class="mx mb"><button class="btn btn-s btn-full" onclick="openTech('')"><i data-lucide="life-buoy"></i>Приёмы под состояние</button></div>`;
   if (crav.length) {
     const held = crav.filter(c => c.outcome === 'held').length;
     const rate = Math.round(held / crav.length * 100);
@@ -3112,6 +3223,7 @@ async function enrichDigestAutonomously(digId) {
 // ─── КОНФИГ ──────────────────────────────────────────────────────
 function rCfgForm() {
   const ni = $('cfg-name');   if(ni) ni.value = CFG.userName||'';
+  const tci = $('cfg-trusted'); if(tci) tci.value = CFG.trustedContact||'';
   const di = $('cfg-domain'); if(di) di.value = CFG.domainLabel||'Книга';
   const ai = $('cfg-api');    if(ai) ai.value = CFG.apiUrl||'';
   const ki = $('cfg-space');  if(ki) ki.value = CFG.spaceKey||'';
@@ -3154,6 +3266,7 @@ function resetApiUrl() {
 }
 function saveCfg() {
   CFG.userName    = $('cfg-name')?.value.trim()||CFG.userName;
+  const tc = $('cfg-trusted'); if (tc) CFG.trustedContact = tc.value.trim();
   CFG.domainLabel = $('cfg-domain')?.value.trim()||CFG.domainLabel;
   CFG.apiUrl      = $('cfg-api')?.value.trim()||'';
   const keyVal    = $('cfg-space')?.value.trim()||'';

@@ -623,6 +623,48 @@
   </div>
 </div>
 
+<!-- ПРИЁМЫ САМОРЕГУЛЯЦИИ -->
+<div class="ov" id="ov-tech" onclick="if(event.target===this)closeOv('ov-tech')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Приёмы под состояние</div>
+    <div class="sh-form">
+      <div>
+        <div class="f-lbl">Что сейчас ближе всего?</div>
+        <div class="trow" id="tech-chips" style="flex-wrap:wrap">
+          <button class="tp" onclick="techPick(this,'тревога паника')">Тревога</button>
+          <button class="tp" onclick="techPick(this,'навязчивые мысли руминация')">Навязчивые мысли</button>
+          <button class="tp" onclick="techPick(this,'тяга сорваться импульс')">Тяга</button>
+          <button class="tp" onclick="techPick(this,'нет сил упадок апатия')">Упадок сил</button>
+          <button class="tp" onclick="techPick(this,'стыд вина самокритика')">Стыд/вина</button>
+          <button class="tp" onclick="techPick(this,'злюсь злость раздражение')">Злость</button>
+          <button class="tp" onclick="techPick(this,'стресс напряжение взвинчен')">Стресс</button>
+          <button class="tp" onclick="techPick(this,'одиночество пусто один')">Одиночество</button>
+        </div>
+      </div>
+      <div>
+        <div class="f-lbl">Или опиши своими словами</div>
+        <input class="field" id="tech-text" placeholder="что происходит прямо сейчас…" oninput="techFromText()">
+      </div>
+      <div id="tech-out"></div>
+    </div>
+  </div>
+</div>
+
+<!-- КРИЗИСНЫЙ ПРОТОКОЛ -->
+<div class="ov" id="ov-crisis">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Ты сейчас не один</div>
+    <div class="sh-form">
+      <div class="si-text">Похоже, тебе очень тяжело. Это важнее любого приёма из приложения — и с этим не нужно оставаться наедине.</div>
+      <div id="crisis-contact"></div>
+      <div class="si-text" style="color:var(--t3)">Если есть угроза прямо сейчас — позвони в скорую или экстренную службу твоего региона. «Архитектор» — не терапевт и не заменяет живого человека.</div>
+      <button class="btn btn-p btn-full" onclick="closeOv('ov-crisis')">Я понял(а)</button>
+    </div>
+  </div>
+</div>
+
 <!-- СОН -->
 <div class="ov" id="ov-drm" onclick="if(event.target===this)closeOv('ov-drm')">
   <div class="sheet">
@@ -819,6 +861,10 @@
       <div>
         <div class="f-lbl">Имя</div>
         <input class="field" id="cfg-name" placeholder="Твоё имя">
+      </div>
+      <div>
+        <div class="f-lbl">Близкий человек <span style="font-weight:500;color:var(--t3)">(имя и телефон — будет под рукой в трудный момент)</span></div>
+        <input class="field" id="cfg-trusted" placeholder="напр. Аня +7…">
       </div>
       <div>
         <div class="f-lbl">Домен (Книга / Музыка / Стихи / Проект…)</div>
