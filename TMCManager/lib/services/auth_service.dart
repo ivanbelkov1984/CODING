@@ -13,8 +13,10 @@ class AuthService {
 
       // Обработка успешного ответа
       if (response.statusCode == 200) {
-        final data = response.body;
-        logger.i('Authentication successful: $data'); // Лог успешного ответа
+        // Не логируем тело ответа — /v4/product/info/limit возвращает бизнес-
+        // данные продавца (остатки, цены, лимиты), не только факт успеха
+        // (наряд #205, находка Никиты).
+        logger.i('Authentication successful');
         return true;
       }
 

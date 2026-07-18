@@ -41,3 +41,11 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Секреты (наряд #205)
+.env
+.env.*
+key.properties
+*.jks
+*.keystore
+google-services.json

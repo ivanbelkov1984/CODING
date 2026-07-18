@@ -59,8 +59,11 @@ class ApiClient {
         _logger.w('Ошибка 403: Доступ запрещен. Проверьте права доступа.');
         throw Exception('Ошибка 403: Доступ запрещен. Проверьте права доступа.');
       default:
-        _logger.e('Ошибка ${response.statusCode}: ${response.body}');
-        throw Exception('Ошибка ${response.statusCode}: ${response.body}');
+        // Не логируем и не пробрасываем тело ответа — оно может содержать
+        // коммерческие данные продавца (остатки, цены, заказы), не только
+        // техническую информацию об ошибке (наряд #205, находка Никиты).
+        _logger.e('Ошибка ${response.statusCode}: запрос к Ozon Seller API не выполнен');
+        throw Exception('Ошибка ${response.statusCode}: запрос к Ozon Seller API не выполнен');
     }
   }
 
