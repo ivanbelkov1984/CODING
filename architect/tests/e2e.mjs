@@ -673,6 +673,110 @@ const sugarFactor = await page.evaluate(() => {
 ok(sugarFactor, 'движок «что влияет» видит «сладкое» как фактор — не только никотин/кофеин/алкоголь');
 await page.evaluate(() => { goTo('home'); DB.cravings = []; });
 
+// ── «Здоровье» фаза 2: типология тяги, контекст, план «если-то», среда, риск ──
+const typology = await page.evaluate(() => {
+  DB.cravings = [];
+  openCraving();
+  document.getElementById('cr-int').value = 8;
+  sCrCtx(document.querySelector('#cr-ctx [data-v="tonic"]'));
+  const tonicTip = document.getElementById('cr-tip').innerHTML;
+  sCrCtx(document.querySelector('#cr-ctx [data-v="cue"]'));
+  const cueTip = document.getElementById('cr-tip').innerHTML;
+  closeOv('ov-craving');
+  return { tonicTip, cueTip };
+});
+ok(/белковое|покоя/.test(typology.tonicTip) && !/белковое|покоя/.test(typology.cueTip),
+  'типология тяги: «копилось весь день» даёт другую подсказку (физиологическая компенсация), чем «внезапно, от повода»');
+
+const ctxSave = await page.evaluate(() => {
+  DB.cravings = [];
+  openCraving();
+  document.getElementById('cr-int').value = 7;
+  sCrCtx(document.querySelector('#cr-ctx [data-v="tonic"]'));
+  sCrCtx(document.querySelector('#cr-ctx [data-v="alone"]'));
+  saveCraving(false);
+  const rec = DB.cravings[0];
+  rcClose();
+  return rec;
+});
+ok(ctxSave.onset === 'tonic' && ctxSave.alone === 'alone', '«Тяга» сохраняет необязательный контекст: тип накопления и один(на)/с людьми');
+
+const loneCorr = await page.evaluate(() => {
+  const keep = DB.cravings;
+  DB.cravings = [
+    { id: 1, kind: 'сигарета', intensity: 5, trigger: '', outcome: 'gave_in', alone: 'alone', createdAt: nowISO(), day: todayKey() },
+    { id: 2, kind: 'сигарета', intensity: 5, trigger: '', outcome: 'gave_in', alone: 'alone', createdAt: nowISO(), day: todayKey() },
+    { id: 3, kind: 'сигарета', intensity: 5, trigger: '', outcome: 'held', alone: 'alone', createdAt: nowISO(), day: todayKey() },
+    { id: 4, kind: 'сигарета', intensity: 5, trigger: '', outcome: 'held', alone: 'people', createdAt: nowISO(), day: todayKey() },
+    { id: 5, kind: 'сигарета', intensity: 5, trigger: '', outcome: 'held', alone: 'people', createdAt: nowISO(), day: todayKey() },
+  ];
+  goTo('health');
+  const txt = document.getElementById('health-out').textContent;
+  DB.cravings = keep;
+  return txt;
+});
+ok(/Один\(на\) срывы чаще/.test(loneCorr), 'связь одиночества со срывами подсвечивается, когда данных достаточно (корневой триггер из разбора JITAI)');
+
+const planFlow = await page.evaluate(() => {
+  const keepIns = DB.insights, keepCrav = DB.cravings;
+  DB.insights = [{ id: 9001, tag: 'personal', w: 1, title: 'План', body: 'Если «созвон с боссом» — то я: выйду на 5 минут подышать.', date: dateRU(), createdAt: nowISO(), day: todayKey(), src: 'План (если-то)', links: [] }];
+  DB.cravings = [];
+  openCraving();
+  document.getElementById('cr-trigger').value = 'созвон с боссом';
+  saveCraving(true);
+  const cardTxt = (document.getElementById('react-card') || {}).textContent || '';
+  rcClose();
+  goTo('health');
+  const healthTxt = document.getElementById('health-out').textContent;
+  DB.insights = keepIns; DB.cravings = keepCrav;
+  return { cardTxt, healthTxt };
+});
+ok(/план на этот случай/.test(planFlow.cardTxt), 'если для триггера уже есть план «если-то», он всплывает в отклике на следующую тягу');
+ok(/план на этот случай уже есть/.test(planFlow.healthTxt), '«Триггеры» на «Здоровье» показывают, что у частого триггера уже есть план');
+
+const envToggle = await page.evaluate(() => {
+  const keep = DB.env;
+  DB.env = { noSweetsHome: false, noCigsHome: false, ritual: false };
+  goTo('health');
+  const before = document.getElementById('health-out').textContent;
+  toggleEnvFlag('noSweetsHome');
+  const after = document.getElementById('health-out').textContent;
+  DB.env = keep;
+  goTo('health');
+  return { before, after };
+});
+ok(/Среда/.test(envToggle.before) && /Дома нет сладкого/.test(envToggle.before), '«Среда»: чек-лист реструктуризации окружения (BCTTv1) отображается');
+ok(envToggle.after !== envToggle.before, 'переключатель «Среды» меняет состояние и перерисовывает раздел');
+
+const riskCard = await page.evaluate(() => {
+  const keepVit = { ...DB.vit };
+  DB.vit = { ...DB.vit, ci: true, date: todayKey(), st: 8, sl: 5 };
+  goTo('health');
+  const withRisk = document.getElementById('health-out').textContent;
+  DB.vit = { ...DB.vit, st: 3, sl: 8 };
+  goTo('health');
+  const noRisk = document.getElementById('health-out').textContent;
+  DB.vit = keepVit;
+  goTo('health');
+  return { withRisk, noRisk };
+});
+ok(/Риск сейчас/.test(riskCard.withRisk) && /Выше обычного/.test(riskCard.withRisk), '«Риск сейчас» объясняет конкретные причины (стресс/сон), а не просто «высокий риск»');
+ok(/Ничего тревожного/.test(riskCard.noRisk), 'без факторов риска — спокойная, не пугающая формулировка');
+
+const bonus = await page.evaluate(() => {
+  DB.cravings = [];
+  const origRandom = Math.random;
+  Math.random = () => 0;
+  openCraving();
+  saveCraving(true);
+  const cardTxt = (document.getElementById('react-card') || {}).textContent || '';
+  Math.random = origRandom;
+  rcClose();
+  return cardTxt;
+});
+ok(/паттерн правда меняется|Маленькая победа|заметь разницу/.test(bonus), 'переменное подкрепление: после «устоял» иногда появляется непредсказуемый бонус-отклик, не гарантированная галочка');
+await page.evaluate(() => { goTo('home'); DB.cravings = []; });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

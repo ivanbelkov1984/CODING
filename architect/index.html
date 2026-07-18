@@ -601,6 +601,15 @@
         <div class="f-lbl">Что происходит прямо сейчас <span style="font-weight:500;color:var(--t3)">(необязательно)</span></div>
         <input class="field" id="cr-trigger" placeholder="стресс, скука, после еды, ссора…">
       </div>
+      <div>
+        <div class="f-lbl">Контекст <span style="font-weight:500;color:var(--t3)">(необязательно, но подскажет точнее)</span></div>
+        <div class="trow" id="cr-ctx" style="flex-wrap:wrap">
+          <button class="tp" data-g="onset" data-v="cue" onclick="sCrCtx(this)">Внезапно, от повода</button>
+          <button class="tp" data-g="onset" data-v="tonic" onclick="sCrCtx(this)">Копилось весь день</button>
+          <button class="tp" data-g="alone" data-v="alone" onclick="sCrCtx(this)">Один(на)</button>
+          <button class="tp" data-g="alone" data-v="people" onclick="sCrCtx(this)">С людьми</button>
+        </div>
+      </div>
       <div class="vf">
         <label>Сила тяги</label>
         <div class="sl"><input type="range" id="cr-int" min="0" max="10" value="5" oninput="crIntChange(this.value)"><span class="slv" id="cr-int-v">5</span></div>

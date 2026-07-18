@@ -73,6 +73,7 @@ const DEFAULT_DB = {
     'Что мешает двигаться вперёд?',
   ],
   vit: {sl:7, sq:7, cl:7, st:4, mv:7, nic:false, caf:true, alc:false, sugar:false, act:'нет', tone:'нейтрально', note:'', ci:false, date:''},
+  env: {noSweetsHome:false, noCigsHome:false, ritual:false},   // «Среда»: реструктуризация окружения (BCTTv1)
   _del: {},   // «надгробия» удалённых записей: { id: timestamp }
   __ts: 0,    // метка времени документа (для слияния скалярных полей)
 };
@@ -781,6 +782,16 @@ function statePromptBucket() {
 // ─── КОНТЕКСТНЫЙ НАДЖ (напоминания: контекст, не будильник — №4) ──
 // Один уместный подсказ по состоянию/пропускам, вопросом, а не командой;
 // закрывается на день. (Web Push позже — логика уже здесь.)
+// Явный объясняющий слой риска (см. HEALTH_BRIEF.md, «Риск» как прозрачный
+// output decision model, не чёрный ящик) — общая логика для наджера и
+// карточки «Риск сейчас» на «Здоровье», чтобы не разъезжались причины.
+function riskReasons() {
+  const v = DB.vit; if (!v || !v.ci || v.date !== todayKey()) return [];
+  const rs = [];
+  if (v.st >= 7) rs.push('высокий стресс');
+  if (v.sl < 6) rs.push('мало сна');
+  return rs;
+}
 function smartNudge() {
   const today = todayKey();
   if (localStorage.getItem('arch5_nudge_dismiss') === today) return null;
@@ -792,8 +803,9 @@ function smartNudge() {
   // тягу; предупреждаем заранее, см. HEALTH_BRIEF.md, п. 4 «Nudging»)
   if (v && v.ci && v.date === today) {
     const riskCtx = healthSpheres().length > 0 || (DB.cravings || []).length > 0;
-    if (riskCtx && (v.st >= 7 || v.sl < 6))
-      return { icon: '⚠️', text: v.st >= 7 ? 'Стресс сегодня высокий — риск тяги выше обычного.' : 'Сна маловато — самоконтроль слабее обычного.',
+    const reasons = riskReasons();
+    if (riskCtx && reasons.length)
+      return { icon: '⚠️', text: `Похоже, риск тяги сегодня выше обычного: ${reasons.join(', ')}.`,
         cta: '3-минутная перезагрузка', act: 'openCraving()' };
   }
   // 2. Привычка-сфера давно без отметки
@@ -1733,15 +1745,25 @@ function saveCI() {
 // Основа (см. HEALTH_BRIEF.md): петля привычки триггер→действие→
 // награда; пик тяги держится 3–5 минут — задача не «победить силой
 // воли», а пережить пик и honestly зафиксировать данные, не судить.
-const CRAVING_TIPS = [
+// Типология тяги (must-have конкретизация из разбора JITAI): внезапная
+// «cue-induced» (нужна дистракция/пересидеть пик) и фоновая «tonic»
+// (нарастает из-за усталости/голода — нужна физиологическая компенсация,
+// не сила воли). Ветвим подсказку по выбору пользователя, не по угадыванию.
+const CRAVING_TIPS_CUE = [
   '🫁 4 медленных вдоха через нос, выдох вдвое дольше — 60 секунд.',
   '💧 Стакан воды, медленно, весь до дна.',
   '🚶 Встань и пройдись 2–3 минуты — смена позы сбивает автоматизм.',
 ];
+const CRAVING_TIPS_TONIC = [
+  '💧 Стакан воды и что-то белковое/сытное — фоновая тяга часто от голода, не от повода.',
+  '🛌 Если это вечер — усталость съедает волю сильнее, чем кажется. Дай себе 10 минут покоя.',
+  '🫁 Медленное дыхание 4/8, чтобы не «долить» тягу собственным напряжением.',
+];
 function openCraving() {
-  STATE.crKind = 'сигарета';
+  STATE.crKind = 'сигарета'; STATE.crOnset = null; STATE.crAlone = null;
   const kindRow = $('cr-kind');
   if (kindRow) kindRow.querySelectorAll('.tp').forEach(b => b.classList.toggle('a-moss', b.dataset.k === 'сигарета'));
+  const ctxRow = $('cr-ctx'); if (ctxRow) ctxRow.querySelectorAll('.tp').forEach(b => b.classList.remove('a-moss'));
   const trig = $('cr-trigger'); if (trig) trig.value = '';
   const int = $('cr-int'); if (int) int.value = 5;
   crIntChange(5);
@@ -1751,11 +1773,22 @@ function sCrKind(btn) {
   btn.parentElement.querySelectorAll('.tp').forEach(b => b.classList.remove('a-moss'));
   btn.classList.add('a-moss'); STATE.crKind = btn.dataset.k;
 }
+// Оба контекстных вопроса необязательны и независимы друг от друга
+// (data-g различает группу), поэтому переключаем активность только
+// внутри своей группы — второй вопрос не сбрасывает первый.
+function sCrCtx(btn) {
+  const g = btn.dataset.g;
+  btn.parentElement.querySelectorAll(`.tp[data-g="${g}"]`).forEach(b => b.classList.remove('a-moss'));
+  btn.classList.add('a-moss');
+  if (g === 'onset') STATE.crOnset = btn.dataset.v; else STATE.crAlone = btn.dataset.v;
+  crIntChange(($('cr-int') && $('cr-int').value) || 5);
+}
 function crIntChange(v) {
   const lbl = $('cr-int-v'); if (lbl) lbl.textContent = v;
   const tip = $('cr-tip'); if (!tip) return;
+  const tips = STATE.crOnset === 'tonic' ? CRAVING_TIPS_TONIC : CRAVING_TIPS_CUE;
   tip.innerHTML = +v >= 6
-    ? `<div class="cr-tip-box"><div class="cr-tip-h">Пик тяги обычно держится 3–5 минут — попробуй пережить его так:</div>${CRAVING_TIPS.map(t => `<div class="cr-tip-row">${t}</div>`).join('')}</div>`
+    ? `<div class="cr-tip-box"><div class="cr-tip-h">Пик тяги обычно держится 3–5 минут — попробуй пережить его так:</div>${tips.map(t => `<div class="cr-tip-row">${t}</div>`).join('')}</div>`
     : '';
 }
 function saveCraving(held) {
@@ -1763,20 +1796,42 @@ function saveCraving(held) {
   const intensity = +(($('cr-int') && $('cr-int').value) || 5);
   const trigger = (($('cr-trigger') && $('cr-trigger').value) || '').trim();
   const rec = { id: Date.now(), kind, intensity, trigger, outcome: held ? 'held' : 'gave_in',
+    onset: STATE.crOnset || null, alone: STATE.crAlone || null,
     createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION };
   (DB.cravings = DB.cravings || []).unshift(rec);
   persist(); closeOv('ov-craving'); hptMed();
   reactToCraving(rec);
   try { if (document.getElementById('pg-health').classList.contains('on')) rHealth(); } catch (e) {}
 }
+// Найти ранее сохранённый план «если...то» под конкретный триггер —
+// план хранится как обычный инсайт (тег «Личное», src-метка), чтобы не
+// плодить новую сущность (см. HEALTH_BRIEF.md, принцип «слой поверх»).
+function findPlanFor(trig) {
+  const t = (trig || '').trim().toLowerCase(); if (!t) return null;
+  return (DB.insights || []).find(i => i.src === 'План (если-то)' && (i.body || '').toLowerCase().includes(t));
+}
+function planForTrigger(trig) {
+  reflectPromptText(`Если «${trig}» — то я:`);
+  const sr = $('add-src'); if (sr) sr.value = 'План (если-то)';
+}
+function planForTriggerIdx(i) {
+  const row = (STATE.healthTopTrig || [])[i]; if (row) planForTrigger(row[0]);
+}
 // Живой отклик на тягу: без осуждения при срыве (метод «Зачем?» —
 // честные данные, не провал), с паттерном при накоплении истории.
+// Награда за «устоял» — переменная (variable-ratio), не гарантированная
+// галочка каждый раз: непредсказуемость сама по себе поддерживает
+// вовлечённость (см. разбор JITAI, п. «variable-ratio reinforcement»).
 function reactToCraving(rec) {
   const rows = [];
   const list = DB.cravings || [];
   if (rec.outcome === 'held') {
     let streak = 0; for (const c of list) { if (c.outcome !== 'held') break; streak++; }
     rows.push({ html: `💪 Устоял(а)${streak > 1 ? ` — ${streak} раз подряд` : ''}` });
+    if (Math.random() < 0.3) {
+      const bonuses = ['🌟 Это не просто галочка — паттерн правда меняется.', '🎉 Маленькая победа, но настоящая.', '💎 Месяц назад это было бы сложнее — заметь разницу.'];
+      rows.push({ html: bonuses[Math.floor(Math.random() * bonuses.length)] });
+    }
   } else {
     rows.push({ html: `Записано честно — это данные, не провал.${rec.trigger ? ` Триггер: «${esc(rec.trigger)}»` : ''}` });
   }
@@ -1785,6 +1840,8 @@ function reactToCraving(rec) {
     const heldN = sameKind.filter(c => c.outcome === 'held').length;
     rows.push({ html: `📊 «${esc(rec.kind)}»: устоял в ${heldN} из ${sameKind.length} (${Math.round(heldN / sameKind.length * 100)}%)` });
   }
+  const plan = findPlanFor(rec.trigger);
+  if (plan) rows.push({ html: `📌 У тебя есть план на этот случай: ${esc(plan.body.replace(/\n+/g, ' ').trim().slice(0, 140))}` });
   rows.push({ html: `Открыть «Здоровье» →`, act: `rcClose();goTo('health')` });
   reactCard(rows, 'Тяга');
 }
@@ -1797,10 +1854,23 @@ function addHealthSphere(name, icon) {
   createSphere({ name, icon, type: 'habit', color: '#5e6ad2' });
   rHealth(); toast(`«${name}» добавлена — отмечай на «Сферах»`, 'ok');
 }
+// «Среда»: реструктуризация окружения (BCTTv1) — три простых переключателя,
+// не отдельная сущность, а плоские флаги (см. DEFAULT_DB.env).
+function toggleEnvFlag(key) {
+  DB.env = DB.env || {}; DB.env[key] = !DB.env[key];
+  persist(); rHealth(); hpt();
+}
 function rHealth() {
   const el = $('health-out'); if (!el) return;
   const hs = healthSpheres(), crav = DB.cravings || [];
-  let html = `<div class="sec-lbl">Вредные привычки</div>`;
+  // «Риск»: прозрачный объясняющий слой — не просто «риск высокий», а
+  // конкретные причины, чтобы решение системы не ощущалось произвольным.
+  const reasons = riskReasons();
+  let html = `<div class="sec-lbl">Риск сейчас</div>
+    <div class="card mx mb" style="padding:1rem">${reasons.length
+      ? `<div class="ai-sp-empty">⚠️ Выше обычного: ${esc(reasons.join(', '))}.</div>`
+      : `<div class="ai-sp-empty">✓ Ничего тревожного по сегодняшнему чек-ину не видно.</div>`}</div>`;
+  html += `<div class="sec-lbl">Прогресс</div>`;
   if (!hs.length) {
     html += `<div class="card mx mb"><div style="padding:1rem" class="ai-sp-empty">Заведи привычку-трекер — «Без сигарет», «Без сладкого» — и здесь появится стрик и паттерн срывов.
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.75rem">
@@ -1814,7 +1884,7 @@ function rHealth() {
       return `<div class="srow" onclick="openSphereLog(${s.id})" role="button"><div class="sic" style="background:${s.color}22"><span>${esc(s.icon || '●')}</span></div><span class="sl2">${esc(s.name)}</span><span class="sv2">${st.consistency || 0}% за 30д</span></div>`;
     }).join('') + `</div>`;
   }
-  html += `<div class="sec-lbl">Тяга</div>
+  html += `<div class="sec-lbl">Опора</div>
     <div class="mx mb"><button class="btn btn-p btn-full" onclick="openCraving()"><i data-lucide="zap"></i>У меня тяга сейчас</button></div>`;
   if (crav.length) {
     const held = crav.filter(c => c.outcome === 'held').length;
@@ -1823,13 +1893,27 @@ function rHealth() {
     const trigCount = {};
     crav.forEach(c => { const t = (c.trigger || '').trim().toLowerCase(); if (t) trigCount[t] = (trigCount[t] || 0) + 1; });
     const topTrig = Object.entries(trigCount).sort((a, b) => b[1] - a[1]).slice(0, 3);
-    html += `<div class="card mx mb" style="padding:1rem">
+    STATE.healthTopTrig = topTrig;
+    // Одиночество — один из двух корневых триггеров (см. разбор JITAI,
+    // раздел «стресс/одиночество»): подсвечиваем связь только если данных
+    // хватает для честного вывода, а не одной-двух точек.
+    const aloneRecs = crav.filter(c => c.alone === 'alone'), peopleRecs = crav.filter(c => c.alone === 'people');
+    let loneRow = '';
+    if (aloneRecs.length >= 3 && peopleRecs.length >= 2) {
+      const aloneRate = Math.round(aloneRecs.filter(c => c.outcome === 'gave_in').length / aloneRecs.length * 100);
+      const peopleRate = Math.round(peopleRecs.filter(c => c.outcome === 'gave_in').length / peopleRecs.length * 100);
+      if (aloneRate - peopleRate >= 15)
+        loneRow = `<div class="si-row"><div class="si-body"><div class="si-text">Один(на) срывы чаще: ${aloneRate}% против ${peopleRate}% с людьми</div></div></div>`;
+    }
+    html += `<div class="sec-lbl">Триггеры</div>
+    <div class="card mx mb" style="padding:1rem">
       <div class="kgrid" style="margin:0 0 .75rem">
         <div class="kc"><span class="kn">${crav.length}</span><span class="kl">Всего</span></div>
         <div class="kc"><span class="kn">${rate}%</span><span class="kl">Устоял</span></div>
         <div class="kc"><span class="kn">${week}</span><span class="kl">За 7 дней</span></div>
       </div>
-      ${topTrig.length ? `<div class="f-lbl">Частые триггеры</div>` + topTrig.map(([t, n]) => `<div class="si-row"><div class="si-body"><div class="si-text">${esc(t)} — ${n} ${pl(n, 'раз', 'раза', 'раз')}</div></div></div>`).join('') : ''}
+      ${topTrig.length ? `<div class="f-lbl">Частые триггеры</div>` + topTrig.map(([t, n], i) => `<div class="si-row"><div class="si-body"><div class="si-text">${esc(t)} — ${n} ${pl(n, 'раз', 'раза', 'раз')}</div>${i === 0 ? `<div class="si-act">${findPlanFor(t) ? '📌 план на этот случай уже есть' : `<a href="javascript:void 0" onclick="planForTriggerIdx(0)">+ план «если...то»</a>`}</div>` : ''}</div></div>`).join('') : ''}
+      ${loneRow}
     </div>`;
   }
   const si = smartInsights();
@@ -1838,7 +1922,14 @@ function rHealth() {
   html += healthItems.length
     ? `<div class="si-card mx mb">` + healthItems.map(it => `<div class="si-row"><div class="si-dot ${it.pos ? 'pos' : 'neg'}"></div><div class="si-body"><div class="si-text">${esc(it.text)}</div><div class="si-act">→ ${esc(it.action)}</div></div></div>`).join('') + `</div>`
     : `<div class="card mx mb"><div style="padding:1rem" class="ai-sp-empty">Отмечай никотин/алкоголь/сладкое в чек-ине — через несколько дней здесь появится честная связь с твоим состоянием.</div></div>`;
-  html += `<div class="sec-lbl">Психологический разбор</div>
+  const env = DB.env || {};
+  html += `<div class="sec-lbl">Среда</div>
+    <div class="card mx mb" style="padding:.5rem">
+      <div class="srow" onclick="toggleEnvFlag('noSweetsHome')" role="button"><span class="sl2">Дома нет сладкого</span><span class="sv2">${env.noSweetsHome ? '✓' : '—'}</span></div>
+      <div class="srow" onclick="toggleEnvFlag('noCigsHome')" role="button"><span class="sl2">Дома нет сигарет</span><span class="sv2">${env.noCigsHome ? '✓' : '—'}</span></div>
+      <div class="srow" onclick="toggleEnvFlag('ritual')" role="button"><span class="sl2">Вечерний ритуал заменён</span><span class="sv2">${env.ritual ? '✓' : '—'}</span></div>
+    </div>`;
+  html += `<div class="sec-lbl">Разбор</div>
     <div class="mx mb"><button class="btn btn-s btn-full" onclick="goTo('map');msub('graph');STATE.mapView='psy';rMap()">Функция, вторичная выгода, потребность →</button></div>`;
   html += `<div class="sec-lbl">Витамины и добавки</div>
     <div class="mx" style="margin-bottom:5rem"><button class="btn btn-s btn-full" onclick="addHealthSphere('Витамины','💊')">+ Отслеживать приём</button></div>`;
@@ -3359,7 +3450,7 @@ function mergeDB(local, remote) {
   IDCOLS.forEach(c => { out[c] = mergeById(local[c] || [], remote[c] || [], del); });
   // скалярные поля (состояние/главы/вопросы) — берём из более свежего документа
   const scal = (remote.__ts || 0) > (local.__ts || 0) ? remote : local;
-  ['vit','chapters','oq'].forEach(k => { if (scal[k] !== undefined) out[k] = scal[k]; });
+  ['vit','chapters','oq','env'].forEach(k => { if (scal[k] !== undefined) out[k] = scal[k]; });
   out.__ts = Math.max(local.__ts || 0, remote.__ts || 0);
   return out;
 }
