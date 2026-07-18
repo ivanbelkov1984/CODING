@@ -782,16 +782,58 @@ function statePromptBucket() {
 // ─── КОНТЕКСТНЫЙ НАДЖ (напоминания: контекст, не будильник — №4) ──
 // Один уместный подсказ по состоянию/пропускам, вопросом, а не командой;
 // закрывается на день. (Web Push позже — логика уже здесь.)
-// Явный объясняющий слой риска (см. HEALTH_BRIEF.md, «Риск» как прозрачный
-// output decision model, не чёрный ящик) — общая логика для наджера и
-// карточки «Риск сейчас» на «Здоровье», чтобы не разъезжались причины.
-function riskReasons() {
-  const v = DB.vit; if (!v || !v.ci || v.date !== todayKey()) return [];
-  const rs = [];
-  if (v.st >= 7) rs.push('высокий стресс');
-  if (v.sl < 6) rs.push('мало сна');
-  return rs;
+// ─── ПЕРСОНАЛЬНЫЙ АДАПТИВНЫЙ РИСК-СКОРИНГ ТЯГИ ───────────────────
+// Сердце JITAI, которое реально помогает: движок учится на ТВОЕЙ
+// истории (окно суток срывов, пост-срыв, одиночество), а не на данных
+// тысяч людей — потому и работает локально, без сервера и без ML-облака.
+// Rule-based и полностью объяснимый: у каждого вклада своя причина,
+// система никогда не говорит «риск высокий» без «потому что». Честность
+// как в smartInsights: персональные паттерны включаются только когда
+// данных хватает, иначе остаётся только сегодняшнее состояние.
+// atHour — необязательный час «как будто сейчас» (для тестов/прогноза).
+function cravingRisk(atHour) {
+  const v = DB.vit, crav = DB.cravings || [];
+  const hour = atHour == null ? new Date().getHours() : atHour;
+  const hasCi = !!(v && v.ci && v.date === todayKey());
+  const F = [];  // {w, why, tag}
+  // 1. Сегодняшнее состояние — доступно сразу после чек-ина. Стресс —
+  //    корневой триггер (см. разбор JITAI), сам по себе весомый.
+  if (hasCi) {
+    if (v.st >= 7) F.push({ w: 0.3,  why: 'высокий стресс сегодня', tag: 'stress' });
+    if (v.sl < 6)  F.push({ w: 0.15, why: 'сна меньше нормы — самоконтроль слабее', tag: 'sleep' });
+  }
+  // 2. Пост-срыв окно (AVE): первые ~48ч после срыва держаться труднее.
+  const lastFall = crav.find(c => c.outcome === 'gave_in' && c.createdAt);
+  if (lastFall) {
+    const hrs = (Date.now() - new Date(lastFall.createdAt).getTime()) / 36e5;
+    if (hrs >= 0 && hrs < 48) F.push({ w: 0.2, why: 'недавний срыв — первые двое суток самые уязвимые', tag: 'recent' });
+  }
+  // 3. Твоё уязвимое ОКНО суток — учится из истории собственных срывов.
+  const falls = crav.filter(c => c.outcome === 'gave_in' && c.createdAt);
+  if (falls.length >= 5) {
+    const band = h => h < 6 ? 0 : h < 12 ? 1 : h < 18 ? 2 : 3;
+    const names = ['ночью', 'по утрам', 'днём', 'по вечерам'];
+    const cnt = [0, 0, 0, 0];
+    falls.forEach(c => cnt[band(new Date(c.createdAt).getHours())]++);
+    const cur = band(hour), share = cnt[cur] / falls.length;
+    if (share >= 0.4) F.push({ w: 0.2, why: `${names[cur]} у тебя срывы случаются чаще всего`, tag: 'window' });
+  }
+  // 4. Одиночество как персональный триггер — учится из контекста тяги.
+  const alone = crav.filter(c => c.alone === 'alone'), withppl = crav.filter(c => c.alone === 'people');
+  if (alone.length >= 3 && withppl.length >= 2) {
+    const ar = alone.filter(c => c.outcome === 'gave_in').length / alone.length;
+    const pr = withppl.filter(c => c.outcome === 'gave_in').length / withppl.length;
+    if (ar - pr >= 0.15) F.push({ w: 0.15, why: 'в одиночестве тебе удержаться труднее', tag: 'lonely' });
+  }
+  // 5. Нарастающая частота — много импульсов за сутки, напряжение копится.
+  const last24 = crav.filter(c => c.createdAt && Date.now() - new Date(c.createdAt).getTime() < 864e5);
+  if (last24.length >= 3) F.push({ w: 0.15, why: `${last24.length} ${pl(last24.length, 'импульс', 'импульса', 'импульсов')} за сутки — напряжение растёт`, tag: 'freq' });
+  const score = Math.min(0.95, F.reduce((s, f) => s + f.w, 0));
+  F.sort((a, b) => b.w - a.w);
+  return { score, factors: F, top: F[0] || null, hasCi };
 }
+// Совместимость: прежний riskReasons() — тонкая обёртка над движком.
+function riskReasons() { return cravingRisk().factors.map(f => f.why); }
 function smartNudge() {
   const today = todayKey();
   if (localStorage.getItem('arch5_nudge_dismiss') === today) return null;
@@ -799,14 +841,16 @@ function smartNudge() {
   // 1. Не отмечен день (после полудня)
   if ((!v || !v.ci || v.date !== today) && hour >= 11)
     return { icon:'📝', text:'Хороший момент отметить день?', cta:'Чек-ин', act:"openOv('ov-ci')" };
-  // 1.5 Предиктивный риск срыва — ДО, а не после (стресс/недосып поднимают
-  // тягу; предупреждаем заранее, см. HEALTH_BRIEF.md, п. 4 «Nudging»)
-  if (v && v.ci && v.date === today) {
+  // 1.5 Предиктивный риск срыва — персональный движок: окно суток срывов,
+  // пост-срыв, одиночество, стресс/сон. Проактивно, ДО тяги, с причиной
+  // (см. cravingRisk / HEALTH_BRIEF.md). Не требует чек-ина: окно суток и
+  // пост-срыв знаемы и без него — потому предупреждение реально опережает.
+  {
     const riskCtx = healthSpheres().length > 0 || (DB.cravings || []).length > 0;
-    const reasons = riskReasons();
-    if (riskCtx && reasons.length)
-      return { icon: '⚠️', text: `Похоже, риск тяги сегодня выше обычного: ${reasons.join(', ')}.`,
-        cta: '3-минутная перезагрузка', act: 'openCraving()' };
+    const risk = cravingRisk();
+    if (riskCtx && risk.score >= 0.3 && risk.top)
+      return { icon: '⚠️', text: `Сейчас риск тяги выше обычного — ${risk.top.why}.`,
+        cta: 'Опереться заранее', act: 'openCraving()' };
   }
   // 2. Привычка-сфера давно без отметки
   for (const s of (DB.spheres || [])) {
@@ -1749,16 +1793,29 @@ function saveCI() {
 // «cue-induced» (нужна дистракция/пересидеть пик) и фоновая «tonic»
 // (нарастает из-за усталости/голода — нужна физиологическая компенсация,
 // не сила воли). Ветвим подсказку по выбору пользователя, не по угадыванию.
+// Подсказки помечены ключом (k) и коротким ярлыком (lbl) — чтобы движок
+// мог запоминать, что помогло именно тебе, и поднимать это вверх (петля
+// обратной связи, см. markHelped/orderedTips).
 const CRAVING_TIPS_CUE = [
-  '🫁 4 медленных вдоха через нос, выдох вдвое дольше — 60 секунд.',
-  '💧 Стакан воды, медленно, весь до дна.',
-  '🚶 Встань и пройдись 2–3 минуты — смена позы сбивает автоматизм.',
+  { k: 'breath', lbl: '🫁 Дыхание', t: '🫁 4 медленных вдоха через нос, выдох вдвое дольше — 60 секунд.' },
+  { k: 'water',  lbl: '💧 Вода',    t: '💧 Стакан воды, медленно, весь до дна.' },
+  { k: 'move',   lbl: '🚶 Шаги',    t: '🚶 Встань и пройдись 2–3 минуты — смена позы сбивает автоматизм.' },
 ];
 const CRAVING_TIPS_TONIC = [
-  '💧 Стакан воды и что-то белковое/сытное — фоновая тяга часто от голода, не от повода.',
-  '🛌 Если это вечер — усталость съедает волю сильнее, чем кажется. Дай себе 10 минут покоя.',
-  '🫁 Медленное дыхание 4/8, чтобы не «долить» тягу собственным напряжением.',
+  { k: 'protein', lbl: '🍳 Еда+вода', t: '💧 Стакан воды и что-то белковое/сытное — фоновая тяга часто от голода, не от повода.' },
+  { k: 'rest',    lbl: '🛌 Покой',    t: '🛌 Если это вечер — усталость съедает волю сильнее, чем кажется. Дай себе 10 минут покоя.' },
+  { k: 'breath',  lbl: '🫁 Дыхание',  t: '🫁 Медленное дыхание 4/8, чтобы не «долить» тягу собственным напряжением.' },
 ];
+// Сколько раз каждый приём помог именно тебе (из истории «Тяги»).
+function tipHelpCounts() {
+  const c = {}; (DB.cravings || []).forEach(r => { if (r.helped && r.helped !== 'wait') c[r.helped] = (c[r.helped] || 0) + 1; });
+  return c;
+}
+// Персонализация: приёмы, что работали у тебя, идут первыми.
+function orderedTips(list) {
+  const c = tipHelpCounts();
+  return list.map((t, i) => ({ t, i })).sort((a, b) => (c[b.t.k] || 0) - (c[a.t.k] || 0) || a.i - b.i).map(x => x.t);
+}
 function openCraving() {
   STATE.crKind = 'сигарета'; STATE.crOnset = null; STATE.crAlone = null;
   const kindRow = $('cr-kind');
@@ -1786,9 +1843,10 @@ function sCrCtx(btn) {
 function crIntChange(v) {
   const lbl = $('cr-int-v'); if (lbl) lbl.textContent = v;
   const tip = $('cr-tip'); if (!tip) return;
-  const tips = STATE.crOnset === 'tonic' ? CRAVING_TIPS_TONIC : CRAVING_TIPS_CUE;
+  const base = STATE.crOnset === 'tonic' ? CRAVING_TIPS_TONIC : CRAVING_TIPS_CUE;
+  const tips = orderedTips(base), cnt = tipHelpCounts();
   tip.innerHTML = +v >= 6
-    ? `<div class="cr-tip-box"><div class="cr-tip-h">Пик тяги обычно держится 3–5 минут — попробуй пережить его так:</div>${tips.map(t => `<div class="cr-tip-row">${t}</div>`).join('')}</div>`
+    ? `<div class="cr-tip-box"><div class="cr-tip-h">Пик тяги обычно держится 3–5 минут — попробуй пережить его так:</div>${tips.map((t, i) => `<div class="cr-tip-row">${t.t}${i === 0 && (cnt[t.k] || 0) > 0 ? ' <span style="color:var(--green)">· помогало тебе</span>' : ''}</div>`).join('')}</div>`
     : '';
 }
 function saveCraving(held) {
@@ -1842,8 +1900,26 @@ function reactToCraving(rec) {
   }
   const plan = findPlanFor(rec.trigger);
   if (plan) rows.push({ html: `📌 У тебя есть план на этот случай: ${esc(plan.body.replace(/\n+/g, ' ').trim().slice(0, 140))}` });
+  // Петля обратной связи: если показывалась микро-интервенция и ты устоял —
+  // спросим, ЧТО помогло, чтобы в следующий раз поднять это первым. Это и
+  // делает движок адаптивным (JITAI: intervention → outcome → приоритет).
+  if (rec.outcome === 'held' && rec.intensity >= 6) {
+    const base = rec.onset === 'tonic' ? CRAVING_TIPS_TONIC : CRAVING_TIPS_CUE;
+    const btns = base.map(t => `<button class="btn btn-s btn-sm" onclick="markHelped(${rec.id},'${t.k}')">${esc(t.lbl)}</button>`).join(' ')
+      + ` <button class="btn btn-s btn-sm" onclick="markHelped(${rec.id},'wait')">просто переждал</button>`;
+    rows.push({ html: `<div style="font-weight:500;margin-bottom:.4rem">Что помогло удержаться?</div><div style="display:flex;gap:.4rem;flex-wrap:wrap">${btns}</div>` });
+  }
   rows.push({ html: `Открыть «Здоровье» →`, act: `rcClose();goTo('health')` });
   reactCard(rows, 'Тяга');
+}
+// Запомнить, какой приём помог именно тебе — движок учится и в следующий
+// раз поднимет его первым (см. orderedTips). Локально, приватно, на твоих
+// данных — это и есть персональная адаптивность вместо серверного ML.
+function markHelped(id, key) {
+  const rec = (DB.cravings || []).find(c => c.id === id); if (!rec) return;
+  rec.helped = key; touch(rec); persist(); hpt();
+  toast(key === 'wait' ? 'Записал — просто переждал' : 'Запомнил, что помогло тебе ✓', 'ok');
+  rcClose();
 }
 // Синтез: сферы-привычки со здоровьем в имени (детект по ключевым
 // словам — не отдельный флаг, чтобы не плодить новую сущность).
@@ -1863,13 +1939,16 @@ function toggleEnvFlag(key) {
 function rHealth() {
   const el = $('health-out'); if (!el) return;
   const hs = healthSpheres(), crav = DB.cravings || [];
-  // «Риск»: прозрачный объясняющий слой — не просто «риск высокий», а
-  // конкретные причины, чтобы решение системы не ощущалось произвольным.
-  const reasons = riskReasons();
+  // «Риск»: прозрачный объясняющий слой — персональный движок cravingRisk
+  // выдаёт уровень + конкретные причины (окно суток, пост-срыв, стресс…),
+  // чтобы решение системы никогда не ощущалось произвольным.
+  const risk = cravingRisk();
+  const lvl = risk.score >= 0.5 ? 'высокий' : risk.score >= 0.3 ? 'повышенный' : 'спокойный';
   let html = `<div class="sec-lbl">Риск сейчас</div>
-    <div class="card mx mb" style="padding:1rem">${reasons.length
-      ? `<div class="ai-sp-empty">⚠️ Выше обычного: ${esc(reasons.join(', '))}.</div>`
-      : `<div class="ai-sp-empty">✓ Ничего тревожного по сегодняшнему чек-ину не видно.</div>`}</div>`;
+    <div class="card mx mb" style="padding:1rem">${risk.factors.length
+      ? `<div class="si-text" style="margin-bottom:.6rem;font-weight:600">Сейчас риск ${lvl}${risk.score >= 0.3 ? ' — стоит опереться заранее' : ''}.</div>`
+        + risk.factors.map(f => `<div class="si-row"><div class="si-dot neg"></div><div class="si-body"><div class="si-text">${esc(f.why)}</div></div></div>`).join('')
+      : `<div class="ai-sp-empty">✓ Спокойно. По твоим данным сейчас ничего тревожного.</div>`}</div>`;
   html += `<div class="sec-lbl">Прогресс</div>`;
   if (!hs.length) {
     html += `<div class="card mx mb"><div style="padding:1rem" class="ai-sp-empty">Заведи привычку-трекер — «Без сигарет», «Без сладкого» — и здесь появится стрик и паттерн срывов.

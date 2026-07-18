@@ -749,19 +749,20 @@ ok(/Среда/.test(envToggle.before) && /Дома нет сладкого/.tes
 ok(envToggle.after !== envToggle.before, 'переключатель «Среды» меняет состояние и перерисовывает раздел');
 
 const riskCard = await page.evaluate(() => {
-  const keepVit = { ...DB.vit };
+  const keepVit = { ...DB.vit }, keepCrav = DB.cravings;
+  DB.cravings = [];  // изолируем риск от истории — проверяем ветку состояния
   DB.vit = { ...DB.vit, ci: true, date: todayKey(), st: 8, sl: 5 };
   goTo('health');
   const withRisk = document.getElementById('health-out').textContent;
   DB.vit = { ...DB.vit, st: 3, sl: 8 };
   goTo('health');
   const noRisk = document.getElementById('health-out').textContent;
-  DB.vit = keepVit;
+  DB.vit = keepVit; DB.cravings = keepCrav;
   goTo('health');
   return { withRisk, noRisk };
 });
-ok(/Риск сейчас/.test(riskCard.withRisk) && /Выше обычного/.test(riskCard.withRisk), '«Риск сейчас» объясняет конкретные причины (стресс/сон), а не просто «высокий риск»');
-ok(/Ничего тревожного/.test(riskCard.noRisk), 'без факторов риска — спокойная, не пугающая формулировка');
+ok(/Риск сейчас/.test(riskCard.withRisk) && /Сейчас риск/.test(riskCard.withRisk) && /стресс/.test(riskCard.withRisk), '«Риск сейчас» объясняет конкретные причины (стресс/сон), а не просто «высокий риск»');
+ok(/Спокойно\. По твоим данным/.test(riskCard.noRisk), 'без факторов риска — спокойная, не пугающая формулировка');
 
 const bonus = await page.evaluate(() => {
   DB.cravings = [];
@@ -775,6 +776,52 @@ const bonus = await page.evaluate(() => {
   return cardTxt;
 });
 ok(/паттерн правда меняется|Маленькая победа|заметь разницу/.test(bonus), 'переменное подкрепление: после «устоял» иногда появляется непредсказуемый бонус-отклик, не гарантированная галочка');
+await page.evaluate(() => { goTo('home'); DB.cravings = []; });
+
+// ── Персональный адаптивный риск-движок (учится на своей истории) ──
+const windowRisk = await page.evaluate(() => {
+  const keep = { crav: DB.cravings, vit: { ...DB.vit } };
+  DB.vit = { ...DB.vit, ci: false };  // без чек-ина — изолируем окно суток
+  const mkEvening = id => { const d = new Date(); d.setHours(21, 0, 0, 0); return { id, kind: 'сигарета', intensity: 6, trigger: '', outcome: 'gave_in', createdAt: d.toISOString(), day: todayKey() }; };
+  DB.cravings = [1, 2, 3, 4, 5, 6].map(mkEvening);
+  const atEvening = cravingRisk(21);   // «как будто сейчас вечер»
+  const atMorning = cravingRisk(8);    // «как будто утро»
+  DB.cravings = keep.crav; DB.vit = keep.vit;
+  return { atEvening, atMorning };
+});
+ok(windowRisk.atEvening.factors.some(f => f.tag === 'window') && windowRisk.atEvening.top,
+  'движок учит ТВОЁ окно суток: вечером риск выше, потому что вечером ты срываешься чаще всего');
+ok(!windowRisk.atMorning.factors.some(f => f.tag === 'window'),
+  'то же окно утром не поднимает риск — паттерн персональный, привязан ко времени');
+
+const postLapse = await page.evaluate(() => {
+  const keep = DB.cravings;
+  const d = new Date(Date.now() - 3600e3);  // час назад
+  DB.cravings = [{ id: 1, kind: 'сигарета', intensity: 5, trigger: '', outcome: 'gave_in', createdAt: d.toISOString(), day: todayKey() }];
+  const r = cravingRisk(12);
+  DB.cravings = keep;
+  return r;
+});
+ok(postLapse.factors.some(f => f.tag === 'recent'), 'пост-срыв окно (AVE): первые двое суток после срыва движок держит риск выше');
+
+const feedbackLoop = await page.evaluate(() => {
+  DB.cravings = [];
+  STATE.crOnset = null;
+  openCraving();
+  document.getElementById('cr-int').value = 8; crIntChange(8);
+  saveCraving(true);
+  const rec = DB.cravings[0];
+  const cardHasQuestion = /Что помогло удержаться/.test((document.getElementById('react-card') || {}).textContent || '');
+  markHelped(rec.id, 'move');
+  const stored = DB.cravings[0].helped;
+  // теперь при следующей тяге приём «Шаги» должен подняться первым
+  const ordered = orderedTips(CRAVING_TIPS_CUE).map(t => t.k);
+  DB.cravings = [];
+  return { cardHasQuestion, stored, firstTip: ordered[0] };
+});
+ok(feedbackLoop.cardHasQuestion, 'после «устоял» с показанной интервенцией движок спрашивает, ЧТО помогло — петля обратной связи');
+ok(feedbackLoop.stored === 'move', 'ответ сохраняется на записи тяги (локально, приватно, на твоих данных)');
+ok(feedbackLoop.firstTip === 'move', 'движок адаптируется: приём, что помог тебе, в следующий раз поднимается первым');
 await page.evaluate(() => { goTo('home'); DB.cravings = []; });
 
 // ── Никаких неожиданных ошибок ──
