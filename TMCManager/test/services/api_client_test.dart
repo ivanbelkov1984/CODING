@@ -117,7 +117,8 @@ void main() {
       },
     );
 
-    test('невалидный JSON в теле 200-ответа: ApiClient сам JSON не парсит — '
+    test(
+        'невалидный JSON в теле 200-ответа: ApiClient сам JSON не парсит — '
         'отдаёт сырой body без исключений (парсинг — забота вызывающего кода, '
         'см. product_service_test.dart)', () async {
       handler = (request) async {
@@ -179,7 +180,8 @@ void main() {
   });
 
   group('ApiClient — adversarial значения в заголовках авторизации', () {
-    test('SQL-подобный Client-Id уходит как обычная строка в заголовке, '
+    test(
+        'SQL-подобный Client-Id уходит как обычная строка в заголовке, '
         'клиент не падает и не пытается её интерпретировать', () async {
       const sqlLike = "' OR '1'='1'; DROP TABLE users;--";
       String? receivedClientId;

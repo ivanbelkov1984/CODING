@@ -22,9 +22,9 @@ class CustomCard extends StatelessWidget {
             Text(
               value,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
             ),
           ],
         ),

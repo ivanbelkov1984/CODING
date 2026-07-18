@@ -30,7 +30,8 @@ void main() {
     expect(tapCount, 1);
   });
 
-  testWidgets('isLoading=true: кнопка disabled (onPressed==null), показывает '
+  testWidgets(
+      'isLoading=true: кнопка disabled (onPressed==null), показывает '
       'спиннер вместо текста, tap не вызывает callback', (tester) async {
     var tapCount = 0;
     await tester.pumpWidget(

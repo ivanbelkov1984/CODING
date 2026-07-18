@@ -36,7 +36,8 @@ class _FakeStorageService extends StorageService {
 
 void main() {
   group('AuthViewModel.authenticate — пустой логин/ключ', () {
-    test('пустой clientId → не бросает исключение наружу (перехвачено внутри), '
+    test(
+        'пустой clientId → не бросает исключение наружу (перехвачено внутри), '
         'и НЕ обращается к storage (валидация срабатывает раньше)', () async {
       final storage = _FakeStorageService();
       final viewModel = AuthViewModel(storage);
