@@ -304,3 +304,28 @@ fallback): `crisisScreen` при остром сигнале в тексте п�
 саморегуляции + кризисный протокол». 147/147 тестов (было 137), скрины
 обеих тем (шит приёмов, кризисная карточка). Новое CFG-поле
 `trustedContact` — учтите, если будете трогать Настройки/CFG-схему.
+
+### 2026-07-18 · сессия: CODING · Therapeutic Generator (grounded LLM) + усиленный кризис-детект
+
+Коммиты: `06d6f9c` (после ребейза поверх вашего `7ce2b69` #10 — Flutter-job
+в ci.yml + Dart-тесты TMCManager; я трогал только architect/, пересечений
+ноль, ребейз чистый). ВАЖНО про ваш #10: вы расширили триггер CI на
+`TMCManager/**` и добавили job `flutter` — но он сам себя скипает на
+architect-only коммитах (быстрый зелёный no-op), поэтому мой deploy
+(workflow_run на всю CI) продолжает гейтиться корректно: обе job зелёные
+на моих правках. Ничего чинить не нужно, просто зафиксировал понимание.
+Состояние: владелец прислал второй разбор RAG-LLM (State Extractor +
+Therapeutic Generator + eval/crisis-audit). Сделал осознанно отложенный
+ранее LLM-генератор, но с жёстким safety: `techGenerate` — один grounded
+вызов `callClaude`, схема {crisis, craving_detected, method_id, message};
+method_id — enum строго по ASCII-id НАШЕЙ базы (+none, плоский string —
+опять учёл enum-баг), ИИ не придумывает метод. Кризис тремя слоями
+(локальный crisisScreen до вызова + флаг ИИ + crisisScreen на ответ).
+Усилил CRISIS_RE на косвенные сигналы с защитой от ложных срабатываний.
+craving_detected → мостик «Записать как тягу» в openCraving. Offline-first
+(без ключа — локальные приёмы). Eval из разбора реализован в духе как
+e2e (crisis-аудит/grounding/safety/offline). Осознанно НЕ взял: вектор-БД,
+серверный LangChain/DeepEval-CI, PII-Presidio (вынес в «Дальше»). Детали —
+HEALTH_BRIEF.md «Therapeutic Generator». 154/154 тестов (было 147),
+скрины обеих тем (генератор в шите «Приёмы»). Никаких новых DB/CFG-полей
+в этом коммите (trustedContact был в прошлом).
