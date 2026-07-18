@@ -404,6 +404,65 @@ ok(/Anthropic/.test(keys.txt) && /OpenAI/.test(keys.txt) && /Gemini/.test(keys.t
   'полный перечень: три ИИ-провайдера + синк-сервер + обратная связь');
 ok(keys.got === 'sk-test-123' && keys.after === keys.before + 1, 'ключ сохраняется per-провайдер, статус сразу «активен»');
 ok(await page.evaluate(() => !!document.querySelector('#pg-settings [onclick*="openKeys"]')), 'вход «Ключи сервисов» есть в Настройках');
+
+// ── ИМПОРТ ИЗ CHATGPT: парсер, дневник-эвристика, даты, сны, дедуп ──
+const gptFix = `[
+  { "title": "Дневник июля", "create_time": 1689600000, "mapping": {
+    "a": { "message": { "author": { "role": "user" }, "create_time": 1689600000,
+      "content": { "content_type": "text", "parts": ["Сегодня понял, что боюсь остановиться: как только появляется пауза, я сразу придумываю себе новую задачу, лишь бы не оставаться наедине с собой"] } } },
+    "b": { "message": { "author": { "role": "assistant" }, "content": { "content_type": "text", "parts": ["Ответ GPT — не должен импортироваться"] } } },
+    "c": { "message": { "author": { "role": "user" }, "create_time": 1689686400,
+      "content": { "content_type": "text", "parts": ["Снилось, что я стою на крыше старого дома и не могу спуститься, а внизу ходят знакомые люди и не замечают меня"] } } }
+  } },
+  { "title": "Fix my code", "create_time": 1689700000, "mapping": {
+    "x": { "message": { "author": { "role": "user" }, "content": { "content_type": "text", "parts": ["function main() { const x = 1; return x; } — why is this broken? Please help me debug the following stack trace and error"] } } }
+  } }
+]`;
+const gpt = await page.evaluate(fix => {
+  const convs = gptParseConvs(fix);
+  _gpt.convs = convs; _gpt.sel = new Set(convs.filter(c => c.diary).map(c => c.i)); _gpt.done = null;
+  const before = { ins: DB.insights.length, drm: DB.dreams.length };
+  gptRunImport();
+  const first = gptRunImport ? { ..._gpt.done } : null;
+  gptRunImport();                                        // повторный импорт того же
+  const second = { ..._gpt.done };
+  const imp = DB.insights.filter(i => i.src === 'ChatGPT');
+  const drm = DB.dreams.filter(d => d.src === 'ChatGPT');
+  const out = {
+    n: convs.length, diary: convs.map(c => c.diary),
+    userOnly: !convs[0] || !convs.flatMap(c => c.msgs).some(m => /не должен импортироваться/.test(m.t)),
+    first, second,
+    year: imp[0] && String(imp[0].createdAt).slice(0, 4),
+    dreamTag: imp.some(i => i.tag === 'dream'), dreamRec: drm.length,
+    added: DB.insights.length - before.ins,
+  };
+  DB.insights = DB.insights.filter(i => i.src !== 'ChatGPT');   // не мешаем прочим тестам
+  DB.dreams = DB.dreams.filter(d => d.src !== 'ChatGPT');
+  _gpt.convs = []; _gpt.sel = new Set(); _gpt.done = null;
+  return out;
+}, gptFix);
+ok(gpt.n === 2 && gpt.diary[1] === true && gpt.diary[0] === false, 'парсер ChatGPT: дневник по-русски распознан, кодовый чат — нет');
+ok(gpt.userOnly, 'импортируются только ТВОИ сообщения — ответы GPT не берутся');
+ok(gpt.first.nIns === 2 && gpt.year === '2023', `записи получили настоящие даты из архива (${gpt.year}), а не день импорта`);
+ok(gpt.dreamTag && gpt.dreamRec === 1, 'сон из архива распознан: попал в дневник снов и с тегом dream');
+ok(gpt.second.nIns === 0 && gpt.second.nDup >= 2, 'повторный импорт того же архива не плодит дубли');
+// zip-ридер: минимальный архив (stored) собирается в тесте и читается локально
+const zipOk = await page.evaluate(async () => {
+  const data = new TextEncoder().encode('[]');
+  const name = new TextEncoder().encode('conversations.json');
+  const w = [];
+  const u16 = v => [v & 255, (v >> 8) & 255], u32 = v => [v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >> 24) & 255];
+  const lho = 0;
+  w.push(...u32(0x04034b50), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...name, ...data);
+  const cdo = w.length;
+  w.push(...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(lho), ...name);
+  const cds = w.length - cdo;
+  w.push(...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(1), ...u16(1), ...u32(cds), ...u32(cdo), ...u16(0));
+  const txt = await gptUnzip(new Uint8Array(w).buffer);
+  return txt === '[]';
+});
+ok(zipOk, 'zip-ридер без внешних библиотек: conversations.json достаётся из архива локально');
+ok(await page.evaluate(() => typeof psyMarkBatch === 'function' && typeof gptAbsorb === 'function' && !!document.getElementById('ov-gpt')), 'массовое «освоение» архива психоконтуром подключено, шит импорта на месте');
 await page.evaluate(() => goTo('home'));
 
 // ── Живое обновление PWA: баннер + «Что нового» + кликабельные тосты ──

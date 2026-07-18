@@ -891,6 +891,31 @@
         <input type="file" id="import-file" accept=".json" style="display:none" onchange="handleImport(this)">
       </div>
       <button class="btn btn-s btn-full" onclick="document.getElementById('import-file').click()"><i data-lucide="upload"></i>Выбрать файл</button>
+      <div class="sec-lbl" style="padding:var(--s3) 0 0">Из других сервисов</div>
+      <button class="btn btn-s btn-full" onclick="closeOv('ov-import');rGptList();openOv('ov-gpt')"><i data-lucide="message-square-text"></i>Импорт из ChatGPT</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── ИМПОРТ ИЗ CHATGPT: многолетний дневник из чатов → в систему ── -->
+<div class="ov" id="ov-gpt" onclick="if(event.target===this)closeOv('ov-gpt')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Импорт из ChatGPT</div>
+    <div class="sh-form" style="padding:0 var(--s4) var(--s4)">
+      <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5;background:var(--bg2);border-radius:var(--r8);padding:var(--s3)">
+        <strong style="color:var(--t2)">Как получить архив:</strong> в ChatGPT открой Settings → Data controls → <strong style="color:var(--t2)">Export data</strong>. На почту придёт ссылка на zip (готовится до 7 дней, живёт 24 часа — скачай сразу). Выбери здесь этот zip или файл conversations.json из него. <strong style="color:var(--t2)">Архив разбирается на этом устройстве и никуда не отправляется.</strong>
+      </div>
+      <input type="file" id="gpt-file" accept=".zip,.json" style="display:none" onchange="handleGptFile(this)">
+      <button class="btn btn-s btn-full" onclick="document.getElementById('gpt-file').click()"><i data-lucide="folder-open"></i>Выбрать архив (.zip или .json)</button>
+      <div id="gpt-list"></div>
+      <div id="gpt-actions" style="display:none">
+        <button class="btn btn-p btn-full" onclick="gptRunImport()"><i data-lucide="download"></i>Импортировать выбранные</button>
+        <div id="gpt-result"></div>
+        <button class="btn btn-s btn-full" style="margin-top:var(--s2)" onclick="gptAbsorb()"><i data-lucide="brain"></i>Освоить архив (метод «Зачем?»)</button>
+        <div id="gpt-absorb" style="font-size:var(--tx2);color:var(--t3);margin-top:var(--s2)"></div>
+      </div>
+      <div id="gpt-summary"></div>
     </div>
   </div>
 </div>

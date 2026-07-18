@@ -1192,3 +1192,10 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .key-del{color:var(--accent-light,var(--accent));cursor:pointer;font-weight:510}
 .key-del:active{opacity:.6}
 .cm-hint.tap{cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+
+/* ── ИМПОРТ ИЗ CHATGPT ─────────────────────────────────────────── */
+.gpt-row{display:flex;gap:var(--s3);align-items:flex-start;padding:var(--s2) 0;border-bottom:1px solid var(--bd);cursor:pointer}
+.gpt-row input{margin-top:3px;accent-color:var(--accent)}
+.gpt-t{font-size:var(--tx3);color:var(--t1);font-weight:500;line-height:1.4}
+.gpt-m{font-size:var(--tx2);color:var(--t3);margin-top:2px}
+.gpt-badge{font-size:var(--tx1,.6875rem);font-weight:510;color:var(--accent-light,var(--accent));background:rgba(94,106,210,.12);border-radius:999px;padding:1px 7px;vertical-align:1px}

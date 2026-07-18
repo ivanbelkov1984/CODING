@@ -2872,6 +2872,196 @@ function handleImport(input) {
 }
 
 // ═════════════════════════════════════════════════════════════════
+//  ИМПОРТ ИЗ CHATGPT: многолетний дневник из чатов → в систему.
+//  Всё локально: архив разбирается в браузере и НИКУДА не уходит.
+//  Путь: экспорт (Settings → Data controls → Export data) → файл сюда →
+//  выбор чатов → записи с настоящими датами → освоение психоконтуром
+//  (метод «Зачем?») → архив питает смысловую карту, паттерны, переклички.
+// ═════════════════════════════════════════════════════════════════
+let _gpt = { convs: [], sel: new Set(), done: null };
+// Минимальный zip-ридер (central directory + DecompressionStream) — без
+// внешних библиотек, читаем только conversations.json из архива экспорта.
+async function gptUnzip(buf) {
+  const b = new Uint8Array(buf), dv = new DataView(buf);
+  let eocd = -1;
+  for (let i = b.length - 22; i >= Math.max(0, b.length - 66000); i--)
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('это не zip-архив');
+  const cnt = dv.getUint16(eocd + 10, true);
+  let off = dv.getUint32(eocd + 16, true);
+  const td = new TextDecoder();
+  for (let k = 0; k < cnt; k++) {
+    if (dv.getUint32(off, true) !== 0x02014b50) break;
+    const method = dv.getUint16(off + 10, true);
+    const csize = dv.getUint32(off + 20, true);
+    const nlen = dv.getUint16(off + 28, true), elen = dv.getUint16(off + 30, true), clen = dv.getUint16(off + 32, true);
+    const lho = dv.getUint32(off + 42, true);
+    const name = td.decode(b.subarray(off + 46, off + 46 + nlen));
+    if (/(^|\/)conversations\.json$/.test(name)) {
+      const lnlen = dv.getUint16(lho + 26, true), lelen = dv.getUint16(lho + 28, true);
+      const data = b.subarray(lho + 30 + lnlen + lelen, lho + 30 + lnlen + lelen + csize);
+      if (method === 0) return td.decode(data);
+      if (method === 8) {
+        const out = await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
+        return td.decode(new Uint8Array(out));
+      }
+      throw new Error('неизвестный метод сжатия');
+    }
+    off += 46 + nlen + elen + clen;
+  }
+  throw new Error('в архиве нет conversations.json');
+}
+// conversations.json → список чатов с ТВОИМИ сообщениями (ответы GPT не
+// импортируются — дневник это твои слова). Эвристика «похоже на дневник»:
+// кириллица, развёрнутые сообщения, не код.
+function gptParseConvs(raw) {
+  let arr; try { arr = JSON.parse(raw); } catch (e) { throw new Error('файл не читается как JSON'); }
+  if (!Array.isArray(arr)) arr = (arr && arr.conversations) || [];
+  const out = [];
+  arr.forEach(c => {
+    const msgs = [];
+    Object.values(c.mapping || {}).forEach(n => {
+      const m = n && n.message;
+      if (!m || !m.author || m.author.role !== 'user') return;
+      const parts = ((m.content && m.content.parts) || []).filter(p => typeof p === 'string');
+      const t = parts.join('\n').trim();
+      if (t) msgs.push({ t, ts: Math.round((m.create_time || c.create_time || 0) * 1000) });
+    });
+    msgs.sort((a, b) => a.ts - b.ts);
+    if (!msgs.length) return;
+    const all = msgs.map(m => m.t).join(' ');
+    const letters = (all.match(/[a-zа-яё]/gi) || []).length || 1;
+    const cyr = (all.match(/[а-яё]/gi) || []).length / letters;
+    const avg = all.length / msgs.length;
+    const code = /```|function |const |=>|SELECT |<div/.test(all);
+    out.push({ i: 0, title: c.title || 'Без названия', t: Math.round((c.create_time || 0) * 1000),
+      msgs, chars: all.length, diary: cyr >= 0.5 && avg >= 60 && !code });
+  });
+  out.sort((a, b) => b.t - a.t);
+  out.forEach((c, i) => { c.i = i; });
+  return out;
+}
+async function handleGptFile(input) {
+  const f = input.files && input.files[0]; if (!f) return;
+  input.value = '';
+  try {
+    toast('Читаю архив локально…');
+    const raw = /\.zip$/i.test(f.name) ? await gptUnzip(await f.arrayBuffer()) : await f.text();
+    _gpt.convs = gptParseConvs(raw);
+    _gpt.sel = new Set(_gpt.convs.filter(c => c.diary).map(c => c.i));
+    _gpt.done = null;
+    if (!_gpt.convs.length) { toast('В файле не нашлось диалогов', 'warn'); return; }
+    rGptList(); hptMed();
+  } catch (e) { toast('Не смог прочитать: ' + e.message, 'warn'); }
+}
+function gptToggle(i) { _gpt.sel.has(i) ? _gpt.sel.delete(i) : _gpt.sel.add(i); }
+function gptSelAll(mode) {
+  _gpt.sel = new Set(mode === 'none' ? [] : _gpt.convs.filter(c => mode === 'all' || c.diary).map(c => c.i));
+  rGptList();
+}
+function rGptList() {
+  const el = $('gpt-list'); if (!el) return;
+  const cs = _gpt.convs || [];
+  const act = $('gpt-actions'); if (act) act.style.display = cs.length ? '' : 'none';
+  if (!cs.length) { el.innerHTML = ''; gptSummary(); return; }
+  const nd = cs.filter(c => c.diary).length;
+  el.innerHTML = `<div class="key-d" style="margin:var(--s2) 0">Найдено ${cs.length} ${pl(cs.length, 'чат', 'чата', 'чатов')}; похожих на дневник — ${nd} (уже отмечены). Отметь вручную, что ещё взять.</div>
+    <div style="display:flex;gap:var(--s2);margin-bottom:var(--s2)">
+      <button class="btn btn-s btn-sm" onclick="gptSelAll('diary')">Дневниковые</button>
+      <button class="btn btn-s btn-sm" onclick="gptSelAll('all')">Все</button>
+      <button class="btn btn-s btn-sm" onclick="gptSelAll('none')">Снять</button>
+    </div>` +
+    cs.slice(0, 400).map(c => `<label class="gpt-row"><input type="checkbox" ${_gpt.sel.has(c.i) ? 'checked' : ''} onchange="gptToggle(${c.i})">
+      <div><div class="gpt-t">${esc(c.title.slice(0, 60))}${c.diary ? ' <span class="gpt-badge">дневник</span>' : ''}</div>
+      <div class="gpt-m">${c.t ? new Date(c.t).toLocaleDateString('ru') : ''} · ${c.msgs.length} ${pl(c.msgs.length, 'сообщение', 'сообщения', 'сообщений')}</div></div></label>`).join('');
+  const res = $('gpt-result');
+  if (res) res.innerHTML = _gpt.done
+    ? `<div class="key-d" style="margin-top:var(--s2)">✓ Импортировано ${_gpt.done.nIns} ${pl(_gpt.done.nIns, 'запись', 'записи', 'записей')}${_gpt.done.nDrm ? ` (снов: ${_gpt.done.nDrm})` : ''}${_gpt.done.nDup ? `, пропущено дублей: ${_gpt.done.nDup}` : ''}. ${getAiKey() ? 'Теперь нажми «Освоить архив» — ИИ разметит записи по методу «Зачем?».' : 'Добавь AI-ключ («Ключи сервисов») — и ИИ осознанно освоит архив по методу «Зачем?».'}</div>`
+    : '';
+  gptSummary();
+}
+// Импорт: твои сообщения → записи с НАСТОЯЩИМИ датами (история за годы
+// ложится в хронологию). Сны распознаются и уходят в дневник снов.
+function gptRunImport() {
+  const sel = _gpt.convs.filter(c => _gpt.sel.has(c.i));
+  if (!sel.length) { toast('Выбери хотя бы один чат', 'warn'); return; }
+  const seen = new Set((DB.insights || []).filter(i => i.src === 'ChatGPT').map(i => (i.day || '') + '|' + String(i.body || '').slice(0, 60)));
+  const dreamRe = /присни|снилось|видел сон|видела сон|сон про|^сон[:. ]/i;
+  let nIns = 0, nDrm = 0, nDup = 0, uid = Date.now();
+  const CAP = 2000;
+  outer:
+  for (const c of sel) for (const m of c.msgs) {
+    if (m.t.length < 60) continue;                 // короткие реплики — не дневник
+    if (nIns >= CAP) break outer;
+    const ts = m.ts || Date.now();
+    const iso = new Date(ts).toISOString(), dayK = iso.slice(0, 10);
+    const key = dayK + '|' + m.t.slice(0, 60);
+    if (seen.has(key)) { nDup++; continue; }
+    seen.add(key);
+    const body = m.t.slice(0, 4000);
+    const dateStr = new Date(ts).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+    const dream = dreamRe.test(m.t.slice(0, 80));
+    if (dream) {
+      DB.dreams.push(touch({ id: ++uid, date: dateStr, createdAt: iso, day: dayK, sv: SCHEMA_VERSION, title: titleFrom(body).slice(0, 52), body, tone: null, arch: null, src: 'ChatGPT' }));
+      nDrm++;
+    }
+    DB.insights.push(touch({ id: ++uid, tag: dream ? 'dream' : 'personal', w: 1, title: titleFrom(body), body, date: dateStr, createdAt: iso, day: dayK, sv: SCHEMA_VERSION, src: 'ChatGPT', links: [] }));
+    nIns++;
+  }
+  DB.insights.sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
+  DB.dreams.sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
+  persist();
+  try { rIns(); rHIns(); rKPIs(); rDrms(); } catch (e) {}
+  _gpt.done = { nIns, nDrm, nDup };
+  rGptList(); hptMed();
+  toast(`Импортировано: ${nIns}${nDrm ? ` · снов: ${nDrm}` : ''}`, 'ok');
+}
+// «Освоение» архива: массовая осознанная разметка психоконтуром — с
+// прогрессом, кнопкой «остановить» и жёстким стопом по бюджету AI.
+let _gptStop = false;
+async function gptAbsorb() {
+  if (!getAiKey()) { closeOv('ov-gpt'); openKeys(); toast('Сначала добавь AI-ключ', 'warn'); return; }
+  const bar = $('gpt-absorb'); _gptStop = false; _psyBusy = true;
+  const todoAll = () => (DB.insights || []).filter(i => (!i.psy || !i.psy.themes) && String(i.body || '').length >= 25);
+  const total = todoAll().length;
+  if (!total) { if (bar) bar.textContent = 'Всё уже освоено ✓'; _psyBusy = false; gptSummary(); return; }
+  let done = 0;
+  while (!_gptStop) {
+    const batch = todoAll().slice(0, 8);
+    if (!batch.length) break;
+    try { done += await psyMarkBatch(batch); }
+    catch (e) {
+      if (bar) bar.textContent = e.budget ? '⏸ Бюджет AI на месяц исчерпан — остальное освою после сброса лимита' : 'Пауза: ' + e.message;
+      _psyBusy = false; gptSummary(); return;
+    }
+    if (bar) bar.innerHTML = `Осваиваю архив… ${total - todoAll().length} из ${total} · <span class="key-del" onclick="_gptStop=true">остановить</span>`;
+  }
+  if (bar) bar.textContent = _gptStop ? `Остановлено: размечено ${done} из ${total}` : `Архив освоен: размечено ${done} записей ✓`;
+  _psyBusy = false;
+  gptSummary();
+}
+// Сводка «что приложение поняло из архива»: годы, сквозные темы, потребности.
+function gptSummary() {
+  const el = $('gpt-summary'); if (!el) return;
+  const imp = (DB.insights || []).filter(i => i.src === 'ChatGPT');
+  if (!imp.length) { el.innerHTML = ''; return; }
+  const byYear = {};
+  imp.forEach(i => { const y = String(i.createdAt || '').slice(0, 4) || '—'; byYear[y] = (byYear[y] || 0) + 1; });
+  const years = Object.entries(byYear).sort();
+  const th = {}, nd = {};
+  imp.forEach(i => { if (i.psy) { (i.psy.themes || []).forEach(t => { th[t] = (th[t] || 0) + 1; }); if (i.psy.need) nd[i.psy.need] = (nd[i.psy.need] || 0) + 1; } });
+  const topTh = Object.entries(th).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const topNd = Object.entries(nd).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  el.innerHTML = `<div class="key-card" style="margin-top:var(--s3)">
+    <div class="key-h"><b>Что приложение поняло из архива</b></div>
+    <div class="key-d">По годам: ${years.map(([y, n]) => `${y} — ${n}`).join(' · ')}</div>
+    ${topTh.length ? `<div class="key-d">Сквозные темы: ${topTh.map(([t, n]) => `«${esc(t)}» (${n})`).join(', ')}</div>` : ''}
+    ${topNd.length ? `<div class="key-d">Глубинные потребности: ${topNd.map(([t, n]) => `${esc(t)} (${n})`).join(', ')}</div>` : `<div class="key-d">Темы и потребности появятся после освоения архива ИИ.</div>`}
+    <div class="key-foot"><span class="key-del" onclick="closeOv('ov-gpt');goTo('map');msub('graph');STATE.mapView='themes';rMap()">открыть смысловую карту →</span></div>
+  </div>`;
+}
+
+// ═════════════════════════════════════════════════════════════════
 //  СИНХРОНИЗАЦИЯ v2  (перенос практик из TMCManager)
 //  · единый API-клиент с таймаутом, ретраями и нормализацией ошибок
 //  · структурный лог последних событий
@@ -4035,6 +4225,7 @@ function rVector() {
 // баннер «Обновить» и карточка «Что нового» после обновления — чтобы
 // изменения были ВИДНЫ, а не молчали.
 const APP_CHANGES = [
+  '📥 Импорт из ChatGPT: многолетний дневник из чатов — в систему, с настоящими датами и освоением по методу «Зачем?»',
   '🧠 Карта теперь строится из СМЫСЛОВ: ИИ осознанно определяет, о чём каждая запись, — не из повторяемых слов',
   '🔮 Сонник: сны толкуются отдельным режимом — Юнг (Тень), гештальт, наука + твой контекст жизни',
   '🔑 «Ключи сервисов» в Настройках: все подключения и ключи в одном меню',
@@ -4492,6 +4683,38 @@ const PSY_NEEDS = ['безопасность', 'принятие', 'значим
 const PSY_EGO = ['Ребёнок', 'Родитель', 'Взрослый'];
 const PSY_SYSTEM = 'Ты — психолог-аналитик дневника «Архитектор». Работаешь строго по методу «Зачем?» (интеграция: логотерапия Франкла — у симптома есть функция и смысл; транзактный анализ Бёрна — игры, скрытый выигрыш, состояния Я; теория привязанности Боулби; эмоциональная регуляция Гоулмана). Для каждой записи осознанно определи: симптом (что болит/повторяется, словами автора), функцию симптома (ЗАЧЕМ он нужен психике), вторичную выгоду (payoff), глубинную потребность (из списка), состояние Я, ядровую эмоцию и психологическую игру, если она видна. НЕ выдумывай: если по тексту не видно — ставь null и снижай confidence. Дополнительно определи themes: 1–3 СМЫСЛОВЫЕ темы записи — о чём она ПО СУТИ (короткая обобщённая фраза в именительном падеже: «отношения», «страх остановки», «признание на работе», «границы с матерью»). Не служебные слова, не пересказ, не эмоции — суть. Если в словаре уже есть подходящая тема — переиспользуй её дословно, чтобы записи связывались.';
 let _psyBusy = false;
+// Разметка одного батча записей психоконтуром — используется и фоновым
+// psyAutoRun, и массовым «освоением» архива (gptAbsorb).
+async function psyMarkBatch(todo) {
+  const schema = { type: 'object', additionalProperties: false, required: ['items'], properties: { items: { type: 'array', items: {
+    type: 'object', additionalProperties: false,
+    required: ['id', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game', 'conf', 'themes'],
+    properties: {
+      id: { type: 'integer' },
+      symptom: { type: ['string', 'null'] }, func: { type: ['string', 'null'] }, gain: { type: ['string', 'null'] },
+      need: { type: ['string', 'null'], enum: [...PSY_NEEDS, null] },
+      ego: { type: ['string', 'null'], enum: [...PSY_EGO, null] },
+      emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
+      conf: { type: 'integer', minimum: 0, maximum: 100 },
+      themes: { type: 'array', items: { type: 'string' }, maxItems: 3 },
+    } } } } };
+  const vocab = [...new Set((DB.insights || []).flatMap(i => (i.psy && i.psy.themes) || []))].slice(0, 40);
+  const user = 'Записи дневника (id, текст):\n' + JSON.stringify(todo.map(i => ({ id: i.id, text: (i.title + '. ' + (i.body || '')).slice(0, 600) }))) +
+    (vocab.length ? '\n\nСловарь уже существующих тем (переиспользуй дословно, если подходит): ' + vocab.join(', ') : '') +
+    '\n\nРазметь каждую по методу «Зачем?». Кратко, по-русски, без пересказа.';
+  const text = await callClaude({ system: PSY_SYSTEM, user, maxTokens: 1400, schema, task: 'psy' });
+  const out = JSON.parse(text);
+  let n = 0;
+  (out.items || []).forEach(m => {
+    const i = DB.insights.find(x => x.id === m.id);
+    if (!i) return;
+    i.psy = { symptom: m.symptom, func: m.func, gain: m.gain, need: m.need, ego: m.ego, emotion: m.emotion, game: m.game, conf: m.conf, at: nowISO(),
+      themes: [...new Set((m.themes || []).map(t => String(t).trim().toLowerCase().replace(/['"«»]/g, '')).filter(t => t && t.length <= 40))].slice(0, 3) };
+    touch(i); n++;
+  });
+  if (n) persist();
+  return n;
+}
 async function psyAutoRun() {
   try {
     if (_psyBusy || !getAiKey() || !navigator.onLine) return;
@@ -4500,33 +4723,8 @@ async function psyAutoRun() {
     const todo = (DB.insights || []).filter(i => (!i.psy || !i.psy.themes) && String(i.body || '').length >= 25).slice(0, 5);
     if (!todo.length) return;
     _psyBusy = true;
-    const schema = { type: 'object', additionalProperties: false, required: ['items'], properties: { items: { type: 'array', items: {
-      type: 'object', additionalProperties: false,
-      required: ['id', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game', 'conf', 'themes'],
-      properties: {
-        id: { type: 'integer' },
-        symptom: { type: ['string', 'null'] }, func: { type: ['string', 'null'] }, gain: { type: ['string', 'null'] },
-        need: { type: ['string', 'null'], enum: [...PSY_NEEDS, null] },
-        ego: { type: ['string', 'null'], enum: [...PSY_EGO, null] },
-        emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
-        conf: { type: 'integer', minimum: 0, maximum: 100 },
-        themes: { type: 'array', items: { type: 'string' }, maxItems: 3 },
-      } } } } };
-    const vocab = [...new Set((DB.insights || []).flatMap(i => (i.psy && i.psy.themes) || []))].slice(0, 40);
-    const user = 'Записи дневника (id, текст):\n' + JSON.stringify(todo.map(i => ({ id: i.id, text: (i.title + '. ' + (i.body || '')).slice(0, 600) }))) +
-      (vocab.length ? '\n\nСловарь уже существующих тем (переиспользуй дословно, если подходит): ' + vocab.join(', ') : '') +
-      '\n\nРазметь каждую по методу «Зачем?». Кратко, по-русски, без пересказа.';
-    const text = await callClaude({ system: PSY_SYSTEM, user, maxTokens: 1400, schema, task: 'psy' });
-    const out = JSON.parse(text);
-    let n = 0;
-    (out.items || []).forEach(m => {
-      const i = DB.insights.find(x => x.id === m.id);
-      if (!i) return;
-      i.psy = { symptom: m.symptom, func: m.func, gain: m.gain, need: m.need, ego: m.ego, emotion: m.emotion, game: m.game, conf: m.conf, at: nowISO(),
-        themes: [...new Set((m.themes || []).map(t => String(t).trim().toLowerCase().replace(/['"«»]/g, '')).filter(t => t && t.length <= 40))].slice(0, 3) };
-      touch(i); n++;
-    });
-    if (n) { persist(); log('info', `психоконтур: размечено ${n} записей`); }
+    const n = await psyMarkBatch(todo);
+    if (n) log('info', `психоконтур: размечено ${n} записей`);
   } catch (e) { log('warn', 'психоконтур: ' + e.message); }
   _psyBusy = false;
 }
