@@ -3700,30 +3700,72 @@ async function api(path, { method='GET', body, timeout=12000, retries=2 } = {}) 
   throw lastErr;
 }
 
-// ─── ШИФРОВАНИЕ (AES-GCM, ключ из парольной фразы) ───────────────
+// ─── ШИФРОВАНИЕ (E2EE: AES-GCM, ключ из парольной фразы) ─────────
+// Модель (см. SECURITY_MODEL.md): сервер видит ТОЛЬКО шифроблоки; ключ
+// выводится из фразы в браузере и на сервер не уходит. v2 — конверт
+// (envelope): случайный DEK шифрует данные, а сам DEK «заворачивается»
+// фразой И (если задан) ключом восстановления — чтобы «забыл фразу» не
+// значило «потерял память навсегда». v1 (прямой ключ из фразы, 100k)
+// читается по-прежнему — обратная совместимость со старыми блоками.
 const _te = new TextEncoder(), _td = new TextDecoder();
 const _b64  = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
 const _ub64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const KDF_ITER = 600000;   // OWASP 2023 для PBKDF2-SHA256 (было 100k)
 function getPass() { try { return localStorage.getItem(passKey(activeId())) || ''; } catch(e) { return ''; } }
 function setPass(p) { const id = activeId(); try { p ? localStorage.setItem(passKey(id), p) : localStorage.removeItem(passKey(id)); } catch(e) {} }
-async function _deriveKey(pass, salt) {
-  const base = await crypto.subtle.importKey('raw', _te.encode(pass), 'PBKDF2', false, ['deriveKey']);
+const recKey = id => 'arch5_rec_' + id;
+function getRecoveryKey() { try { return localStorage.getItem(recKey(activeId())) || ''; } catch(e) { return ''; } }
+function setRecoveryKey(k) { const id = activeId(); try { k ? localStorage.setItem(recKey(id), k) : localStorage.removeItem(recKey(id)); } catch(e) {} }
+async function _deriveKey(secret, salt, iter, usages) {
+  const base = await crypto.subtle.importKey('raw', _te.encode(secret), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
-    { name:'PBKDF2', salt, iterations:100000, hash:'SHA-256' },
-    base, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']
+    { name:'PBKDF2', salt, iterations: iter, hash:'SHA-256' },
+    base, { name:'AES-GCM', length:256 }, false, usages
   );
 }
-async function encryptPayload(obj, pass) {
+// Завернуть/развернуть DEK секретом (фраза ИЛИ ключ восстановления).
+async function _wrapDek(dekRaw, secret) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv   = crypto.getRandomValues(new Uint8Array(12));
-  const key  = await _deriveKey(pass, salt);
-  const ct   = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, _te.encode(JSON.stringify(obj)));
-  return { _enc:'v1', salt:_b64(salt), iv:_b64(iv), ct:_b64(ct) };
+  const kek  = await _deriveKey(secret, salt, KDF_ITER, ['encrypt']);
+  const ct   = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, kek, dekRaw);
+  return { salt:_b64(salt), iv:_b64(iv), ct:_b64(ct) };
 }
-async function decryptPayload(blob, pass) {
-  const key = await _deriveKey(pass, _ub64(blob.salt));
+async function _unwrapDek(wrap, secret) {
+  const kek = await _deriveKey(secret, _ub64(wrap.salt), KDF_ITER, ['decrypt']);
+  return crypto.subtle.decrypt({ name:'AES-GCM', iv:_ub64(wrap.iv) }, kek, _ub64(wrap.ct)); // -> ArrayBuffer (raw DEK)
+}
+async function encryptPayload(obj, pass, recovery) {
+  const dek = await crypto.subtle.generateKey({ name:'AES-GCM', length:256 }, true, ['encrypt','decrypt']);
+  const dekRaw = await crypto.subtle.exportKey('raw', dek);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, dek, _te.encode(JSON.stringify(obj)));
+  const wraps = { pass: await _wrapDek(dekRaw, pass) };
+  if (recovery) wraps.recovery = await _wrapDek(dekRaw, recovery);
+  return { _enc:'v2', data:{ iv:_b64(iv), ct:_b64(ct) }, wraps };
+}
+// which: 'pass' (по фразе) или 'recovery' (по ключу восстановления).
+async function decryptPayload(blob, secret, which = 'pass') {
+  if (blob && blob._enc === 'v2') {
+    const wrap = blob.wraps && blob.wraps[which];
+    if (!wrap) { const e = new Error(which === 'recovery' ? 'Для этих данных нет ключа восстановления' : 'Нет ключа для расшифровки'); e.needPass = true; throw e; }
+    const dekRaw = await _unwrapDek(wrap, secret);
+    const dek = await crypto.subtle.importKey('raw', dekRaw, { name:'AES-GCM' }, false, ['decrypt']);
+    const pt = await crypto.subtle.decrypt({ name:'AES-GCM', iv:_ub64(blob.data.iv) }, dek, _ub64(blob.data.ct));
+    return JSON.parse(_td.decode(pt));
+  }
+  // v1 legacy: прямой ключ из фразы, 100k
+  const key = await _deriveKey(secret, _ub64(blob.salt), 100000, ['decrypt']);
   const pt  = await crypto.subtle.decrypt({ name:'AES-GCM', iv:_ub64(blob.iv) }, key, _ub64(blob.ct));
   return JSON.parse(_td.decode(pt));
+}
+// Ключ восстановления: читаемые группы, без похожих символов (0/O, 1/I).
+function genRecoveryKey() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const rnd = crypto.getRandomValues(new Uint8Array(20));
+  let s = '';
+  for (let i = 0; i < 20; i++) { s += A[rnd[i] % A.length]; if (i % 5 === 4 && i < 19) s += '-'; }
+  return 'ARCH-' + s;
 }
 
 // ─── ВЕРСИИ ЗАПИСЕЙ + СЛИЯНИЕ ────────────────────────────────────
@@ -3769,22 +3811,52 @@ async function packPayload() {
   const bundle = { db: DB, cfg: CFG };
   const pass = getPass();
   if (pass) {
-    const blob = await encryptPayload(bundle, pass);
-    return { db: blob, cfg: { _enc: 'v1' } };
+    const blob = await encryptPayload(bundle, pass, getRecoveryKey() || undefined);
+    return { db: blob, cfg: { _enc: 'v2' } };
   }
   return { db: DB, cfg: CFG };
 }
 async function unpackServer(server) {
   const sdb = server.db || {}, scfg = server.cfg || {};
-  if (sdb._enc === 'v1' || scfg._enc === 'v1') {
+  if (sdb._enc || scfg._enc) {
     const pass = getPass();
     if (!pass) { const e = new Error('Нужна парольная фраза для расшифровки'); e.needPass = true; throw e; }
     let bundle;
-    try { bundle = await decryptPayload(sdb, pass); }
-    catch (err) { const e = new Error('Неверная парольная фраза'); e.needPass = true; throw e; }
+    try { bundle = await decryptPayload(sdb, pass, 'pass'); }
+    catch (err) { if (err.needPass) throw err; const e = new Error('Неверная парольная фраза'); e.needPass = true; throw e; }
     return { db: bundle.db || {}, cfg: bundle.cfg || {} };
   }
   return { db: sdb, cfg: scfg };
+}
+// Восстановление на устройстве без фразы: развернуть серверный блок ключом
+// восстановления, применить локально, затем попросить задать новую фразу.
+async function recoverFromKey() {
+  const k = ($('cfg-rec-in') && $('cfg-rec-in').value || '').trim();
+  if (!k) { toast('Введи ключ восстановления', 'warn'); return; }
+  if (!apiBase() || !CFG.spaceKey) { toast('Сначала укажи URL backend и ключ пространства', 'warn'); openOv('ov-cfg'); return; }
+  try {
+    const server = await api('/api/space/' + CFG.spaceKey);
+    const bundle = await decryptPayload(server.db, k, 'recovery');
+    DB = mergeDB(DB, { ...(bundle.db || {}), __ts: Date.parse(server.updated_at) || 0 });
+    setRecoveryKey(k); persistLocal(); renderAfterSync();
+    hptMed(); toast('Восстановлено! Задай новую парольную фразу и применишь шифрование', 'ok');
+    const pi = $('cfg-pass'); if (pi) pi.focus();
+  } catch (e) {
+    toast(e.needPass ? 'Для этих данных нет ключа восстановления' : 'Неверный ключ восстановления', 'warn');
+  }
+}
+// Создать ключ восстановления (только когда фраза уже задана).
+function generateRecoveryKey() {
+  if (!getPass()) { toast('Сначала задай парольную фразу', 'warn'); return; }
+  const k = genRecoveryKey();
+  setRecoveryKey(k);
+  const el = $('cfg-rec-out');
+  if (el) el.innerHTML = `<div class="card" style="padding:1rem;margin-top:.5rem">
+    <div class="si-text" style="font-weight:600">Твой ключ восстановления</div>
+    <div class="si-text" style="font-family:monospace;font-size:1.05em;margin:.4rem 0;user-select:all;word-break:break-all">${esc(k)}</div>
+    <div class="si-text" style="color:var(--t3)">Сохрани его в надёжном месте (менеджер паролей или бумага). Это единственный способ войти, если забудешь фразу — восстановить его мы не можем.</div></div>`;
+  updateEncStatus(); scheduleSync(300);
+  hptMed(); toast('Ключ восстановления создан — сохрани его', 'ok');
 }
 // Применить серверный снимок к локальному состоянию (со слиянием).
 async function applyServer(server, { merge = true } = {}) {
@@ -3816,6 +3888,9 @@ async function runSync({ manual = false } = {}) {
   if (!apiBase()) { if (manual) { toast('Укажи URL backend в Конфигурации', 'warn'); openOv('ov-cfg'); } return; }
   if (_syncing) { _dirty = true; return; }
   if (!navigator.onLine) { setSyncBadge('offline'); log('warn', 'offline — синк отложен'); return; }
+  // Защита от даунгрейда: после восстановления по ключу (recovery есть,
+  // фразы ещё нет) НЕ пушим открытым текстом поверх шифрованного блока.
+  if (getRecoveryKey() && !getPass()) { setSyncBadge('needpass'); if (manual) { toast('Задай новую парольную фразу после восстановления', 'warn'); openOv('ov-cfg'); } return; }
   _syncing = true; _dirty = false; setSyncBadge('syncing');
   try {
     if (!CFG.spaceKey) {
@@ -3934,9 +4009,11 @@ function saveEncPass() {
 }
 function updateEncStatus() {
   const el = $('cfg-enc-status'); if (!el) return;
-  const on = !!getPass();
-  el.textContent = on ? '🔒 Данные шифруются перед отправкой' : 'Без шифрования — данные хранятся как есть';
-  el.style.color = on ? 'var(--green)' : 'var(--t3)';
+  const on = !!getPass(), rec = !!getRecoveryKey();
+  el.textContent = on
+    ? `🔒 End-to-end: на сервер уходят только шифроблоки${rec ? ' · ключ восстановления создан' : ''}`
+    : '⚠️ Без фразы синк уходит в открытом виде — задай фразу для end-to-end шифрования';
+  el.style.color = on ? 'var(--green)' : 'var(--orange)';
 }
 
 // ═════════════════════════════════════════════════════════════════

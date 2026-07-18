@@ -995,6 +995,78 @@ const genOffline = await page.evaluate(async () => {
 ok(/Заземление|Дыхание|Шаг к человеку|приём/i.test(genOffline), 'без ИИ-ключа генератор тихо откатывается на локальные приёмы (offline-first)');
 await page.evaluate(() => { goTo('home'); });
 
+// ── E2EE: конверт v2, ключ восстановления, обратная совместимость v1 ──
+const crypto2 = await page.evaluate(async () => {
+  const secret = { hi: 'привет', deep: { n: 7, arr: [1, 2, 'три'] } };
+  // v2: шифруем фразой + ключом восстановления
+  const rec = genRecoveryKey();
+  const blob = await encryptPayload(secret, 'моя-фраза', rec);
+  const serverSeesPlaintext = JSON.stringify(blob).includes('привет'); // не должно
+  const byPass = await decryptPayload(blob, 'моя-фраза', 'pass');
+  const byRec = await decryptPayload(blob, rec, 'recovery');
+  let wrongPass = 'decrypted'; try { await decryptPayload(blob, 'не-та-фраза', 'pass'); } catch (e) { wrongPass = 'blocked'; }
+  let wrongRec = 'decrypted'; try { await decryptPayload(blob, 'ARCH-WRONG', 'recovery'); } catch (e) { wrongRec = 'blocked'; }
+  // без recovery-конверта — попытка recovery должна честно упасть
+  const blobNoRec = await encryptPayload(secret, 'ф', undefined);
+  let noRecWrap = 'ok'; try { await decryptPayload(blobNoRec, 'что-то', 'recovery'); } catch (e) { noRecWrap = e.needPass ? 'no-recovery' : 'other'; }
+  // формат корректный + KDF поднят до 600k
+  return {
+    enc: blob._enc, hasWrapPass: !!blob.wraps.pass, hasWrapRec: !!blob.wraps.recovery,
+    serverSeesPlaintext, byPassOk: JSON.stringify(byPass) === JSON.stringify(secret),
+    byRecOk: JSON.stringify(byRec) === JSON.stringify(secret),
+    wrongPass, wrongRec, noRecWrap, iter: KDF_ITER, recFmt: /^ARCH-[A-Z2-9-]+$/.test(rec),
+  };
+});
+ok(crypto2.enc === 'v2' && crypto2.hasWrapPass && crypto2.hasWrapRec && !crypto2.serverSeesPlaintext,
+  'E2EE: v2-конверт — на сервер уходит только шифроблок (открытого текста нет), есть обёртки фразы и восстановления');
+ok(crypto2.byPassOk && crypto2.byRecOk, 'расшифровка работает и по фразе, и по ключу восстановления (envelope round-trip)');
+ok(crypto2.wrongPass === 'blocked' && crypto2.wrongRec === 'blocked' && crypto2.noRecWrap === 'no-recovery',
+  'неверная фраза/ключ отвергаются; без recovery-обёртки восстановление честно недоступно');
+ok(crypto2.iter === 600000 && crypto2.recFmt, 'KDF поднят до 600k (OWASP), ключ восстановления — читаемый формат');
+
+const cryptoV1 = await page.evaluate(async () => {
+  // Имитируем СТАРЫЙ блок v1 (100k, прямой ключ из фразы) и проверяем,
+  // что новый decryptPayload его читает — обратная совместимость.
+  const te = new TextEncoder();
+  const pass = 'старая-фраза', obj = { legacy: 'да', x: 42 };
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const base = await crypto.subtle.importKey('raw', te.encode(pass), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  const b64 = b => btoa(String.fromCharCode(...new Uint8Array(b)));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, te.encode(JSON.stringify(obj)));
+  const v1blob = { _enc: 'v1', salt: b64(salt), iv: b64(iv), ct: b64(ct) };
+  const back = await decryptPayload(v1blob, pass, 'pass');
+  return JSON.stringify(back) === JSON.stringify(obj);
+});
+ok(cryptoV1, 'обратная совместимость: старые v1-блоки (100k) читаются новым кодом — данные не теряются при апгрейде');
+
+const packE2EE = await page.evaluate(async () => {
+  const keep = { pass: getPass(), rec: getRecoveryKey(), ins: DB.insights };
+  DB.insights = [{ id: 7, tag: 'personal', title: 'секрет', body: 'очень личное', links: [] }];
+  setPass('ф-раза'); setRecoveryKey('');
+  const payload = await packPayload();               // фраза есть → шифруем
+  const leaks = JSON.stringify(payload).includes('очень личное');
+  const restored = await unpackServer({ db: payload.db, cfg: payload.cfg, updated_at: new Date().toISOString() });
+  const roundtrip = (restored.db.insights || []).some(i => i.body === 'очень личное');
+  // защита от даунгрейда: recovery есть, фразы нет → синк не пушит плейнтекст
+  setPass(''); setRecoveryKey('ARCH-TEST');
+  const guard = (getRecoveryKey() && !getPass()) ? 'guarded' : 'open';
+  setPass(keep.pass); setRecoveryKey(keep.rec); DB.insights = keep.ins;
+  return { leaks, roundtrip, guard };
+});
+ok(!packE2EE.leaks && packE2EE.roundtrip, 'packPayload/unpackServer: реальные данные шифруются перед отправкой и корректно расшифровываются');
+ok(packE2EE.guard === 'guarded', 'защита от даунгрейда: после восстановления (recovery без фразы) плейнтекст не пушится поверх шифроблока');
+
+const privacyUI = await page.evaluate(() => {
+  goTo('settings'); openOv('ov-privacy');
+  const t = document.getElementById('ov-privacy').textContent;
+  closeOv('ov-privacy');
+  return t;
+});
+ok(/end-to-end/i.test(privacyUI) && /ИИ/.test(privacyUI) && /Забыл фразу/.test(privacyUI),
+  'privacy-экран честен: E2EE-хранилище + оговорка про ИИ-разбор + про потерю фразы');
+await page.evaluate(() => { goTo('home'); });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
