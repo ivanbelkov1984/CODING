@@ -3013,6 +3013,17 @@ function rCfgAxes() {
     </div>`
   ).join('');
 }
+function resetApiUrl() {
+  // Иван ввёл неверный Railway-адрес вручную — CFG.apiUrl (локальный override
+  // на устройстве) перекрывал рабочий window.ARCHITECT_API, синк молчал с
+  // «Ошибка», не говоря, какой именно URL пробуется. Один тап возвращает
+  // дефолт — без похода в консоль/файлы, это личный оверрайд на телефоне.
+  CFG.apiUrl = '';
+  const ai = $('cfg-api'); if (ai) ai.value = '';
+  persist();
+  checkApiStatus();
+  toast('Backend сброшен на сервер по умолчанию', 'ok');
+}
 function saveCfg() {
   CFG.userName    = $('cfg-name')?.value.trim()||CFG.userName;
   CFG.domainLabel = $('cfg-domain')?.value.trim()||CFG.domainLabel;
@@ -4113,10 +4124,14 @@ function checkApiStatus() {
   const el = $('api-lbl');
   if (!API) { if(el) el.textContent='Не подключён'; return; }
   if(el) el.textContent='Проверяю…';
+  // Ошибка раньше была голым словом «Ошибка» — не видно, какой адрес пробуется
+  // (частая причина: свой URL в Настройках перекрывает рабочий по умолчанию).
+  // Теперь хост виден прямо в статусе — сразу понятно, что чинить.
+  let host = API; try { host = new URL(API).host; } catch (e) {}
   fetch(API+'/health').then(r => {
     if(r.ok) { if(el) el.textContent = CFG.spaceKey ? 'Подключён ✓' : 'Готов — нажми Синк'; }
-    else { if(el) el.textContent='Ошибка'; }
-  }).catch(() => { if(el) el.textContent='Недоступен'; });
+    else { if(el) el.textContent='Ошибка: '+host; }
+  }).catch(() => { if(el) el.textContent='Недоступен: '+host; });
 }
 
 // ─── УМНЫЕ ТРИГГЕРЫ ──────────────────────────────────────────────
