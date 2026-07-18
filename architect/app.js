@@ -4564,10 +4564,10 @@ async function chatFinish() {
       required: ['text', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game'],
       properties: {
         text: { type: 'string' },
-        symptom: { type: ['string', 'null'] }, func: { type: ['string', 'null'] }, gain: { type: ['string', 'null'] },
-        need: { type: ['string', 'null'], enum: [...Object.values(PSY_NEED_CODE), null] },
-        ego: { type: ['string', 'null'], enum: [...Object.values(PSY_EGO_CODE), null] },
-        emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
+        symptom: { anyOf: [{ type: 'string' }, { type: 'null' }] }, func: { anyOf: [{ type: 'string' }, { type: 'null' }] }, gain: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        need: { anyOf: [{ type: 'string', enum: [...Object.values(PSY_NEED_CODE)] }, { type: 'null' }] },
+        ego: { anyOf: [{ type: 'string', enum: [...Object.values(PSY_EGO_CODE)] }, { type: 'null' }] },
+        emotion: { anyOf: [{ type: 'string' }, { type: 'null' }] }, game: { anyOf: [{ type: 'string' }, { type: 'null' }] },
       } };
     const out = await callClaude({
       system: (c.mode === 'dream'
@@ -4854,10 +4854,10 @@ async function psyMarkBatch(todo) {
     required: ['id', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game', 'conf', 'themes'],
     properties: {
       id: { type: 'integer' },
-      symptom: { type: ['string', 'null'] }, func: { type: ['string', 'null'] }, gain: { type: ['string', 'null'] },
-      need: { type: ['string', 'null'], enum: [...Object.values(PSY_NEED_CODE), null] },
-      ego: { type: ['string', 'null'], enum: [...Object.values(PSY_EGO_CODE), null] },
-      emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
+      symptom: { anyOf: [{ type: 'string' }, { type: 'null' }] }, func: { anyOf: [{ type: 'string' }, { type: 'null' }] }, gain: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+      need: { anyOf: [{ type: 'string', enum: [...Object.values(PSY_NEED_CODE)] }, { type: 'null' }] },
+      ego: { anyOf: [{ type: 'string', enum: [...Object.values(PSY_EGO_CODE)] }, { type: 'null' }] },
+      emotion: { anyOf: [{ type: 'string' }, { type: 'null' }] }, game: { anyOf: [{ type: 'string' }, { type: 'null' }] },
       conf: { type: 'integer', minimum: 0, maximum: 100 },
       themes: { type: 'array', items: { type: 'string' }, maxItems: 3 },
     } } } } };
