@@ -252,6 +252,10 @@ const dig = await page.evaluate(async () => {
            marked: !!document.querySelector('#dg-list .dg-new') };
 });
 ok(dig.n === 1 && dig.cause >= 1, `обзор недели содержит «Причины → следствия» (${dig.cause})`);
+ok(await page.evaluate(() => DB.digests[0].cntPrev != null && /[▲▼≈]/.test(document.querySelector('#dg-list .dg-stats').innerHTML)), 'обзор показывает дельты к прошлой неделе');
+const spiR = await page.evaluate(() => { DB.spiritual = [{ id: 1, day: todayKey(), text: 'Медитация утром', createdAt: nowISO() }]; reactToSpi('Медитация утром дала тишину'); const t = (document.getElementById('react-card') || {}).textContent || ''; rcClose(); return t; });
+ok(/духовная запись/.test(spiR), 'живой отклик и на духовную запись');
+ok(await page.evaluate(() => { const rows = []; const orig = window.reactCard; window.reactCard = r => rows.push(...r); reactToCheckin(3.5); window.reactCard = orig; return rows.some(r => /восстановление в приоритете/.test(r.html)); }), 'низкое состояние — в карточке отклика, не в мимолётном тосте');
 ok(dig.hasCe, 'блок «Причины → следствия» отрендерен в карточке обзора');
 ok(dig.marked, 'свежий обзор подсвечен (не мелькает тостом)');
 const dedup = await page.evaluate(async () => { await mkDig(); await mkDig(); return { n: DB.digests.length, tomb: Object.keys(DB._del || {}).length > 0 }; });

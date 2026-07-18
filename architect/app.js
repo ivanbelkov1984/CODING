@@ -1704,10 +1704,9 @@ function saveCI() {
   const ci = {...v, id: existing>=0 ? DB.checkins[existing].id : Date.now()};
   if (existing>=0) DB.checkins[existing] = ci; else DB.checkins.push(ci);
   closeOv('ov-ci'); persist(); rVit(); rCompass(); rHState(); rStreak();
-  const avg = (v.cl + v.mv + (10-v.st)) / 3;
-  if (avg < 5) toast('Состояние ниже 5 — восстановление в приоритете', 'warn');
-  else { hptMed(); toast('Check-in сохранён', 'ok'); }
-  reactToCheckin();                        // живой отклик вместо молчания
+  // Содержательное — в карточку отклика (не в мимолётный тост, П2 брифа)
+  hptMed(); toast('Check-in сохранён', 'ok');
+  reactToCheckin((v.cl + v.mv + (10-v.st)) / 3);
   try { rVector(); } catch (e) {}
 }
 
@@ -1750,6 +1749,16 @@ function saveSpi() {
   $('spi-tx').value='';
   closeOv('ov-spi-add'); persist(); rSpi();
   hptMed(); toast('Запись сохранена', 'ok');
+  try { reactToSpi(tx); rVector(); } catch (e) {}    // живой отклик и на духовное
+}
+function reactToSpi(tx) {
+  const rows = [];
+  const rel = rcRelated(tx, null);
+  if (rel) rows.push({ html: `🔗 Перекликается с «${esc(rel.title)}»`, act: `rcClose();showDet(${rel.id})` });
+  const n = (DB.spiritual || []).length;
+  const m30 = (DB.spiritual || []).filter(s => (s.day || '') > dayAgo(30)).length;
+  rows.push({ html: `🕊 ${n}-я духовная запись${m30 >= 2 ? ` · ${m30} за месяц — практика держится` : ''}` });
+  reactCard(rows);
 }
 function deleteSpi(id) {
   delUndo('spiritual', id, rSpi, 'Запись удалена');
@@ -2630,13 +2639,14 @@ function rDig() {
   el.innerHTML = DB.digests.map(d => {
     // Новый формат (с top/stateAvg) или старый (week/h/cnt/themes)
     if (d.top !== undefined) {
+      const dlt = (cur, prev) => prev == null ? '' : cur - prev > 0 ? `<span style="color:var(--green)">▲ +${cur - prev}</span>` : cur - prev < 0 ? `<span style="color:var(--orange)">▼ ${cur - prev}</span>` : '<span style="color:var(--t3)">≈</span>';
       const arrow = d.stateDelta == null ? '' : d.stateDelta > 0 ? `<span style="color:var(--green)">▲ +${d.stateDelta}</span>` : d.stateDelta < 0 ? `<span style="color:var(--orange)">▼ ${d.stateDelta}</span>` : '<span style="color:var(--t3)">≈</span>';
       return `<div class="dg">
         <div class="dg-w">${esc(d.week)}</div>
         <div class="dg-h">Итоги недели</div>
         <div class="dg-stats">
-          <div class="dg-stat"><b>${d.cnt}</b><span>инсайтов</span></div>
-          <div class="dg-stat"><b>${d.adherence}/7</b><span>чек-инов</span></div>
+          <div class="dg-stat"><b>${d.cnt}</b><span>инсайтов ${dlt(d.cnt, d.cntPrev)}</span></div>
+          <div class="dg-stat"><b>${d.adherence}/7</b><span>чек-инов ${dlt(d.adherence, d.adhPrev)}</span></div>
           <div class="dg-stat"><b>${d.stateAvg ?? '—'}</b><span>состояние ${arrow}</span></div>
           <div class="dg-stat"><b>${d.dreams}</b><span>снов</span></div>
         </div>
@@ -2685,9 +2695,11 @@ async function mkDig() {
   (DB.digests || []).filter(d => d.week === week).forEach(d => tomb(d.id));
   DB.digests = (DB.digests || []).filter(d => d.week !== week);
   while (DB.digests.length > 19) tomb(DB.digests.pop().id);
+  // Дельты к прошлой неделе — обзор показывает движение, а не только счёт
+  const insP7 = DB.insights.filter(i => { const t = Date.parse(i.createdAt); return t && t < now - 7 * 864e5 && t >= now - 14 * 864e5; }).length;
   DB.digests.unshift({
     id: now, createdAt: nowISO(), sv: SCHEMA_VERSION, week,
-    cnt: insW.length, adherence: ciW.length,
+    cnt: insW.length, cntPrev: insP7, adherence: ciW.length, adhPrev: ciP.length,
     stateAvg: aW ? +aW.comp.toFixed(1) : null, stateDelta,
     dreams, patterns: DB.patterns.length, themes, top, cause,
   });
@@ -3873,8 +3885,9 @@ function reactToInsight(ins) {
   reactCard(rows);
   rcAI(ins.body || ins.title || '');
 }
-function reactToCheckin() {
+function reactToCheckin(todayAvg) {
   const rows = [];
+  if (todayAvg != null && todayAvg < 5) rows.push({ html: `⚠️ Состояние сегодня ниже 5 — восстановление в приоритете, не требуй от себя многого` });
   const s = stateScore();
   if (s.ok) {
     rows.push({ html: `📊 Состояние ${s.score}/100 — ${s.delta > 0 ? 'выше' : s.delta < 0 ? 'ниже' : 'ровно по'} твоей норме${s.delta ? ` на ${Math.abs(s.delta)}` : ''}`, act: `rcClose();goTo('vit')` });
