@@ -29,6 +29,7 @@ const DEFAULT_CFG = {
   spaceKey: '',
   lastSync: '',
   aiModel: 'claude-opus-4-8',
+  trustedContact: '',   // близкий человек — под рукой в кризисном протоколе
   newAxColor: '#1056CC',
   axes: {
     vitality:   {lbl:'Здоровье',   s:7,   c:'#1A7F3C'},
@@ -73,6 +74,7 @@ const DEFAULT_DB = {
     'Что мешает двигаться вперёд?',
   ],
   vit: {sl:7, sq:7, cl:7, st:4, mv:7, nic:false, caf:true, alc:false, sugar:false, act:'нет', tone:'нейтрально', note:'', ci:false, date:''},
+  env: {noSweetsHome:false, noCigsHome:false, ritual:false},   // «Среда»: реструктуризация окружения (BCTTv1)
   _del: {},   // «надгробия» удалённых записей: { id: timestamp }
   __ts: 0,    // метка времени документа (для слияния скалярных полей)
 };
@@ -781,6 +783,175 @@ function statePromptBucket() {
 // ─── КОНТЕКСТНЫЙ НАДЖ (напоминания: контекст, не будильник — №4) ──
 // Один уместный подсказ по состоянию/пропускам, вопросом, а не командой;
 // закрывается на день. (Web Push позже — логика уже здесь.)
+// ─── ПСИХИЧЕСКОЕ СОСТОЯНИЕ ПО ДИАЛОГАМ → ЖУРНАЛ ЗДОРОВЬЯ ─────────
+// При закрытии чата вывод размечается (chatFinish) и в т.ч. коарс-оценка
+// состояния (mood/stress/lonely) кладётся на инсайт как stateNote. Здесь
+// эти сигналы собираются за 2 недели в дайджест для «Здоровья» и для
+// риск-движка — так психоконтур синхронизируется с журналом здоровья.
+function mentalStateDigest() {
+  const cutoff = Date.now() - 14 * 864e5;
+  const notes = (DB.insights || [])
+    .filter(i => i.stateNote && i.stateNote.at && Date.parse(i.stateNote.at) >= cutoff)
+    .map(i => i.stateNote)
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  if (!notes.length) return null;
+  const n = notes.length;
+  const moodScore = { low: 1, mid: 2, high: 3 };
+  return {
+    n, latest: notes[0],
+    highStress: notes.filter(s => s.stress === 'high').length,
+    lonely: notes.filter(s => s.lonely).length,
+    avgMood: notes.reduce((s, x) => s + (moodScore[x.mood] || 2), 0) / n,
+  };
+}
+function todayStateNote() {
+  return (DB.insights || []).map(i => i.stateNote).find(s => s && s.day === todayKey()) || null;
+}
+// ─── ПРИЁМЫ САМОРЕГУЛЯЦИИ (локальный RAG-lite) ──────────────────
+// Из разбора RAG-LLM: не хардкод правил, а курируемая база доказательных
+// приёмов (CBT/ACT/DBT/соматика) + подбор под состояние. Хостовая
+// вектор-БД (Pinecone/Qdrant) для ~12 приёмов избыточна и тянет данные на
+// сервер; при таком размере ретрив — локальная функция по стем-тегам.
+// Каждый приём: id, заголовок, рамка (когда), шаги, for — стемы состояний.
+const REG_TECHNIQUES = [
+  { id: 'ground54321', title: 'Заземление 5-4-3-2-1', frame: 'при острой тревоге, панике, наплыве',
+    for: ['трев', 'паник', 'страх', 'наплыв', 'накрыв', 'захлёст'],
+    steps: ['Назови 5 вещей, что видишь вокруг', '4 — что слышишь', '3 — к чему можешь прикоснуться', '2 — что чувствуешь запахом', '1 — вкус во рту или один медленный вдох'] },
+  { id: 'sigh', title: 'Физиологический вздох', frame: 'быстрый сброс напряжения телом',
+    for: ['стресс', 'напряж', 'взвинч', 'зл', 'раздраж'],
+    steps: ['Два вдоха носом подряд (второй — короткий добор сверху)', 'Долгий медленный выдох ртом', 'Повтори 3–5 раз — тело выходит из «боевого» режима за минуту'] },
+  { id: 'urgesurf', title: 'Сёрфинг по тяге', frame: 'ACT — пережить пик, не борясь силой воли',
+    for: ['тяг', 'тянет', 'срыв', 'сорв', 'сладк', 'сигарет', 'кур', 'импульс', 'съест', 'торт', 'заед'],
+    steps: ['Замечай тягу как волну, а не как приказ', 'Она растёт, достигает пика и спадает за 5–10 минут', 'Наблюдай ощущение в теле — не борись и не корми его', 'Дай волне пройти: ты не обязан на неё отвечать'] },
+  { id: 'defusion', title: 'Когнитивное расцепление', frame: 'ACT — отделить себя от навязчивой мысли',
+    for: ['навязчив', 'румин', 'мысл', 'самокрит', 'прокруч', 'думаю об'],
+    steps: ['Поймай мысль дословно: «…»', 'Скажи про себя: «У меня есть мысль, что …»', 'Потом: «Я замечаю, что у меня есть мысль, что …»', 'Мысль — событие в уме, а не факт и не приказ'] },
+  { id: 'decatastroph', title: 'Декатастрофизация', frame: 'CBT — вернуть реализм при тревоге о будущем',
+    for: ['катастроф', 'страх', 'будущ', 'бессонниц', 'не усн', 'заснуть', 'встреч'],
+    steps: ['Какой самый худший сценарий?', 'А какой самый реалистичный?', 'Если случится плохое — как ты справишься?', 'Что бы ты сказал другу в этой ситуации?'] },
+  { id: 'behavact', title: 'Поведенческая активация', frame: 'CBT — действие раньше настроения',
+    for: ['упадок', 'апати', 'нет сил', 'подавл', 'лень', 'бессил', 'ничего не хоч'],
+    steps: ['Выбери одно крошечное действие на 5 минут', 'Не жди мотивацию — она приходит в процессе, не до него', 'Сделай и отметь, как чуть сдвинулось состояние'] },
+  { id: 'selfcompassion', title: 'Пауза самосострадания', frame: 'при стыде, вине, самокритике',
+    for: ['стыд', 'вин', 'самокрит', 'провал', 'ничтожеств', 'ненавижу себя'],
+    steps: ['Признай честно: «Сейчас мне тяжело»', '«Тяжело бывает всем — я в этом не один»', 'Рука на грудь; скажи себе то, что сказал бы близкому другу'] },
+  { id: 'box', title: 'Дыхание по квадрату', frame: 'сфокусировать и успокоить перед сложным',
+    for: ['стресс', 'трев', 'взвинч', 'перед', 'волну'],
+    steps: ['Вдох на 4 счёта', 'Задержка на 4', 'Выдох на 4', 'Задержка на 4 — и снова, 4 круга'] },
+  { id: 'opposite', title: 'Противоположное действие', frame: 'DBT — не идти на поводу у импульса эмоции',
+    for: ['зл', 'избега', 'страх', 'импульс', 'обид'],
+    steps: ['Назови эмоцию и что она толкает сделать', 'Если это действие не полезно — сделай мягко противоположное', 'Злость → спокойный тон; страх → маленький шаг навстречу'] },
+  { id: 'tipp', title: 'Резкое охлаждение (TIPP)', frame: 'DBT — сбить сильный аффект через тело',
+    for: ['паник', 'сильн', 'аффект', 'захлёст', 'накрыв', 'трясёт'],
+    steps: ['Холодная вода на лицо или холод к запястьям, 30–60 сек', 'Или быстрая физнагрузка пару минут', 'Тело гасит пик возбуждения — ум проясняется'] },
+  { id: 'name', title: 'Назвать эмоцию', frame: 'аффект-лейблинг снижает накал',
+    for: ['захлёст', 'смятен', 'не понимаю что чувств', 'непонятно', 'трев'],
+    steps: ['Назови эмоцию одним словом', 'Где она в теле? Какого она «размера»?', 'Само называние снижает силу эмоции — это доказанный эффект'] },
+  { id: 'connect', title: 'Шаг к человеку', frame: 'при одиночестве — корневом триггере тяги',
+    for: ['одиночеств', 'один', 'пуст', 'изоляц', 'никто', 'брошен'],
+    steps: ['Напиши или позвони одному человеку — даже коротко', 'Или выйди туда, где есть люди, на 10 минут', 'Одиночество усиливает тягу — живой контакт сбивает её'] },
+];
+// Локальный ретрив: скоринг по вхождению стем-тегов в текст состояния.
+function suggestTechniques(text, limit = 2) {
+  const s = String(text || '').toLowerCase();
+  if (!s.trim()) return [];
+  return REG_TECHNIQUES
+    .map(t => ({ t, score: t.for.reduce((n, stem) => n + (s.includes(stem) ? 1 : 0), 0) }))
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(x => x.t);
+}
+// ─── КРИЗИСНЫЙ ПРОТОКОЛ (safety fallback) ───────────────────────
+// Из разбора: при признаках острого кризиса приложение НЕ должно выдавать
+// «приёмчик», а мягко направить к живому человеку. Это ЛОКАЛЬНЫЙ слой
+// защиты — регекс по явным И частым косвенным формулировкам (второй
+// разбор особо просил ловить непрямые сигналы: «всем лучше без меня»,
+// «хочется исчезнуть», «не вижу смысла ни в чём»). Честная граница: сильно
+// завуалированные/ироничные сигналы регекс не гарантирует — их ловит
+// второй слой (флаг crisis от ИИ в techGenerate). Это страховка, не
+// клинический скрининг; «Архитектор» прямо говорит, что он не терапевт.
+const CRISIS_RE = new RegExp([
+  'не хочу жить', 'жить не хочется', 'незачем жить', 'устал[аи]? жить', 'больше так жить не могу', 'не могу больше так жить',
+  'нет смысла жить', 'не вижу смысла жить', 'не вижу смысла ни в ч[её]м', 'нет смысла ни в ч[её]м',
+  'покончить с собой', 'свести сч[её]ты с жизнью', 'убить себя', 'наложить на себя руки',
+  'причинить себе вред', 'причиню себе', 'порезать себя',
+  'лучше бы (я )?(не жил|умер)', '(хочу|хочется) умереть(?! со смеху| от смеха)',
+  '(хочу|хочется) (просто )?исчезнуть', 'исчезнуть навсегда',
+  'всем( бы)? (было бы |будет |станет )?лучше без меня', 'если бы меня не было', 'никому( бы)? не (будет|станет|стало) хуже без меня',
+  'не хочу просыпаться', 'не проснуться бы', 'чтобы (вс[её]|это) (прекрат|законч|выключ|кончил)',
+  'сил( больше)? нет жить', 'нет сил жить',
+].join('|'), 'i');
+function crisisScreen(text) { return CRISIS_RE.test(String(text || '')); }
+function openCrisisCard() {
+  const el = $('crisis-contact');
+  if (el) {
+    const c = (CFG.trustedContact || '').trim();
+    el.innerHTML = c
+      ? `<div class="card" style="padding:1rem;margin:.5rem 0"><div class="si-text" style="font-weight:600;margin-bottom:.35rem">Напиши или позвони близкому:</div><div class="si-text">${esc(c)}</div></div>`
+      : `<div class="card" style="padding:1rem;margin:.5rem 0"><div class="si-text">Добавь близкого человека в Настройках — чтобы в такой момент он был на один тап.</div><button class="btn btn-s btn-sm" style="margin-top:.5rem" onclick="closeOv('ov-crisis');goTo('settings')">Открыть настройки</button></div>`;
+  }
+  openOv('ov-crisis');
+}
+// ─── ПЕРСОНАЛЬНЫЙ АДАПТИВНЫЙ РИСК-СКОРИНГ ТЯГИ ───────────────────
+// Сердце JITAI, которое реально помогает: движок учится на ТВОЕЙ
+// истории (окно суток срывов, пост-срыв, одиночество), а не на данных
+// тысяч людей — потому и работает локально, без сервера и без ML-облака.
+// Rule-based и полностью объяснимый: у каждого вклада своя причина,
+// система никогда не говорит «риск высокий» без «потому что». Честность
+// как в smartInsights: персональные паттерны включаются только когда
+// данных хватает, иначе остаётся только сегодняшнее состояние.
+// atHour — необязательный час «как будто сейчас» (для тестов/прогноза).
+function cravingRisk(atHour) {
+  const v = DB.vit, crav = DB.cravings || [];
+  const hour = atHour == null ? new Date().getHours() : atHour;
+  const hasCi = !!(v && v.ci && v.date === todayKey());
+  const F = [];  // {w, why, tag}
+  // 1. Сегодняшнее состояние — доступно сразу после чек-ина. Стресс —
+  //    корневой триггер (см. разбор JITAI), сам по себе весомый.
+  if (hasCi) {
+    if (v.st >= 7) F.push({ w: 0.3,  why: 'высокий стресс сегодня', tag: 'stress' });
+    if (v.sl < 6)  F.push({ w: 0.15, why: 'сна меньше нормы — самоконтроль слабее', tag: 'sleep' });
+  }
+  // 2. Пост-срыв окно (AVE): первые ~48ч после срыва держаться труднее.
+  const lastFall = crav.find(c => c.outcome === 'gave_in' && c.createdAt);
+  if (lastFall) {
+    const hrs = (Date.now() - new Date(lastFall.createdAt).getTime()) / 36e5;
+    if (hrs >= 0 && hrs < 48) F.push({ w: 0.2, why: 'недавний срыв — первые двое суток самые уязвимые', tag: 'recent' });
+  }
+  // 3. Твоё уязвимое ОКНО суток — учится из истории собственных срывов.
+  const falls = crav.filter(c => c.outcome === 'gave_in' && c.createdAt);
+  if (falls.length >= 5) {
+    const band = h => h < 6 ? 0 : h < 12 ? 1 : h < 18 ? 2 : 3;
+    const names = ['ночью', 'по утрам', 'днём', 'по вечерам'];
+    const cnt = [0, 0, 0, 0];
+    falls.forEach(c => cnt[band(new Date(c.createdAt).getHours())]++);
+    const cur = band(hour), share = cnt[cur] / falls.length;
+    if (share >= 0.4) F.push({ w: 0.2, why: `${names[cur]} у тебя срывы случаются чаще всего`, tag: 'window' });
+  }
+  // 4. Одиночество как персональный триггер — учится из контекста тяги.
+  const alone = crav.filter(c => c.alone === 'alone'), withppl = crav.filter(c => c.alone === 'people');
+  if (alone.length >= 3 && withppl.length >= 2) {
+    const ar = alone.filter(c => c.outcome === 'gave_in').length / alone.length;
+    const pr = withppl.filter(c => c.outcome === 'gave_in').length / withppl.length;
+    if (ar - pr >= 0.15) F.push({ w: 0.15, why: 'в одиночестве тебе удержаться труднее', tag: 'lonely' });
+  }
+  // 5. Нарастающая частота — много импульсов за сутки, напряжение копится.
+  const last24 = crav.filter(c => c.createdAt && Date.now() - new Date(c.createdAt).getTime() < 864e5);
+  if (last24.length >= 3) F.push({ w: 0.15, why: `${last24.length} ${pl(last24.length, 'импульс', 'импульса', 'импульсов')} за сутки — напряжение растёт`, tag: 'freq' });
+  // 6. Сигнал из сегодняшнего диалога (психоконтур → журнал здоровья): если
+  //    сегодня в чате звучал сильный стресс/одиночество — это тоже риск.
+  const note = todayStateNote();
+  if (note) {
+    if (note.stress === 'high') F.push({ w: 0.15, why: 'по сегодняшнему диалогу — сильное напряжение', tag: 'chat-stress' });
+    if (note.lonely)            F.push({ w: 0.12, why: 'сегодняшний разговор был об одиночестве', tag: 'chat-lonely' });
+  }
+  const score = Math.min(0.95, F.reduce((s, f) => s + f.w, 0));
+  F.sort((a, b) => b.w - a.w);
+  return { score, factors: F, top: F[0] || null, hasCi };
+}
+// Совместимость: прежний riskReasons() — тонкая обёртка над движком.
+function riskReasons() { return cravingRisk().factors.map(f => f.why); }
 function smartNudge() {
   const today = todayKey();
   if (localStorage.getItem('arch5_nudge_dismiss') === today) return null;
@@ -788,13 +959,16 @@ function smartNudge() {
   // 1. Не отмечен день (после полудня)
   if ((!v || !v.ci || v.date !== today) && hour >= 11)
     return { icon:'📝', text:'Хороший момент отметить день?', cta:'Чек-ин', act:"openOv('ov-ci')" };
-  // 1.5 Предиктивный риск срыва — ДО, а не после (стресс/недосып поднимают
-  // тягу; предупреждаем заранее, см. HEALTH_BRIEF.md, п. 4 «Nudging»)
-  if (v && v.ci && v.date === today) {
+  // 1.5 Предиктивный риск срыва — персональный движок: окно суток срывов,
+  // пост-срыв, одиночество, стресс/сон. Проактивно, ДО тяги, с причиной
+  // (см. cravingRisk / HEALTH_BRIEF.md). Не требует чек-ина: окно суток и
+  // пост-срыв знаемы и без него — потому предупреждение реально опережает.
+  {
     const riskCtx = healthSpheres().length > 0 || (DB.cravings || []).length > 0;
-    if (riskCtx && (v.st >= 7 || v.sl < 6))
-      return { icon: '⚠️', text: v.st >= 7 ? 'Стресс сегодня высокий — риск тяги выше обычного.' : 'Сна маловато — самоконтроль слабее обычного.',
-        cta: '3-минутная перезагрузка', act: 'openCraving()' };
+    const risk = cravingRisk();
+    if (riskCtx && risk.score >= 0.3 && risk.top)
+      return { icon: '⚠️', text: `Сейчас риск тяги выше обычного — ${risk.top.why}.`,
+        cta: 'Опереться заранее', act: 'openCraving()' };
   }
   // 2. Привычка-сфера давно без отметки
   for (const s of (DB.spheres || [])) {
@@ -1733,15 +1907,115 @@ function saveCI() {
 // Основа (см. HEALTH_BRIEF.md): петля привычки триггер→действие→
 // награда; пик тяги держится 3–5 минут — задача не «победить силой
 // воли», а пережить пик и honestly зафиксировать данные, не судить.
-const CRAVING_TIPS = [
-  '🫁 4 медленных вдоха через нос, выдох вдвое дольше — 60 секунд.',
-  '💧 Стакан воды, медленно, весь до дна.',
-  '🚶 Встань и пройдись 2–3 минуты — смена позы сбивает автоматизм.',
+// Типология тяги (must-have конкретизация из разбора JITAI): внезапная
+// «cue-induced» (нужна дистракция/пересидеть пик) и фоновая «tonic»
+// (нарастает из-за усталости/голода — нужна физиологическая компенсация,
+// не сила воли). Ветвим подсказку по выбору пользователя, не по угадыванию.
+// Подсказки помечены ключом (k) и коротким ярлыком (lbl) — чтобы движок
+// мог запоминать, что помогло именно тебе, и поднимать это вверх (петля
+// обратной связи, см. markHelped/orderedTips).
+const CRAVING_TIPS_CUE = [
+  { k: 'breath', lbl: '🫁 Дыхание', t: '🫁 4 медленных вдоха через нос, выдох вдвое дольше — 60 секунд.' },
+  { k: 'water',  lbl: '💧 Вода',    t: '💧 Стакан воды, медленно, весь до дна.' },
+  { k: 'move',   lbl: '🚶 Шаги',    t: '🚶 Встань и пройдись 2–3 минуты — смена позы сбивает автоматизм.' },
 ];
+const CRAVING_TIPS_TONIC = [
+  { k: 'protein', lbl: '🍳 Еда+вода', t: '💧 Стакан воды и что-то белковое/сытное — фоновая тяга часто от голода, не от повода.' },
+  { k: 'rest',    lbl: '🛌 Покой',    t: '🛌 Если это вечер — усталость съедает волю сильнее, чем кажется. Дай себе 10 минут покоя.' },
+  { k: 'breath',  lbl: '🫁 Дыхание',  t: '🫁 Медленное дыхание 4/8, чтобы не «долить» тягу собственным напряжением.' },
+];
+// Сколько раз каждый приём помог именно тебе (из истории «Тяги»).
+function tipHelpCounts() {
+  const c = {}; (DB.cravings || []).forEach(r => { if (r.helped && r.helped !== 'wait') c[r.helped] = (c[r.helped] || 0) + 1; });
+  return c;
+}
+// Персонализация: приёмы, что работали у тебя, идут первыми.
+function orderedTips(list) {
+  const c = tipHelpCounts();
+  return list.map((t, i) => ({ t, i })).sort((a, b) => (c[b.t.k] || 0) - (c[a.t.k] || 0) || a.i - b.i).map(x => x.t);
+}
+// ─── Шит «Приёмы»: подбор доказательного приёма под состояние ────
+function openTech(seed) {
+  const chips = $('tech-chips'); if (chips) chips.querySelectorAll('.tp').forEach(b => b.classList.remove('a-moss'));
+  const tx = $('tech-text'); if (tx) tx.value = '';
+  renderTechniques(seed || '');
+  openOv('ov-tech');
+  if (seed) renderTechniques(seed);
+}
+function techPick(btn, key) {
+  btn.parentElement.querySelectorAll('.tp').forEach(b => b.classList.remove('a-moss'));
+  btn.classList.add('a-moss');
+  const tx = $('tech-text'); if (tx) tx.value = '';
+  renderTechniques(key); hpt();
+}
+function techFromText() {
+  const tx = $('tech-text'); if (!tx) return;
+  const val = tx.value;
+  // Кризисный протокол — раньше любого приёма (safety fallback).
+  if (crisisScreen(val)) { closeOv('ov-tech'); openCrisisCard(); return; }
+  const chips = $('tech-chips'); if (chips) chips.querySelectorAll('.tp').forEach(b => b.classList.remove('a-moss'));
+  renderTechniques(val);
+}
+function renderTechniques(q) {
+  const out = $('tech-out'); if (!out) return;
+  const techs = suggestTechniques(q, 2);
+  if (!q || !String(q).trim()) { out.innerHTML = `<div class="ai-sp-empty" style="padding:1rem">Выбери, что ближе, или опиши своими словами — подберу доказательный приём под состояние.</div>`; return; }
+  if (!techs.length) { out.innerHTML = `<div class="ai-sp-empty" style="padding:1rem">Не поймал состояние по словам. Попробуй иначе — «тревожно», «тянет сорваться», «нет сил», «злюсь», «пусто и одиноко».</div>`; return; }
+  out.innerHTML = techs.map(t => `<div class="card mx" style="padding:1rem;margin-bottom:.6rem">
+    <div class="si-text" style="font-weight:700">${esc(t.title)}</div>
+    <div class="si-text" style="color:var(--t3);margin:.15rem 0 .5rem">${esc(t.frame)}</div>
+    ${t.steps.map(s => `<div class="cr-tip-row">• ${esc(s)}</div>`).join('')}
+  </div>`).join('');
+}
+// ─── Therapeutic Generator (grounded, single-call) ──────────────
+// Из второго разбора RAG-LLM: адаптировать метод под слова человека, а не
+// выдавать сухую инструкцию. Grounding — ключевой safety-принцип: ИИ НЕ
+// придумывает метод, а обязан выбрать method_id из НАШЕЙ базы (enum по
+// ASCII-id, плоский string — учли enum-баг). Кризис — двумя слоями: локальный
+// crisisScreen ДО вызова + флаг crisis от ИИ + crisisScreen на сам ответ.
+// Без ключа/сети — тихий откат на локальные приёмы (offline-first).
+async function techGenerate() {
+  const tx = $('tech-text'); const val = tx ? tx.value.trim() : '';
+  if (!val) { toast('Опиши, что происходит'); return; }
+  if (crisisScreen(val)) { closeOv('ov-tech'); openCrisisCard(); return; }
+  if (!getAiKey() || !navigator.onLine) { renderTechniques(val); toast(getAiKey() ? 'Нет сети — базовые приёмы' : 'Без ИИ-ключа — базовые приёмы'); return; }
+  const out = $('tech-out'); if (out) out.innerHTML = `<div class="ai-sp-empty" style="padding:1rem">Разбираю бережно…</div>`;
+  try {
+    const schema = { type: 'object', additionalProperties: false, required: ['crisis', 'craving_detected', 'method_id', 'message'],
+      properties: {
+        crisis: { type: 'boolean' },
+        craving_detected: { type: 'boolean' },
+        method_id: { type: 'string', enum: [...REG_TECHNIQUES.map(t => t.id), 'none'] },
+        message: { type: 'string' },
+      } };
+    const catalog = REG_TECHNIQUES.map(t => `${t.id}: ${t.title} — ${t.frame}`).join('\n');
+    const sys = 'Ты — бережный психологический ассистент приложения «Архитектор». По свободному тексту человека:\n'
+      + '— НЕ ставь диагнозов, не используй клинические термины, не выдавай себя за терапевта;\n'
+      + '— опирайся только на текст, не додумывай переживаний, которых там нет;\n'
+      + '— если есть признаки острого кризиса (мысли о смерти/самоповреждении, безысходность «всем лучше без меня», «не вижу смысла жить») — поставь crisis=true, method_id="none", message="" и НЕ давай советов;\n'
+      + '— иначе выбери ОДИН метод строго из списка ниже (method_id — только оттуда) под состояние и напиши короткое (2–4 предложения) бережное, неосуждающее сообщение на «ты»: сначала валидируй чувство, потом мягко, приглашающим тоном предложи этот метод под конкретную ситуацию. Без лекций и морали;\n'
+      + '— craving_detected=true, если в тексте есть тяга к курению/сладкому/алкоголю.\n\nМетоды (method_id выбирай только отсюда):\n' + catalog;
+    const raw = await callClaude({ system: sys, user: val, maxTokens: 400, schema, task: 'analysis' });
+    let p; try { p = JSON.parse(raw); } catch (e) { renderTechniques(val); return; }
+    if (p.crisis || crisisScreen(p.message)) { closeOv('ov-tech'); openCrisisCard(); return; }
+    const method = REG_TECHNIQUES.find(t => t.id === p.method_id) || null;
+    techRenderGenerated(p.message, method, !!p.craving_detected);
+  } catch (e) { renderTechniques(val); toast('Не вышло разобрать — вот базовые приёмы'); }
+}
+function techRenderGenerated(message, method, craving) {
+  const out = $('tech-out'); if (!out) return;
+  if (!message && !method) { const tx = $('tech-text'); renderTechniques(tx ? tx.value : ''); return; }
+  let html = '';
+  if (message) html += `<div class="card mx" style="padding:1rem;margin-bottom:.6rem"><div class="si-text">${esc(message)}</div></div>`;
+  if (method) html += `<div class="card mx" style="padding:1rem;margin-bottom:.6rem"><div class="si-text" style="font-weight:700">${esc(method.title)}</div><div class="si-text" style="color:var(--t3);margin:.15rem 0 .5rem">${esc(method.frame)}</div>${method.steps.map(s => `<div class="cr-tip-row">• ${esc(s)}</div>`).join('')}</div>`;
+  if (craving) html += `<div class="mx"><button class="btn btn-s btn-sm" onclick="closeOv('ov-tech');openCraving()">Записать как тягу →</button></div>`;
+  out.innerHTML = html;
+}
 function openCraving() {
-  STATE.crKind = 'сигарета';
+  STATE.crKind = 'сигарета'; STATE.crOnset = null; STATE.crAlone = null;
   const kindRow = $('cr-kind');
   if (kindRow) kindRow.querySelectorAll('.tp').forEach(b => b.classList.toggle('a-moss', b.dataset.k === 'сигарета'));
+  const ctxRow = $('cr-ctx'); if (ctxRow) ctxRow.querySelectorAll('.tp').forEach(b => b.classList.remove('a-moss'));
   const trig = $('cr-trigger'); if (trig) trig.value = '';
   const int = $('cr-int'); if (int) int.value = 5;
   crIntChange(5);
@@ -1751,11 +2025,23 @@ function sCrKind(btn) {
   btn.parentElement.querySelectorAll('.tp').forEach(b => b.classList.remove('a-moss'));
   btn.classList.add('a-moss'); STATE.crKind = btn.dataset.k;
 }
+// Оба контекстных вопроса необязательны и независимы друг от друга
+// (data-g различает группу), поэтому переключаем активность только
+// внутри своей группы — второй вопрос не сбрасывает первый.
+function sCrCtx(btn) {
+  const g = btn.dataset.g;
+  btn.parentElement.querySelectorAll(`.tp[data-g="${g}"]`).forEach(b => b.classList.remove('a-moss'));
+  btn.classList.add('a-moss');
+  if (g === 'onset') STATE.crOnset = btn.dataset.v; else STATE.crAlone = btn.dataset.v;
+  crIntChange(($('cr-int') && $('cr-int').value) || 5);
+}
 function crIntChange(v) {
   const lbl = $('cr-int-v'); if (lbl) lbl.textContent = v;
   const tip = $('cr-tip'); if (!tip) return;
+  const base = STATE.crOnset === 'tonic' ? CRAVING_TIPS_TONIC : CRAVING_TIPS_CUE;
+  const tips = orderedTips(base), cnt = tipHelpCounts();
   tip.innerHTML = +v >= 6
-    ? `<div class="cr-tip-box"><div class="cr-tip-h">Пик тяги обычно держится 3–5 минут — попробуй пережить его так:</div>${CRAVING_TIPS.map(t => `<div class="cr-tip-row">${t}</div>`).join('')}</div>`
+    ? `<div class="cr-tip-box"><div class="cr-tip-h">Пик тяги обычно держится 3–5 минут — попробуй пережить его так:</div>${tips.map((t, i) => `<div class="cr-tip-row">${t.t}${i === 0 && (cnt[t.k] || 0) > 0 ? ' <span style="color:var(--green)">· помогало тебе</span>' : ''}</div>`).join('')}<div class="cr-tip-row" style="margin-top:.5rem"><a href="javascript:void 0" onclick="closeOv('ov-craving');openTech('${STATE.crOnset === 'tonic' ? 'тяга пусто вечер' : 'тяга импульс'}')">Ещё приёмы под состояние →</a></div></div>`
     : '';
 }
 function saveCraving(held) {
@@ -1763,20 +2049,45 @@ function saveCraving(held) {
   const intensity = +(($('cr-int') && $('cr-int').value) || 5);
   const trigger = (($('cr-trigger') && $('cr-trigger').value) || '').trim();
   const rec = { id: Date.now(), kind, intensity, trigger, outcome: held ? 'held' : 'gave_in',
+    onset: STATE.crOnset || null, alone: STATE.crAlone || null,
     createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION };
   (DB.cravings = DB.cravings || []).unshift(rec);
   persist(); closeOv('ov-craving'); hptMed();
+  // Кризисный протокол важнее обычного отклика: если в триггере — острый
+  // сигнал, ведём к живому человеку, а не к статистике тяги (safety first).
+  if (crisisScreen(trigger)) { try { if (document.getElementById('pg-health').classList.contains('on')) rHealth(); } catch (e) {} openCrisisCard(); return; }
   reactToCraving(rec);
   try { if (document.getElementById('pg-health').classList.contains('on')) rHealth(); } catch (e) {}
 }
+// Найти ранее сохранённый план «если...то» под конкретный триггер —
+// план хранится как обычный инсайт (тег «Личное», src-метка), чтобы не
+// плодить новую сущность (см. HEALTH_BRIEF.md, принцип «слой поверх»).
+function findPlanFor(trig) {
+  const t = (trig || '').trim().toLowerCase(); if (!t) return null;
+  return (DB.insights || []).find(i => i.src === 'План (если-то)' && (i.body || '').toLowerCase().includes(t));
+}
+function planForTrigger(trig) {
+  reflectPromptText(`Если «${trig}» — то я:`);
+  const sr = $('add-src'); if (sr) sr.value = 'План (если-то)';
+}
+function planForTriggerIdx(i) {
+  const row = (STATE.healthTopTrig || [])[i]; if (row) planForTrigger(row[0]);
+}
 // Живой отклик на тягу: без осуждения при срыве (метод «Зачем?» —
 // честные данные, не провал), с паттерном при накоплении истории.
+// Награда за «устоял» — переменная (variable-ratio), не гарантированная
+// галочка каждый раз: непредсказуемость сама по себе поддерживает
+// вовлечённость (см. разбор JITAI, п. «variable-ratio reinforcement»).
 function reactToCraving(rec) {
   const rows = [];
   const list = DB.cravings || [];
   if (rec.outcome === 'held') {
     let streak = 0; for (const c of list) { if (c.outcome !== 'held') break; streak++; }
     rows.push({ html: `💪 Устоял(а)${streak > 1 ? ` — ${streak} раз подряд` : ''}` });
+    if (Math.random() < 0.3) {
+      const bonuses = ['🌟 Это не просто галочка — паттерн правда меняется.', '🎉 Маленькая победа, но настоящая.', '💎 Месяц назад это было бы сложнее — заметь разницу.'];
+      rows.push({ html: bonuses[Math.floor(Math.random() * bonuses.length)] });
+    }
   } else {
     rows.push({ html: `Записано честно — это данные, не провал.${rec.trigger ? ` Триггер: «${esc(rec.trigger)}»` : ''}` });
   }
@@ -1785,8 +2096,28 @@ function reactToCraving(rec) {
     const heldN = sameKind.filter(c => c.outcome === 'held').length;
     rows.push({ html: `📊 «${esc(rec.kind)}»: устоял в ${heldN} из ${sameKind.length} (${Math.round(heldN / sameKind.length * 100)}%)` });
   }
+  const plan = findPlanFor(rec.trigger);
+  if (plan) rows.push({ html: `📌 У тебя есть план на этот случай: ${esc(plan.body.replace(/\n+/g, ' ').trim().slice(0, 140))}` });
+  // Петля обратной связи: если показывалась микро-интервенция и ты устоял —
+  // спросим, ЧТО помогло, чтобы в следующий раз поднять это первым. Это и
+  // делает движок адаптивным (JITAI: intervention → outcome → приоритет).
+  if (rec.outcome === 'held' && rec.intensity >= 6) {
+    const base = rec.onset === 'tonic' ? CRAVING_TIPS_TONIC : CRAVING_TIPS_CUE;
+    const btns = base.map(t => `<button class="btn btn-s btn-sm" onclick="markHelped(${rec.id},'${t.k}')">${esc(t.lbl)}</button>`).join(' ')
+      + ` <button class="btn btn-s btn-sm" onclick="markHelped(${rec.id},'wait')">просто переждал</button>`;
+    rows.push({ html: `<div style="font-weight:500;margin-bottom:.4rem">Что помогло удержаться?</div><div style="display:flex;gap:.4rem;flex-wrap:wrap">${btns}</div>` });
+  }
   rows.push({ html: `Открыть «Здоровье» →`, act: `rcClose();goTo('health')` });
   reactCard(rows, 'Тяга');
+}
+// Запомнить, какой приём помог именно тебе — движок учится и в следующий
+// раз поднимет его первым (см. orderedTips). Локально, приватно, на твоих
+// данных — это и есть персональная адаптивность вместо серверного ML.
+function markHelped(id, key) {
+  const rec = (DB.cravings || []).find(c => c.id === id); if (!rec) return;
+  rec.helped = key; touch(rec); persist(); hpt();
+  toast(key === 'wait' ? 'Записал — просто переждал' : 'Запомнил, что помогло тебе ✓', 'ok');
+  rcClose();
 }
 // Синтез: сферы-привычки со здоровьем в имени (детект по ключевым
 // словам — не отдельный флаг, чтобы не плодить новую сущность).
@@ -1797,10 +2128,26 @@ function addHealthSphere(name, icon) {
   createSphere({ name, icon, type: 'habit', color: '#5e6ad2' });
   rHealth(); toast(`«${name}» добавлена — отмечай на «Сферах»`, 'ok');
 }
+// «Среда»: реструктуризация окружения (BCTTv1) — три простых переключателя,
+// не отдельная сущность, а плоские флаги (см. DEFAULT_DB.env).
+function toggleEnvFlag(key) {
+  DB.env = DB.env || {}; DB.env[key] = !DB.env[key];
+  persist(); rHealth(); hpt();
+}
 function rHealth() {
   const el = $('health-out'); if (!el) return;
   const hs = healthSpheres(), crav = DB.cravings || [];
-  let html = `<div class="sec-lbl">Вредные привычки</div>`;
+  // «Риск»: прозрачный объясняющий слой — персональный движок cravingRisk
+  // выдаёт уровень + конкретные причины (окно суток, пост-срыв, стресс…),
+  // чтобы решение системы никогда не ощущалось произвольным.
+  const risk = cravingRisk();
+  const lvl = risk.score >= 0.5 ? 'высокий' : risk.score >= 0.3 ? 'повышенный' : 'спокойный';
+  let html = `<div class="sec-lbl">Риск сейчас</div>
+    <div class="card mx mb" style="padding:1rem">${risk.factors.length
+      ? `<div class="si-text" style="margin-bottom:.6rem;font-weight:600">Сейчас риск ${lvl}${risk.score >= 0.3 ? ' — стоит опереться заранее' : ''}.</div>`
+        + risk.factors.map(f => `<div class="si-row"><div class="si-dot neg"></div><div class="si-body"><div class="si-text">${esc(f.why)}</div></div></div>`).join('')
+      : `<div class="ai-sp-empty">✓ Спокойно. По твоим данным сейчас ничего тревожного.</div>`}</div>`;
+  html += `<div class="sec-lbl">Прогресс</div>`;
   if (!hs.length) {
     html += `<div class="card mx mb"><div style="padding:1rem" class="ai-sp-empty">Заведи привычку-трекер — «Без сигарет», «Без сладкого» — и здесь появится стрик и паттерн срывов.
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.75rem">
@@ -1814,8 +2161,9 @@ function rHealth() {
       return `<div class="srow" onclick="openSphereLog(${s.id})" role="button"><div class="sic" style="background:${s.color}22"><span>${esc(s.icon || '●')}</span></div><span class="sl2">${esc(s.name)}</span><span class="sv2">${st.consistency || 0}% за 30д</span></div>`;
     }).join('') + `</div>`;
   }
-  html += `<div class="sec-lbl">Тяга</div>
-    <div class="mx mb"><button class="btn btn-p btn-full" onclick="openCraving()"><i data-lucide="zap"></i>У меня тяга сейчас</button></div>`;
+  html += `<div class="sec-lbl">Опора</div>
+    <div class="mx mb"><button class="btn btn-p btn-full" onclick="openCraving()"><i data-lucide="zap"></i>У меня тяга сейчас</button></div>
+    <div class="mx mb"><button class="btn btn-s btn-full" onclick="openTech('')"><i data-lucide="life-buoy"></i>Приёмы под состояние</button></div>`;
   if (crav.length) {
     const held = crav.filter(c => c.outcome === 'held').length;
     const rate = Math.round(held / crav.length * 100);
@@ -1823,13 +2171,27 @@ function rHealth() {
     const trigCount = {};
     crav.forEach(c => { const t = (c.trigger || '').trim().toLowerCase(); if (t) trigCount[t] = (trigCount[t] || 0) + 1; });
     const topTrig = Object.entries(trigCount).sort((a, b) => b[1] - a[1]).slice(0, 3);
-    html += `<div class="card mx mb" style="padding:1rem">
+    STATE.healthTopTrig = topTrig;
+    // Одиночество — один из двух корневых триггеров (см. разбор JITAI,
+    // раздел «стресс/одиночество»): подсвечиваем связь только если данных
+    // хватает для честного вывода, а не одной-двух точек.
+    const aloneRecs = crav.filter(c => c.alone === 'alone'), peopleRecs = crav.filter(c => c.alone === 'people');
+    let loneRow = '';
+    if (aloneRecs.length >= 3 && peopleRecs.length >= 2) {
+      const aloneRate = Math.round(aloneRecs.filter(c => c.outcome === 'gave_in').length / aloneRecs.length * 100);
+      const peopleRate = Math.round(peopleRecs.filter(c => c.outcome === 'gave_in').length / peopleRecs.length * 100);
+      if (aloneRate - peopleRate >= 15)
+        loneRow = `<div class="si-row"><div class="si-body"><div class="si-text">Один(на) срывы чаще: ${aloneRate}% против ${peopleRate}% с людьми</div></div></div>`;
+    }
+    html += `<div class="sec-lbl">Триггеры</div>
+    <div class="card mx mb" style="padding:1rem">
       <div class="kgrid" style="margin:0 0 .75rem">
         <div class="kc"><span class="kn">${crav.length}</span><span class="kl">Всего</span></div>
         <div class="kc"><span class="kn">${rate}%</span><span class="kl">Устоял</span></div>
         <div class="kc"><span class="kn">${week}</span><span class="kl">За 7 дней</span></div>
       </div>
-      ${topTrig.length ? `<div class="f-lbl">Частые триггеры</div>` + topTrig.map(([t, n]) => `<div class="si-row"><div class="si-body"><div class="si-text">${esc(t)} — ${n} ${pl(n, 'раз', 'раза', 'раз')}</div></div></div>`).join('') : ''}
+      ${topTrig.length ? `<div class="f-lbl">Частые триггеры</div>` + topTrig.map(([t, n], i) => `<div class="si-row"><div class="si-body"><div class="si-text">${esc(t)} — ${n} ${pl(n, 'раз', 'раза', 'раз')}</div>${i === 0 ? `<div class="si-act">${findPlanFor(t) ? '📌 план на этот случай уже есть' : `<a href="javascript:void 0" onclick="planForTriggerIdx(0)">+ план «если...то»</a>`}</div>` : ''}</div></div>`).join('') : ''}
+      ${loneRow}
     </div>`;
   }
   const si = smartInsights();
@@ -1838,7 +2200,32 @@ function rHealth() {
   html += healthItems.length
     ? `<div class="si-card mx mb">` + healthItems.map(it => `<div class="si-row"><div class="si-dot ${it.pos ? 'pos' : 'neg'}"></div><div class="si-body"><div class="si-text">${esc(it.text)}</div><div class="si-act">→ ${esc(it.action)}</div></div></div>`).join('') + `</div>`
     : `<div class="card mx mb"><div style="padding:1rem" class="ai-sp-empty">Отмечай никотин/алкоголь/сладкое в чек-ине — через несколько дней здесь появится честная связь с твоим состоянием.</div></div>`;
-  html += `<div class="sec-lbl">Психологический разбор</div>
+  // Психическое состояние по диалогам — синхронизация психоконтура с
+  // журналом здоровья (запрос владельца: ключевые данные о состоянии из
+  // чатов распределяются сюда). Честно к малым данным: тренд только при n≥3.
+  const md = mentalStateDigest();
+  if (md) {
+    const moodRu = { low: 'подавленное', mid: 'ровное', high: 'приподнятое' };
+    html += `<div class="sec-lbl">Психическое состояние</div><div class="card mx mb" style="padding:1rem">`;
+    html += `<div class="si-text"><b>По последнему диалогу:</b> настроение ${moodRu[md.latest.mood] || '—'}${md.latest.emotion ? `, ${esc(md.latest.emotion)}` : ''}.</div>`;
+    if (md.n >= 3) {
+      const trend = md.avgMood >= 2.4 ? 'скорее в ресурсе' : md.avgMood <= 1.6 ? 'скорее на спаде' : 'ровное';
+      html += `<div class="si-row" style="margin-top:.5rem"><div class="si-dot ${md.avgMood >= 2.4 ? 'pos' : 'neg'}"></div><div class="si-body"><div class="si-text">За 2 недели по ${md.n} ${pl(md.n, 'диалогу', 'диалогам', 'диалогам')} — состояние ${trend}.</div></div></div>`;
+      if (md.highStress >= 2) html += `<div class="si-row"><div class="si-dot neg"></div><div class="si-body"><div class="si-text">Напряжение звучало в ${md.highStress} из ${md.n} — стоит поберечь ресурс.</div></div></div>`;
+      if (md.lonely >= 2) html += `<div class="si-row"><div class="si-dot neg"></div><div class="si-body"><div class="si-text">Тема одиночества всплывала ${md.lonely} ${pl(md.lonely, 'раз', 'раза', 'раз')} — это частый корень тяги.</div></div></div>`;
+    } else {
+      html += `<div class="si-text" style="color:var(--t3);margin-top:.4rem">Закрывай диалоги с наставником — состояние из них копится здесь, и через несколько разговоров появится тренд.</div>`;
+    }
+    html += `</div>`;
+  }
+  const env = DB.env || {};
+  html += `<div class="sec-lbl">Среда</div>
+    <div class="card mx mb" style="padding:.5rem">
+      <div class="srow" onclick="toggleEnvFlag('noSweetsHome')" role="button"><span class="sl2">Дома нет сладкого</span><span class="sv2">${env.noSweetsHome ? '✓' : '—'}</span></div>
+      <div class="srow" onclick="toggleEnvFlag('noCigsHome')" role="button"><span class="sl2">Дома нет сигарет</span><span class="sv2">${env.noCigsHome ? '✓' : '—'}</span></div>
+      <div class="srow" onclick="toggleEnvFlag('ritual')" role="button"><span class="sl2">Вечерний ритуал заменён</span><span class="sv2">${env.ritual ? '✓' : '—'}</span></div>
+    </div>`;
+  html += `<div class="sec-lbl">Разбор</div>
     <div class="mx mb"><button class="btn btn-s btn-full" onclick="goTo('map');msub('graph');STATE.mapView='psy';rMap()">Функция, вторичная выгода, потребность →</button></div>`;
   html += `<div class="sec-lbl">Витамины и добавки</div>
     <div class="mx" style="margin-bottom:5rem"><button class="btn btn-s btn-full" onclick="addHealthSphere('Витамины','💊')">+ Отслеживать приём</button></div>`;
@@ -2893,6 +3280,7 @@ async function enrichDigestAutonomously(digId) {
 // ─── КОНФИГ ──────────────────────────────────────────────────────
 function rCfgForm() {
   const ni = $('cfg-name');   if(ni) ni.value = CFG.userName||'';
+  const tci = $('cfg-trusted'); if(tci) tci.value = CFG.trustedContact||'';
   const di = $('cfg-domain'); if(di) di.value = CFG.domainLabel||'Книга';
   const ai = $('cfg-api');    if(ai) ai.value = CFG.apiUrl||'';
   const ki = $('cfg-space');  if(ki) ki.value = CFG.spaceKey||'';
@@ -2935,6 +3323,7 @@ function resetApiUrl() {
 }
 function saveCfg() {
   CFG.userName    = $('cfg-name')?.value.trim()||CFG.userName;
+  const tc = $('cfg-trusted'); if (tc) CFG.trustedContact = tc.value.trim();
   CFG.domainLabel = $('cfg-domain')?.value.trim()||CFG.domainLabel;
   CFG.apiUrl      = $('cfg-api')?.value.trim()||'';
   const keyVal    = $('cfg-space')?.value.trim()||'';
@@ -3370,7 +3759,7 @@ function mergeDB(local, remote) {
   IDCOLS.forEach(c => { out[c] = mergeById(local[c] || [], remote[c] || [], del); });
   // скалярные поля (состояние/главы/вопросы) — берём из более свежего документа
   const scal = (remote.__ts || 0) > (local.__ts || 0) ? remote : local;
-  ['vit','chapters','oq'].forEach(k => { if (scal[k] !== undefined) out[k] = scal[k]; });
+  ['vit','chapters','oq','env'].forEach(k => { if (scal[k] !== undefined) out[k] = scal[k]; });
   out.__ts = Math.max(local.__ts || 0, remote.__ts || 0);
   return out;
 }
@@ -4561,33 +4950,48 @@ async function chatFinish() {
     // Заключение — работа для СИЛЬНОЙ модели (deep-маршрут, opus): вывод
     // сразу размечается по методу «Зачем?» и разносится по системе.
     const schema = { type: 'object', additionalProperties: false,
-      required: ['text', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game'],
+      required: ['text', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game', 'state'],
       properties: {
         text: { type: 'string' },
         symptom: { anyOf: [{ type: 'string' }, { type: 'null' }] }, func: { anyOf: [{ type: 'string' }, { type: 'null' }] }, gain: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-        need: { anyOf: [{ type: 'string', enum: [...Object.values(PSY_NEED_CODE)] }, { type: 'null' }] },
-        ego: { anyOf: [{ type: 'string', enum: [...Object.values(PSY_EGO_CODE)] }, { type: 'null' }] },
+        ...psyEnumProps(),
         emotion: { anyOf: [{ type: 'string' }, { type: 'null' }] }, game: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        // Метрики состояния из диалога → синхронизируются с журналом здоровья
+        // (запрос владельца: при закрытии чата ключевые данные о состоянии
+        // распределяются в «Здоровье»). Коарс-оценка, ASCII-enum (не union+enum).
+        state: { type: 'object', additionalProperties: false, required: ['mood', 'stress', 'lonely'],
+          properties: {
+            mood: { type: 'string', enum: ['low', 'mid', 'high'] },
+            stress: { type: 'string', enum: ['low', 'mid', 'high'] },
+            lonely: { type: 'boolean' },
+          } },
       } };
     const out = await callClaude({
       system: (c.mode === 'dream'
         ? 'Сожми разбор сна. text: личный вывод от первого лица (2–4 предложения — что сон показал, какая часть меня в нём говорила, что признать или сделать). Плюс психологическая структура вывода: симптом (что сон подсветил), функция, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без эзотерики и воды.'
         : 'Сожми диалог по методу «Зачем?». text: личный вывод от первого лица (2–4 предложения — что я понял, корень темы, один следующий шаг). Плюс структура метода: симптом, функция симптома, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без воды.')
-        + ' Поля need/ego — строго кодом: need = safety(безопасность)/acceptance(принятие)/significance(значимость)/autonomy(автономия)/meaning(смысл)/closeness(близость)/control(контроль)/calm(покой)/novelty(новизна); ego = child(Ребёнок)/parent(Родитель)/adult(Взрослый).',
+        + ' Поля need/ego — строго кодом: need = safety(безопасность)/acceptance(принятие)/significance(значимость)/autonomy(автономия)/meaning(смысл)/closeness(близость)/control(контроль)/calm(покой)/novelty(новизна); ego = child(Ребёнок)/parent(Родитель)/adult(Взрослый). Если не видно — ставь \'none\' (не null). Плюс state — коротко оцени по диалогу: mood (low/mid/high — общий тон настроения), stress (low/mid/high — уровень напряжения), lonely (true, если тема одиночества/изоляции звучит).',
       user: dialog, maxTokens: 500, task: 'analysis', schema,
     });
     let parsed; try { parsed = JSON.parse(out); } catch (e) { parsed = { text: String(out).trim() }; }
     const t = String(parsed.text || '').trim(); if (!t) return;
     const psyNeed = psyNeedFromAI(parsed.need), psyEgo = psyEgoFromAI(parsed.ego);
+    // Метрики состояния из диалога → журнал здоровья (см. mentalStateDigest,
+    // cravingRisk): распределяем данные о состоянии в «Здоровье», как просил
+    // владелец, не перезаписывая честный чек-ин — это отдельный сигнал.
+    const st = parsed.state && ['low', 'mid', 'high'].includes(parsed.state.mood)
+      ? { mood: parsed.state.mood, stress: parsed.state.stress, lonely: !!parsed.state.lonely, emotion: parsed.emotion || null, at: nowISO(), day: todayKey() }
+      : undefined;
     c.summarized = true; touch(c);
     DB.insights.unshift({
       id: Date.now(), tag: 'personal', w: 2, title: titleFrom(t), body: t,
       date: dateRU(), createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION,
       src: c.mode === 'dream' ? 'Разбор сна' : 'Диалог', links: [], chatId: c.id,
       psy: psyNeed || parsed.func ? { symptom: parsed.symptom, func: parsed.func, gain: parsed.gain, need: psyNeed, ego: psyEgo, emotion: parsed.emotion, game: parsed.game, conf: 85, at: nowISO() } : undefined,
+      stateNote: st,
     });
     persist(); rIns(); rHIns(); rKPIs();
-    toast('Вывод диалога сохранён в инсайты', 'ok');
+    toast(st ? 'Вывод сохранён · состояние учтено в «Здоровье»' : 'Вывод диалога сохранён в инсайты', 'ok');
   } catch (e) { toast('Вывод не собрался: ' + e.message, 'warn'); }
 }
 // История диалогов: Разум → Записи → Диалоги.
@@ -4844,7 +5248,19 @@ const PSY_NEED_FROM_CODE = Object.fromEntries(Object.entries(PSY_NEED_CODE).map(
 const PSY_EGO_FROM_CODE = Object.fromEntries(Object.entries(PSY_EGO_CODE).map(([ru, code]) => [code, ru]));
 const psyNeedFromAI = code => PSY_NEED_FROM_CODE[code] || null;
 const psyEgoFromAI = code => PSY_EGO_FROM_CODE[code] || null;
-const PSY_SYSTEM = 'Ты — психолог-аналитик дневника «Архитектор». Работаешь строго по методу «Зачем?» (интеграция: логотерапия Франкла — у симптома есть функция и смысл; транзактный анализ Бёрна — игры, скрытый выигрыш, состояния Я; теория привязанности Боулби; эмоциональная регуляция Гоулмана). Для каждой записи осознанно определи: симптом (что болит/повторяется, словами автора), функцию симптома (ЗАЧЕМ он нужен психике), вторичную выгоду (payoff), глубинную потребность, состояние Я, ядровую эмоцию и психологическую игру, если она видна. Поля need/ego — строго кодом (не переводи и не выдумывай новые): need = safety(безопасность)/acceptance(принятие)/significance(значимость)/autonomy(автономия)/meaning(смысл)/closeness(близость)/control(контроль)/calm(покой)/novelty(новизна); ego = child(Ребёнок)/parent(Родитель)/adult(Взрослый). НЕ выдумывай: если по тексту не видно — ставь null и снижай confidence. Дополнительно определи themes: 1–3 СМЫСЛОВЫЕ темы записи — о чём она ПО СУТИ (короткая обобщённая фраза в именительном падеже: «отношения», «страх остановки», «признание на работе», «границы с матерью»). Не служебные слова, не пересказ, не эмоции — суть. Если в словаре уже есть подходящая тема — переиспользуй её дословно, чтобы записи связывались.';
+// need/ego в схеме — плоский string с сентинелом 'none' вместо union-типа
+// ['string','null']. Причина (воспроизведено в проде, IMG_3165): Anthropic-
+// валидатор отвергает union-тип ВМЕСТЕ с enum — «Enum value 'safety' does
+// not match declared type '['string','null']'», хотя null и был в enum.
+// Плоский string + 'none' проходит и в Anthropic, и в OpenAI strict; 'none'
+// декодится в null через psyNeedFromAI/psyEgoFromAI (нет в обратной карте).
+function psyEnumProps() {
+  return {
+    need: { type: 'string', enum: [...Object.values(PSY_NEED_CODE), 'none'] },
+    ego:  { type: 'string', enum: [...Object.values(PSY_EGO_CODE), 'none'] },
+  };
+}
+const PSY_SYSTEM = 'Ты — психолог-аналитик дневника «Архитектор». Работаешь строго по методу «Зачем?» (интеграция: логотерапия Франкла — у симптома есть функция и смысл; транзактный анализ Бёрна — игры, скрытый выигрыш, состояния Я; теория привязанности Боулби; эмоциональная регуляция Гоулмана). Для каждой записи осознанно определи: симптом (что болит/повторяется, словами автора), функцию симптома (ЗАЧЕМ он нужен психике), вторичную выгоду (payoff), глубинную потребность, состояние Я, ядровую эмоцию и психологическую игру, если она видна. Поля need/ego — строго кодом (не переводи и не выдумывай новые): need = safety(безопасность)/acceptance(принятие)/significance(значимость)/autonomy(автономия)/meaning(смысл)/closeness(близость)/control(контроль)/calm(покой)/novelty(новизна); ego = child(Ребёнок)/parent(Родитель)/adult(Взрослый). НЕ выдумывай: если по тексту не видно — для need/ego ставь код \'none\', для остальных полей null, и снижай confidence. Дополнительно определи themes: 1–3 СМЫСЛОВЫЕ темы записи — о чём она ПО СУТИ (короткая обобщённая фраза в именительном падеже: «отношения», «страх остановки», «признание на работе», «границы с матерью»). Не служебные слова, не пересказ, не эмоции — суть. Если в словаре уже есть подходящая тема — переиспользуй её дословно, чтобы записи связывались.';
 let _psyBusy = false;
 // Разметка одного батча записей психоконтуром — используется и фоновым
 // psyAutoRun, и массовым «освоением» архива (gptAbsorb).
@@ -4855,8 +5271,7 @@ async function psyMarkBatch(todo) {
     properties: {
       id: { type: 'integer' },
       symptom: { anyOf: [{ type: 'string' }, { type: 'null' }] }, func: { anyOf: [{ type: 'string' }, { type: 'null' }] }, gain: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-      need: { anyOf: [{ type: 'string', enum: [...Object.values(PSY_NEED_CODE)] }, { type: 'null' }] },
-      ego: { anyOf: [{ type: 'string', enum: [...Object.values(PSY_EGO_CODE)] }, { type: 'null' }] },
+      ...psyEnumProps(),
       emotion: { anyOf: [{ type: 'string' }, { type: 'null' }] }, game: { anyOf: [{ type: 'string' }, { type: 'null' }] },
       conf: { type: 'integer', minimum: 0, maximum: 100 },
       themes: { type: 'array', items: { type: 'string' }, maxItems: 3 },

@@ -242,6 +242,23 @@ ok(/близость/.test(psy.view) && /Ребёнок/.test(psy.view), 'вью
 ok(/Функция/.test(psy.det) && /Вторичная выгода/.test(psy.det), 'в деталях записи — разбор: симптом → функция → вторичная выгода');
 ok(psy.sys, 'диалог-наставник ведёт по алгоритму метода «Зачем?»');
 
+// ── Схема психоразметки: без union-типа+enum (баг IMG_3165) ──
+const psySchema = await page.evaluate(() => {
+  const p = psyEnumProps();
+  return {
+    needType: p.need.type, egoType: p.ego.type,
+    needHasNull: p.need.enum.includes(null), needHasNone: p.need.enum.includes('none'),
+    egoHasNull: p.ego.enum.includes(null), egoHasNone: p.ego.enum.includes('none'),
+    hasSafety: p.need.enum.includes('safety'),
+    decodeNone: psyNeedFromAI('none'), decodeNoneEgo: psyEgoFromAI('none'),
+    decodeSafety: psyNeedFromAI('safety'),
+  };
+});
+ok(psySchema.needType === 'string' && psySchema.egoType === 'string' && !psySchema.needHasNull && !psySchema.egoHasNull,
+  'схема need/ego — плоский string без union-типа+null (иначе Anthropic валит «Enum value does not match declared type»)');
+ok(psySchema.needHasNone && psySchema.egoHasNone && psySchema.hasSafety && psySchema.decodeNone === null && psySchema.decodeNoneEgo === null && psySchema.decodeSafety === 'безопасность',
+  'сентинел \'none\' декодится в null, реальные коды (safety→безопасность) — в русское значение');
+
 // ── RULER ──
 await page.evaluate(() => openOv('ov-ci'));
 await page.waitForTimeout(120);
@@ -672,6 +689,311 @@ const sugarFactor = await page.evaluate(() => {
 });
 ok(sugarFactor, 'движок «что влияет» видит «сладкое» как фактор — не только никотин/кофеин/алкоголь');
 await page.evaluate(() => { goTo('home'); DB.cravings = []; });
+
+// ── «Здоровье» фаза 2: типология тяги, контекст, план «если-то», среда, риск ──
+const typology = await page.evaluate(() => {
+  DB.cravings = [];
+  openCraving();
+  document.getElementById('cr-int').value = 8;
+  sCrCtx(document.querySelector('#cr-ctx [data-v="tonic"]'));
+  const tonicTip = document.getElementById('cr-tip').innerHTML;
+  sCrCtx(document.querySelector('#cr-ctx [data-v="cue"]'));
+  const cueTip = document.getElementById('cr-tip').innerHTML;
+  closeOv('ov-craving');
+  return { tonicTip, cueTip };
+});
+ok(/белковое|покоя/.test(typology.tonicTip) && !/белковое|покоя/.test(typology.cueTip),
+  'типология тяги: «копилось весь день» даёт другую подсказку (физиологическая компенсация), чем «внезапно, от повода»');
+
+const ctxSave = await page.evaluate(() => {
+  DB.cravings = [];
+  openCraving();
+  document.getElementById('cr-int').value = 7;
+  sCrCtx(document.querySelector('#cr-ctx [data-v="tonic"]'));
+  sCrCtx(document.querySelector('#cr-ctx [data-v="alone"]'));
+  saveCraving(false);
+  const rec = DB.cravings[0];
+  rcClose();
+  return rec;
+});
+ok(ctxSave.onset === 'tonic' && ctxSave.alone === 'alone', '«Тяга» сохраняет необязательный контекст: тип накопления и один(на)/с людьми');
+
+const loneCorr = await page.evaluate(() => {
+  const keep = DB.cravings;
+  DB.cravings = [
+    { id: 1, kind: 'сигарета', intensity: 5, trigger: '', outcome: 'gave_in', alone: 'alone', createdAt: nowISO(), day: todayKey() },
+    { id: 2, kind: 'сигарета', intensity: 5, trigger: '', outcome: 'gave_in', alone: 'alone', createdAt: nowISO(), day: todayKey() },
+    { id: 3, kind: 'сигарета', intensity: 5, trigger: '', outcome: 'held', alone: 'alone', createdAt: nowISO(), day: todayKey() },
+    { id: 4, kind: 'сигарета', intensity: 5, trigger: '', outcome: 'held', alone: 'people', createdAt: nowISO(), day: todayKey() },
+    { id: 5, kind: 'сигарета', intensity: 5, trigger: '', outcome: 'held', alone: 'people', createdAt: nowISO(), day: todayKey() },
+  ];
+  goTo('health');
+  const txt = document.getElementById('health-out').textContent;
+  DB.cravings = keep;
+  return txt;
+});
+ok(/Один\(на\) срывы чаще/.test(loneCorr), 'связь одиночества со срывами подсвечивается, когда данных достаточно (корневой триггер из разбора JITAI)');
+
+const planFlow = await page.evaluate(() => {
+  const keepIns = DB.insights, keepCrav = DB.cravings;
+  DB.insights = [{ id: 9001, tag: 'personal', w: 1, title: 'План', body: 'Если «созвон с боссом» — то я: выйду на 5 минут подышать.', date: dateRU(), createdAt: nowISO(), day: todayKey(), src: 'План (если-то)', links: [] }];
+  DB.cravings = [];
+  openCraving();
+  document.getElementById('cr-trigger').value = 'созвон с боссом';
+  saveCraving(true);
+  const cardTxt = (document.getElementById('react-card') || {}).textContent || '';
+  rcClose();
+  goTo('health');
+  const healthTxt = document.getElementById('health-out').textContent;
+  DB.insights = keepIns; DB.cravings = keepCrav;
+  return { cardTxt, healthTxt };
+});
+ok(/план на этот случай/.test(planFlow.cardTxt), 'если для триггера уже есть план «если-то», он всплывает в отклике на следующую тягу');
+ok(/план на этот случай уже есть/.test(planFlow.healthTxt), '«Триггеры» на «Здоровье» показывают, что у частого триггера уже есть план');
+
+const envToggle = await page.evaluate(() => {
+  const keep = DB.env;
+  DB.env = { noSweetsHome: false, noCigsHome: false, ritual: false };
+  goTo('health');
+  const before = document.getElementById('health-out').textContent;
+  toggleEnvFlag('noSweetsHome');
+  const after = document.getElementById('health-out').textContent;
+  DB.env = keep;
+  goTo('health');
+  return { before, after };
+});
+ok(/Среда/.test(envToggle.before) && /Дома нет сладкого/.test(envToggle.before), '«Среда»: чек-лист реструктуризации окружения (BCTTv1) отображается');
+ok(envToggle.after !== envToggle.before, 'переключатель «Среды» меняет состояние и перерисовывает раздел');
+
+const riskCard = await page.evaluate(() => {
+  const keepVit = { ...DB.vit }, keepCrav = DB.cravings;
+  DB.cravings = [];  // изолируем риск от истории — проверяем ветку состояния
+  DB.vit = { ...DB.vit, ci: true, date: todayKey(), st: 8, sl: 5 };
+  goTo('health');
+  const withRisk = document.getElementById('health-out').textContent;
+  DB.vit = { ...DB.vit, st: 3, sl: 8 };
+  goTo('health');
+  const noRisk = document.getElementById('health-out').textContent;
+  DB.vit = keepVit; DB.cravings = keepCrav;
+  goTo('health');
+  return { withRisk, noRisk };
+});
+ok(/Риск сейчас/.test(riskCard.withRisk) && /Сейчас риск/.test(riskCard.withRisk) && /стресс/.test(riskCard.withRisk), '«Риск сейчас» объясняет конкретные причины (стресс/сон), а не просто «высокий риск»');
+ok(/Спокойно\. По твоим данным/.test(riskCard.noRisk), 'без факторов риска — спокойная, не пугающая формулировка');
+
+const bonus = await page.evaluate(() => {
+  DB.cravings = [];
+  const origRandom = Math.random;
+  Math.random = () => 0;
+  openCraving();
+  saveCraving(true);
+  const cardTxt = (document.getElementById('react-card') || {}).textContent || '';
+  Math.random = origRandom;
+  rcClose();
+  return cardTxt;
+});
+ok(/паттерн правда меняется|Маленькая победа|заметь разницу/.test(bonus), 'переменное подкрепление: после «устоял» иногда появляется непредсказуемый бонус-отклик, не гарантированная галочка');
+await page.evaluate(() => { goTo('home'); DB.cravings = []; });
+
+// ── Персональный адаптивный риск-движок (учится на своей истории) ──
+const windowRisk = await page.evaluate(() => {
+  const keep = { crav: DB.cravings, vit: { ...DB.vit } };
+  DB.vit = { ...DB.vit, ci: false };  // без чек-ина — изолируем окно суток
+  const mkEvening = id => { const d = new Date(); d.setHours(21, 0, 0, 0); return { id, kind: 'сигарета', intensity: 6, trigger: '', outcome: 'gave_in', createdAt: d.toISOString(), day: todayKey() }; };
+  DB.cravings = [1, 2, 3, 4, 5, 6].map(mkEvening);
+  const atEvening = cravingRisk(21);   // «как будто сейчас вечер»
+  const atMorning = cravingRisk(8);    // «как будто утро»
+  DB.cravings = keep.crav; DB.vit = keep.vit;
+  return { atEvening, atMorning };
+});
+ok(windowRisk.atEvening.factors.some(f => f.tag === 'window') && windowRisk.atEvening.top,
+  'движок учит ТВОЁ окно суток: вечером риск выше, потому что вечером ты срываешься чаще всего');
+ok(!windowRisk.atMorning.factors.some(f => f.tag === 'window'),
+  'то же окно утром не поднимает риск — паттерн персональный, привязан ко времени');
+
+const postLapse = await page.evaluate(() => {
+  const keep = DB.cravings;
+  const d = new Date(Date.now() - 3600e3);  // час назад
+  DB.cravings = [{ id: 1, kind: 'сигарета', intensity: 5, trigger: '', outcome: 'gave_in', createdAt: d.toISOString(), day: todayKey() }];
+  const r = cravingRisk(12);
+  DB.cravings = keep;
+  return r;
+});
+ok(postLapse.factors.some(f => f.tag === 'recent'), 'пост-срыв окно (AVE): первые двое суток после срыва движок держит риск выше');
+
+const feedbackLoop = await page.evaluate(() => {
+  DB.cravings = [];
+  STATE.crOnset = null;
+  openCraving();
+  document.getElementById('cr-int').value = 8; crIntChange(8);
+  saveCraving(true);
+  const rec = DB.cravings[0];
+  const cardHasQuestion = /Что помогло удержаться/.test((document.getElementById('react-card') || {}).textContent || '');
+  markHelped(rec.id, 'move');
+  const stored = DB.cravings[0].helped;
+  // теперь при следующей тяге приём «Шаги» должен подняться первым
+  const ordered = orderedTips(CRAVING_TIPS_CUE).map(t => t.k);
+  DB.cravings = [];
+  return { cardHasQuestion, stored, firstTip: ordered[0] };
+});
+ok(feedbackLoop.cardHasQuestion, 'после «устоял» с показанной интервенцией движок спрашивает, ЧТО помогло — петля обратной связи');
+ok(feedbackLoop.stored === 'move', 'ответ сохраняется на записи тяги (локально, приватно, на твоих данных)');
+ok(feedbackLoop.firstTip === 'move', 'движок адаптируется: приём, что помог тебе, в следующий раз поднимается первым');
+await page.evaluate(() => { goTo('home'); DB.cravings = []; });
+
+// ── Закрытие чата → метрики состояния синхронизируются с «Здоровьем» ──
+const stateFlow = await page.evaluate(async () => {
+  const keepIns = DB.insights, keepChats = DB.chats, keepCrav = DB.cravings;
+  DB.insights = []; DB.chats = []; DB.cravings = [];
+  setAiKey('sk-test'); CFG.aiProvider = 'anthropic';
+  let phase = 'reply';
+  window.fetch = (u) => {
+    if (!String(u).includes('anthropic')) return Promise.reject(new Error('offline'));
+    const text = phase === 'reply'
+      ? 'Слышу тебя. Что за этим стоит?'
+      : JSON.stringify({ text: 'Понял: тяну из страха оценки, и вечерами одному особенно тяжело.', symptom: 'откладываю', func: 'избежать оценки', gain: 'не рисковать', need: 'safety', ego: 'child', emotion: 'тревога', game: null, state: { mood: 'low', stress: 'high', lonely: true } });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text }], usage: { input_tokens: 100, output_tokens: 50 } }) });
+  };
+  openChatFor(null, 'Опять весь вечер один, тянет курить');
+  await new Promise(r => setTimeout(r, 350));
+  const c = DB.chats[DB.chats.length - 1];
+  c.msgs.push({ r: 'u', t: 'Да, вечерами особенно', ts: Date.now() });
+  phase = 'finish';
+  await chatFinish();
+  const ins = DB.insights[0] || {};
+  const risk = cravingRisk(12);
+  const md = mentalStateDigest();
+  goTo('health');
+  const healthTxt = document.getElementById('health-out').textContent;
+  goTo('home');
+  DB.insights = keepIns; DB.chats = keepChats; DB.cravings = keepCrav;
+  return {
+    hasNote: !!ins.stateNote, note: ins.stateNote || {},
+    riskChatStress: risk.factors.some(f => f.tag === 'chat-stress'),
+    riskChatLonely: risk.factors.some(f => f.tag === 'chat-lonely'),
+    healthHasSection: /Психическое состояние/.test(healthTxt),
+    digestN: md ? md.n : 0,
+  };
+});
+ok(stateFlow.hasNote && stateFlow.note.mood === 'low' && stateFlow.note.stress === 'high' && stateFlow.note.lonely === true,
+  'при закрытии чата состояние (настроение/стресс/одиночество) сохраняется как метрика на выводе диалога');
+ok(stateFlow.riskChatStress && stateFlow.riskChatLonely,
+  'сегодняшний диалог о стрессе/одиночестве поднимает риск тяги — психоконтур синхронизирован с движком здоровья');
+ok(stateFlow.healthHasSection && stateFlow.digestN >= 1,
+  'в «Здоровье» появляется раздел «Психическое состояние» по диалогам');
+
+// ── Приёмы саморегуляции (локальный RAG-lite) + кризисный протокол ──
+const tech = await page.evaluate(() => {
+  const byText = suggestTechniques('не спал всю ночь, злюсь на начальника', 2).map(t => t.id);
+  const craving = suggestTechniques('хочется съесть торт и сорваться', 2).map(t => t.id);
+  const anxiety = suggestTechniques('накрывает тревога перед встречей', 2).map(t => t.id);
+  const lonely = suggestTechniques('пусто и одиноко весь вечер один', 2).map(t => t.id);
+  const empty = suggestTechniques('', 2).length;
+  return { byText, craving, anxiety, lonely, empty };
+});
+ok(tech.byText.includes('sigh') || tech.byText.includes('opposite'), 'ретрив по свободному тексту: «злюсь» → приём на злость/напряжение (без вектор-БД, локально)');
+ok(tech.craving.includes('urgesurf'), '«хочется съесть торт и сорваться» → сёрфинг по тяге (ACT)');
+ok(tech.anxiety.includes('ground54321') || tech.anxiety.includes('box') || tech.anxiety.includes('decatastroph'), '«тревога перед встречей» → заземление/дыхание/декатастрофизация');
+ok(tech.lonely.includes('connect'), '«пусто и одиноко» → шаг к человеку (корневой триггер)');
+ok(tech.empty === 0, 'без запроса приёмы не навязываются');
+
+const techUI = await page.evaluate(() => {
+  openTech('тревога паника');
+  const open = document.getElementById('ov-tech').classList.contains('on');
+  const out = document.getElementById('tech-out').textContent;
+  closeOv('ov-tech');
+  return { open, out };
+});
+ok(techUI.open && /Заземление|Дыхание|Декатастроф/.test(techUI.out), 'шит «Приёмы» открывается и показывает подобранный приём с шагами');
+
+const crisis = await page.evaluate(() => {
+  const hit = crisisScreen('иногда думаю, что не хочу жить');
+  const safe = crisisScreen('устал и злюсь на всех, тяжёлый день');
+  // острый сигнал в свободном тексте приёмов → кризисный протокол, не приём
+  document.getElementById('tech-text').value = 'не хочу жить, сил больше нет';
+  techFromText();
+  const crisisOpen = document.getElementById('ov-crisis').classList.contains('on');
+  const techClosed = !document.getElementById('ov-tech').classList.contains('on');
+  const body = document.getElementById('ov-crisis').textContent;
+  closeOv('ov-crisis');
+  return { hit, safe, crisisOpen, techClosed, body };
+});
+ok(crisis.hit && !crisis.safe, 'кризис-скрин ловит острый сигнал и не срабатывает на обычную усталость/злость');
+ok(crisis.crisisOpen && crisis.techClosed, 'острый сигнал в тексте → кризисный протокол вместо приёма (safety fallback)');
+ok(/не терапевт|скорую|не один/.test(crisis.body), 'кризисная карточка: без диагнозов, ведёт к живому человеку, честно про «не терапевт»');
+
+const crisisCraving = await page.evaluate(() => {
+  DB.cravings = [];
+  openCraving();
+  document.getElementById('cr-trigger').value = 'не хочу жить';
+  saveCraving(false);
+  const crisisOpen = document.getElementById('ov-crisis').classList.contains('on');
+  const noReact = !document.getElementById('react-card');
+  closeOv('ov-crisis'); DB.cravings = [];
+  return { crisisOpen, noReact };
+});
+ok(crisisCraving.crisisOpen && crisisCraving.noReact, 'острый сигнал в триггере тяги → кризисный протокол вместо обычного отклика');
+await page.evaluate(() => { goTo('home'); DB.cravings = []; });
+
+// ── Crisis-аудит: косвенные сигналы ловятся, обычная тяжесть — нет ──
+const crisisAudit = await page.evaluate(() => {
+  const hidden = ['иногда хочется просто исчезнуть', 'всем было бы лучше без меня',
+    'если бы меня не было, никому бы хуже не стало', 'не вижу смысла ни в чём',
+    'просто хочется, чтобы всё прекратилось', 'не хочу просыпаться по утрам'];
+  const benign = ['нет смысла спорить с ним', 'устал на работе за день',
+    'не вижу смысла в этой встрече', 'хочется умереть со смеху', 'злюсь и вымотан, тяжёлый день'];
+  return { hiddenCaught: hidden.every(crisisScreen), benignClean: benign.every(t => !crisisScreen(t)) };
+});
+ok(crisisAudit.hiddenCaught, 'crisis-аудит: косвенные сигналы («всем лучше без меня», «хочется исчезнуть», «не вижу смысла ни в чём») ловятся');
+ok(crisisAudit.benignClean, 'crisis-аудит: обычная тяжесть/идиомы («умереть со смеху», «нет смысла спорить») НЕ дают ложного кризиса');
+
+// ── Therapeutic Generator (grounded, single-call) + safety-контур ──
+const gen = await page.evaluate(async () => {
+  setAiKey('sk-test'); CFG.aiProvider = 'anthropic';
+  const mock = obj => { window.fetch = (u) => String(u).includes('anthropic')
+    ? Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify(obj) }], usage: { input_tokens: 100, output_tokens: 40 } }) })
+    : Promise.reject(new Error('offline')); };
+  // 1) обычный кейс: сообщение + метод из НАШЕЙ базы + кнопка «записать как тягу»
+  openTech('');
+  document.getElementById('tech-text').value = 'поругался с коллегой, хочется съесть торт';
+  mock({ crisis: false, craving_detected: true, method_id: 'urgesurf', message: 'Обидно, когда не слышат. Давай переждём волну тяги вместе.' });
+  await techGenerate();
+  const outNormal = document.getElementById('tech-out').textContent;
+  const hasCravingBtn = /Записать как тягу/.test(document.getElementById('tech-out').innerHTML);
+  // 2) ИИ вернул method_id, которого нет в базе → метод не подставляется (grounding)
+  document.getElementById('tech-text').value = 'тревожно';
+  mock({ crisis: false, craving_detected: false, method_id: 'выдуманный_метод', message: 'Слышу тревогу.' });
+  await techGenerate();
+  const outHallucinated = document.getElementById('tech-out').textContent;
+  // 3) флаг crisis от ИИ → кризисный протокол, генерация отменяется
+  document.getElementById('tech-text').value = 'нейтральный по виду текст';
+  mock({ crisis: true, craving_detected: false, method_id: 'none', message: '' });
+  await techGenerate();
+  const crisisFromFlag = document.getElementById('ov-crisis').classList.contains('on');
+  closeOv('ov-crisis');
+  // 4) crisisScreen на САМ ответ ИИ (второй слой) → тоже кризис
+  openTech(''); document.getElementById('tech-text').value = 'обычный текст про усталость';
+  mock({ crisis: false, craving_detected: false, method_id: 'sigh', message: 'иногда кажется, что не хочу жить' });
+  await techGenerate();
+  const crisisFromOutput = document.getElementById('ov-crisis').classList.contains('on');
+  closeOv('ov-crisis');
+  return { outNormal, hasCravingBtn, outHallucinated, crisisFromFlag, crisisFromOutput };
+});
+ok(/переждём волну|Сёрфинг по тяге/.test(gen.outNormal) && gen.hasCravingBtn, 'генератор: бережное сообщение + метод из базы + мостик «записать как тягу» (JITAI)');
+ok(!/выдуманный/.test(gen.outHallucinated), 'grounding: метод не из нашей базы не подставляется — ИИ не навязывает выдуманную технику');
+ok(gen.crisisFromFlag, 'safety: флаг crisis от ИИ отменяет генерацию и открывает кризисный протокол');
+ok(gen.crisisFromOutput, 'safety: crisisScreen на самом ответе ИИ (второй слой) тоже уводит в кризисный протокол');
+
+const genOffline = await page.evaluate(async () => {
+  setAiKey('');  // нет ключа
+  openTech(''); document.getElementById('tech-text').value = 'тревожно и пусто';
+  await techGenerate();
+  const out = document.getElementById('tech-out').textContent;
+  closeOv('ov-tech');
+  return out;
+});
+ok(/Заземление|Дыхание|Шаг к человеку|приём/i.test(genOffline), 'без ИИ-ключа генератор тихо откатывается на локальные приёмы (offline-first)');
+await page.evaluate(() => { goTo('home'); });
 
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
