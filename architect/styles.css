@@ -1205,3 +1205,8 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .h-more-btn:active{background:var(--bg2)}
 .h-more{display:none}
 .h-more.on{display:block}
+
+/* ── ЗДОРОВЬЕ: тяга/импульс — микро-интервенция на пике ─────────── */
+.cr-tip-box{background:var(--bg2);border:1px solid var(--bd);border-left:3px solid var(--orange);border-radius:8px;padding:var(--s3);margin:var(--s2) 0}
+.cr-tip-h{font-size:var(--tx3);color:var(--t1);font-weight:500;margin-bottom:var(--s2)}
+.cr-tip-row{font-size:var(--tx3);color:var(--t2);line-height:1.6}

@@ -603,6 +603,76 @@ const font = await page.evaluate(async () => {
 });
 ok(font.avail && font.loaded >= 1, `Inter загружен локально (faces: ${font.loaded})`);
 
+// ── «Здоровье»: вредные привычки, «Тяга» + микро-интервенция, наджер ──
+ok(await page.evaluate(() => !!document.querySelector('[data-tab="health"]')), 'в сайдбаре есть раздел «Здоровье»');
+const healthEmpty = await page.evaluate(() => {
+  const keep = DB.spheres; DB.spheres = [];
+  goTo('health');
+  const txt = document.getElementById('health-out').textContent;
+  DB.spheres = keep;
+  return txt;
+});
+ok(/Заведи привычку-трекер/.test(healthEmpty) && /Без сигарет/.test(healthEmpty), 'без привычек-трекеров — понятный empty state с быстрым стартом');
+const crav = await page.evaluate(() => {
+  DB.cravings = [];
+  openCraving();
+  const before = document.getElementById('cr-tip').innerHTML;
+  document.getElementById('cr-int').value = 8; crIntChange(8);
+  const tipAtHigh = document.getElementById('cr-tip').innerHTML;
+  document.getElementById('cr-trigger').value = 'стресс на работе';
+  saveCraving(true);
+  const rec = DB.cravings[0];
+  const cardTxt = (document.getElementById('react-card') || {}).textContent || '';
+  rcClose();
+  return { before, tipAtHigh, rec, cardTxt };
+});
+ok(!crav.before && /3–5 минут/.test(crav.tipAtHigh) && /вдоха|Стакан воды|пройдись/.test(crav.tipAtHigh),
+  'при силе тяги ≥6 появляется микро-интервенция (дыхание/вода/движение), при низкой — нет');
+ok(crav.rec.kind === 'сигарета' && crav.rec.intensity === 8 && crav.rec.trigger === 'стресс на работе' && crav.rec.outcome === 'held',
+  '«Тяга» сохраняется: вид, сила, триггер, честный исход');
+ok(/Устоял/.test(crav.cardTxt), 'живой отклик на «устоял» — без осуждения, по факту');
+const cravFail = await page.evaluate(() => {
+  openCraving(); sCrKind(document.querySelector('#cr-kind [data-k="сладкое"]'));
+  saveCraving(false);
+  const txt = (document.getElementById('react-card') || {}).textContent || '';
+  rcClose();
+  return { txt, outcome: DB.cravings[0].outcome };
+});
+ok(cravFail.outcome === 'gave_in' && /честно|не провал/.test(cravFail.txt), 'срыв фиксируется без вины — «честно, не провал», не молчание и не нотация');
+const nudgeRisk = await page.evaluate(() => {
+  const keep = { spheres: DB.spheres, vit: { ...DB.vit } };
+  DB.spheres = [{ id: 999, name: 'Без сигарет', type: 'habit', color: '#000' }];
+  DB.vit = { ...DB.vit, ci: true, date: todayKey(), st: 8, sl: 7 };
+  const n = smartNudge();
+  DB.spheres = keep.spheres; DB.vit = keep.vit;
+  return n;
+});
+ok(nudgeRisk && /риск тяги/.test(nudgeRisk.text) && nudgeRisk.act === 'openCraving()', 'предиктивный наджер: высокий стресс + привычка-трекер → предупреждение о риске до срыва, не после');
+const healthWithData = await page.evaluate(() => {
+  const mood = createSphere({ name: 'Без сигарет', type: 'habit', color: '#000' });
+  goTo('health');
+  const txt = document.getElementById('health-out').textContent;
+  const hasCard = !!document.querySelector('#health-out .kgrid');
+  DB.spheres = DB.spheres.filter(s => s.id !== mood.id);
+  return { txt, hasCard, cravN: DB.cravings.length };
+});
+ok(/Без сигарет/.test(healthWithData.txt) && /за 30д/.test(healthWithData.txt), 'раздел «Здоровье» показывает привычку-трекер со стриком, найденную по имени');
+ok(healthWithData.hasCard && healthWithData.cravN === 2, 'и накопленный лог «Тяги» (счётчик, % устоял, за 7 дней)');
+const sugarFactor = await page.evaluate(() => {
+  const keep = DB.checkins;
+  const iso = n => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+  DB.checkins = [];
+  for (let i = 0; i < 16; i++) {
+    const sug = i % 2 === 0;
+    DB.checkins.push({ id: 800 + i, date: iso(i), sl: 7, sq: 7, cl: sug ? 4 : 8, mv: sug ? 4 : 8, st: sug ? 8 : 3, sugar: sug, ci: true });
+  }
+  const found = (smartInsights().items || []).some(it => /сладкое/.test(it.text));
+  DB.checkins = keep;
+  return found;
+});
+ok(sugarFactor, 'движок «что влияет» видит «сладкое» как фактор — не только никотин/кофеин/алкоголь');
+await page.evaluate(() => { goTo('home'); DB.cravings = []; });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

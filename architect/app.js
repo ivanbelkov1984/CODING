@@ -67,11 +67,12 @@ const DEFAULT_DB = {
   ],
   digests: [],
   chats: [],          // диалоги вглубь с AI: {id, insightId, title, msgs:[{r,t,ts}]}
+  cravings: [],       // «Здоровье»: тяга/импульс — {id, kind, intensity, trigger, outcome, note}
   oq: [
     'Что самое важное прямо сейчас?',
     'Что мешает двигаться вперёд?',
   ],
-  vit: {sl:7, sq:7, cl:7, st:4, mv:7, nic:false, caf:true, alc:false, act:'нет', tone:'нейтрально', note:'', ci:false, date:''},
+  vit: {sl:7, sq:7, cl:7, st:4, mv:7, nic:false, caf:true, alc:false, sugar:false, act:'нет', tone:'нейтрально', note:'', ci:false, date:''},
   _del: {},   // «надгробия» удалённых записей: { id: timestamp }
   __ts: 0,    // метка времени документа (для слияния скалярных полей)
 };
@@ -143,7 +144,7 @@ const bakKey = id => 'arch5_bak_' + id;
 function dbCount(db) {
   if (!db || typeof db !== 'object') return 0;
   let n = 0;
-  ['insights','checkins','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats']
+  ['insights','checkins','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings']
     .forEach(c => { if (Array.isArray(db[c])) n += db[c].length; });
   return n;
 }
@@ -452,7 +453,7 @@ function updateDomainLabel() {
 }
 
 // ─── НАВИГАЦИЯ ───────────────────────────────────────────────────
-const TITLES = {home:'Сегодня', insights:'Инсайты', book:CFG.domainLabel||'Книга', vit:'Сферы', sys:'Итоги', map:'Разум', settings:'Настройки'};
+const TITLES = {home:'Сегодня', insights:'Инсайты', book:CFG.domainLabel||'Книга', vit:'Сферы', sys:'Итоги', map:'Разум', health:'Здоровье', settings:'Настройки'};
 function goTo(tab, el) {
   document.querySelectorAll('.pg').forEach(p => p.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
@@ -468,6 +469,7 @@ function goTo(tab, el) {
   if (tab==='vit') { rSpheres(); rVit(); }
   if (tab==='sys') { rLivingMap('livingmap-out'); rDig(); rReview(30); }
   if (tab==='map') rIns();
+  if (tab==='health') rHealth();
   if (tab==='settings') { rProfileRow(); checkApiStatus(); rPushStatus(); const kc=$('keys-cnt'); if (kc) kc.textContent = KEY_SERVICES.filter(s=>getAiKeyFor(s.p)).length + ' из ' + KEY_SERVICES.length; }
 }
 function msub(tab, el) {
@@ -786,6 +788,14 @@ function smartNudge() {
   // 1. Не отмечен день (после полудня)
   if ((!v || !v.ci || v.date !== today) && hour >= 11)
     return { icon:'📝', text:'Хороший момент отметить день?', cta:'Чек-ин', act:"openOv('ov-ci')" };
+  // 1.5 Предиктивный риск срыва — ДО, а не после (стресс/недосып поднимают
+  // тягу; предупреждаем заранее, см. HEALTH_BRIEF.md, п. 4 «Nudging»)
+  if (v && v.ci && v.date === today) {
+    const riskCtx = healthSpheres().length > 0 || (DB.cravings || []).length > 0;
+    if (riskCtx && (v.st >= 7 || v.sl < 6))
+      return { icon: '⚠️', text: v.st >= 7 ? 'Стресс сегодня высокий — риск тяги выше обычного.' : 'Сна маловато — самоконтроль слабее обычного.',
+        cta: '3-минутная перезагрузка', act: 'openCraving()' };
+  }
   // 2. Привычка-сфера давно без отметки
   for (const s of (DB.spheres || [])) {
     if (s.type !== 'habit') continue;
@@ -1704,6 +1714,7 @@ function saveCI() {
     nic: $('tog-nic').classList.contains('on'),
     caf: $('tog-caf').classList.contains('on'),
     alc: $('tog-alc').classList.contains('on'),
+    sugar: $('tog-sugar').classList.contains('on'),
     act: STATE.ciAct, tone: STATE.ciTone, emo: STATE.ciEmo || '', note: $('ci-note').value, ci: true, date: todayKey(),
     createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
   };
@@ -1716,6 +1727,122 @@ function saveCI() {
   hptMed(); toast('Check-in сохранён', 'ok');
   reactToCheckin((v.cl + v.mv + (10-v.st)) / 3);
   try { rVector(); } catch (e) {}
+}
+
+// ─── ЗДОРОВЬЕ: «Тяга» — лог импульса + микро-интервенция ─────────
+// Основа (см. HEALTH_BRIEF.md): петля привычки триггер→действие→
+// награда; пик тяги держится 3–5 минут — задача не «победить силой
+// воли», а пережить пик и honestly зафиксировать данные, не судить.
+const CRAVING_TIPS = [
+  '🫁 4 медленных вдоха через нос, выдох вдвое дольше — 60 секунд.',
+  '💧 Стакан воды, медленно, весь до дна.',
+  '🚶 Встань и пройдись 2–3 минуты — смена позы сбивает автоматизм.',
+];
+function openCraving() {
+  STATE.crKind = 'сигарета';
+  const kindRow = $('cr-kind');
+  if (kindRow) kindRow.querySelectorAll('.tp').forEach(b => b.classList.toggle('a-moss', b.dataset.k === 'сигарета'));
+  const trig = $('cr-trigger'); if (trig) trig.value = '';
+  const int = $('cr-int'); if (int) int.value = 5;
+  crIntChange(5);
+  openOv('ov-craving');
+}
+function sCrKind(btn) {
+  btn.parentElement.querySelectorAll('.tp').forEach(b => b.classList.remove('a-moss'));
+  btn.classList.add('a-moss'); STATE.crKind = btn.dataset.k;
+}
+function crIntChange(v) {
+  const lbl = $('cr-int-v'); if (lbl) lbl.textContent = v;
+  const tip = $('cr-tip'); if (!tip) return;
+  tip.innerHTML = +v >= 6
+    ? `<div class="cr-tip-box"><div class="cr-tip-h">Пик тяги обычно держится 3–5 минут — попробуй пережить его так:</div>${CRAVING_TIPS.map(t => `<div class="cr-tip-row">${t}</div>`).join('')}</div>`
+    : '';
+}
+function saveCraving(held) {
+  const kind = STATE.crKind || 'сигарета';
+  const intensity = +(($('cr-int') && $('cr-int').value) || 5);
+  const trigger = (($('cr-trigger') && $('cr-trigger').value) || '').trim();
+  const rec = { id: Date.now(), kind, intensity, trigger, outcome: held ? 'held' : 'gave_in',
+    createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION };
+  (DB.cravings = DB.cravings || []).unshift(rec);
+  persist(); closeOv('ov-craving'); hptMed();
+  reactToCraving(rec);
+  try { if (document.getElementById('pg-health').classList.contains('on')) rHealth(); } catch (e) {}
+}
+// Живой отклик на тягу: без осуждения при срыве (метод «Зачем?» —
+// честные данные, не провал), с паттерном при накоплении истории.
+function reactToCraving(rec) {
+  const rows = [];
+  const list = DB.cravings || [];
+  if (rec.outcome === 'held') {
+    let streak = 0; for (const c of list) { if (c.outcome !== 'held') break; streak++; }
+    rows.push({ html: `💪 Устоял(а)${streak > 1 ? ` — ${streak} раз подряд` : ''}` });
+  } else {
+    rows.push({ html: `Записано честно — это данные, не провал.${rec.trigger ? ` Триггер: «${esc(rec.trigger)}»` : ''}` });
+  }
+  const sameKind = list.filter(c => c.kind === rec.kind);
+  if (sameKind.length >= 3) {
+    const heldN = sameKind.filter(c => c.outcome === 'held').length;
+    rows.push({ html: `📊 «${esc(rec.kind)}»: устоял в ${heldN} из ${sameKind.length} (${Math.round(heldN / sameKind.length * 100)}%)` });
+  }
+  rows.push({ html: `Открыть «Здоровье» →`, act: `rcClose();goTo('health')` });
+  reactCard(rows, 'Тяга');
+}
+// Синтез: сферы-привычки со здоровьем в имени (детект по ключевым
+// словам — не отдельный флаг, чтобы не плодить новую сущность).
+const HEALTH_KEYWORDS = /куре|сигарет|сладк|сахар|алкогол|никотин/i;
+function healthSpheres() { return (DB.spheres || []).filter(s => HEALTH_KEYWORDS.test(s.name || '')); }
+function addHealthSphere(name, icon) {
+  if ((DB.spheres || []).some(s => s.name === name)) { toast('Уже есть на «Сферах»'); goTo('vit'); return; }
+  createSphere({ name, icon, type: 'habit', color: '#5e6ad2' });
+  rHealth(); toast(`«${name}» добавлена — отмечай на «Сферах»`, 'ok');
+}
+function rHealth() {
+  const el = $('health-out'); if (!el) return;
+  const hs = healthSpheres(), crav = DB.cravings || [];
+  let html = `<div class="sec-lbl">Вредные привычки</div>`;
+  if (!hs.length) {
+    html += `<div class="card mx mb"><div style="padding:1rem" class="ai-sp-empty">Заведи привычку-трекер — «Без сигарет», «Без сладкого» — и здесь появится стрик и паттерн срывов.
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.75rem">
+        <button class="btn btn-s btn-sm" onclick="addHealthSphere('Без сигарет','🚭')">+ Без сигарет</button>
+        <button class="btn btn-s btn-sm" onclick="addHealthSphere('Без сладкого','🍬')">+ Без сладкого</button>
+        <button class="btn btn-s btn-sm" onclick="addHealthSphere('Без алкоголя','🍺')">+ Без алкоголя</button>
+      </div></div></div>`;
+  } else {
+    html += `<div class="card mx mb">` + hs.map(s => {
+      const st = sphereStats(s.id) || {};
+      return `<div class="srow" onclick="openSphereLog(${s.id})" role="button"><div class="sic" style="background:${s.color}22"><span>${esc(s.icon || '●')}</span></div><span class="sl2">${esc(s.name)}</span><span class="sv2">${st.consistency || 0}% за 30д</span></div>`;
+    }).join('') + `</div>`;
+  }
+  html += `<div class="sec-lbl">Тяга</div>
+    <div class="mx mb"><button class="btn btn-p btn-full" onclick="openCraving()"><i data-lucide="zap"></i>У меня тяга сейчас</button></div>`;
+  if (crav.length) {
+    const held = crav.filter(c => c.outcome === 'held').length;
+    const rate = Math.round(held / crav.length * 100);
+    const week = crav.filter(c => rcDay(c) > dayAgo(7)).length;
+    const trigCount = {};
+    crav.forEach(c => { const t = (c.trigger || '').trim().toLowerCase(); if (t) trigCount[t] = (trigCount[t] || 0) + 1; });
+    const topTrig = Object.entries(trigCount).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    html += `<div class="card mx mb" style="padding:1rem">
+      <div class="kgrid" style="margin:0 0 .75rem">
+        <div class="kc"><span class="kn">${crav.length}</span><span class="kl">Всего</span></div>
+        <div class="kc"><span class="kn">${rate}%</span><span class="kl">Устоял</span></div>
+        <div class="kc"><span class="kn">${week}</span><span class="kl">За 7 дней</span></div>
+      </div>
+      ${topTrig.length ? `<div class="f-lbl">Частые триггеры</div>` + topTrig.map(([t, n]) => `<div class="si-row"><div class="si-body"><div class="si-text">${esc(t)} — ${n} ${pl(n, 'раз', 'раза', 'раз')}</div></div></div>`).join('') : ''}
+    </div>`;
+  }
+  const si = smartInsights();
+  const healthItems = (si.items || []).filter(it => /кофеин|алкогол|никотин|сладкое/.test(it.text) || hs.some(s => it.text.includes(s.name)));
+  html += `<div class="sec-lbl">Что влияет на состояние</div>`;
+  html += healthItems.length
+    ? `<div class="si-card mx mb">` + healthItems.map(it => `<div class="si-row"><div class="si-dot ${it.pos ? 'pos' : 'neg'}"></div><div class="si-body"><div class="si-text">${esc(it.text)}</div><div class="si-act">→ ${esc(it.action)}</div></div></div>`).join('') + `</div>`
+    : `<div class="card mx mb"><div style="padding:1rem" class="ai-sp-empty">Отмечай никотин/алкоголь/сладкое в чек-ине — через несколько дней здесь появится честная связь с твоим состоянием.</div></div>`;
+  html += `<div class="sec-lbl">Психологический разбор</div>
+    <div class="mx mb"><button class="btn btn-s btn-full" onclick="goTo('map');msub('graph');STATE.mapView='psy';rMap()">Функция, вторичная выгода, потребность →</button></div>`;
+  html += `<div class="sec-lbl">Витамины и добавки</div>
+    <div class="mx" style="margin-bottom:5rem"><button class="btn btn-s btn-full" onclick="addHealthSphere('Витамины','💊')">+ Отслеживать приём</button></div>`;
+  el.innerHTML = html;
 }
 
 // ─── СОН ─────────────────────────────────────────────────────────
@@ -2195,6 +2322,7 @@ function smartInsights() {
     { key:'caf', label:'кофеин',   act:'Понаблюдай за кофеином во второй половине дня.' },
     { key:'alc', label:'алкоголь', act:'Попробуй несколько дней без алкоголя.' },
     { key:'nic', label:'никотин',  act:'Отметь, как никотин сказывается на состоянии.' },
+    { key:'sugar', label:'сладкое', act:'Тяга к сладкому часто компенсирует усталость или стресс — понаблюдай за триггером.' },
   ];
   const raw = [];
   NUM.forEach(f => {
@@ -3202,7 +3330,7 @@ async function decryptPayload(blob, pass) {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','bots','digests','spheres','sphereLogs','chats'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','bots','digests','spheres','sphereLogs','chats','cravings'];
 function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
 function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
 const _ru = r => r._u || r.id || 0;   // «когда обновлено» с откатом на id (id = Date.now())
