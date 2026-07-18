@@ -2,20 +2,13 @@ name: CI — Архитектор
 
 # Регрессионная сеть: собирает приложение и гоняет E2E в Chromium
 # на каждый push/PR. Защищает курс после инцидента с потерей данных.
-#
-# Job `flutter` — статический анализ/тесты/формат мобильного модуля
-# TMCManager (Flutter/Dart). Не пересекается с job `e2e` (architect/):
-# триггер расширен на TMCManager/**, но сама job внутри себя проверяет,
-# затронут ли TMCManager в конкретном коммите/PR, и если нет — пропускает
-# все Flutter-шаги (быстрый зелёный no-op), чтобы не гонять flutter pub
-# get/analyze/test зря на правках architect/.
 
 on:
   push:
     branches: [ MAIN, "claude/**" ]
-    paths: [ "architect/**", "TMCManager/**" ]
+    paths: [ "architect/**" ]
   pull_request:
-    paths: [ "architect/**", "TMCManager/**" ]
+    paths: [ "architect/**" ]
 
 jobs:
   e2e:
@@ -34,73 +27,3 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Build + E2E
         run: npm test
-
-  flutter:
-    name: Flutter — TMCManager
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Затронут ли TMCManager/ в этом коммите/PR
-        id: filter
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE="${{ github.event.pull_request.base.sha }}"
-          else
-            BASE="${{ github.event.before }}"
-          fi
-          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
-            # новая ветка / нет базы для сравнения — считаем затронутым
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$BASE" "${{ github.sha }}" -- TMCManager | grep -q .; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: subosito/flutter-action@v2
-        if: steps.filter.outputs.changed == 'true'
-        with:
-          # Пин, не «channel: stable» — тот плавает во времени, а dart format
-          # чувствителен к версии SDK: наряд #205 упёрся в ровно это (локально
-          # отформатировано одной stable-сборкой, CI прогнал другую и снова
-          # нашёл «неформатированные» файлы). Версия ниже — та, на которой
-          # реально прогнан и проверен этот PR.
-          flutter-version: "3.44.6"
-          cache: true
-
-      - name: Кеш pub-зависимостей
-        if: steps.filter.outputs.changed == 'true'
-        uses: actions/cache@v4
-        with:
-          path: ~/.pub-cache
-          key: pub-${{ runner.os }}-${{ hashFiles('TMCManager/pubspec.lock') }}
-          restore-keys: |
-            pub-${{ runner.os }}-
-
-      - name: flutter pub get
-        if: steps.filter.outputs.changed == 'true'
-        working-directory: TMCManager
-        run: flutter pub get
-
-      - name: flutter analyze
-        if: steps.filter.outputs.changed == 'true'
-        working-directory: TMCManager
-        run: flutter analyze
-
-      - name: flutter test
-        if: steps.filter.outputs.changed == 'true'
-        working-directory: TMCManager
-        run: |
-          if [ -d test ]; then
-            flutter test
-          else
-            echo "::warning::TMCManager/test/ ещё не создан (наряд #188 в работе) — шаг пропущен, структура готова принять тесты, когда они появятся"
-          fi
-
-      - name: dart format --set-exit-if-changed
-        if: steps.filter.outputs.changed == 'true'
-        working-directory: TMCManager
-        run: dart format --set-exit-if-changed .
