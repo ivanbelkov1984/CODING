@@ -4953,9 +4953,9 @@ async function chatFinish() {
       required: ['text', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game', 'state'],
       properties: {
         text: { type: 'string' },
-        symptom: { type: ['string', 'null'] }, func: { type: ['string', 'null'] }, gain: { type: ['string', 'null'] },
+        symptom: { anyOf: [{ type: 'string' }, { type: 'null' }] }, func: { anyOf: [{ type: 'string' }, { type: 'null' }] }, gain: { anyOf: [{ type: 'string' }, { type: 'null' }] },
         ...psyEnumProps(),
-        emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
+        emotion: { anyOf: [{ type: 'string' }, { type: 'null' }] }, game: { anyOf: [{ type: 'string' }, { type: 'null' }] },
         // Метрики состояния из диалога → синхронизируются с журналом здоровья
         // (запрос владельца: при закрытии чата ключевые данные о состоянии
         // распределяются в «Здоровье»). Коарс-оценка, ASCII-enum (не union+enum).
@@ -5270,9 +5270,9 @@ async function psyMarkBatch(todo) {
     required: ['id', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game', 'conf', 'themes'],
     properties: {
       id: { type: 'integer' },
-      symptom: { type: ['string', 'null'] }, func: { type: ['string', 'null'] }, gain: { type: ['string', 'null'] },
+      symptom: { anyOf: [{ type: 'string' }, { type: 'null' }] }, func: { anyOf: [{ type: 'string' }, { type: 'null' }] }, gain: { anyOf: [{ type: 'string' }, { type: 'null' }] },
       ...psyEnumProps(),
-      emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
+      emotion: { anyOf: [{ type: 'string' }, { type: 'null' }] }, game: { anyOf: [{ type: 'string' }, { type: 'null' }] },
       conf: { type: 'integer', minimum: 0, maximum: 100 },
       themes: { type: 'array', items: { type: 'string' }, maxItems: 3 },
     } } } } };

@@ -45,7 +45,7 @@ const schema = { type:'object', additionalProperties:false, required:['items'], 
     confidence:{type:'integer', minimum:0, maximum:100},
     module:{type:'string', enum:['today','spheres','mind','results','sync','ai','pwa','feedback','other']},
     summary:{type:'string'},
-    pattern_id:{type:['integer','null']}
+    pattern_id:{anyOf:[{type:'integer'},{type:'null'}]}
   } } } } };
 
 const user = 'Сообщения пользователей (id, текст, экран):\n' +
