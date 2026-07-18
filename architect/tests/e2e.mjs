@@ -841,6 +841,47 @@ ok(feedbackLoop.stored === 'move', 'ответ сохраняется на за�
 ok(feedbackLoop.firstTip === 'move', 'движок адаптируется: приём, что помог тебе, в следующий раз поднимается первым');
 await page.evaluate(() => { goTo('home'); DB.cravings = []; });
 
+// ── Закрытие чата → метрики состояния синхронизируются с «Здоровьем» ──
+const stateFlow = await page.evaluate(async () => {
+  const keepIns = DB.insights, keepChats = DB.chats, keepCrav = DB.cravings;
+  DB.insights = []; DB.chats = []; DB.cravings = [];
+  setAiKey('sk-test'); CFG.aiProvider = 'anthropic';
+  let phase = 'reply';
+  window.fetch = (u) => {
+    if (!String(u).includes('anthropic')) return Promise.reject(new Error('offline'));
+    const text = phase === 'reply'
+      ? 'Слышу тебя. Что за этим стоит?'
+      : JSON.stringify({ text: 'Понял: тяну из страха оценки, и вечерами одному особенно тяжело.', symptom: 'откладываю', func: 'избежать оценки', gain: 'не рисковать', need: 'safety', ego: 'child', emotion: 'тревога', game: null, state: { mood: 'low', stress: 'high', lonely: true } });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text }], usage: { input_tokens: 100, output_tokens: 50 } }) });
+  };
+  openChatFor(null, 'Опять весь вечер один, тянет курить');
+  await new Promise(r => setTimeout(r, 350));
+  const c = DB.chats[DB.chats.length - 1];
+  c.msgs.push({ r: 'u', t: 'Да, вечерами особенно', ts: Date.now() });
+  phase = 'finish';
+  await chatFinish();
+  const ins = DB.insights[0] || {};
+  const risk = cravingRisk(12);
+  const md = mentalStateDigest();
+  goTo('health');
+  const healthTxt = document.getElementById('health-out').textContent;
+  goTo('home');
+  DB.insights = keepIns; DB.chats = keepChats; DB.cravings = keepCrav;
+  return {
+    hasNote: !!ins.stateNote, note: ins.stateNote || {},
+    riskChatStress: risk.factors.some(f => f.tag === 'chat-stress'),
+    riskChatLonely: risk.factors.some(f => f.tag === 'chat-lonely'),
+    healthHasSection: /Психическое состояние/.test(healthTxt),
+    digestN: md ? md.n : 0,
+  };
+});
+ok(stateFlow.hasNote && stateFlow.note.mood === 'low' && stateFlow.note.stress === 'high' && stateFlow.note.lonely === true,
+  'при закрытии чата состояние (настроение/стресс/одиночество) сохраняется как метрика на выводе диалога');
+ok(stateFlow.riskChatStress && stateFlow.riskChatLonely,
+  'сегодняшний диалог о стрессе/одиночестве поднимает риск тяги — психоконтур синхронизирован с движком здоровья');
+ok(stateFlow.healthHasSection && stateFlow.digestN >= 1,
+  'в «Здоровье» появляется раздел «Психическое состояние» по диалогам');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

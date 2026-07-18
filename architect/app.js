@@ -782,6 +782,30 @@ function statePromptBucket() {
 // ─── КОНТЕКСТНЫЙ НАДЖ (напоминания: контекст, не будильник — №4) ──
 // Один уместный подсказ по состоянию/пропускам, вопросом, а не командой;
 // закрывается на день. (Web Push позже — логика уже здесь.)
+// ─── ПСИХИЧЕСКОЕ СОСТОЯНИЕ ПО ДИАЛОГАМ → ЖУРНАЛ ЗДОРОВЬЯ ─────────
+// При закрытии чата вывод размечается (chatFinish) и в т.ч. коарс-оценка
+// состояния (mood/stress/lonely) кладётся на инсайт как stateNote. Здесь
+// эти сигналы собираются за 2 недели в дайджест для «Здоровья» и для
+// риск-движка — так психоконтур синхронизируется с журналом здоровья.
+function mentalStateDigest() {
+  const cutoff = Date.now() - 14 * 864e5;
+  const notes = (DB.insights || [])
+    .filter(i => i.stateNote && i.stateNote.at && Date.parse(i.stateNote.at) >= cutoff)
+    .map(i => i.stateNote)
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  if (!notes.length) return null;
+  const n = notes.length;
+  const moodScore = { low: 1, mid: 2, high: 3 };
+  return {
+    n, latest: notes[0],
+    highStress: notes.filter(s => s.stress === 'high').length,
+    lonely: notes.filter(s => s.lonely).length,
+    avgMood: notes.reduce((s, x) => s + (moodScore[x.mood] || 2), 0) / n,
+  };
+}
+function todayStateNote() {
+  return (DB.insights || []).map(i => i.stateNote).find(s => s && s.day === todayKey()) || null;
+}
 // ─── ПЕРСОНАЛЬНЫЙ АДАПТИВНЫЙ РИСК-СКОРИНГ ТЯГИ ───────────────────
 // Сердце JITAI, которое реально помогает: движок учится на ТВОЕЙ
 // истории (окно суток срывов, пост-срыв, одиночество), а не на данных
@@ -828,6 +852,13 @@ function cravingRisk(atHour) {
   // 5. Нарастающая частота — много импульсов за сутки, напряжение копится.
   const last24 = crav.filter(c => c.createdAt && Date.now() - new Date(c.createdAt).getTime() < 864e5);
   if (last24.length >= 3) F.push({ w: 0.15, why: `${last24.length} ${pl(last24.length, 'импульс', 'импульса', 'импульсов')} за сутки — напряжение растёт`, tag: 'freq' });
+  // 6. Сигнал из сегодняшнего диалога (психоконтур → журнал здоровья): если
+  //    сегодня в чате звучал сильный стресс/одиночество — это тоже риск.
+  const note = todayStateNote();
+  if (note) {
+    if (note.stress === 'high') F.push({ w: 0.15, why: 'по сегодняшнему диалогу — сильное напряжение', tag: 'chat-stress' });
+    if (note.lonely)            F.push({ w: 0.12, why: 'сегодняшний разговор был об одиночестве', tag: 'chat-lonely' });
+  }
   const score = Math.min(0.95, F.reduce((s, f) => s + f.w, 0));
   F.sort((a, b) => b.w - a.w);
   return { score, factors: F, top: F[0] || null, hasCi };
@@ -2001,6 +2032,24 @@ function rHealth() {
   html += healthItems.length
     ? `<div class="si-card mx mb">` + healthItems.map(it => `<div class="si-row"><div class="si-dot ${it.pos ? 'pos' : 'neg'}"></div><div class="si-body"><div class="si-text">${esc(it.text)}</div><div class="si-act">→ ${esc(it.action)}</div></div></div>`).join('') + `</div>`
     : `<div class="card mx mb"><div style="padding:1rem" class="ai-sp-empty">Отмечай никотин/алкоголь/сладкое в чек-ине — через несколько дней здесь появится честная связь с твоим состоянием.</div></div>`;
+  // Психическое состояние по диалогам — синхронизация психоконтура с
+  // журналом здоровья (запрос владельца: ключевые данные о состоянии из
+  // чатов распределяются сюда). Честно к малым данным: тренд только при n≥3.
+  const md = mentalStateDigest();
+  if (md) {
+    const moodRu = { low: 'подавленное', mid: 'ровное', high: 'приподнятое' };
+    html += `<div class="sec-lbl">Психическое состояние</div><div class="card mx mb" style="padding:1rem">`;
+    html += `<div class="si-text"><b>По последнему диалогу:</b> настроение ${moodRu[md.latest.mood] || '—'}${md.latest.emotion ? `, ${esc(md.latest.emotion)}` : ''}.</div>`;
+    if (md.n >= 3) {
+      const trend = md.avgMood >= 2.4 ? 'скорее в ресурсе' : md.avgMood <= 1.6 ? 'скорее на спаде' : 'ровное';
+      html += `<div class="si-row" style="margin-top:.5rem"><div class="si-dot ${md.avgMood >= 2.4 ? 'pos' : 'neg'}"></div><div class="si-body"><div class="si-text">За 2 недели по ${md.n} ${pl(md.n, 'диалогу', 'диалогам', 'диалогам')} — состояние ${trend}.</div></div></div>`;
+      if (md.highStress >= 2) html += `<div class="si-row"><div class="si-dot neg"></div><div class="si-body"><div class="si-text">Напряжение звучало в ${md.highStress} из ${md.n} — стоит поберечь ресурс.</div></div></div>`;
+      if (md.lonely >= 2) html += `<div class="si-row"><div class="si-dot neg"></div><div class="si-body"><div class="si-text">Тема одиночества всплывала ${md.lonely} ${pl(md.lonely, 'раз', 'раза', 'раз')} — это частый корень тяги.</div></div></div>`;
+    } else {
+      html += `<div class="si-text" style="color:var(--t3);margin-top:.4rem">Закрывай диалоги с наставником — состояние из них копится здесь, и через несколько разговоров появится тренд.</div>`;
+    }
+    html += `</div>`;
+  }
   const env = DB.env || {};
   html += `<div class="sec-lbl">Среда</div>
     <div class="card mx mb" style="padding:.5rem">
@@ -4731,32 +4780,48 @@ async function chatFinish() {
     // Заключение — работа для СИЛЬНОЙ модели (deep-маршрут, opus): вывод
     // сразу размечается по методу «Зачем?» и разносится по системе.
     const schema = { type: 'object', additionalProperties: false,
-      required: ['text', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game'],
+      required: ['text', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game', 'state'],
       properties: {
         text: { type: 'string' },
         symptom: { type: ['string', 'null'] }, func: { type: ['string', 'null'] }, gain: { type: ['string', 'null'] },
         ...psyEnumProps(),
         emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
+        // Метрики состояния из диалога → синхронизируются с журналом здоровья
+        // (запрос владельца: при закрытии чата ключевые данные о состоянии
+        // распределяются в «Здоровье»). Коарс-оценка, ASCII-enum (не union+enum).
+        state: { type: 'object', additionalProperties: false, required: ['mood', 'stress', 'lonely'],
+          properties: {
+            mood: { type: 'string', enum: ['low', 'mid', 'high'] },
+            stress: { type: 'string', enum: ['low', 'mid', 'high'] },
+            lonely: { type: 'boolean' },
+          } },
       } };
     const out = await callClaude({
       system: (c.mode === 'dream'
         ? 'Сожми разбор сна. text: личный вывод от первого лица (2–4 предложения — что сон показал, какая часть меня в нём говорила, что признать или сделать). Плюс психологическая структура вывода: симптом (что сон подсветил), функция, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без эзотерики и воды.'
         : 'Сожми диалог по методу «Зачем?». text: личный вывод от первого лица (2–4 предложения — что я понял, корень темы, один следующий шаг). Плюс структура метода: симптом, функция симптома, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без воды.')
-        + ' Поля need/ego — строго кодом: need = safety(безопасность)/acceptance(принятие)/significance(значимость)/autonomy(автономия)/meaning(смысл)/closeness(близость)/control(контроль)/calm(покой)/novelty(новизна); ego = child(Ребёнок)/parent(Родитель)/adult(Взрослый). Если не видно — ставь \'none\' (не null).',
+        + ' Поля need/ego — строго кодом: need = safety(безопасность)/acceptance(принятие)/significance(значимость)/autonomy(автономия)/meaning(смысл)/closeness(близость)/control(контроль)/calm(покой)/novelty(новизна); ego = child(Ребёнок)/parent(Родитель)/adult(Взрослый). Если не видно — ставь \'none\' (не null). Плюс state — коротко оцени по диалогу: mood (low/mid/high — общий тон настроения), stress (low/mid/high — уровень напряжения), lonely (true, если тема одиночества/изоляции звучит).',
       user: dialog, maxTokens: 500, task: 'analysis', schema,
     });
     let parsed; try { parsed = JSON.parse(out); } catch (e) { parsed = { text: String(out).trim() }; }
     const t = String(parsed.text || '').trim(); if (!t) return;
     const psyNeed = psyNeedFromAI(parsed.need), psyEgo = psyEgoFromAI(parsed.ego);
+    // Метрики состояния из диалога → журнал здоровья (см. mentalStateDigest,
+    // cravingRisk): распределяем данные о состоянии в «Здоровье», как просил
+    // владелец, не перезаписывая честный чек-ин — это отдельный сигнал.
+    const st = parsed.state && ['low', 'mid', 'high'].includes(parsed.state.mood)
+      ? { mood: parsed.state.mood, stress: parsed.state.stress, lonely: !!parsed.state.lonely, emotion: parsed.emotion || null, at: nowISO(), day: todayKey() }
+      : undefined;
     c.summarized = true; touch(c);
     DB.insights.unshift({
       id: Date.now(), tag: 'personal', w: 2, title: titleFrom(t), body: t,
       date: dateRU(), createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION,
       src: c.mode === 'dream' ? 'Разбор сна' : 'Диалог', links: [], chatId: c.id,
       psy: psyNeed || parsed.func ? { symptom: parsed.symptom, func: parsed.func, gain: parsed.gain, need: psyNeed, ego: psyEgo, emotion: parsed.emotion, game: parsed.game, conf: 85, at: nowISO() } : undefined,
+      stateNote: st,
     });
     persist(); rIns(); rHIns(); rKPIs();
-    toast('Вывод диалога сохранён в инсайты', 'ok');
+    toast(st ? 'Вывод сохранён · состояние учтено в «Здоровье»' : 'Вывод диалога сохранён в инсайты', 'ok');
   } catch (e) { toast('Вывод не собрался: ' + e.message, 'warn'); }
 }
 // История диалогов: Разум → Записи → Диалоги.
