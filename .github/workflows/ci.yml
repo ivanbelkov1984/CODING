@@ -63,7 +63,12 @@ jobs:
       - uses: subosito/flutter-action@v2
         if: steps.filter.outputs.changed == 'true'
         with:
-          channel: stable
+          # Пин, не «channel: stable» — тот плавает во времени, а dart format
+          # чувствителен к версии SDK: наряд #205 упёрся в ровно это (локально
+          # отформатировано одной stable-сборкой, CI прогнал другую и снова
+          # нашёл «неформатированные» файлы). Версия ниже — та, на которой
+          # реально прогнан и проверен этот PR.
+          flutter-version: "3.44.6"
           cache: true
 
       - name: Кеш pub-зависимостей
