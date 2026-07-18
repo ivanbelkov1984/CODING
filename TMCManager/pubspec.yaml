@@ -49,3 +49,15 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+# NOTE (наряд #188, тесты): flutter_localizations из текущего Flutter SDK
+# (3.44.6, stable) требует intl 0.20.2, а syncfusion_flutter_charts ^27.2.3
+# требует intl <0.20.0 — без override `flutter pub get` не резолвится вообще
+# ни для одной команды (test/analyze/build), это блокирует любую работу с
+# проектом. Оверрайд нужен только для резолва зависимостей; сам код
+# syncfusion_flutter_charts (lib/widgets/analytics_chart.dart) тестами не
+# затронут. Отдельная находка для директора: если syncfusion продолжит
+# ломаться на новых intl API — потребуется отдельный наряд на апгрейд до
+# syncfusion_flutter_charts ^34 (см. описание в PR/issue).
+dependency_overrides:
+  intl: 0.20.2
