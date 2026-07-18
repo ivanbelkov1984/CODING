@@ -242,6 +242,23 @@ ok(/близость/.test(psy.view) && /Ребёнок/.test(psy.view), 'вью
 ok(/Функция/.test(psy.det) && /Вторичная выгода/.test(psy.det), 'в деталях записи — разбор: симптом → функция → вторичная выгода');
 ok(psy.sys, 'диалог-наставник ведёт по алгоритму метода «Зачем?»');
 
+// ── Схема психоразметки: без union-типа+enum (баг IMG_3165) ──
+const psySchema = await page.evaluate(() => {
+  const p = psyEnumProps();
+  return {
+    needType: p.need.type, egoType: p.ego.type,
+    needHasNull: p.need.enum.includes(null), needHasNone: p.need.enum.includes('none'),
+    egoHasNull: p.ego.enum.includes(null), egoHasNone: p.ego.enum.includes('none'),
+    hasSafety: p.need.enum.includes('safety'),
+    decodeNone: psyNeedFromAI('none'), decodeNoneEgo: psyEgoFromAI('none'),
+    decodeSafety: psyNeedFromAI('safety'),
+  };
+});
+ok(psySchema.needType === 'string' && psySchema.egoType === 'string' && !psySchema.needHasNull && !psySchema.egoHasNull,
+  'схема need/ego — плоский string без union-типа+null (иначе Anthropic валит «Enum value does not match declared type»)');
+ok(psySchema.needHasNone && psySchema.egoHasNone && psySchema.hasSafety && psySchema.decodeNone === null && psySchema.decodeNoneEgo === null && psySchema.decodeSafety === 'безопасность',
+  'сентинел \'none\' декодится в null, реальные коды (safety→безопасность) — в русское значение');
+
 // ── RULER ──
 await page.evaluate(() => openOv('ov-ci'));
 await page.waitForTimeout(120);

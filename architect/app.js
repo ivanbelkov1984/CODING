@@ -4735,15 +4735,14 @@ async function chatFinish() {
       properties: {
         text: { type: 'string' },
         symptom: { type: ['string', 'null'] }, func: { type: ['string', 'null'] }, gain: { type: ['string', 'null'] },
-        need: { type: ['string', 'null'], enum: [...Object.values(PSY_NEED_CODE), null] },
-        ego: { type: ['string', 'null'], enum: [...Object.values(PSY_EGO_CODE), null] },
+        ...psyEnumProps(),
         emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
       } };
     const out = await callClaude({
       system: (c.mode === 'dream'
         ? 'Сожми разбор сна. text: личный вывод от первого лица (2–4 предложения — что сон показал, какая часть меня в нём говорила, что признать или сделать). Плюс психологическая структура вывода: симптом (что сон подсветил), функция, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без эзотерики и воды.'
         : 'Сожми диалог по методу «Зачем?». text: личный вывод от первого лица (2–4 предложения — что я понял, корень темы, один следующий шаг). Плюс структура метода: симптом, функция симптома, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без воды.')
-        + ' Поля need/ego — строго кодом: need = safety(безопасность)/acceptance(принятие)/significance(значимость)/autonomy(автономия)/meaning(смысл)/closeness(близость)/control(контроль)/calm(покой)/novelty(новизна); ego = child(Ребёнок)/parent(Родитель)/adult(Взрослый).',
+        + ' Поля need/ego — строго кодом: need = safety(безопасность)/acceptance(принятие)/significance(значимость)/autonomy(автономия)/meaning(смысл)/closeness(близость)/control(контроль)/calm(покой)/novelty(новизна); ego = child(Ребёнок)/parent(Родитель)/adult(Взрослый). Если не видно — ставь \'none\' (не null).',
       user: dialog, maxTokens: 500, task: 'analysis', schema,
     });
     let parsed; try { parsed = JSON.parse(out); } catch (e) { parsed = { text: String(out).trim() }; }
@@ -5014,7 +5013,19 @@ const PSY_NEED_FROM_CODE = Object.fromEntries(Object.entries(PSY_NEED_CODE).map(
 const PSY_EGO_FROM_CODE = Object.fromEntries(Object.entries(PSY_EGO_CODE).map(([ru, code]) => [code, ru]));
 const psyNeedFromAI = code => PSY_NEED_FROM_CODE[code] || null;
 const psyEgoFromAI = code => PSY_EGO_FROM_CODE[code] || null;
-const PSY_SYSTEM = 'Ты — психолог-аналитик дневника «Архитектор». Работаешь строго по методу «Зачем?» (интеграция: логотерапия Франкла — у симптома есть функция и смысл; транзактный анализ Бёрна — игры, скрытый выигрыш, состояния Я; теория привязанности Боулби; эмоциональная регуляция Гоулмана). Для каждой записи осознанно определи: симптом (что болит/повторяется, словами автора), функцию симптома (ЗАЧЕМ он нужен психике), вторичную выгоду (payoff), глубинную потребность, состояние Я, ядровую эмоцию и психологическую игру, если она видна. Поля need/ego — строго кодом (не переводи и не выдумывай новые): need = safety(безопасность)/acceptance(принятие)/significance(значимость)/autonomy(автономия)/meaning(смысл)/closeness(близость)/control(контроль)/calm(покой)/novelty(новизна); ego = child(Ребёнок)/parent(Родитель)/adult(Взрослый). НЕ выдумывай: если по тексту не видно — ставь null и снижай confidence. Дополнительно определи themes: 1–3 СМЫСЛОВЫЕ темы записи — о чём она ПО СУТИ (короткая обобщённая фраза в именительном падеже: «отношения», «страх остановки», «признание на работе», «границы с матерью»). Не служебные слова, не пересказ, не эмоции — суть. Если в словаре уже есть подходящая тема — переиспользуй её дословно, чтобы записи связывались.';
+// need/ego в схеме — плоский string с сентинелом 'none' вместо union-типа
+// ['string','null']. Причина (воспроизведено в проде, IMG_3165): Anthropic-
+// валидатор отвергает union-тип ВМЕСТЕ с enum — «Enum value 'safety' does
+// not match declared type '['string','null']'», хотя null и был в enum.
+// Плоский string + 'none' проходит и в Anthropic, и в OpenAI strict; 'none'
+// декодится в null через psyNeedFromAI/psyEgoFromAI (нет в обратной карте).
+function psyEnumProps() {
+  return {
+    need: { type: 'string', enum: [...Object.values(PSY_NEED_CODE), 'none'] },
+    ego:  { type: 'string', enum: [...Object.values(PSY_EGO_CODE), 'none'] },
+  };
+}
+const PSY_SYSTEM = 'Ты — психолог-аналитик дневника «Архитектор». Работаешь строго по методу «Зачем?» (интеграция: логотерапия Франкла — у симптома есть функция и смысл; транзактный анализ Бёрна — игры, скрытый выигрыш, состояния Я; теория привязанности Боулби; эмоциональная регуляция Гоулмана). Для каждой записи осознанно определи: симптом (что болит/повторяется, словами автора), функцию симптома (ЗАЧЕМ он нужен психике), вторичную выгоду (payoff), глубинную потребность, состояние Я, ядровую эмоцию и психологическую игру, если она видна. Поля need/ego — строго кодом (не переводи и не выдумывай новые): need = safety(безопасность)/acceptance(принятие)/significance(значимость)/autonomy(автономия)/meaning(смысл)/closeness(близость)/control(контроль)/calm(покой)/novelty(новизна); ego = child(Ребёнок)/parent(Родитель)/adult(Взрослый). НЕ выдумывай: если по тексту не видно — для need/ego ставь код \'none\', для остальных полей null, и снижай confidence. Дополнительно определи themes: 1–3 СМЫСЛОВЫЕ темы записи — о чём она ПО СУТИ (короткая обобщённая фраза в именительном падеже: «отношения», «страх остановки», «признание на работе», «границы с матерью»). Не служебные слова, не пересказ, не эмоции — суть. Если в словаре уже есть подходящая тема — переиспользуй её дословно, чтобы записи связывались.';
 let _psyBusy = false;
 // Разметка одного батча записей психоконтуром — используется и фоновым
 // psyAutoRun, и массовым «освоением» архива (gptAbsorb).
@@ -5025,8 +5036,7 @@ async function psyMarkBatch(todo) {
     properties: {
       id: { type: 'integer' },
       symptom: { type: ['string', 'null'] }, func: { type: ['string', 'null'] }, gain: { type: ['string', 'null'] },
-      need: { type: ['string', 'null'], enum: [...Object.values(PSY_NEED_CODE), null] },
-      ego: { type: ['string', 'null'], enum: [...Object.values(PSY_EGO_CODE), null] },
+      ...psyEnumProps(),
       emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
       conf: { type: 'integer', minimum: 0, maximum: 100 },
       themes: { type: 'array', items: { type: 'string' }, maxItems: 3 },
