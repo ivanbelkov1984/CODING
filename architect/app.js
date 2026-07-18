@@ -863,12 +863,25 @@ function suggestTechniques(text, limit = 2) {
     .map(x => x.t);
 }
 // ─── КРИЗИСНЫЙ ПРОТОКОЛ (safety fallback) ───────────────────────
-// Из разбора: при явных признаках острого кризиса приложение НЕ должно
-// выдавать «приёмчик», а мягко направить к живому человеку. Это
-// намеренно консервативный keyword-детектор (не клинический скрининг):
-// ловит только сильные явные формулировки, тон — без осуждения и
-// диагнозов, «Архитектор» честно говорит, что он не терапевт.
-const CRISIS_RE = /(не хочу жить|незачем жить|нет смысла жить|покончить с собой|свести сч[её]ты с жизнью|убить себя|наложить на себя руки|причинить себе вред|порезать себя|лучше бы (я )?умер|хочу исчезнуть навсегда|жить не хочется)/i;
+// Из разбора: при признаках острого кризиса приложение НЕ должно выдавать
+// «приёмчик», а мягко направить к живому человеку. Это ЛОКАЛЬНЫЙ слой
+// защиты — регекс по явным И частым косвенным формулировкам (второй
+// разбор особо просил ловить непрямые сигналы: «всем лучше без меня»,
+// «хочется исчезнуть», «не вижу смысла ни в чём»). Честная граница: сильно
+// завуалированные/ироничные сигналы регекс не гарантирует — их ловит
+// второй слой (флаг crisis от ИИ в techGenerate). Это страховка, не
+// клинический скрининг; «Архитектор» прямо говорит, что он не терапевт.
+const CRISIS_RE = new RegExp([
+  'не хочу жить', 'жить не хочется', 'незачем жить', 'устал[аи]? жить', 'больше так жить не могу', 'не могу больше так жить',
+  'нет смысла жить', 'не вижу смысла жить', 'не вижу смысла ни в ч[её]м', 'нет смысла ни в ч[её]м',
+  'покончить с собой', 'свести сч[её]ты с жизнью', 'убить себя', 'наложить на себя руки',
+  'причинить себе вред', 'причиню себе', 'порезать себя',
+  'лучше бы (я )?(не жил|умер)', '(хочу|хочется) умереть(?! со смеху| от смеха)',
+  '(хочу|хочется) (просто )?исчезнуть', 'исчезнуть навсегда',
+  'всем( бы)? (было бы |будет |станет )?лучше без меня', 'если бы меня не было', 'никому( бы)? не (будет|станет|стало) хуже без меня',
+  'не хочу просыпаться', 'не проснуться бы', 'чтобы (вс[её]|это) (прекрат|законч|выключ|кончил)',
+  'сил( больше)? нет жить', 'нет сил жить',
+].join('|'), 'i');
 function crisisScreen(text) { return CRISIS_RE.test(String(text || '')); }
 function openCrisisCard() {
   const el = $('crisis-contact');
@@ -1953,6 +1966,50 @@ function renderTechniques(q) {
     <div class="si-text" style="color:var(--t3);margin:.15rem 0 .5rem">${esc(t.frame)}</div>
     ${t.steps.map(s => `<div class="cr-tip-row">• ${esc(s)}</div>`).join('')}
   </div>`).join('');
+}
+// ─── Therapeutic Generator (grounded, single-call) ──────────────
+// Из второго разбора RAG-LLM: адаптировать метод под слова человека, а не
+// выдавать сухую инструкцию. Grounding — ключевой safety-принцип: ИИ НЕ
+// придумывает метод, а обязан выбрать method_id из НАШЕЙ базы (enum по
+// ASCII-id, плоский string — учли enum-баг). Кризис — двумя слоями: локальный
+// crisisScreen ДО вызова + флаг crisis от ИИ + crisisScreen на сам ответ.
+// Без ключа/сети — тихий откат на локальные приёмы (offline-first).
+async function techGenerate() {
+  const tx = $('tech-text'); const val = tx ? tx.value.trim() : '';
+  if (!val) { toast('Опиши, что происходит'); return; }
+  if (crisisScreen(val)) { closeOv('ov-tech'); openCrisisCard(); return; }
+  if (!getAiKey() || !navigator.onLine) { renderTechniques(val); toast(getAiKey() ? 'Нет сети — базовые приёмы' : 'Без ИИ-ключа — базовые приёмы'); return; }
+  const out = $('tech-out'); if (out) out.innerHTML = `<div class="ai-sp-empty" style="padding:1rem">Разбираю бережно…</div>`;
+  try {
+    const schema = { type: 'object', additionalProperties: false, required: ['crisis', 'craving_detected', 'method_id', 'message'],
+      properties: {
+        crisis: { type: 'boolean' },
+        craving_detected: { type: 'boolean' },
+        method_id: { type: 'string', enum: [...REG_TECHNIQUES.map(t => t.id), 'none'] },
+        message: { type: 'string' },
+      } };
+    const catalog = REG_TECHNIQUES.map(t => `${t.id}: ${t.title} — ${t.frame}`).join('\n');
+    const sys = 'Ты — бережный психологический ассистент приложения «Архитектор». По свободному тексту человека:\n'
+      + '— НЕ ставь диагнозов, не используй клинические термины, не выдавай себя за терапевта;\n'
+      + '— опирайся только на текст, не додумывай переживаний, которых там нет;\n'
+      + '— если есть признаки острого кризиса (мысли о смерти/самоповреждении, безысходность «всем лучше без меня», «не вижу смысла жить») — поставь crisis=true, method_id="none", message="" и НЕ давай советов;\n'
+      + '— иначе выбери ОДИН метод строго из списка ниже (method_id — только оттуда) под состояние и напиши короткое (2–4 предложения) бережное, неосуждающее сообщение на «ты»: сначала валидируй чувство, потом мягко, приглашающим тоном предложи этот метод под конкретную ситуацию. Без лекций и морали;\n'
+      + '— craving_detected=true, если в тексте есть тяга к курению/сладкому/алкоголю.\n\nМетоды (method_id выбирай только отсюда):\n' + catalog;
+    const raw = await callClaude({ system: sys, user: val, maxTokens: 400, schema, task: 'analysis' });
+    let p; try { p = JSON.parse(raw); } catch (e) { renderTechniques(val); return; }
+    if (p.crisis || crisisScreen(p.message)) { closeOv('ov-tech'); openCrisisCard(); return; }
+    const method = REG_TECHNIQUES.find(t => t.id === p.method_id) || null;
+    techRenderGenerated(p.message, method, !!p.craving_detected);
+  } catch (e) { renderTechniques(val); toast('Не вышло разобрать — вот базовые приёмы'); }
+}
+function techRenderGenerated(message, method, craving) {
+  const out = $('tech-out'); if (!out) return;
+  if (!message && !method) { const tx = $('tech-text'); renderTechniques(tx ? tx.value : ''); return; }
+  let html = '';
+  if (message) html += `<div class="card mx" style="padding:1rem;margin-bottom:.6rem"><div class="si-text">${esc(message)}</div></div>`;
+  if (method) html += `<div class="card mx" style="padding:1rem;margin-bottom:.6rem"><div class="si-text" style="font-weight:700">${esc(method.title)}</div><div class="si-text" style="color:var(--t3);margin:.15rem 0 .5rem">${esc(method.frame)}</div>${method.steps.map(s => `<div class="cr-tip-row">• ${esc(s)}</div>`).join('')}</div>`;
+  if (craving) html += `<div class="mx"><button class="btn btn-s btn-sm" onclick="closeOv('ov-tech');openCraving()">Записать как тягу →</button></div>`;
+  out.innerHTML = html;
 }
 function openCraving() {
   STATE.crKind = 'сигарета'; STATE.crOnset = null; STATE.crAlone = null;

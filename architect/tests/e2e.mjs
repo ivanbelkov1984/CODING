@@ -935,6 +935,66 @@ const crisisCraving = await page.evaluate(() => {
 ok(crisisCraving.crisisOpen && crisisCraving.noReact, 'острый сигнал в триггере тяги → кризисный протокол вместо обычного отклика');
 await page.evaluate(() => { goTo('home'); DB.cravings = []; });
 
+// ── Crisis-аудит: косвенные сигналы ловятся, обычная тяжесть — нет ──
+const crisisAudit = await page.evaluate(() => {
+  const hidden = ['иногда хочется просто исчезнуть', 'всем было бы лучше без меня',
+    'если бы меня не было, никому бы хуже не стало', 'не вижу смысла ни в чём',
+    'просто хочется, чтобы всё прекратилось', 'не хочу просыпаться по утрам'];
+  const benign = ['нет смысла спорить с ним', 'устал на работе за день',
+    'не вижу смысла в этой встрече', 'хочется умереть со смеху', 'злюсь и вымотан, тяжёлый день'];
+  return { hiddenCaught: hidden.every(crisisScreen), benignClean: benign.every(t => !crisisScreen(t)) };
+});
+ok(crisisAudit.hiddenCaught, 'crisis-аудит: косвенные сигналы («всем лучше без меня», «хочется исчезнуть», «не вижу смысла ни в чём») ловятся');
+ok(crisisAudit.benignClean, 'crisis-аудит: обычная тяжесть/идиомы («умереть со смеху», «нет смысла спорить») НЕ дают ложного кризиса');
+
+// ── Therapeutic Generator (grounded, single-call) + safety-контур ──
+const gen = await page.evaluate(async () => {
+  setAiKey('sk-test'); CFG.aiProvider = 'anthropic';
+  const mock = obj => { window.fetch = (u) => String(u).includes('anthropic')
+    ? Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify(obj) }], usage: { input_tokens: 100, output_tokens: 40 } }) })
+    : Promise.reject(new Error('offline')); };
+  // 1) обычный кейс: сообщение + метод из НАШЕЙ базы + кнопка «записать как тягу»
+  openTech('');
+  document.getElementById('tech-text').value = 'поругался с коллегой, хочется съесть торт';
+  mock({ crisis: false, craving_detected: true, method_id: 'urgesurf', message: 'Обидно, когда не слышат. Давай переждём волну тяги вместе.' });
+  await techGenerate();
+  const outNormal = document.getElementById('tech-out').textContent;
+  const hasCravingBtn = /Записать как тягу/.test(document.getElementById('tech-out').innerHTML);
+  // 2) ИИ вернул method_id, которого нет в базе → метод не подставляется (grounding)
+  document.getElementById('tech-text').value = 'тревожно';
+  mock({ crisis: false, craving_detected: false, method_id: 'выдуманный_метод', message: 'Слышу тревогу.' });
+  await techGenerate();
+  const outHallucinated = document.getElementById('tech-out').textContent;
+  // 3) флаг crisis от ИИ → кризисный протокол, генерация отменяется
+  document.getElementById('tech-text').value = 'нейтральный по виду текст';
+  mock({ crisis: true, craving_detected: false, method_id: 'none', message: '' });
+  await techGenerate();
+  const crisisFromFlag = document.getElementById('ov-crisis').classList.contains('on');
+  closeOv('ov-crisis');
+  // 4) crisisScreen на САМ ответ ИИ (второй слой) → тоже кризис
+  openTech(''); document.getElementById('tech-text').value = 'обычный текст про усталость';
+  mock({ crisis: false, craving_detected: false, method_id: 'sigh', message: 'иногда кажется, что не хочу жить' });
+  await techGenerate();
+  const crisisFromOutput = document.getElementById('ov-crisis').classList.contains('on');
+  closeOv('ov-crisis');
+  return { outNormal, hasCravingBtn, outHallucinated, crisisFromFlag, crisisFromOutput };
+});
+ok(/переждём волну|Сёрфинг по тяге/.test(gen.outNormal) && gen.hasCravingBtn, 'генератор: бережное сообщение + метод из базы + мостик «записать как тягу» (JITAI)');
+ok(!/выдуманный/.test(gen.outHallucinated), 'grounding: метод не из нашей базы не подставляется — ИИ не навязывает выдуманную технику');
+ok(gen.crisisFromFlag, 'safety: флаг crisis от ИИ отменяет генерацию и открывает кризисный протокол');
+ok(gen.crisisFromOutput, 'safety: crisisScreen на самом ответе ИИ (второй слой) тоже уводит в кризисный протокол');
+
+const genOffline = await page.evaluate(async () => {
+  setAiKey('');  // нет ключа
+  openTech(''); document.getElementById('tech-text').value = 'тревожно и пусто';
+  await techGenerate();
+  const out = document.getElementById('tech-out').textContent;
+  closeOv('ov-tech');
+  return out;
+});
+ok(/Заземление|Дыхание|Шаг к человеку|приём/i.test(genOffline), 'без ИИ-ключа генератор тихо откатывается на локальные приёмы (offline-first)');
+await page.evaluate(() => { goTo('home'); });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
