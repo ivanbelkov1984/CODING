@@ -13,8 +13,11 @@ import 'package:tmc_manager/services/api_client.dart';
 /// `_sendRequest`/`_handleHttpError`/`get`/`post` — выполняется НАСТОЯЩАЯ,
 /// без единого мока: тест реально ходит по HTTP на localhost.
 class _LocalApiClient extends ApiClient {
-  _LocalApiClient(this._localBaseUrl,
-      {required super.clientId, required super.apiKey});
+  _LocalApiClient(
+    this._localBaseUrl, {
+    required super.clientId,
+    required super.apiKey,
+  });
 
   final String _localBaseUrl;
 
@@ -82,29 +85,37 @@ void main() {
       expect(
         () => client().post('/v2/product/info', {}),
         throwsA(
-          isA<Exception>()
-              .having((e) => e.toString(), 'message', contains('401')),
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('401'),
+          ),
         ),
       );
     });
 
-    test('500: бросает Exception, код и тело ошибки не проглатываются',
-        () async {
-      handler = (request) async {
-        request.response
-          ..statusCode = 500
-          ..write('boom');
-        await request.response.close();
-      };
+    test(
+      '500: бросает Exception, код и тело ошибки не проглатываются',
+      () async {
+        handler = (request) async {
+          request.response
+            ..statusCode = 500
+            ..write('boom');
+          await request.response.close();
+        };
 
-      expect(
-        () => client().post('/v2/product/info', {}),
-        throwsA(
-          isA<Exception>()
-              .having((e) => e.toString(), 'message', contains('500')),
-        ),
-      );
-    });
+        expect(
+          () => client().post('/v2/product/info', {}),
+          throwsA(
+            isA<Exception>().having(
+              (e) => e.toString(),
+              'message',
+              contains('500'),
+            ),
+          ),
+        );
+      },
+    );
 
     test(
         'невалидный JSON в теле 200-ответа: ApiClient сам JSON не парсит — '
@@ -124,26 +135,32 @@ void main() {
       expect(() => jsonDecode(response.body), throwsFormatException);
     });
 
-    test('юникод (кириллица + эмодзи) в теле запроса и ответа не искажается',
-        () async {
-      const requestUnicode = 'Товар «Ключ 🔑» — тест юникода 🚀';
-      String? receivedBody;
-      handler = (request) async {
-        receivedBody = await readBody(request);
-        request.response
-          ..statusCode = 200
-          ..headers.contentType =
-              ContentType('application', 'json', charset: 'utf-8')
-          ..write(jsonEncode({'echo': 'Ответ на 🔑 — готово ✅'}));
-        await request.response.close();
-      };
+    test(
+      'юникод (кириллица + эмодзи) в теле запроса и ответа не искажается',
+      () async {
+        const requestUnicode = 'Товар «Ключ 🔑» — тест юникода 🚀';
+        String? receivedBody;
+        handler = (request) async {
+          receivedBody = await readBody(request);
+          request.response
+            ..statusCode = 200
+            ..headers.contentType = ContentType(
+              'application',
+              'json',
+              charset: 'utf-8',
+            )
+            ..write(jsonEncode({'echo': 'Ответ на 🔑 — готово ✅'}));
+          await request.response.close();
+        };
 
-      final response =
-          await client().post('/v2/product/info', {'name': requestUnicode});
+        final response = await client().post('/v2/product/info', {
+          'name': requestUnicode,
+        });
 
-      expect(receivedBody, contains(requestUnicode));
-      expect(jsonDecode(response.body)['echo'], 'Ответ на 🔑 — готово ✅');
-    });
+        expect(receivedBody, contains(requestUnicode));
+        expect(jsonDecode(response.body)['echo'], 'Ответ на 🔑 — готово ✅');
+      },
+    );
   });
 
   group('ApiClient.get', () {
@@ -176,8 +193,9 @@ void main() {
         await request.response.close();
       };
 
-      final response =
-          await client(clientId: sqlLike).post('/v2/product/info', {});
+      final response = await client(
+        clientId: sqlLike,
+      ).post('/v2/product/info', {});
 
       expect(response.statusCode, 200);
       expect(receivedClientId, sqlLike);
@@ -194,8 +212,9 @@ void main() {
         await request.response.close();
       };
 
-      final response =
-          await client(apiKey: hugeKey).post('/v2/product/info', {});
+      final response = await client(
+        apiKey: hugeKey,
+      ).post('/v2/product/info', {});
 
       expect(response.statusCode, 200);
       expect(receivedLength, hugeKey.length);

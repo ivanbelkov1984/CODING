@@ -131,8 +131,9 @@ class _AuthScreenState extends State<AuthScreen> {
               onChanged: (value) {
                 setState(() {
                   _selectedProfile = value;
-                  final profile =
-                      _profiles.firstWhere((p) => p['name'] == value);
+                  final profile = _profiles.firstWhere(
+                    (p) => p['name'] == value,
+                  );
                   _clientIdController.text = profile['clientId']!;
                   _apiKeyController.text = profile['apiKey']!;
                 });
@@ -171,7 +172,10 @@ class _AuthScreenState extends State<AuthScreen> {
                   onPressed: () async {
                     const name = 'Новый профиль'; // Укажите имя профиля
                     await _saveProfile(
-                        name, _clientIdController.text, _apiKeyController.text);
+                      name,
+                      _clientIdController.text,
+                      _apiKeyController.text,
+                    );
                   },
                   child: const Text('Добавить профиль'),
                 ),

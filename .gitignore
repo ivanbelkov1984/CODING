@@ -2,3 +2,13 @@
 architect/dist/
 architect/node_modules
 node_modules
+
+# Секреты (наряд #205: TMCManager объявляет flutter_dotenv, но .env-паттернов
+# в игноре не было — если .env появится раньше, чем его прикроет игнор, он
+# уйдёт в git)
+.env
+.env.*
+key.properties
+*.jks
+*.keystore
+google-services.json

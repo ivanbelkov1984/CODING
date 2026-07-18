@@ -7,9 +7,7 @@ import 'views/dashboard/dashboard_screen.dart';
 void main() {
   runApp(
     MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => ProductService()),
-      ],
+      providers: [ChangeNotifierProvider(create: (_) => ProductService())],
       child: const MyApp(),
     ),
   );
@@ -27,7 +25,8 @@ class _MyAppState extends State<MyApp> {
 
   void _toggleTheme() {
     setState(() {
-      _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
+      _themeMode =
+          _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
     });
   }
 

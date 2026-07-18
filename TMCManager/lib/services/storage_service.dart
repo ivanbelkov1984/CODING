@@ -28,7 +28,9 @@ class StorageService {
   // Метод для сохранения нового профиля
   Future<void> saveProfile(Map<String, String> profile) async {
     final profiles = await loadProfiles();
-    profiles.removeWhere((p) => p['name'] == profile['name']); // Удалить дубликаты
+    profiles.removeWhere(
+      (p) => p['name'] == profile['name'],
+    ); // Удалить дубликаты
     profiles.add(profile);
     await _storage.write(key: _profilesKey, value: jsonEncode(profiles));
   }

@@ -4,9 +4,7 @@
 const String baseUrl = 'https://api-seller.ozon.ru';
 
 // Заголовки для запросов
-const Map<String, String> defaultHeaders = {
-  'Content-Type': 'application/json',
-};
+const Map<String, String> defaultHeaders = {'Content-Type': 'application/json'};
 
 // Константы для авторизации
 const String clientIdKey = 'Client-Id'; // Ключ заголовка для Client ID

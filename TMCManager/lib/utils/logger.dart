@@ -10,7 +10,8 @@ final Logger logger = Logger(
     lineLength: 80, // Максимальная длина строки в логах
     colors: true, // Использовать цвета
     printEmojis: true, // Показывать эмодзи
-    dateTimeFormat: DateTimeFormat.onlyTimeAndSinceStart, // Показывать время в логах
+    dateTimeFormat:
+        DateTimeFormat.onlyTimeAndSinceStart, // Показывать время в логах
   ),
 );
 

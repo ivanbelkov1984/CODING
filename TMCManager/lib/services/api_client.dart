@@ -13,7 +13,10 @@ class ApiClient {
 
   // Универсальный метод для отправки запросов
   Future<http.Response> _sendRequest(
-      String method, String endpoint, [Map<String, dynamic>? body]) async {
+    String method,
+    String endpoint, [
+    Map<String, dynamic>? body,
+  ]) async {
     final url = Uri.parse('$baseUrl$endpoint');
 
     try {
@@ -28,7 +31,11 @@ class ApiClient {
       if (method == 'GET') {
         response = await http.get(url, headers: headers);
       } else if (method == 'POST') {
-        response = await http.post(url, headers: headers, body: jsonEncode(body));
+        response = await http.post(
+          url,
+          headers: headers,
+          body: jsonEncode(body),
+        );
       } else {
         throw Exception('Unsupported HTTP method: $method');
       }
@@ -50,17 +57,30 @@ class ApiClient {
   void _handleHttpError(http.Response response) {
     switch (response.statusCode) {
       case 400:
-        _logger.w('Ошибка 400: Неверный запрос. Проверьте параметры или тело запроса.');
-        throw Exception('Ошибка 400: Неверный запрос. Проверьте параметры или тело запроса.');
+        _logger.w(
+          'Ошибка 400: Неверный запрос. Проверьте параметры или тело запроса.',
+        );
+        throw Exception(
+          'Ошибка 400: Неверный запрос. Проверьте параметры или тело запроса.',
+        );
       case 401:
         _logger.w('Ошибка 401: Неверные ключи авторизации.');
         throw Exception('Ошибка 401: Неверные ключи авторизации.');
       case 403:
         _logger.w('Ошибка 403: Доступ запрещен. Проверьте права доступа.');
-        throw Exception('Ошибка 403: Доступ запрещен. Проверьте права доступа.');
+        throw Exception(
+          'Ошибка 403: Доступ запрещен. Проверьте права доступа.',
+        );
       default:
-        _logger.e('Ошибка ${response.statusCode}: ${response.body}');
-        throw Exception('Ошибка ${response.statusCode}: ${response.body}');
+        // Не логируем и не пробрасываем тело ответа — оно может содержать
+        // коммерческие данные продавца (остатки, цены, заказы), не только
+        // техническую информацию об ошибке (наряд #205, находка Никиты).
+        _logger.e(
+          'Ошибка ${response.statusCode}: запрос к Ozon Seller API не выполнен',
+        );
+        throw Exception(
+          'Ошибка ${response.statusCode}: запрос к Ozon Seller API не выполнен',
+        );
     }
   }
 

@@ -86,12 +86,7 @@ void main() {
     });
 
     test('offer_id: null бросает исключение — сам id тоже не защищён', () {
-      final json = {
-        'offer_id': null,
-        'name': 'Товар',
-        'price': 10,
-        'stock': 1,
-      };
+      final json = {'offer_id': null, 'name': 'Товар', 'price': 10, 'stock': 1};
 
       expect(() => ProductModel.fromJson(json), throwsA(anything));
     });

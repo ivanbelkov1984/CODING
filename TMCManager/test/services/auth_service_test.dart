@@ -18,7 +18,9 @@ class _FakeApiClient extends ApiClient {
   });
 
   final FutureOr<http.Response> Function(
-      String endpoint, Map<String, dynamic> body) _respond;
+    String endpoint,
+    Map<String, dynamic> body,
+  ) _respond;
 
   @override
   Future<http.Response> post(String endpoint, Map<String, dynamic> body) =>
@@ -51,8 +53,7 @@ void main() {
   // подключён к UI — задокументировано отдельно в PR/issue.
 
   group('AuthService.authenticate() — коды ответа сервера', () {
-    test('успех: сервер вернул 200 → authenticate() возвращает true',
-        () async {
+    test('успех: сервер вернул 200 → authenticate() возвращает true', () async {
       final apiClient = _FakeApiClient((endpoint, body) {
         expect(endpoint, '/v4/product/info/limit');
         return http.Response('{"ok": true}', 200);
@@ -66,17 +67,18 @@ void main() {
         '"неверный пароль" (реальный эквивалент — сервер вернул 401 на '
         'текущих ключах): authenticate() возвращает false, а не бросает '
         'исключение наружу', () async {
-      final apiClient =
-          _FakeApiClient((endpoint, body) => http.Response('unauthorized', 401));
+      final apiClient = _FakeApiClient(
+        (endpoint, body) => http.Response('unauthorized', 401),
+      );
       final auth = AuthService(apiClient: apiClient);
 
       expect(await auth.authenticate(), isFalse);
     });
 
-    test('500 (Internal Server Error) перехвачен → возвращает false',
-        () async {
-      final apiClient =
-          _FakeApiClient((endpoint, body) => http.Response('boom', 500));
+    test('500 (Internal Server Error) перехвачен → возвращает false', () async {
+      final apiClient = _FakeApiClient(
+        (endpoint, body) => http.Response('boom', 500),
+      );
       final auth = AuthService(apiClient: apiClient);
 
       expect(await auth.authenticate(), isFalse);
@@ -135,7 +137,9 @@ void main() {
         'вообще не парсится и не проверяется на структуру, проверяется '
         'только HTTP statusCode. Это тоже находка: если контракт ответа '
         'API поменяется, AuthService этого не заметит.', () async {
-      final apiClient = _FakeApiClient((endpoint, body) => http.Response('{}', 200));
+      final apiClient = _FakeApiClient(
+        (endpoint, body) => http.Response('{}', 200),
+      );
       final auth = AuthService(apiClient: apiClient);
 
       expect(await auth.authenticate(), isTrue);

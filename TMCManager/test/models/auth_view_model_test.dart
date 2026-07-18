@@ -42,25 +42,23 @@ void main() {
       final storage = _FakeStorageService();
       final viewModel = AuthViewModel(storage);
 
-      await expectLater(
-        viewModel.authenticate('', 'some-api-key'),
-        completes,
-      );
+      await expectLater(viewModel.authenticate('', 'some-api-key'), completes);
       expect(storage.calls, isEmpty);
     });
 
     test(
-        'пустой apiKey → аналогично: не падает и не сохраняет данные',
-        () async {
-      final storage = _FakeStorageService();
-      final viewModel = AuthViewModel(storage);
+      'пустой apiKey → аналогично: не падает и не сохраняет данные',
+      () async {
+        final storage = _FakeStorageService();
+        final viewModel = AuthViewModel(storage);
 
-      await expectLater(
-        viewModel.authenticate('some-client-id', ''),
-        completes,
-      );
-      expect(storage.calls, isEmpty);
-    });
+        await expectLater(
+          viewModel.authenticate('some-client-id', ''),
+          completes,
+        );
+        expect(storage.calls, isEmpty);
+      },
+    );
 
     test('оба поля пустые → тоже не падает и не сохраняет данные', () async {
       final storage = _FakeStorageService();
@@ -72,15 +70,17 @@ void main() {
   });
 
   group('AuthViewModel.authenticate — успешный путь', () {
-    test('непустые clientId и apiKey → данные сохраняются через storage',
-        () async {
-      final storage = _FakeStorageService();
-      final viewModel = AuthViewModel(storage);
+    test(
+      'непустые clientId и apiKey → данные сохраняются через storage',
+      () async {
+        final storage = _FakeStorageService();
+        final viewModel = AuthViewModel(storage);
 
-      await viewModel.authenticate('client-42', 'key-42');
+        await viewModel.authenticate('client-42', 'key-42');
 
-      expect(storage.calls, ['saveAuthData(client-42, key-42)']);
-    });
+        expect(storage.calls, ['saveAuthData(client-42, key-42)']);
+      },
+    );
   });
 
   group('AuthViewModel.clearAuthData', () {
