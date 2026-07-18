@@ -18,7 +18,10 @@ class _FakeApiClient extends ApiClient {
   });
 
   final FutureOr<http.Response> Function(
-      String endpoint, Map<String, dynamic> body) _respond;
+    String endpoint,
+    Map<String, dynamic> body,
+  )
+  _respond;
 
   @override
   Future<http.Response> post(String endpoint, Map<String, dynamic> body) =>
@@ -51,8 +54,7 @@ void main() {
   // подключён к UI — задокументировано отдельно в PR/issue.
 
   group('AuthService.authenticate() — коды ответа сервера', () {
-    test('успех: сервер вернул 200 → authenticate() возвращает true',
-        () async {
+    test('успех: сервер вернул 200 → authenticate() возвращает true', () async {
       final apiClient = _FakeApiClient((endpoint, body) {
         expect(endpoint, '/v4/product/info/limit');
         return http.Response('{"ok": true}', 200);
@@ -62,28 +64,27 @@ void main() {
       expect(await auth.authenticate(), isTrue);
     });
 
-    test(
-        '"неверный пароль" (реальный эквивалент — сервер вернул 401 на '
+    test('"неверный пароль" (реальный эквивалент — сервер вернул 401 на '
         'текущих ключах): authenticate() возвращает false, а не бросает '
         'исключение наружу', () async {
-      final apiClient =
-          _FakeApiClient((endpoint, body) => http.Response('unauthorized', 401));
+      final apiClient = _FakeApiClient(
+        (endpoint, body) => http.Response('unauthorized', 401),
+      );
       final auth = AuthService(apiClient: apiClient);
 
       expect(await auth.authenticate(), isFalse);
     });
 
-    test('500 (Internal Server Error) перехвачен → возвращает false',
-        () async {
-      final apiClient =
-          _FakeApiClient((endpoint, body) => http.Response('boom', 500));
+    test('500 (Internal Server Error) перехвачен → возвращает false', () async {
+      final apiClient = _FakeApiClient(
+        (endpoint, body) => http.Response('boom', 500),
+      );
       final auth = AuthService(apiClient: apiClient);
 
       expect(await auth.authenticate(), isFalse);
     });
 
-    test(
-        'таймаут/обрыв сети: если транспорт бросает исключение (например, '
+    test('таймаут/обрыв сети: если транспорт бросает исключение (например, '
         'TimeoutException — так ведёт себя http-клиент при недоступности '
         'сети), authenticate() ловит его и возвращает false, не роняя '
         'приложение. ВАЖНО: в самом ApiClient/AuthService нет ни одного '
@@ -102,8 +103,7 @@ void main() {
   });
 
   group('Adversarial — что может сломать авторизацию', () {
-    test(
-        'огромный Api-Key (100 000 символов) не мешает AuthService нормально '
+    test('огромный Api-Key (100 000 символов) не мешает AuthService нормально '
         'завершить работу', () async {
       final hugeKey = List.filled(100000, 'x').join();
       final apiClient = _FakeApiClient(
@@ -116,8 +116,7 @@ void main() {
       expect(await auth.authenticate(), isTrue);
     });
 
-    test(
-        'SQL-подобный Client-Id не вызывает исключений при конструировании '
+    test('SQL-подобный Client-Id не вызывает исключений при конструировании '
         'ApiClient/AuthService — значение хранится как обычная строка, без '
         'какой-либо интерполяции/валидации на этом уровне', () {
       const sqlLike = "' OR '1'='1'; DROP TABLE users;--";
@@ -129,13 +128,14 @@ void main() {
       expect(apiClient.clientId, sqlLike);
     });
 
-    test(
-        'отсутствующий ожидаемый ключ в теле ответа (пустой объект "{}" без '
+    test('отсутствующий ожидаемый ключ в теле ответа (пустой объект "{}" без '
         '"ok"/"data"/чего угодно) не роняет authenticate() — тело ответа '
         'вообще не парсится и не проверяется на структуру, проверяется '
         'только HTTP statusCode. Это тоже находка: если контракт ответа '
         'API поменяется, AuthService этого не заметит.', () async {
-      final apiClient = _FakeApiClient((endpoint, body) => http.Response('{}', 200));
+      final apiClient = _FakeApiClient(
+        (endpoint, body) => http.Response('{}', 200),
+      );
       final auth = AuthService(apiClient: apiClient);
 
       expect(await auth.authenticate(), isTrue);

@@ -23,4 +23,3 @@ class AuthViewModel {
     return await storageService.loadAuthData();
   }
 }
-

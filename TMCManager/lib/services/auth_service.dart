@@ -36,7 +36,8 @@ class AuthService {
           throw Exception('Internal Server Error: Ошибка на стороне сервера.');
         default:
           throw Exception(
-              'Unexpected Error: Код ошибки ${response.statusCode}.');
+            'Unexpected Error: Код ошибки ${response.statusCode}.',
+          );
       }
     } catch (error) {
       // Логирование ошибки

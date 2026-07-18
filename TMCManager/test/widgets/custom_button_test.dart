@@ -5,8 +5,9 @@ import 'package:tmc_manager/widgets/custom_button.dart';
 void main() {
   Widget wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
-  testWidgets('рендерит переданный текст, без спиннера в обычном состоянии',
-      (tester) async {
+  testWidgets('рендерит переданный текст, без спиннера в обычном состоянии', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       wrap(CustomButton(text: 'Сохранить', onPressed: () {})),
     );
@@ -15,8 +16,9 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
-  testWidgets('tap по кнопке вызывает onPressed ровно один раз',
-      (tester) async {
+  testWidgets('tap по кнопке вызывает onPressed ровно один раз', (
+    tester,
+  ) async {
     var tapCount = 0;
     await tester.pumpWidget(
       wrap(CustomButton(text: 'Ок', onPressed: () => tapCount++)),
@@ -28,16 +30,17 @@ void main() {
     expect(tapCount, 1);
   });
 
-  testWidgets(
-      'isLoading=true: кнопка disabled (onPressed==null), показывает '
+  testWidgets('isLoading=true: кнопка disabled (onPressed==null), показывает '
       'спиннер вместо текста, tap не вызывает callback', (tester) async {
     var tapCount = 0;
     await tester.pumpWidget(
-      wrap(CustomButton(
-        text: 'Сохранить',
-        isLoading: true,
-        onPressed: () => tapCount++,
-      )),
+      wrap(
+        CustomButton(
+          text: 'Сохранить',
+          isLoading: true,
+          onPressed: () => tapCount++,
+        ),
+      ),
     );
 
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
@@ -53,9 +56,7 @@ void main() {
   });
 
   testWidgets('isLoading=false (по умолчанию): кнопка активна', (tester) async {
-    await tester.pumpWidget(
-      wrap(CustomButton(text: 'Ок', onPressed: () {})),
-    );
+    await tester.pumpWidget(wrap(CustomButton(text: 'Ок', onPressed: () {})));
 
     final button = tester.widget<ElevatedButton>(find.byType(ElevatedButton));
     expect(button.onPressed, isNotNull);

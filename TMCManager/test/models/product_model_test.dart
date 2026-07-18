@@ -56,11 +56,9 @@ void main() {
     }
   });
 
-  group(
-      'ProductModel.fromJson — где инвариант РЕАЛЬНО ломается (честная '
+  group('ProductModel.fromJson — где инвариант РЕАЛЬНО ломается (честная '
       'находка, не часть "зелёного" инварианта выше)', () {
-    test(
-        'name: null бросает исключение — fromJson присваивает json[\'name\'] '
+    test('name: null бросает исключение — fromJson присваивает json[\'name\'] '
         'напрямую в поле `final String name` без null-проверки', () {
       final json = {
         'offer_id': 'sku-null-name',
@@ -72,8 +70,7 @@ void main() {
       expect(() => ProductModel.fromJson(json), throwsA(anything));
     });
 
-    test(
-        'price: null бросает исключение (null.toDouble() недоступен) — та же '
+    test('price: null бросает исключение (null.toDouble() недоступен) — та же '
         'причина: отсутствие null-safety проверок в fromJson', () {
       final json = {
         'offer_id': 'sku-null-price',
@@ -86,12 +83,7 @@ void main() {
     });
 
     test('offer_id: null бросает исключение — сам id тоже не защищён', () {
-      final json = {
-        'offer_id': null,
-        'name': 'Товар',
-        'price': 10,
-        'stock': 1,
-      };
+      final json = {'offer_id': null, 'name': 'Товар', 'price': 10, 'stock': 1};
 
       expect(() => ProductModel.fromJson(json), throwsA(anything));
     });

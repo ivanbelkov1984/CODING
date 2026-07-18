@@ -111,10 +111,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       padding: const EdgeInsets.symmetric(vertical: 16.0),
       child: Text(
         title,
-        style: Theme.of(context)
-            .textTheme
-            .titleLarge
-            ?.copyWith(fontWeight: FontWeight.bold),
+        style: Theme.of(
+          context,
+        ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -148,9 +147,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }) {
     return Card(
       elevation: 6,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12.0),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -158,17 +155,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             Icon(icon, size: 40, color: Theme.of(context).primaryColor),
             const SizedBox(height: 8),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.bodyLarge,
-            ),
+            Text(title, style: Theme.of(context).textTheme.bodyLarge),
             const SizedBox(height: 8),
             Text(
               value,
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
             ),
           ],
         ),
@@ -178,9 +171,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildProductList(List products) {
     if (products.isEmpty) {
-      return const Center(
-        child: Text('Нет доступных товаров.'),
-      );
+      return const Center(child: Text('Нет доступных товаров.'));
     }
     return ListView.separated(
       shrinkWrap: true,
@@ -190,12 +181,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       itemBuilder: (context, index) {
         final product = products[index];
         return ListTile(
-          leading: CircleAvatar(
-            child: Text(product.name[0].toUpperCase()),
-          ),
+          leading: CircleAvatar(child: Text(product.name[0].toUpperCase())),
           title: Text(product.name),
           subtitle: Text(
-              'Цена: ${product.price} руб. | Остаток: ${product.stock} шт.'),
+            'Цена: ${product.price} руб. | Остаток: ${product.stock} шт.',
+          ),
           trailing: IconButton(
             icon: const Icon(Icons.edit),
             onPressed: () => _editProduct(product),
