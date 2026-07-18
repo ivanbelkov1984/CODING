@@ -295,7 +295,7 @@ textarea.field{resize:none;line-height:1.6;min-height:96px}
 .vgrid{display:grid;grid-template-columns:1fr 1fr;gap:var(--s3);padding:0 var(--s4) var(--s4)}
 .vf label{display:block;font-size:var(--tx2);font-weight:510;color:var(--t3);text-transform:uppercase;letter-spacing:.09em;margin-bottom:var(--s2)}
 .sl{display:flex;align-items:center;gap:var(--s3)}
-.sl input[type=range]{flex:1;-webkit-appearance:none;height:4px;background:var(--bg3);border-radius:var(--rF);accent-color:var(--blue-btn)}
+.sl input[type=range]{flex:1;-webkit-appearance:none;height:4px;background:var(--bd2);border-radius:var(--rF);accent-color:var(--blue-btn)}
 .sl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--blue-btn);cursor:pointer;box-shadow:none}
 .slv{font-size:var(--tx5);font-weight:510;color:var(--blue-t);min-width:20px;text-align:right;font-variant-numeric:tabular-nums}
 .tog-row{display:flex;align-items:center;justify-content:space-between;padding:var(--s3) 0;border-bottom:1px solid var(--bd)}

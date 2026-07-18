@@ -2508,8 +2508,11 @@ function openSphereLog(id) {
   $('sphere-log-title').textContent = `${s.icon||''} ${s.name}`.trim();
   const b = $('sphere-log-body');
   if (s.type === 'score') {
+    // Слайдер как в чек-ине дня (единый паттерн 0–10 по всему приложению) —
+    // тапнуть и потянуть, а не вбивать число руками (см. PATTERN_LIBRARY.md).
+    const v0 = cur !== '' ? cur : 5;
     b.innerHTML = `<div class="f-lbl">Балл сегодня (0–10)</div>
-      <input class="field" id="sph-log-val" type="number" min="0" max="10" inputmode="decimal" value="${cur}" placeholder="7">
+      <div class="sl"><input type="range" id="sph-log-val" min="0" max="10" step="1" value="${v0}" oninput="document.getElementById('sph-log-val-v').textContent=this.value"><span class="slv" id="sph-log-val-v">${v0}</span></div>
       ${logNoteField(st)}<button class="btn btn-p btn-full" onclick="saveSphereLog(${id})">Сохранить</button>`;
   } else if (s.type === 'counter') {
     b.innerHTML = `<div class="f-lbl">Сколько сегодня${s.unit?' ('+esc(s.unit)+')':''}</div>
@@ -4419,24 +4422,26 @@ async function chatFinish() {
       properties: {
         text: { type: 'string' },
         symptom: { type: ['string', 'null'] }, func: { type: ['string', 'null'] }, gain: { type: ['string', 'null'] },
-        need: { type: ['string', 'null'], enum: [...PSY_NEEDS, null] },
-        ego: { type: ['string', 'null'], enum: [...PSY_EGO, null] },
+        need: { type: ['string', 'null'], enum: [...Object.values(PSY_NEED_CODE), null] },
+        ego: { type: ['string', 'null'], enum: [...Object.values(PSY_EGO_CODE), null] },
         emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
       } };
     const out = await callClaude({
-      system: c.mode === 'dream'
+      system: (c.mode === 'dream'
         ? 'Сожми разбор сна. text: личный вывод от первого лица (2–4 предложения — что сон показал, какая часть меня в нём говорила, что признать или сделать). Плюс психологическая структура вывода: симптом (что сон подсветил), функция, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без эзотерики и воды.'
-        : 'Сожми диалог по методу «Зачем?». text: личный вывод от первого лица (2–4 предложения — что я понял, корень темы, один следующий шаг). Плюс структура метода: симптом, функция симптома, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без воды.',
+        : 'Сожми диалог по методу «Зачем?». text: личный вывод от первого лица (2–4 предложения — что я понял, корень темы, один следующий шаг). Плюс структура метода: симптом, функция симптома, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без воды.')
+        + ' Поля need/ego — строго кодом: need = safety(безопасность)/acceptance(принятие)/significance(значимость)/autonomy(автономия)/meaning(смысл)/closeness(близость)/control(контроль)/calm(покой)/novelty(новизна); ego = child(Ребёнок)/parent(Родитель)/adult(Взрослый).',
       user: dialog, maxTokens: 500, task: 'analysis', schema,
     });
     let parsed; try { parsed = JSON.parse(out); } catch (e) { parsed = { text: String(out).trim() }; }
     const t = String(parsed.text || '').trim(); if (!t) return;
+    const psyNeed = psyNeedFromAI(parsed.need), psyEgo = psyEgoFromAI(parsed.ego);
     c.summarized = true; touch(c);
     DB.insights.unshift({
       id: Date.now(), tag: 'personal', w: 2, title: titleFrom(t), body: t,
       date: dateRU(), createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION,
       src: c.mode === 'dream' ? 'Разбор сна' : 'Диалог', links: [], chatId: c.id,
-      psy: parsed.need || parsed.func ? { symptom: parsed.symptom, func: parsed.func, gain: parsed.gain, need: parsed.need, ego: parsed.ego, emotion: parsed.emotion, game: parsed.game, conf: 85, at: nowISO() } : undefined,
+      psy: psyNeed || parsed.func ? { symptom: parsed.symptom, func: parsed.func, gain: parsed.gain, need: psyNeed, ego: psyEgo, emotion: parsed.emotion, game: parsed.game, conf: 85, at: nowISO() } : undefined,
     });
     persist(); rIns(); rHIns(); rKPIs();
     toast('Вывод диалога сохранён в инсайты', 'ok');
@@ -4685,7 +4690,18 @@ function rThemeMap(elId) {
 // строятся по ПОТРЕБНОСТЯМ и ИГРАМ — системно, а не по словам.
 const PSY_NEEDS = ['безопасность', 'принятие', 'значимость', 'автономия', 'смысл', 'близость', 'контроль', 'покой', 'новизна'];
 const PSY_EGO = ['Ребёнок', 'Родитель', 'Взрослый'];
-const PSY_SYSTEM = 'Ты — психолог-аналитик дневника «Архитектор». Работаешь строго по методу «Зачем?» (интеграция: логотерапия Франкла — у симптома есть функция и смысл; транзактный анализ Бёрна — игры, скрытый выигрыш, состояния Я; теория привязанности Боулби; эмоциональная регуляция Гоулмана). Для каждой записи осознанно определи: симптом (что болит/повторяется, словами автора), функцию симптома (ЗАЧЕМ он нужен психике), вторичную выгоду (payoff), глубинную потребность (из списка), состояние Я, ядровую эмоцию и психологическую игру, если она видна. НЕ выдумывай: если по тексту не видно — ставь null и снижай confidence. Дополнительно определи themes: 1–3 СМЫСЛОВЫЕ темы записи — о чём она ПО СУТИ (короткая обобщённая фраза в именительном падеже: «отношения», «страх остановки», «признание на работе», «границы с матерью»). Не служебные слова, не пересказ, не эмоции — суть. Если в словаре уже есть подходящая тема — переиспользуй её дословно, чтобы записи связывались.';
+// В JSON Schema структурированного вывода enum-значения должны быть ASCII —
+// кириллица в enum ловит ошибку API «Invalid schema: Enum value … does not
+// match» (воспроизведено в проде), и вся психоразметка тихо не сохранялась.
+// Схеме отдаём латинские коды, а в данных/интерфейсе как жили, так и живут
+// русские значения PSY_NEEDS/PSY_EGO — перевод туда-обратно на границе ИИ.
+const PSY_NEED_CODE = { 'безопасность': 'safety', 'принятие': 'acceptance', 'значимость': 'significance', 'автономия': 'autonomy', 'смысл': 'meaning', 'близость': 'closeness', 'контроль': 'control', 'покой': 'calm', 'новизна': 'novelty' };
+const PSY_EGO_CODE = { 'Ребёнок': 'child', 'Родитель': 'parent', 'Взрослый': 'adult' };
+const PSY_NEED_FROM_CODE = Object.fromEntries(Object.entries(PSY_NEED_CODE).map(([ru, code]) => [code, ru]));
+const PSY_EGO_FROM_CODE = Object.fromEntries(Object.entries(PSY_EGO_CODE).map(([ru, code]) => [code, ru]));
+const psyNeedFromAI = code => PSY_NEED_FROM_CODE[code] || null;
+const psyEgoFromAI = code => PSY_EGO_FROM_CODE[code] || null;
+const PSY_SYSTEM = 'Ты — психолог-аналитик дневника «Архитектор». Работаешь строго по методу «Зачем?» (интеграция: логотерапия Франкла — у симптома есть функция и смысл; транзактный анализ Бёрна — игры, скрытый выигрыш, состояния Я; теория привязанности Боулби; эмоциональная регуляция Гоулмана). Для каждой записи осознанно определи: симптом (что болит/повторяется, словами автора), функцию симптома (ЗАЧЕМ он нужен психике), вторичную выгоду (payoff), глубинную потребность, состояние Я, ядровую эмоцию и психологическую игру, если она видна. Поля need/ego — строго кодом (не переводи и не выдумывай новые): need = safety(безопасность)/acceptance(принятие)/significance(значимость)/autonomy(автономия)/meaning(смысл)/closeness(близость)/control(контроль)/calm(покой)/novelty(новизна); ego = child(Ребёнок)/parent(Родитель)/adult(Взрослый). НЕ выдумывай: если по тексту не видно — ставь null и снижай confidence. Дополнительно определи themes: 1–3 СМЫСЛОВЫЕ темы записи — о чём она ПО СУТИ (короткая обобщённая фраза в именительном падеже: «отношения», «страх остановки», «признание на работе», «границы с матерью»). Не служебные слова, не пересказ, не эмоции — суть. Если в словаре уже есть подходящая тема — переиспользуй её дословно, чтобы записи связывались.';
 let _psyBusy = false;
 // Разметка одного батча записей психоконтуром — используется и фоновым
 // psyAutoRun, и массовым «освоением» архива (gptAbsorb).
@@ -4696,8 +4712,8 @@ async function psyMarkBatch(todo) {
     properties: {
       id: { type: 'integer' },
       symptom: { type: ['string', 'null'] }, func: { type: ['string', 'null'] }, gain: { type: ['string', 'null'] },
-      need: { type: ['string', 'null'], enum: [...PSY_NEEDS, null] },
-      ego: { type: ['string', 'null'], enum: [...PSY_EGO, null] },
+      need: { type: ['string', 'null'], enum: [...Object.values(PSY_NEED_CODE), null] },
+      ego: { type: ['string', 'null'], enum: [...Object.values(PSY_EGO_CODE), null] },
       emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
       conf: { type: 'integer', minimum: 0, maximum: 100 },
       themes: { type: 'array', items: { type: 'string' }, maxItems: 3 },
@@ -4712,7 +4728,7 @@ async function psyMarkBatch(todo) {
   (out.items || []).forEach(m => {
     const i = DB.insights.find(x => x.id === m.id);
     if (!i) return;
-    i.psy = { symptom: m.symptom, func: m.func, gain: m.gain, need: m.need, ego: m.ego, emotion: m.emotion, game: m.game, conf: m.conf, at: nowISO(),
+    i.psy = { symptom: m.symptom, func: m.func, gain: m.gain, need: psyNeedFromAI(m.need), ego: psyEgoFromAI(m.ego), emotion: m.emotion, game: m.game, conf: m.conf, at: nowISO(),
       themes: [...new Set((m.themes || []).map(t => String(t).trim().toLowerCase().replace(/['"«»]/g, '')).filter(t => t && t.length <= 40))].slice(0, 3) };
     touch(i); n++;
   });

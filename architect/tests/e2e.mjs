@@ -90,6 +90,24 @@ ok(eng.review30 && eng.review365, 'periodReview месяц/год строятс
 ok(eng.nudge, 'smartNudge формирует напоминание');
 ok(eng.sphere === 'habit', 'sphereStats читает тип сферы');
 
+// ── Отметка балльной сферы — слайдер 0–10 как в чек-ине, не число руками ──
+const scoreLog = await page.evaluate(() => {
+  const mood = createSphere({ name: 'Настроение', type: 'score', color: '#5e6ad2' });
+  openSphereLog(mood.id);
+  const inputType = (document.getElementById('sph-log-val') || {}).type;
+  const hasSlider = !!document.querySelector('#sphere-log-body .sl input[type="range"]');
+  const hasNumberInput = !!document.querySelector('#sphere-log-body input[type="number"]');
+  document.getElementById('sph-log-val').value = '8';
+  saveSphereLog(mood.id);
+  const val = sphereStats(mood.id).today;
+  DB.spheres = DB.spheres.filter(s => s.id !== mood.id);
+  DB.sphereLogs = DB.sphereLogs.filter(l => l.sphereId !== mood.id);
+  return { inputType, hasSlider, hasNumberInput, val };
+});
+ok(scoreLog.hasSlider && scoreLog.inputType === 'range' && !scoreLog.hasNumberInput,
+  'сфера с баллом 0–10 отмечается слайдером (тот же паттерн, что в чек-ине), не ручным вводом числа');
+ok(scoreLog.val === 8, 'значение слайдера корректно сохраняется');
+
 // ── Сферы: лог + habit-toggle + goal ──
 await page.evaluate(() => {
   const c = createSphere({ name: 'Книги', type: 'goal', target: 12 });
@@ -204,8 +222,11 @@ ok(/generativelanguage\.googleapis\.com/.test(prov.u1) && /gemini-2\.5-pro/.test
 const psy = await page.evaluate(async () => {
   setAiKey('sk-test'); CFG.aiProvider = 'anthropic';
   DB.insights.unshift({ id: 501, tag: 'personal', title: 'Опять жду её сообщения весь вечер', body: 'Опять жду её сообщения весь вечер и не могу заняться делом, тревога накрывает.', links: [], createdAt: nowISO(), day: todayKey(), date: '' });
+  // ИИ отвечает ASCII-кодом (see comment on PSY_NEED_CODE) — схема с кириллицей
+  // в enum ловила реальную ошибку API «Invalid schema: Enum value … does not
+  // match»; тест проверяет и код от ИИ, и перевод обратно в русское значение.
   window.fetch = (u) => String(u).includes('anthropic')
-    ? Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify({ items: [{ id: 501, symptom: 'жду сообщения, тревога', func: 'сохранить связь', gain: 'не оставаться с пустотой', need: 'близость', ego: 'Ребёнок', emotion: 'тревога', game: null, conf: 80 }] }) }], usage: { input_tokens: 200, output_tokens: 100 } }) })
+    ? Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify({ items: [{ id: 501, symptom: 'жду сообщения, тревога', func: 'сохранить связь', gain: 'не оставаться с пустотой', need: 'closeness', ego: 'child', emotion: 'тревога', game: null, conf: 80 }] }) }], usage: { input_tokens: 200, output_tokens: 100 } }) })
     : Promise.reject(new Error('offline'));
   await psyAutoRun();
   const i = DB.insights.find(x => x.id === 501);
