@@ -5,7 +5,7 @@ name: CI — Архитектор
 
 on:
   push:
-    branches: [ MAIN, "claude/**" ]
+    branches: [ MAIN, "claude/**", "studio/**" ]
     paths: [ "architect/**" ]
   pull_request:
     paths: [ "architect/**" ]
@@ -21,6 +21,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # Быстрый синтаксический линт до тяжёлого Chromium: битый JS роняет CI
+      # за секунды, не тратя минуты на установку браузера и прогон E2E.
+      - name: Lint (syntax)
+        run: |
+          for f in build.mjs tests/e2e.mjs sw.js app.js; do
+            echo "node --check $f"
+            node --check "$f"
+          done
       - name: Install deps
         run: npm install
       - name: Install Chromium
