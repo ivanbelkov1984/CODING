@@ -122,11 +122,10 @@
 <section class="pg on" id="pg-home">
   <div class="h-hero">
     <div class="h-date" id="h-date"></div>
-    <div class="h-hl">Система <em id="h-st">готова</em></div>
+    <div class="h-hl" id="h-hl">Доброе <em>утро</em></div>
     <div id="h-streak-wrap"></div>
   </div>
   <div id="h-nudge"></div>
-  <div id="h-onthisday"></div>
   <div class="sec-lbl">Действия</div>
   <div class="qarow">
     <button class="qabtn" onclick="openOv('ov-ci')" aria-label="Check-in">
@@ -158,39 +157,44 @@
     <div class="sh-contrib" id="sh-contrib"></div>
   </div>
 
-  <!-- ВЕКТОР НЕДЕЛИ: «куда я еду» одним взглядом -->
-  <div id="h-vector"></div>
+  <button class="h-more-btn" id="h-more-btn" onclick="toggleHomeMore()">Показать больше ↓</button>
+  <div class="h-more" id="h-more">
+    <div id="h-onthisday"></div>
 
-  <!-- ЖИВАЯ СЕТЬ (амбиентные кросс-доменные связи) -->
-  <div id="home-ambient"></div>
+    <!-- ВЕКТОР НЕДЕЛИ: «куда я еду» одним взглядом -->
+    <div id="h-vector"></div>
 
-  <!-- ЧТО ТЕБЕ ПОМОГАЕТ (действенные выводы — флагман умного слоя) -->
-  <div class="sec-lbl">Что тебе помогает</div>
-  <div class="si-card mx mb" id="home-smart"></div>
+    <!-- ЖИВАЯ СЕТЬ (амбиентные кросс-доменные связи) -->
+    <div id="home-ambient"></div>
 
-  <!-- ТЕПЛОВАЯ КАРТА НАСТРОЕНИЯ -->
-  <div class="sec-lbl">Настроение</div>
-  <div class="hm-card mx mb" id="home-heatmap"></div>
+    <!-- ЧТО ТЕБЕ ПОМОГАЕТ (действенные выводы — флагман умного слоя) -->
+    <div class="sec-lbl">Что тебе помогает</div>
+    <div class="si-card mx mb" id="home-smart"></div>
 
-  <!-- ГРАФ СВЯЗЕЙ (тизер) -->
-  <div class="sec-lbl">Карта мыслей</div>
-  <div class="gg mx mb" id="home-graph" onclick="goTo('map');msub('graph')" role="button"></div>
+    <!-- ТЕПЛОВАЯ КАРТА НАСТРОЕНИЯ -->
+    <div class="sec-lbl">Настроение</div>
+    <div class="hm-card mx mb" id="home-heatmap"></div>
 
-  <div class="agrid" id="ax-grid" style="display:none"></div>
-  <div class="sec-lbl">Эта неделя</div>
-  <div class="kgrid">
-    <div class="kc"><span class="kn" id="kn-i">0</span><span class="kl">Инсайты</span><span class="kt" id="kt-i"></span></div>
-    <div class="kc"><span class="kn" id="kn-d">0</span><span class="kl">Сны</span><span class="kt" id="kt-d"></span></div>
-    <div class="kc"><span class="kn" id="kn-p">0</span><span class="kl">Паттерны</span><span class="kt" id="kt-p"></span></div>
-    <div class="kc"><span class="kn" id="kn-c">0</span><span class="kl">Глав</span><span class="kt" id="kt-c"></span></div>
+    <!-- ГРАФ СВЯЗЕЙ (тизер) -->
+    <div class="sec-lbl">Карта мыслей</div>
+    <div class="gg mx mb" id="home-graph" onclick="goTo('map');msub('graph')" role="button"></div>
+
+    <div class="agrid" id="ax-grid" style="display:none"></div>
+    <div class="sec-lbl">Эта неделя</div>
+    <div class="kgrid">
+      <div class="kc"><span class="kn" id="kn-i">0</span><span class="kl">Инсайты</span><span class="kt" id="kt-i"></span></div>
+      <div class="kc"><span class="kn" id="kn-d">0</span><span class="kl">Сны</span><span class="kt" id="kt-d"></span></div>
+      <div class="kc"><span class="kn" id="kn-p">0</span><span class="kl">Паттерны</span><span class="kt" id="kt-p"></span></div>
+      <div class="kc"><span class="kn" id="kn-c">0</span><span class="kl">Глав</span><span class="kt" id="kt-c"></span></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:.5rem;padding:1.25rem 1rem .375rem">
+      <div class="oqpulse"></div>
+      <span class="sec-lbl" style="padding:0">Открытые вопросы</span>
+    </div>
+    <div class="card mx mb" id="h-oq"></div>
+    <div class="sec-lbl">Последние инсайты</div>
+    <div class="card mx" style="margin-bottom:5rem" id="h-ins"></div>
   </div>
-  <div style="display:flex;align-items:center;gap:.5rem;padding:1.25rem 1rem .375rem">
-    <div class="oqpulse"></div>
-    <span class="sec-lbl" style="padding:0">Открытые вопросы</span>
-  </div>
-  <div class="card mx mb" id="h-oq"></div>
-  <div class="sec-lbl">Последние инсайты</div>
-  <div class="card mx" style="margin-bottom:5rem" id="h-ins"></div>
 </section>
 
 <!-- Инсайты и Книга вынесены в раздел «Разум» (subnav) ниже -->

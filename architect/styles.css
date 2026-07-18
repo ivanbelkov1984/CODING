@@ -1199,3 +1199,9 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .gpt-t{font-size:var(--tx3);color:var(--t1);font-weight:500;line-height:1.4}
 .gpt-m{font-size:var(--tx2);color:var(--t3);margin-top:2px}
 .gpt-badge{font-size:var(--tx1,.6875rem);font-weight:510;color:var(--accent-light,var(--accent));background:rgba(94,106,210,.12);border-radius:999px;padding:1px 7px;vertical-align:1px}
+
+/* ── ГЛАВНАЯ: сворачиваемые вторичные блоки («Показать больше») ──── */
+.h-more-btn{display:block;margin:var(--s2) var(--s4) var(--s4);padding:var(--s2) var(--s3);background:var(--sf);border:1px solid var(--bd);border-radius:var(--r8);color:var(--t2);font-size:var(--tx3);font-weight:500;text-align:center;cursor:pointer;width:calc(100% - var(--s4)*2)}
+.h-more-btn:active{background:var(--bg2)}
+.h-more{display:none}
+.h-more.on{display:block}

@@ -239,6 +239,42 @@ ok(await page.evaluate(() => /Перекликается|мысль|записе
 ok(await page.evaluate(() => !!document.querySelector('#h-vector .vec-card')), 'виджет «Вектор недели» построен');
 ok(await page.evaluate(() => /запис/.test(document.querySelector('#h-vector .vec-sub').textContent)), 'вектор показывает движение за неделю');
 await page.evaluate(() => rcClose());
+
+// ── Аудит главного экрана: заголовок-приветствие вместо сломанной фразы,
+// свёрнутые вторичные блоки, без дублирующего тоста поверх шапки ──
+const hero = await page.evaluate(() => {
+  DB.vit.ci = false;                                  // check-in не сделан — раньше здесь была «Система check-in не выполнен»
+  rHState();
+  const txt = document.getElementById('h-hl').textContent;
+  return { txt, hasEm: !!document.querySelector('#h-hl em') };
+});
+ok(!/Систем/.test(hero.txt), `заголовок больше не «Система …» — грамматически связный текст («${hero.txt}»)`);
+ok(/Добр(ое|ый|ой) (утро|день|вечер|ночи)/.test(hero.txt) && hero.hasEm, 'заголовок — приветствие по времени суток с акцентным словом');
+const more = await page.evaluate(() => {
+  const el = document.getElementById('h-more'), btn = document.getElementById('h-more-btn');
+  const closedByDefault = !el.classList.contains('on');
+  const hasContent = el.querySelectorAll('#home-smart, #home-heatmap, #home-graph, #h-ins').length === 4;
+  toggleHomeMore();
+  const openedNow = el.classList.contains('on') && /Скрыть/.test(btn.textContent);
+  toggleHomeMore();
+  const closedAgain = !el.classList.contains('on') && /Показать больше/.test(btn.textContent);
+  return { closedByDefault, hasContent, openedNow, closedAgain };
+});
+ok(more.closedByDefault && more.hasContent, 'вторичные блоки главного экрана свёрнуты по умолчанию, но отрендерены внутри');
+ok(more.openedNow && more.closedAgain, '«Показать больше» разворачивает и сворачивает обратно, текст кнопки меняется');
+const noToast = await page.evaluate(async () => {
+  const calls = []; const orig = window.toast; window.toast = (m, t) => calls.push(m);
+  // на время паузы гасим авто-синк (иначе фоновый таймер, взведённый более
+  // ранним тестом, успевает сработать в это окно ожидания и пишет в консоль
+  // офлайн-ошибку, не связанную с тем, что здесь проверяется)
+  const savedApi = window.ARCHITECT_API; window.ARCHITECT_API = '';
+  DB.vit.ci = false; DB.vit.date = '2000-01-01';
+  smartTriggers();
+  await new Promise(r => setTimeout(r, 3200));
+  window.ARCHITECT_API = savedApi; window.toast = orig;
+  return calls;
+});
+ok(!noToast.some(m => /Check-in не выполнен/.test(m)), 'напоминание о check-in больше не дублируется тостом поверх шапки — только карточка-наджер');
 const sphR = await page.evaluate(() => { reactToSphere(DB.spheres[0]); const t = (document.getElementById('react-card') || {}).textContent || ''; rcClose(); return t; });
 ok(/Спорт/.test(sphR), 'живой отклик и на отметку сферы');
 

@@ -868,13 +868,21 @@ function rStateHero() {
       <div class="cbar-t"><div class="cbar-f" style="width:${c.score}%;background:${moodColorScore(c.score)}"></div></div></div>`;
   }).join('');
 }
+// Заголовок героя — приветствие по времени суток, а не статус check-in
+// (раньше «Система «+статус давало сломанные фразы вроде «Система пусто» —
+// статус и так виден на карточке состояния ниже, дублировать не нужно).
 function rHState() {
-  const el = $('h-st'); const v = DB.vit;
-  if (!v.ci) { el.textContent='check-in не выполнен'; el.style.color='var(--t3)'; return; }
-  const avg = (v.cl + v.mv + (10 - v.st)) / 3;
-  const lbl = avg>=8?'заряжен':avg>=6?'нейтрально':avg>=4?'пусто':'тяжело';
-  el.textContent = lbl;
-  el.style.color = avg>=8?'var(--green)':avg>=6?'var(--blue-t)':'var(--orange)';
+  const el = $('h-hl'); if (!el) return;
+  const h = new Date().getHours();
+  const [pre, em] = h < 5 ? ['Доброй', 'ночи'] : h < 12 ? ['Доброе', 'утро'] : h < 18 ? ['Добрый', 'день'] : ['Добрый', 'вечер'];
+  const name = String(CFG.userName || '').trim();
+  el.innerHTML = `${esc(pre)} <em>${esc(em)}</em>${name ? ', ' + esc(name) : ''}`;
+}
+function toggleHomeMore() {
+  const el = $('h-more'), btn = $('h-more-btn'); if (!el || !btn) return;
+  const open = el.classList.toggle('on');
+  btn.textContent = open ? 'Скрыть подробности ↑' : 'Показать больше ↓';
+  if (typeof hpt === 'function') hpt();
 }
 function rHIns() {
   $('h-ins').innerHTML = DB.insights.slice(0,4).map(iRow).join('');
@@ -3891,13 +3899,9 @@ function checkApiStatus() {
 
 // ─── УМНЫЕ ТРИГГЕРЫ ──────────────────────────────────────────────
 function smartTriggers() {
-  // Напоминание о check-in если не сделан сегодня
-  if (!DB.vit.ci || DB.vit.date !== todayKey()) {
-    const now = new Date();
-    if (now.getHours() >= 12) {
-      setTimeout(() => toast('Check-in не выполнен сегодня', 'warn'), 3000);
-    }
-  }
+  // Напоминание о check-in уже живёт постоянной карточкой в rNudge() на
+  // главном экране — отдельный тост здесь только дублировал её и перекрывал
+  // шапку (см. PATTERN_LIBRARY.md, П4: результат — карточка, не тост).
   // Молчащие разделы
   const lastDrm = DB.dreams[0];
   if (lastDrm && lastDrm.createdAt) {
