@@ -261,6 +261,15 @@ ok(dig.marked, 'свежий обзор подсвечен (не мелькае�
 const dedup = await page.evaluate(async () => { await mkDig(); await mkDig(); return { n: DB.digests.length, tomb: Object.keys(DB._del || {}).length > 0 }; });
 ok(dedup.n === 1, 'повторный «Собрать обзор» обновляет карточку недели, а не дублирует');
 ok(dedup.tomb, 'замещённый обзор получает надгробие (синк не воскресит дубль)');
+// идентичность обзора — календарная ISO-неделя: сборка в другой день недели
+// (другая строка дат) больше не плодит почти одинаковые карточки
+const wkDedup = await page.evaluate(() => {
+  const k = isoWeekKey(Date.now());
+  DB.digests.push({ id: 999, createdAt: nowISO(), week: '1 янв – 7 янв', cnt: 1 });
+  const removed = dedupeDigests();
+  return { removed, left: DB.digests.filter(d => digWk(d) === k).length, tombed: !!(DB._del || {})[999] };
+});
+ok(wkDedup.removed >= 1 && wkDedup.left === 1 && wkDedup.tombed, 'карточки одной календарной недели схлопываются даже при разных датах сборки');
 
 // ── Карта связей: смысл вместо каши (tf-idf + лимит связей на узел) ──
 const graph = await page.evaluate(() => {
@@ -325,6 +334,76 @@ const clean = await page.evaluate(() => {
 });
 ok(!clean.some(s => ['котор', 'нужн', 'прост', 'должен', 'должн'].includes(s)) && clean.includes('страх'),
   `служебные слова отфильтрованы, смысловые остаются (темы: ${clean.join(', ') || '—'})`);
+
+// ── СМЫСЛОВАЯ карта: темы осознанно размечает ИИ (психоконтур), не слова ──
+const sem = await page.evaluate(() => {
+  const keep = DB.insights;
+  const mk = (id, body, themes, need) => ({ id, tag: 'personal', title: body.slice(0, 40), body, links: [], createdAt: nowISO(), day: todayKey(), date: '', psy: { need, themes, conf: 80, at: nowISO() } });
+  DB.insights = [
+    mk(41, 'Опять отложил разговор о повышении', ['признание на работе'], 'значимость'),
+    mk(42, 'Написал бывшей, хотя решил не писать', ['отношения', 'страх одиночества'], 'близость'),
+    mk(43, 'Тянет проверить её страницу', ['отношения'], 'близость'),
+    mk(44, 'Боюсь остановиться, сразу тревога', ['страх остановки', 'бегство в работу'], 'покой'),
+    mk(45, 'Снова взял чужую задачу, чтобы заметили', ['признание на работе'], 'значимость'),
+  ];
+  const g = buildThemeGraph();
+  STATE.mapView = 'themes'; rMap();
+  const meta = (document.querySelector('#graph-canvas .graph-meta') || {}).textContent || '';
+  const hint = (document.getElementById('graph-hint') || {}).textContent || '';
+  const out = { sem: g.sem, labels: g.nodes.map(n => n.title), edges: g.edges.length, meta, hint };
+  DB.insights = keep; rMap();
+  return out;
+});
+ok(sem.sem === true && sem.labels.includes('отношения') && sem.labels.includes('признание на работе'),
+  `карта строится из смысловых тем ИИ, а не из повторяемых слов (${sem.labels.join(', ')})`);
+ok(sem.edges >= 2, 'связи смыслов: темы одной записи + темы одной глубинной потребности');
+ok(/смысловые темы/.test(sem.meta), 'подпись карты честно говорит: темы размечает ИИ');
+ok(/СМЫСЛ/.test(sem.hint), 'подсказка объясняет смысловой режим карты');
+
+// ── СОННИК: отдельный режим толкования (Юнг + гештальт + наука + контекст) ──
+const dream = await page.evaluate(() => {
+  DB.insights.unshift({ id: 77, tag: 'dream', w: 1, title: 'Сон: маленькие дети', body: 'Приснились маленькие дети и спокойная Лена в старом доме', date: '', createdAt: nowISO(), day: todayKey(), sv: 2, src: 'Дневник снов', links: [] });
+  openChatFor(77);
+  const c = DB.chats.find(x => x.insightId === 77);
+  const sys = chatSystemFor(c);
+  closeOv('ov-chat');
+  const out = { mode: c && c.mode, jung: /Юнга/.test(sys) && /Тень/.test(sys), science: /Домхофф|непрерывности/.test(sys),
+    ctx: /Жизненный контекст/.test(sys), separate: !/метод «Зачем\?» \(интеграция/.test(sys) };
+  DB.chats = DB.chats.filter(x => x.insightId !== 77);
+  DB.insights = DB.insights.filter(i => i.id !== 77);
+  return out;
+});
+ok(dream.mode === 'dream', 'диалог по сну открывается в режиме толкования, а не в методе «Зачем?»');
+ok(dream.jung && dream.science, 'сонник — синтез: Юнг (Тень, компенсация), гештальт, научный слой');
+ok(dream.ctx && dream.separate, 'толкование опирается на жизненный контекст дневника, отдельно от метода «Зачем?»');
+const dreamRow = await page.evaluate(() => {
+  const rows = []; const orig = window.reactCard; window.reactCard = r => rows.push(...r);
+  reactToDream({ body: 'тестовый сон про дом', arch: null }, 501);
+  window.reactCard = orig;
+  return rows.some(r => /Растолковать сон/.test(r.html));
+});
+ok(dreamRow, 'отклик на сон предлагает «Растолковать сон» — вход в сонник');
+
+// ── КЛЮЧИ СЕРВИСОВ: полный перечень подключений в одном меню ──
+const keys = await page.evaluate(() => {
+  setAiKeyFor('openai', '');                       // тест провайдеров выше оставил ключ
+  openKeys();
+  const el = document.getElementById('keys-list');
+  const cards = el.querySelectorAll('.key-card').length;
+  const before = el.querySelectorAll('.key-st.on').length;
+  setAiKeyFor('openai', 'sk-test-123'); rKeys();
+  const after = el.querySelectorAll('.key-st.on').length;
+  const got = getAiKeyFor('openai');
+  setAiKeyFor('openai', ''); rKeys();
+  const txt = el.textContent;
+  closeOv('ov-keys');
+  return { cards, before, after, got, txt };
+});
+ok(keys.cards >= 5, `«Ключи сервисов»: все внешние подключения в одном меню (${keys.cards} карточек)`);
+ok(/Anthropic/.test(keys.txt) && /OpenAI/.test(keys.txt) && /Gemini/.test(keys.txt) && /Синк-сервер/.test(keys.txt) && /Обратная связь/.test(keys.txt),
+  'полный перечень: три ИИ-провайдера + синк-сервер + обратная связь');
+ok(keys.got === 'sk-test-123' && keys.after === keys.before + 1, 'ключ сохраняется per-провайдер, статус сразу «активен»');
+ok(await page.evaluate(() => !!document.querySelector('#pg-settings [onclick*="openKeys"]')), 'вход «Ключи сервисов» есть в Настройках');
 await page.evaluate(() => goTo('home'));
 
 // ── Живое обновление PWA: баннер + «Что нового» + кликабельные тосты ──

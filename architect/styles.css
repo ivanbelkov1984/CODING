@@ -1180,3 +1180,15 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .psy-row{display:flex;gap:var(--s3);font-size:var(--tx2);line-height:1.5;padding:3px 0}
 .psy-row span{flex:0 0 108px;color:var(--t4)}
 .psy-row div{color:var(--t1)}
+
+/* ── КЛЮЧИ СЕРВИСОВ: одно меню на все внешние подключения ──────── */
+.key-card{background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:var(--s3);display:flex;flex-direction:column;gap:var(--s2)}
+.key-h{display:flex;align-items:center;gap:var(--s2);font-size:var(--tx3)}
+.key-h b{color:var(--t1);font-weight:510;flex:1}
+.key-st{font-size:var(--tx1,.6875rem);font-weight:510;color:var(--t3);background:var(--sf);border:1px solid var(--bd);border-radius:999px;padding:2px 8px}
+.key-st.on{color:var(--green);border-color:var(--green)}
+.key-d{font-size:var(--tx2);color:var(--t2);line-height:1.5}
+.key-foot{display:flex;justify-content:space-between;gap:var(--s2);font-size:var(--tx2);color:var(--t3)}
+.key-del{color:var(--accent-light,var(--accent));cursor:pointer;font-weight:510}
+.key-del:active{opacity:.6}
+.cm-hint.tap{cursor:pointer;text-decoration:underline;text-underline-offset:3px}

@@ -468,7 +468,7 @@ function goTo(tab, el) {
   if (tab==='vit') { rSpheres(); rVit(); }
   if (tab==='sys') { rLivingMap('livingmap-out'); rDig(); rReview(30); }
   if (tab==='map') rIns();
-  if (tab==='settings') { rProfileRow(); checkApiStatus(); rPushStatus(); }
+  if (tab==='settings') { rProfileRow(); checkApiStatus(); rPushStatus(); const kc=$('keys-cnt'); if (kc) kc.textContent = KEY_SERVICES.filter(s=>getAiKeyFor(s.p)).length + ' из ' + KEY_SERVICES.length; }
 }
 function msub(tab, el) {
   document.querySelectorAll('[id^="ms-"]').forEach(t => t.style.display='none');
@@ -1439,7 +1439,7 @@ const RU_STOP = new Set(('и в во не что он на я с со как а 
 // модальные («должен», «нужно»), пустые глаголы («думать», «говорить») и
 // ультра-общие слова дневника («время», «жизнь», «момент») не несут темы —
 // без этого фильтра они становятся ложными «хабами» карты.
-const STEM_STOP = new Set(('котор должн должен нужн нужен можн нельз прост стал стан буд был быва действительн наверн возможн кажет например конечн точн правд однак вообщ именн кажд люб так такж тож иногд всегд сегодн завтр вчер сраз дале зат почем зач сколь нескольк немног мног мал боле мене сам сво себ соб мен теб нам вам очен хоч хот хотел дела сдела делаю говор сказа дума поня понима знаю знал вид видел смотр смотрел ид идёт пошл пошел получа получ получил происход произошл явля момент врем времен ден недел месяц год человек люд жизн жизнь дел вещ ситуац вопрос ответ слов текст запис мысл штук притом причём хорош плох нормальн наверно').split(/\s+/));
+const STEM_STOP = new Set(('котор должн должен нужн нужен можн нельз прост стал стан буд был быва действительн наверн возможн кажет например конечн точн правд однак вообщ именн кажд люб так такж тож иногд всегд сегодн завтр вчер сраз дале зат почем зач сколь нескольк немног мног мал боле мене сам сво себ соб мен теб нам вам очен хоч хот хотел дела сдела делаю говор сказа дума поня понима знаю знал вид видел смотр смотрел ид идёт пошл пошел получа получ получил происход произошл явля момент врем времен ден недел месяц год человек люд жизн жизнь дел вещ ситуац вопрос ответ слов текст запис мысл штук притом причём хорош плох нормальн наверно либ пришл сказал скаж виж прям важн сторон постоянн состоян состояни').split(/\s+/));
 function keywords(text) {
   return [...new Set(String(text || '').toLowerCase().replace(/[^а-яёa-z0-9\s]/gi, ' ')
     .split(/\s+/).filter(w => w.length >= 4 && !RU_STOP.has(w)).map(stemRu)
@@ -1721,7 +1721,7 @@ function saveDrm() {
   $('drm-tx').value=''; $('drm-arch').value='';
   closeOv('ov-drm'); persist(); rDrms(); rIns(); rHIns(); rKPIs();
   hptMed(); toast('Сон зафиксирован', 'ok');
-  reactToDream(DB.dreams[0]);              // живой отклик вместо молчания
+  reactToDream(DB.dreams[0], _ts + 1);     // живой отклик + вход в толкование
   try { rVector(); } catch (e) {}
 }
 function deleteDrm(id) {
@@ -2630,7 +2630,31 @@ function rReview(days) {
 }
 
 // ─── ДАЙДЖЕСТ ────────────────────────────────────────────────────
+// Одна карточка «Итоги недели» на КАЛЕНДАРНУЮ неделю (ISO, пн–вс).
+// Раньше идентичностью была строка дат скользящего окна («11 июл – 17 июл»),
+// и сборка в другой день плодила почти одинаковые карточки — «повторяется
+// одно и то же». Теперь неделя одна — карточка одна, свежая замещает.
+function isoWeekKey(ts) {
+  const d = new Date(ts);
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  t.setUTCDate(t.getUTCDate() - (t.getUTCDay() + 6) % 7 + 3);   // четверг ISO-недели
+  const y1 = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+  const w = 1 + Math.round(((t - y1) / 864e5 - 3 + (y1.getUTCDay() + 6) % 7) / 7);
+  return t.getUTCFullYear() + '-W' + String(w).padStart(2, '0');
+}
+const digWk = d => d.wk || isoWeekKey(d.createdAt ? Date.parse(d.createdAt) : d.id);
+function dedupeDigests() {
+  const seen = {}; let removed = 0;
+  // список отсортирован свежими вперёд — на неделю остаётся самая свежая карточка
+  DB.digests = (DB.digests || []).filter(d => {
+    const k = digWk(d);
+    if (seen[k]) { tomb(d.id); removed++; return false; }
+    seen[k] = 1; return true;
+  });
+  return removed;
+}
 function rDig() {
+  if (dedupeDigests()) persistLocal();   // страховка: дубли не выживают и после синка
   const el = $('dg-list');
   if (!DB.digests.length) {
     el.innerHTML = `<div class="empty"><div class="em-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:26px;height:26px;color:var(--t3)"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="em-t">Дайджеста пока нет</div><div class="em-d">Нажми «Сформировать» — соберу сводку недели из твоих данных</div></div>`;
@@ -2671,7 +2695,9 @@ async function mkDig() {
   const now = Date.now();
   const wk = iso => iso && Date.parse(iso) >= now - 7*864e5;
   const insW = DB.insights.filter(i => wk(i.createdAt));
-  const top = [...(insW.length ? insW : DB.insights)]
+  // Только инсайты ЭТОЙ недели: глобальный запасной список повторял одни и
+  // те же «сильнейшие» в каждой карточке. Нет записей — блок честно пуст.
+  const top = [...insW]
     .sort((a,b) => (b.w||1)-(a.w||1)).slice(0,3)
     .map(i => ({ title: i.title, tag: i.tag }));
   const ciW = DB.checkins.filter(c => c.date >  dayAgo(7));
@@ -2689,16 +2715,17 @@ async function mkDig() {
   const M = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
   const d0 = new Date(now-6*864e5), d1 = new Date(now);
   const week = `${d0.getDate()} ${M[d0.getMonth()]} – ${d1.getDate()} ${M[d1.getMonth()]}`;
-  // Один обзор на неделю: повторное «Собрать» обновляет карточку, а не
-  // плодит дубли («повторяется одно и то же»). Замещённые — с надгробием,
-  // чтобы синк не воскресил их с другого устройства. Хвост списка ≤ 20.
-  (DB.digests || []).filter(d => d.week === week).forEach(d => tomb(d.id));
-  DB.digests = (DB.digests || []).filter(d => d.week !== week);
+  // Один обзор на КАЛЕНДАРНУЮ неделю: повторное «Собрать» обновляет карточку,
+  // а не плодит дубли. Замещённые — с надгробием, чтобы синк не воскресил их
+  // с другого устройства. Хвост списка ≤ 20.
+  const wkKey = isoWeekKey(now);
+  (DB.digests || []).filter(d => digWk(d) === wkKey).forEach(d => tomb(d.id));
+  DB.digests = (DB.digests || []).filter(d => digWk(d) !== wkKey);
   while (DB.digests.length > 19) tomb(DB.digests.pop().id);
   // Дельты к прошлой неделе — обзор показывает движение, а не только счёт
   const insP7 = DB.insights.filter(i => { const t = Date.parse(i.createdAt); return t && t < now - 7 * 864e5 && t >= now - 14 * 864e5; }).length;
   DB.digests.unshift({
-    id: now, createdAt: nowISO(), sv: SCHEMA_VERSION, week,
+    id: now, createdAt: nowISO(), sv: SCHEMA_VERSION, week, wk: wkKey,
     cnt: insW.length, cntPrev: insP7, adherence: ciW.length, adhPrev: ciP.length,
     stateAvg: aW ? +aW.comp.toFixed(1) : null, stateDelta,
     dreams, patterns: DB.patterns.length, themes, top, cause,
@@ -3194,6 +3221,57 @@ const aiKeySlot = p => 'arch5_aikey_' + ((p && p !== 'anthropic') ? p + '_' : ''
 function getAiKeyFor(p) { try { return localStorage.getItem(aiKeySlot(p)) || ''; } catch (e) { return ''; } }
 function getAiKey() { return getAiKeyFor(CFG.aiProvider || 'anthropic'); }
 function setAiKey(k) { try { const s = aiKeySlot(CFG.aiProvider || 'anthropic'); k ? localStorage.setItem(s, k) : localStorage.removeItem(s); } catch(e) {} }
+function setAiKeyFor(p, k) { try { const s = aiKeySlot(p); k ? localStorage.setItem(s, k) : localStorage.removeItem(s); } catch(e) {} }
+
+// ─── КЛЮЧИ СЕРВИСОВ: одно меню на все внешние сервисы ────────────
+// Полный перечень того, что подключается к приложению, — в одном месте:
+// какие ключи есть, что каждый даёт, где взять, статус. Не надо ходить
+// по разным меню.
+const KEY_SERVICES = [
+  { p: 'anthropic', name: 'Anthropic · Claude', ic: '✳', ph: 'sk-ant-…', url: 'console.anthropic.com → API Keys',
+    gives: 'Основной ИИ: живые отклики, диалог вглубь, психоконтур «Зачем?», смысловая карта, обзор недели. Рекомендуем.' },
+  { p: 'openai', name: 'OpenAI · GPT', ic: '❋', ph: 'sk-…', url: 'platform.openai.com/api-keys',
+    gives: 'Модели GPT-4o в диалоге вглубь и как основной провайдер (Настройки → Конфигурация).' },
+  { p: 'gemini', name: 'Google · Gemini', ic: '✦', ph: 'AIza…', url: 'aistudio.google.com/apikey',
+    gives: 'Модели Gemini в диалоге вглубь и как основной провайдер.' },
+];
+function openKeys() { rKeys(); openOv('ov-keys'); }
+function keysSetInput(p, el) {
+  const v = (el.value || '').trim();
+  if (!v) return;
+  setAiKeyFor(p, v); el.value = '';
+  toast('Ключ сохранён — сервис активен', 'ok'); rKeys();
+}
+function keysDrop(p) { setAiKeyFor(p, ''); toast('Ключ удалён'); rKeys(); }
+function rKeys() {
+  const el = $('keys-list'); if (!el) return;
+  const ai = KEY_SERVICES.map(s => {
+    const has = !!getAiKeyFor(s.p);
+    return `<div class="key-card">
+      <div class="key-h"><span class="mdl-ic p-${s.p}">${s.ic}</span><b>${s.name}</b><span class="key-st${has ? ' on' : ''}">${has ? 'активен' : 'нет ключа'}</span></div>
+      <div class="key-d">${s.gives}</div>
+      <input class="field" type="password" placeholder="${has ? 'ключ сохранён — вставь новый, чтобы заменить' : s.ph}"
+        autocapitalize="off" autocorrect="off" spellcheck="false" onchange="keysSetInput('${s.p}', this)">
+      <div class="key-foot"><span>Где взять: ${s.url}</span>${has ? `<span class="key-del" onclick="keysDrop('${s.p}')">убрать ключ</span>` : ''}</div>
+    </div>`;
+  }).join('');
+  const srv = `<div class="sec-lbl" style="padding:var(--s3) 0 var(--s2)">Сервисы без ключа</div>
+    <div class="key-card">
+      <div class="key-h"><b>Синк-сервер (Railway)</b><span class="key-st${apiBase() ? ' on' : ''}">${apiBase() ? 'подключён' : 'не подключён'}</span></div>
+      <div class="key-d">Синхронизация между устройствами: URL сервера, ключ пространства и парольная фраза шифрования — в Конфигурации.</div>
+      <div class="key-foot"><span class="key-del" onclick="closeOv('ov-keys');openOv('ov-cfg')">открыть Конфигурацию →</span></div>
+    </div>
+    <div class="key-card">
+      <div class="key-h"><b>Обратная связь</b><span class="key-st on">работает</span></div>
+      <div class="key-d">Форма «Обратная связь» в меню — ключ не нужен, на сервер уходит только текст формы.</div>
+    </div>
+    <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5;background:var(--bg2);border-radius:var(--r8);padding:var(--s3)">
+      Все ключи хранятся <strong style="color:var(--t2)">только на этом устройстве</strong> (per-профиль) и никогда не проходят через наш сервер: запросы идут из браузера напрямую в выбранный сервис.
+    </div>`;
+  el.innerHTML = ai + srv;
+  const kc = $('keys-cnt');
+  if (kc) kc.textContent = KEY_SERVICES.filter(s => getAiKeyFor(s.p)).length + ' из ' + KEY_SERVICES.length;
+}
 
 // ─── МАРШРУТИЗАЦИЯ МОДЕЛЕЙ + УЧЁТ РАСХОДОВ (AI_ROUTING_BRIEF) ────
 // Лёгкие частые задачи ходят на дешёвую модель, глубокий анализ — на
@@ -3919,11 +3997,12 @@ function reactToSphere(s) {
   }
   reactCard(rows);
 }
-function reactToDream(d) {
+function reactToDream(d, insId) {
   const rows = [];
   const rel = rcRelated(d.body || '', null);
   if (rel) rows.push({ html: `🔗 Сон перекликается с «${esc(rel.title)}»`, act: `rcClose();showDet(${rel.id})` });
   rows.push({ html: `🌙 ${DB.dreams.length}-й сон в дневнике${d.arch ? ` · архетип «${esc(d.arch)}»` : ''}` });
+  if (insId) rows.push({ html: `🔮 <b>Растолковать сон</b> — Юнг, гештальт и твой контекст жизни`, act: `rcDiscuss(${insId})` });
   reactCard(rows);
   rcAI('Сон: ' + (d.body || ''));
 }
@@ -3956,10 +4035,10 @@ function rVector() {
 // баннер «Обновить» и карточка «Что нового» после обновления — чтобы
 // изменения были ВИДНЫ, а не молчали.
 const APP_CHANGES = [
-  '🗣 Живой отклик: приложение отвечает на каждую запись — эхо из прошлого, зреющие темы, твой темп',
-  '🧭 «Вектор недели» на главной: направление (↗/→/↘), движение и главная тема',
-  '⚡ AI-наставник в отклике — при твоём ключе Anthropic (Итоги → Настройки)',
-  '💬 Обратная связь из меню — и уведомление, когда твой отзыв исправлен',
+  '🧠 Карта теперь строится из СМЫСЛОВ: ИИ осознанно определяет, о чём каждая запись, — не из повторяемых слов',
+  '🔮 Сонник: сны толкуются отдельным режимом — Юнг (Тень), гештальт, наука + твой контекст жизни',
+  '🔑 «Ключи сервисов» в Настройках: все подключения и ключи в одном меню',
+  '📆 «Итоги недели» больше не дублируются: одна карточка на календарную неделю',
 ];
 async function currentAppVersion() {
   try { return ((await caches.keys()) || []).find(k => /^arch-v/.test(k)) || ''; } catch (e) { return ''; }
@@ -4004,6 +4083,30 @@ setTimeout(() => { try { maybeWhatsNew(); } catch (e) {} }, 2500);
 // труд): симптом → серия «Зачем?» → функция → вторичная выгода → цена →
 // альтернативный способ закрыть потребность → закрепление выбора.
 const CHAT_SYSTEM = 'Ты — наставник дневника «Архитектор». Работаешь строго по методу «Зачем?» (интеграция: логотерапия Франкла, транзактный анализ Бёрна, теория привязанности Боулби, эмоциональная регуляция Гоулмана). Алгоритм диалога: 1) зафиксируй симптом словами человека; 2) последовательно спрашивай «Зачем?» — по ОДНОЙ итерации за ход, всего 3–5, двигаясь от жалобы к ФУНКЦИИ переживания (вопрос «зачем», не «почему»: не причина в прошлом, а функция сейчас); 3) когда функция видна — назови её и вторичную выгоду (payoff, Бёрн); 4) мягко покажи цену симптома; 5) спроси, каким другим способом можно удовлетворить ту же глубинную потребность; 6) помоги закрепить новый выбор. Замечай состояния Я (Ребёнок/Родитель/Взрослый) и психологические игры — называй их бережно. За один ход: короткое отражение (1–3 предложения) + ОДИН вопрос. Без советов, пока не попросят. Тепло, без осуждения, по-русски, на «ты».';
+// Сонник — ОТДЕЛЬНЫЙ режим диалога: сон не «раскручивают методом „Зачем?"»,
+// его толкуют. Синтез признанных подходов + жизненный контекст из дневника —
+// приложение знает дела, проблемы и потребности сновидца, и сон читается
+// на их фоне, а не в вакууме.
+const DREAM_SYSTEM = 'Ты — толкователь снов дневника «Архитектор». Работаешь как синтез признанных подходов: аналитическая психология Юнга (сон компенсирует сознательную установку; образы — части психики: Тень — вытесненное и отвергаемое, Анима/Анимус, Персона, Самость; амплификация образов), гештальт-подход Перлза (каждый элемент сна — часть самого сновидца; можно предложить «сказать от лица» образа), научный слой (Холл/Домхофф: сны продолжают дневные заботы — гипотеза непрерывности; Ревонсуо: репетиция угроз; консолидация эмоциональной памяти). НЕ сонник-предсказание, НЕ эзотерика, НЕ метод «Зачем?» — это другой режим. Алгоритм: 1) прими сон; уточни максимум 1–2 детали: самый яркий образ и чувство в момент пробуждения; 2) выдели ключевые образы, отдельно замечай возможные фигуры Тени (пугающее, отвратительное, «это не я»); 3) ОБЯЗАТЕЛЬНО связывай образы с жизненным контекстом сновидца (дан ниже) — сны продолжают дневную жизнь; 4) предложи 2–3 гипотезы толкования, называя подход каждой (Юнг / гештальт / непрерывность), и спроси, какая отзывается; 5) заверши интеграцией: что сон приглашает признать или сделать — один маленький шаг. За один ход: короткое отражение + один вопрос ИЛИ гипотезы. Тепло, по-русски, на «ты».';
+// Жизненный контекст для толкования: свежие записи (не сны), глубинные
+// потребности из психоконтура, состояние, паттерны — то, что сон «продолжает».
+function dreamLifeContext() {
+  const ins = (DB.insights || []).filter(i => i.tag !== 'dream' && i.src !== 'Дневник снов').slice(0, 8)
+    .map(i => '— ' + i.title + (i.psy && i.psy.need ? ` (потребность: ${i.psy.need})` : ''));
+  const needs = {};
+  (DB.insights || []).forEach(i => { const n = i.psy && i.psy.need; if (n) needs[n] = (needs[n] || 0) + 1; });
+  const topNeeds = Object.entries(needs).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n, c]) => `${n} (${c})`);
+  const aW = checkinAvg((DB.checkins || []).filter(c => c.date > dayAgo(7)));
+  const pats = (DB.patterns || []).slice(0, 4).map(p => '— ' + p.text);
+  let s = 'Свежие записи дневника:\n' + (ins.length ? ins.join('\n') : '— нет') + '\n';
+  if (topNeeds.length) s += 'Глубинные потребности по методу «Зачем?»: ' + topNeeds.join(', ') + '\n';
+  if (aW) s += `Состояние за 7 дней: ясность ${aW.cl.toFixed(1)}/10, стресс ${aW.st.toFixed(1)}/10, мотивация ${aW.mv.toFixed(1)}/10, сон ${aW.sl.toFixed(1)}ч\n`;
+  if (pats.length) s += 'Замеченные паттерны:\n' + pats.join('\n');
+  return s;
+}
+const chatSystemFor = c => c && c.mode === 'dream'
+  ? DREAM_SYSTEM + '\n\nЖизненный контекст сновидца (из его дневника):\n' + dreamLifeContext()
+  : CHAT_SYSTEM;
 // Модель диалога выбирается как в Perplexity: список моделей трёх
 // провайдеров, выбранная раскрыта с описанием и тумблером «С рассуждением».
 // Диалог идёт на выбранной (дефолт — sonnet, дёшево); а вот ЗАКЛЮЧЕНИЕ
@@ -4028,7 +4131,7 @@ function rModels() {
     const hasKey = !!getAiKeyFor(m.provider);
     return `<div class="mdl-row${sel ? ' sel' : ''}" onclick="chatModelPick(${i})" role="button">
       <div class="mdl-main"><span class="mdl-ic p-${m.provider}">${m.ic}</span><b>${m.name}</b>${m.tag ? `<span class="mdl-tag">${m.tag}</span>` : ''}${sel ? '<span class="mdl-check">✓</span>' : ''}</div>
-      ${sel ? `<div class="mdl-desc">${m.desc}${hasKey ? '' : ' · <span class="mdl-nokey">нет ключа — добавь в Настройках</span>'}</div>` +
+      ${sel ? `<div class="mdl-desc">${m.desc}${hasKey ? '' : ' · <span class="mdl-nokey" onclick="event.stopPropagation();closeOv(\'ov-models\');closeOv(\'ov-chat\');openKeys()">нет ключа — добавить в «Ключи сервисов»</span>'}</div>` +
         (m.reason ? `<div class="mdl-reason" onclick="event.stopPropagation();chatReasonToggle()"><span>С рассуждением</span><span class="tgl${cm.reasoning !== false ? ' on' : ''}"></span></div>` : '') : ''}
     </div>`;
   }).join('');
@@ -4053,15 +4156,19 @@ function rChatChip() {
 }
 let _chatId = null, _chatBusy = false;
 function openChatFor(insId, seed) {
-  if (!seed && insId) { const i = DB.insights.find(x => x.id === insId); seed = i ? (i.body || i.title) : ''; }
+  const src = insId ? DB.insights.find(x => x.id === insId) : null;
+  if (!seed && src) seed = src.body || src.title;
+  // сон уходит в режим толкования (Юнг/гештальт/наука), не в метод «Зачем?»
+  const isDream = !!(src && (src.tag === 'dream' || src.src === 'Дневник снов'));
   let chat = insId ? (DB.chats || []).find(c => c.insightId === insId) : null;
   if (!chat) {
     const now = Date.now();
-    chat = { id: now, insightId: insId || null, title: titleFrom(seed || 'Диалог') || 'Диалог',
+    chat = { id: now, insightId: insId || null, mode: isDream ? 'dream' : null,
+             title: titleFrom(seed || 'Диалог') || 'Диалог',
              createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, msgs: [] };
     if (seed) chat.msgs.push({ r: 'u', t: seed, ts: now });
     (DB.chats = DB.chats || []).push(chat); touch(chat); persist();
-  }
+  } else if (isDream && !chat.mode) { chat.mode = 'dream'; touch(chat); persist(); }
   _chatId = chat.id;
   rChat(); openOv('ov-chat');
   // первый ход наставника — сразу, чтобы диалог не начинался с тишины
@@ -4075,7 +4182,7 @@ function rChat() {
   box.innerHTML = c.msgs.map(m =>
     `<div class="cm ${m.r === 'u' ? 'cm-u' : 'cm-a'}">${esc(m.t).replace(/\n/g, '<br>')}</div>`).join('') +
     (_chatBusy ? '<div class="cm cm-a cm-think">думаю…</div>' : '') +
-    (!getAiKeyFor(chatModel().provider) ? '<div class="cm cm-hint">Для этой модели нет ключа — Настройки → Конфигурация</div>' : '');
+    (!getAiKeyFor(chatModel().provider) ? '<div class="cm cm-hint tap" onclick="closeOv(\'ov-chat\');openKeys()" role="button">Для этой модели нет ключа — открыть «Ключи сервисов» →</div>' : '');
   box.scrollTop = box.scrollHeight;
   rChatChip();
 }
@@ -4093,7 +4200,7 @@ async function chatReply() {
   try {
     const messages = c.msgs.slice(-24).map(m => ({ role: m.r === 'u' ? 'user' : 'assistant', content: m.t }));
     // диалог — на выбранной в пикере модели (дёшево); заключение — отдельно
-    const a = await callClaude({ system: CHAT_SYSTEM, messages, maxTokens: 500, task: 'chat', provider: cm.provider, model: cm.model, reasoning: cm.reasoning !== false });
+    const a = await callClaude({ system: chatSystemFor(c), messages, maxTokens: 500, task: 'chat', provider: cm.provider, model: cm.model, reasoning: cm.reasoning !== false });
     const t = String(a).trim();
     if (t) { c.msgs.push({ r: 'a', t, ts: Date.now() }); touch(c); persist(); }
   } catch (e) { toast(e.budget ? e.message : 'AI: ' + e.message, 'warn'); }
@@ -4122,7 +4229,9 @@ async function chatFinish() {
         emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
       } };
     const out = await callClaude({
-      system: 'Сожми диалог по методу «Зачем?». text: личный вывод от первого лица (2–4 предложения — что я понял, корень темы, один следующий шаг). Плюс структура метода: симптом, функция симптома, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без воды.',
+      system: c.mode === 'dream'
+        ? 'Сожми разбор сна. text: личный вывод от первого лица (2–4 предложения — что сон показал, какая часть меня в нём говорила, что признать или сделать). Плюс психологическая структура вывода: симптом (что сон подсветил), функция, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без эзотерики и воды.'
+        : 'Сожми диалог по методу «Зачем?». text: личный вывод от первого лица (2–4 предложения — что я понял, корень темы, один следующий шаг). Плюс структура метода: симптом, функция симптома, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без воды.',
       user: dialog, maxTokens: 500, task: 'analysis', schema,
     });
     let parsed; try { parsed = JSON.parse(out); } catch (e) { parsed = { text: String(out).trim() }; }
@@ -4131,7 +4240,7 @@ async function chatFinish() {
     DB.insights.unshift({
       id: Date.now(), tag: 'personal', w: 2, title: titleFrom(t), body: t,
       date: dateRU(), createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION,
-      src: 'Диалог', links: [], chatId: c.id,
+      src: c.mode === 'dream' ? 'Разбор сна' : 'Диалог', links: [], chatId: c.id,
       psy: parsed.need || parsed.func ? { symptom: parsed.symptom, func: parsed.func, gain: parsed.gain, need: parsed.need, ego: parsed.ego, emotion: parsed.emotion, game: parsed.game, conf: 85, at: nowISO() } : undefined,
     });
     persist(); rIns(); rHIns(); rKPIs();
@@ -4148,7 +4257,7 @@ function rChats() {
   }
   el.innerHTML = list.map(c => `
     <div class="chat-row" onclick="_chatId=${c.id};rChat();openOv('ov-chat')" role="button">
-      <div class="chat-row-t">${esc(c.title)}</div>
+      <div class="chat-row-t">${c.mode === 'dream' ? '🌙 ' : ''}${esc(c.title)}</div>
       <div class="chat-row-m">${c.msgs.length} ${pl(c.msgs.length, 'сообщение', 'сообщения', 'сообщений')} · ${new Date(c.id).toLocaleDateString('ru')}${c.summarized ? ' · вывод сохранён' : ''}</div>
     </div>`).join('');
 }
@@ -4160,7 +4269,63 @@ function rcDiscuss(insId) { rcClose(); openChatFor(insId); }
 // совместная встречаемость, цвет — кластер (label propagation). Главная
 // ценность — выводы простым языком: ядро внимания, мост между группами,
 // структурный разрыв (несвязанные темы → подсказка записать мысль о связи).
+// кластеры тем: label propagation — для малых графов сходится за пару шагов
+function clusterizeGraph(nodes, edges) {
+  nodes.forEach((n, i) => n.cluster = i);
+  const nb = {}; edges.forEach(e => { (nb[e.a] = nb[e.a] || []).push([e.b, e.w]); (nb[e.b] = nb[e.b] || []).push([e.a, e.w]); });
+  const byKey = {}; nodes.forEach(n => byKey[n.key] = n);
+  for (let it = 0; it < 6; it++) {
+    nodes.forEach(n => {
+      const votes = {};
+      (nb[n.key] || []).forEach(([k, w]) => { const c = byKey[k].cluster; votes[c] = (votes[c] || 0) + w; });
+      const best = Object.entries(votes).sort((x, y) => y[1] - x[1])[0];
+      if (best) n.cluster = +best[0];
+    });
+  }
+}
+// Смысловой граф: узлы — темы, осознанно определённые ИИ по СУТИ записи
+// (психоконтур, i.psy.themes), а не по повторяемым словам. Связь — темы
+// живут в одной записи ИЛИ их записи держит одна глубинная потребность.
+function semThemeGraph() {
+  const list = (DB.insights || []).filter(i => i.psy && Array.isArray(i.psy.themes) && i.psy.themes.length);
+  if (list.length < 4) return null;
+  const df = {}, entries = [];
+  list.forEach(i => {
+    const t = [...new Set(i.psy.themes)];
+    entries.push({ themes: t, need: i.psy.need || null });
+    t.forEach(w => { df[w] = (df[w] || 0) + 1; });
+  });
+  const labels = Object.keys(df).sort((a, b) => df[b] - df[a]).slice(0, 16);
+  if (labels.length < 3) return null;
+  const idx = new Set(labels);
+  const nodes = labels.map(s => ({ key: 't' + s, stem: s, title: s, df: df[s], deg: 0, cluster: 0 }));
+  const byStem = {}; nodes.forEach(n => byStem[n.stem] = n);
+  const co = {};
+  const bump = (a, b, w) => { const k = [a, b].sort().join('\u0001'); co[k] = (co[k] || 0) + w; };
+  // связь 1: темы одной записи (сильная — психика соединила их в одном тексте)
+  entries.forEach(e => {
+    const p = e.themes.filter(w => idx.has(w));
+    for (let i = 0; i < p.length; i++) for (let j = i + 1; j < p.length; j++) bump(p[i], p[j], 2);
+  });
+  // связь 2: темы разных записей с одной глубинной потребностью (метод «Зачем?»)
+  const byNeed = {};
+  entries.forEach(e => { if (e.need) e.themes.forEach(t => { if (idx.has(t)) (byNeed[e.need] = byNeed[e.need] || new Set()).add(t); }); });
+  Object.values(byNeed).forEach(set => {
+    const p = [...set];
+    for (let i = 0; i < p.length; i++) for (let j = i + 1; j < p.length; j++) bump(p[i], p[j], 1);
+  });
+  const edges = [];
+  Object.entries(co).forEach(([k, w]) => {
+    const [a, b] = k.split('\u0001');
+    if (byStem[a] && byStem[b]) { edges.push({ a: 't' + a, b: 't' + b, w }); byStem[a].deg++; byStem[b].deg++; }
+  });
+  clusterizeGraph(nodes, edges);
+  return { nodes, edges, N: list.length, sem: true };
+}
 function buildThemeGraph() {
+  // Есть смысловая разметка ИИ — карта строится из смыслов, не из слов.
+  const sem = semThemeGraph();
+  if (sem) return sem;
   const T = themeIndex(); const forms = themeForms();
   const N = (DB.insights || []).length;
   const df = {};
@@ -4184,19 +4349,8 @@ function buildThemeGraph() {
     const [a, b] = k.split('|');
     if (byStem[a] && byStem[b]) { edges.push({ a: 't' + a, b: 't' + b, w }); byStem[a].deg++; byStem[b].deg++; }
   });
-  // кластеры тем: label propagation — для малых графов сходится за пару шагов
-  nodes.forEach((n, i) => n.cluster = i);
-  const nb = {}; edges.forEach(e => { (nb[e.a] = nb[e.a] || []).push([e.b, e.w]); (nb[e.b] = nb[e.b] || []).push([e.a, e.w]); });
-  const byKey = {}; nodes.forEach(n => byKey[n.key] = n);
-  for (let it = 0; it < 6; it++) {
-    nodes.forEach(n => {
-      const votes = {};
-      (nb[n.key] || []).forEach(([k, w]) => { const c = byKey[k].cluster; votes[c] = (votes[c] || 0) + w; });
-      const best = Object.entries(votes).sort((x, y) => y[1] - x[1])[0];
-      if (best) n.cluster = +best[0];
-    });
-  }
-  return { nodes, edges, N };
+  clusterizeGraph(nodes, edges);
+  return { nodes, edges, N, sem: false };
 }
 function themeMapInsights(g) {
   const out = [];
@@ -4226,7 +4380,11 @@ function themeMapInsights(g) {
   }
   // рост: тема с наибольшим числом упоминаний за 7 дней
   const grow = {};
-  (DB.insights || []).forEach(i => { if (rcDay(i) > dayAgo(7)) keywords((i.title || '') + ' ' + (i.body || '')).forEach(w => { grow[w] = (grow[w] || 0) + 1; }); });
+  (DB.insights || []).forEach(i => {
+    if (rcDay(i) <= dayAgo(7)) return;
+    const ws = g.sem ? ((i.psy && i.psy.themes) || []) : keywords((i.title || '') + ' ' + (i.body || ''));
+    ws.forEach(w => { grow[w] = (grow[w] || 0) + 1; });
+  });
   const g7 = g.nodes.map(n => [n, grow[n.stem] || 0]).sort((a, b) => b[1] - a[1])[0];
   if (g7 && g7[1] >= 2) out.push({ ic: '📈', html: `Растёт: <b>«${esc(g7[0].title)}»</b> — ${g7[1]} ${pl(g7[1], 'упоминание', 'упоминания', 'упоминаний')} за последнюю неделю.` });
   return out;
@@ -4244,8 +4402,11 @@ function rMap() {
   if (bp) bp.classList.toggle('on', v === 'psy');
   if (bn) bn.classList.toggle('on', v === 'notes');
   const hint = $('graph-hint');
+  const semOn = (DB.insights || []).some(i => i.psy && i.psy.themes && i.psy.themes.length);
   if (hint) hint.textContent = v === 'themes'
-    ? 'Карта строится сама из твоих записей: размер — как часто тема встречается, цвет — группа связанных тем, линия — темы появляются вместе.'
+    ? (semOn
+      ? 'Карта строится из СМЫСЛОВ: ИИ осознанно определяет, о чём каждая запись по сути, а связи — темы одной записи или одной глубинной потребности (метод «Зачем?»).'
+      : 'Пока карта строится по повторяющимся словам. ' + (getAiKey() ? 'ИИ уже размечает записи по смыслу в фоне — скоро карта станет смысловой.' : 'Добавь AI-ключ в Настройках — и карта станет смысловой: ИИ определит, о чём каждая запись по сути.'))
     : v === 'psy'
       ? 'ИИ осознанно размечает записи по методу «Зачем?»: функция симптома, вторичная выгода, глубинная потребность, состояние Я, игры. Связи — по психологии, не по словам.'
       : 'Связи находятся сами — по общим темам твоих записей. Крупные узлы упоминаются чаще. Тапни узел — фокус на его окружении.';
@@ -4255,7 +4416,11 @@ function rMap() {
   else { if (ti) ti.innerHTML = ''; rGraph('graph-canvas', 380, false); }
 }
 let _tmSel = null;
-function tmSelect(stem) { _tmSel = (stem && _tmSel !== stem) ? stem : null; rThemeMap('graph-canvas'); if (typeof hpt === 'function') hpt(); }
+function tmSelect(enc) {
+  const stem = enc ? decodeURIComponent(enc) : null;
+  _tmSel = (stem && _tmSel !== stem) ? stem : null;
+  rThemeMap('graph-canvas'); if (typeof hpt === 'function') hpt();
+}
 function rThemeMap(elId) {
   const el = $(elId); if (!el) return;
   const g = buildThemeGraph();
@@ -4283,14 +4448,15 @@ function rThemeMap(elId) {
   }).join('');
   const placed = [];
   const circ = g.nodes.map(nd => {
-    const short = nd.title.length > 14 ? nd.title.slice(0, 13) + '…' : nd.title;
+    const maxL = g.sem ? 20 : 14;   // смысловые темы длиннее слов — им больше места
+    const short = nd.title.length > maxL ? nd.title.slice(0, maxL - 1) + '…' : nd.title;
     const w = short.length * 5.6 + 8, ly = nd.y + nd.r + 11;
     const lx = Math.max(w / 2 + 4, Math.min(W - w / 2 - 4, nd.x));
     const box = { x1: lx - w / 2, x2: lx + w / 2, y1: ly - 9, y2: ly + 3 };
     const clash = placed.some(b => !(box.x2 < b.x1 || box.x1 > b.x2 || box.y2 < b.y1 || box.y1 > b.y2));
     if (!clash) placed.push(box);
     const dim = selKey && nd.key !== selKey && !neigh.has(nd.key) ? ' gdim' : '';
-    return `<g class="gnode${dim}" onclick="event.stopPropagation();tmSelect('${nd.stem}')">
+    return `<g class="gnode${dim}" onclick="event.stopPropagation();tmSelect('${encodeURIComponent(nd.stem)}')">
       ${nd.key === selKey ? `<circle cx="${nd.x.toFixed(1)}" cy="${nd.y.toFixed(1)}" r="${nd.r + 4}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>` : ''}
       <circle cx="${nd.x.toFixed(1)}" cy="${nd.y.toFixed(1)}" r="${nd.r}" fill="${colorOf(nd.cluster)}" fill-opacity=".85"/>
       ${clash ? '' : `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" class="glbl">${esc(short)}</text>`}
@@ -4298,11 +4464,13 @@ function rThemeMap(elId) {
   }).join('');
   let info;
   if (_tmSel) {
-    const recs = (DB.insights || []).filter(i => keywords((i.title || '') + ' ' + (i.body || '')).includes(_tmSel)).slice(0, 4);
+    const recs = (DB.insights || []).filter(i => g.sem
+      ? ((i.psy && i.psy.themes) || []).includes(_tmSel)
+      : keywords((i.title || '') + ' ' + (i.body || '')).includes(_tmSel)).slice(0, 4);
     const sel = byKey['t' + _tmSel];
     info = `<div class="ginfo"><div class="gi-t">Тема «${esc(sel.title)}» · ${sel.df} ${pl(sel.df, 'запись', 'записи', 'записей')}<i>${recs.map(r => `<span class="wl" onclick="showDet(${r.id})">${esc(r.title.slice(0, 38))}</span>`).join(' · ')}</i></div></div>`;
   } else {
-    info = `<div class="graph-meta">${g.nodes.length} тем · ${g.edges.length} связей · цвет — группа тем · тапни тему</div>`;
+    info = `<div class="graph-meta">${g.nodes.length} тем · ${g.edges.length} связей · ${g.sem ? '✨ смысловые темы (размечает ИИ)' : 'цвет — группа тем'} · тапни тему</div>`;
   }
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" class="graph-svg" onclick="tmSelect(null)">${lines}${circ}</svg>` + info;
   if (ti) {
@@ -4322,17 +4490,19 @@ function rThemeMap(elId) {
 // строятся по ПОТРЕБНОСТЯМ и ИГРАМ — системно, а не по словам.
 const PSY_NEEDS = ['безопасность', 'принятие', 'значимость', 'автономия', 'смысл', 'близость', 'контроль', 'покой', 'новизна'];
 const PSY_EGO = ['Ребёнок', 'Родитель', 'Взрослый'];
-const PSY_SYSTEM = 'Ты — психолог-аналитик дневника «Архитектор». Работаешь строго по методу «Зачем?» (интеграция: логотерапия Франкла — у симптома есть функция и смысл; транзактный анализ Бёрна — игры, скрытый выигрыш, состояния Я; теория привязанности Боулби; эмоциональная регуляция Гоулмана). Для каждой записи осознанно определи: симптом (что болит/повторяется, словами автора), функцию симптома (ЗАЧЕМ он нужен психике), вторичную выгоду (payoff), глубинную потребность (из списка), состояние Я, ядровую эмоцию и психологическую игру, если она видна. НЕ выдумывай: если по тексту не видно — ставь null и снижай confidence.';
+const PSY_SYSTEM = 'Ты — психолог-аналитик дневника «Архитектор». Работаешь строго по методу «Зачем?» (интеграция: логотерапия Франкла — у симптома есть функция и смысл; транзактный анализ Бёрна — игры, скрытый выигрыш, состояния Я; теория привязанности Боулби; эмоциональная регуляция Гоулмана). Для каждой записи осознанно определи: симптом (что болит/повторяется, словами автора), функцию симптома (ЗАЧЕМ он нужен психике), вторичную выгоду (payoff), глубинную потребность (из списка), состояние Я, ядровую эмоцию и психологическую игру, если она видна. НЕ выдумывай: если по тексту не видно — ставь null и снижай confidence. Дополнительно определи themes: 1–3 СМЫСЛОВЫЕ темы записи — о чём она ПО СУТИ (короткая обобщённая фраза в именительном падеже: «отношения», «страх остановки», «признание на работе», «границы с матерью»). Не служебные слова, не пересказ, не эмоции — суть. Если в словаре уже есть подходящая тема — переиспользуй её дословно, чтобы записи связывались.';
 let _psyBusy = false;
 async function psyAutoRun() {
   try {
     if (_psyBusy || !getAiKey() || !navigator.onLine) return;
-    const todo = (DB.insights || []).filter(i => !i.psy && String(i.body || '').length >= 25).slice(0, 5);
+    // В очередь попадают и уже размеченные записи без themes — смысловой
+    // слой карты дозаполняется по старым записям сам.
+    const todo = (DB.insights || []).filter(i => (!i.psy || !i.psy.themes) && String(i.body || '').length >= 25).slice(0, 5);
     if (!todo.length) return;
     _psyBusy = true;
     const schema = { type: 'object', additionalProperties: false, required: ['items'], properties: { items: { type: 'array', items: {
       type: 'object', additionalProperties: false,
-      required: ['id', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game', 'conf'],
+      required: ['id', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game', 'conf', 'themes'],
       properties: {
         id: { type: 'integer' },
         symptom: { type: ['string', 'null'] }, func: { type: ['string', 'null'] }, gain: { type: ['string', 'null'] },
@@ -4340,8 +4510,11 @@ async function psyAutoRun() {
         ego: { type: ['string', 'null'], enum: [...PSY_EGO, null] },
         emotion: { type: ['string', 'null'] }, game: { type: ['string', 'null'] },
         conf: { type: 'integer', minimum: 0, maximum: 100 },
+        themes: { type: 'array', items: { type: 'string' }, maxItems: 3 },
       } } } } };
+    const vocab = [...new Set((DB.insights || []).flatMap(i => (i.psy && i.psy.themes) || []))].slice(0, 40);
     const user = 'Записи дневника (id, текст):\n' + JSON.stringify(todo.map(i => ({ id: i.id, text: (i.title + '. ' + (i.body || '')).slice(0, 600) }))) +
+      (vocab.length ? '\n\nСловарь уже существующих тем (переиспользуй дословно, если подходит): ' + vocab.join(', ') : '') +
       '\n\nРазметь каждую по методу «Зачем?». Кратко, по-русски, без пересказа.';
     const text = await callClaude({ system: PSY_SYSTEM, user, maxTokens: 1400, schema, task: 'psy' });
     const out = JSON.parse(text);
@@ -4349,7 +4522,8 @@ async function psyAutoRun() {
     (out.items || []).forEach(m => {
       const i = DB.insights.find(x => x.id === m.id);
       if (!i) return;
-      i.psy = { symptom: m.symptom, func: m.func, gain: m.gain, need: m.need, ego: m.ego, emotion: m.emotion, game: m.game, conf: m.conf, at: nowISO() };
+      i.psy = { symptom: m.symptom, func: m.func, gain: m.gain, need: m.need, ego: m.ego, emotion: m.emotion, game: m.game, conf: m.conf, at: nowISO(),
+        themes: [...new Set((m.themes || []).map(t => String(t).trim().toLowerCase().replace(/['"«»]/g, '')).filter(t => t && t.length <= 40))].slice(0, 3) };
       touch(i); n++;
     });
     if (n) { persist(); log('info', `психоконтур: размечено ${n} записей`); }
