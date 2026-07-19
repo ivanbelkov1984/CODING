@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://architect.life/schemas/scenario-forecast-output.json",
+  "title": "ScenarioForecastOutput",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "scenarioId",
+    "generatedAt",
+    "readiness",
+    "dataQuality",
+    "probabilityStatus"
+  ],
+  "properties": {
+    "scenarioId": {
+      "type": "string"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "readiness": {
+      "type": "object",
+      "required": [
+        "index",
+        "definitionId"
+      ],
+      "properties": {
+        "index": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "definitionId": {
+          "type": "string"
+        },
+        "drivers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "actionMomentum": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "astrologyAnnotation": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "probabilityStatus": {
+      "enum": [
+        "unavailable",
+        "research_only",
+        "validated_for_intended_use"
+      ]
+    },
+    "probabilityEstimate": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "dataQuality": {
+      "enum": [
+        "insufficient",
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "provenance": {
+      "type": "object"
+    }
+  }
+}

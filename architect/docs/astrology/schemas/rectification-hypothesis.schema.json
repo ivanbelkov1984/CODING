@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://architect.life/schemas/rectification-hypothesis.json",
+  "title": "RectificationHypothesis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "hypothesisId",
+    "sourceBirthDataRevision",
+    "candidateInterval",
+    "methodSetId",
+    "relativeScore",
+    "status",
+    "provenance"
+  ],
+  "properties": {
+    "hypothesisId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sourceBirthDataRevision": {
+      "type": "string"
+    },
+    "candidateInterval": {
+      "type": "object",
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "representativeTime": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "methodSetId": {
+      "type": "string"
+    },
+    "methodVersion": {
+      "type": "string"
+    },
+    "relativeScore": {
+      "type": "number"
+    },
+    "scoreDefinition": {
+      "type": "string"
+    },
+    "stability": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "unassessed"
+      ]
+    },
+    "status": {
+      "enum": [
+        "proposed",
+        "testing",
+        "competing",
+        "provisionally_accepted",
+        "rejected",
+        "superseded"
+      ]
+    },
+    "eventsSupporting": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "eventsContradicting": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "provenance": {
+      "type": "object"
+    }
+  }
+}
