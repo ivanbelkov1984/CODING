@@ -1088,6 +1088,15 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .sn-glbl{font-size:var(--tx1,.6875rem);font-weight:510;color:var(--t4);text-transform:uppercase;letter-spacing:.06em;padding-left:2px}
 .sn-row{display:flex;gap:var(--s2)}
 
+/* ── Сегмент «Сегодня»: Обзор / Сферы / Здоровье (свёртка меню 6→3, наряд #28).
+   Единый ряд равных сегментов без горизонтального скролла; выбранный сегмент
+   «поднимается» на панель — тихий Linear-канон, без теней, один акцент. */
+.subnav-today{flex-wrap:nowrap;overflow:visible;padding:var(--s3) var(--s4) var(--s1)}
+.subnav-today .sn-row{flex:1;gap:var(--s1);width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:var(--r16);padding:3px}
+.subnav-today .snpill{flex:1 1 0;justify-content:center;border:none;background:transparent;border-radius:var(--r12);padding:var(--s2);color:var(--t2)}
+.subnav-today .snpill.on{background:var(--sf);border:none;color:var(--accent-light)}
+.subnav-today .snpill svg{width:14px;height:14px}
+
 /* ── Расходы AI: леджер «за что сколько снято» ─────────────────── */
 .ai-spend{background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:var(--s2) var(--s3)}
 .ai-sp-empty{font-size:var(--tx2);color:var(--t3);padding:var(--s2) 0;line-height:1.5}

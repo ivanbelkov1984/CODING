@@ -464,7 +464,11 @@ function goTo(tab, el) {
   const nb = $('nt-'+tab) || el;
   if (nb) nb.classList.add('on');
   $('ptitle').textContent = TITLES[tab] || tab;
-  document.querySelectorAll('.navlink').forEach(n => n.classList.toggle('on', n.dataset.tab === tab));
+  // «Сферы» и «Здоровье» свёрнуты под «Сегодня» (subnav-сегмент): в боковом
+  // меню подсвечиваем родителя, а активный сегмент — по самой вкладке.
+  const navHi = ({vit:'home', health:'home'})[tab] || tab;
+  document.querySelectorAll('.navlink').forEach(n => n.classList.toggle('on', n.dataset.tab === navHi));
+  document.querySelectorAll('.subnav-today .snpill').forEach(p => p.classList.toggle('on', p.dataset.tab === tab));
   if (typeof closeNav === 'function') closeNav();
   if (typeof rSidebar === 'function') rSidebar();
   hpt();

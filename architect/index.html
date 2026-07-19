@@ -34,10 +34,8 @@
   </div>
   <nav id="nav">
     <button class="navlink on" data-tab="home" onclick="goTo('home')"><i data-lucide="sun"></i>Сегодня</button>
-    <button class="navlink" data-tab="vit" onclick="goTo('vit')"><i data-lucide="layers"></i>Сферы</button>
     <button class="navlink" data-tab="map" onclick="goTo('map')"><i data-lucide="brain"></i>Разум</button>
     <button class="navlink" data-tab="sys" onclick="goTo('sys')"><i data-lucide="bar-chart-3"></i>Итоги</button>
-    <button class="navlink" data-tab="health" onclick="goTo('health')"><i data-lucide="heart-pulse"></i>Здоровье</button>
     <div class="side-div"></div>
     <button class="navlink" data-tab="settings" onclick="goTo('settings')"><i data-lucide="settings"></i>Настройки</button>
     <button class="navlink" onclick="closeNav();openOv('ov-feedback')"><i data-lucide="message-square"></i>Обратная связь</button>
@@ -121,6 +119,13 @@
 
 <!-- ── ГЛАВНАЯ ─────────────────────────────────────────────────── -->
 <section class="pg on" id="pg-home">
+  <div class="subnav subnav-today">
+    <div class="sn-row">
+      <div class="snpill on" data-tab="home" onclick="goTo('home')"><i data-lucide="sun"></i>Обзор</div>
+      <div class="snpill" data-tab="vit" onclick="goTo('vit')"><i data-lucide="layers"></i>Сферы</div>
+      <div class="snpill" data-tab="health" onclick="goTo('health')"><i data-lucide="heart-pulse"></i>Здоровье</div>
+    </div>
+  </div>
   <div class="h-hero">
     <div class="h-date" id="h-date"></div>
     <div class="h-hl" id="h-hl">Доброе <em>утро</em></div>
@@ -203,6 +208,13 @@
 
 <!-- ── СФЕРЫ ───────────────────────────────────────────────────── -->
 <section class="pg" id="pg-vit">
+  <div class="subnav subnav-today">
+    <div class="sn-row">
+      <div class="snpill" data-tab="home" onclick="goTo('home')"><i data-lucide="sun"></i>Обзор</div>
+      <div class="snpill on" data-tab="vit" onclick="goTo('vit')"><i data-lucide="layers"></i>Сферы</div>
+      <div class="snpill" data-tab="health" onclick="goTo('health')"><i data-lucide="heart-pulse"></i>Здоровье</div>
+    </div>
+  </div>
   <div class="sec-lbl">Твои сферы жизни</div>
   <div id="spheres-list" class="mx"></div>
   <div style="padding:var(--s3) var(--s4) 0;display:flex;gap:var(--s2);flex-wrap:wrap">
@@ -247,6 +259,13 @@
      влияет»), не дублирует его — новое здесь только «Тяга» (лог
      импульса + микро-интервенция) и синтез в одном месте. -->
 <section class="pg" id="pg-health">
+  <div class="subnav subnav-today">
+    <div class="sn-row">
+      <div class="snpill" data-tab="home" onclick="goTo('home')"><i data-lucide="sun"></i>Обзор</div>
+      <div class="snpill" data-tab="vit" onclick="goTo('vit')"><i data-lucide="layers"></i>Сферы</div>
+      <div class="snpill on" data-tab="health" onclick="goTo('health')"><i data-lucide="heart-pulse"></i>Здоровье</div>
+    </div>
+  </div>
   <div id="health-out"></div>
 </section>
 
