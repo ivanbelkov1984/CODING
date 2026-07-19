@@ -881,10 +881,21 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 /* Заголовки — лёгкий негативный трекинг (Linear, но не театральный) */
 .sec-lbl { letter-spacing: -0.005em; }
 
+/* Граф связей: узлы «прорастают», рёбра проявляются при построении карты
+   (Order 6 — CSS-анимация layout графа). backwards-fill, чтобы не спорить
+   с состояниями .on/.dim/.gdim, которые ставятся уже после рендера. */
+@keyframes gNodeIn { from { opacity: 0; transform: scale(.82); } to { opacity: 1; transform: scale(1); } }
+@keyframes gEdgeIn { from { opacity: 0; } to { opacity: .7; } }
+.gnode { animation: gNodeIn .42s var(--e) backwards; transform-box: fill-box; transform-origin: center; }
+.gnode:nth-of-type(2n) { animation-delay: .05s; }
+.gnode:nth-of-type(3n) { animation-delay: .09s; }
+.gedge { animation: gEdgeIn .5s var(--e) .1s backwards; }
+
 @media (prefers-reduced-motion: reduce) {
   #compass { animation: none; }
   .cons-ring, .sph-ring { transition: none; }
   .pg.on { animation: none; }
+  .gnode, .gedge { animation: none; }
 }
 
 /* ═══ ВОЛНА 2 — дисциплина поверхностей (Linear/Oura) ═══ */
