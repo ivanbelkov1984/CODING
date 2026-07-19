@@ -3,6 +3,11 @@ architect/dist/
 architect/node_modules
 node_modules
 
+# ОС / редактор — служебный мусор, не должен попадать в репозиторий
+.DS_Store
+Thumbs.db
+*.log
+
 # Секреты (наряд #205: TMCManager объявляет flutter_dotenv, но .env-паттернов
 # в игноре не было — если .env появится раньше, чем его прикроет игнор, он
 # уйдёт в git)
