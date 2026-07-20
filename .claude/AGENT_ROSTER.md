@@ -22,8 +22,23 @@
 ## Командные пресеты
 
 - Repository audit: Dispatcher + Product Architect + Data Architect + Security + QA.
+- Momentary state: Product + Data + UI + QA.
+- Health organizer: Product + Data + Security + UI + QA; clinical/legal gates remain external owner reviews.
+- LLM synthesis: Product + Data + Security + QA + Backend/UI owner selected by repository seam.
 - Astrology calculation spike: Astrology + WASM + Time/Geo + QA.
 - Rectification preview: Astrology + Predictive Methodologist + Data + QA + Security.
 - Scenario forecasting: Predictive Methodologist + Product + Data + Security + QA.
-- UI feature: UI + Art Director + Tokenizer + QA; Integration собирает.
+- UI feature: UI + Art Director + Tokenizer + QA; Integration собирает. Use current Dual Realm tokens.
 - Release: Integration + QA + Security + соответствующий domain owner.
+
+## LLM synthesis ownership rule
+
+No new permanent agent is required. The task uses existing roles:
+
+- Product Architect owns user purpose and non-shaming directness;
+- Data Architect owns input/output epistemic contracts and provenance;
+- Security/Privacy owns consent, prompt injection, provider payload and crisis/health boundaries;
+- Backend or UI Engineer owns the actual repository adapter discovered in Phase 0;
+- QA Auditor owns semantic evals and deterministic validator evidence.
+
+Astrology Domain Architect participates only for the isolated symbolic section and cannot modify empirical conclusions.
