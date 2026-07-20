@@ -23,40 +23,41 @@
    Старые имена переменных сохранены и переназначены на новую палитру —
    весь var()-код приложения подхватывает систему без правки тысяч мест. */
 :root {
-  /* лестница поверхностей (глубина светлотой, не тенями) */
-  --bg-base:#08090a; --bg-panel:#0f1011; --bg-surface-2:#141516;
-  --bg-surface-3:#18191a; --bg-surface-4:#191a1b;
-  --bg:  var(--bg-base);      /* корневой фон */
-  --sf:  var(--bg-panel);     /* панели: topbar, tabbar, карточки 1-го уровня */
+  /* DUAL REALM · НОЧЬ «Deep Space» — стекло-поверхности парят над космосом.
+     Поверхности полупрозрачные: сквозь них просвечивает звёздное поле (см. слой
+     «DUAL REALM» в конце файла). Имена переменных сохранены — весь var()-код цел. */
+  --bg-base:#04060e; --bg-panel:rgba(17,23,41,.62); --bg-surface-2:rgba(26,33,54,.72);
+  --bg-surface-3:rgba(38,47,72,.82); --bg-surface-4:rgba(30,38,60,.90);
+  --bg:  var(--bg-base);      /* корневой фон (под ним — космос) */
+  --sf:  var(--bg-panel);     /* панели-стекло: topbar, tabbar, карточки */
   --sf2: var(--bg-surface-2); /* поднятые элементы, инпуты */
   --bg2: var(--bg-surface-2); /* вторичный фон, hover */
   --bg3: var(--bg-surface-3); /* сильный hover */
-  /* hairlines */
-  --border-subtle:#23252a; --border-medium:#34343a; --border-strong:#3e3e44;
+  /* hairlines — свет по краю стекла */
+  --border-subtle:rgba(255,255,255,.08); --border-medium:rgba(255,255,255,.14); --border-strong:rgba(255,255,255,.20);
   --bd: var(--border-subtle); --bd2: var(--border-medium);
   /* текст, 4 уровня */
-  --t1:#f7f8f8; --t2:#d0d6e0; --t3:#8a8f98; --t4:#62666d;
-  /* ЕДИНСТВЕННЫЙ акцент + 2 hover-оттенка */
-  --accent:#5e6ad2; --accent-hover:#7170ff; --accent-light:#828fff;
+  --t1:#f4f8ff; --t2:#c6d2e6; --t3:#8593ad; --t4:#5a6683;
+  /* акцент — Nebula: циан → фиолет → золото */
+  --accent:#22D3EE; --accent-hover:#38BDF8; --accent-light:#67E8F9;
   --blue: var(--accent); --blue-t: var(--accent); --blue-btn: var(--accent);
-  --blue-l: rgba(94,106,210,.13);
-  /* статусы — ТОЛЬКО функционально */
-  --green:#27a644; --green-l:rgba(39,166,68,.12);
-  --red:#e5484d;   --red-l:rgba(229,72,77,.12);
-  --orange:#c78d45; --orange-l:rgba(199,141,69,.12); /* функц. «внимание/ниже» */
-  /* бывшие декоративные hues → дисциплина: индиго-рампа (интенсивность) */
-  --purple: var(--accent-hover); --purple-l: rgba(94,106,210,.12);
-  --teal:   var(--accent-light); --teal-l:  rgba(94,106,210,.12);
-  --gold:   rgba(94,106,210,.55); --gold-l: rgba(94,106,210,.10);
-  --rose:   rgba(94,106,210,.28); /* низ рампы тепловой карты */
-  --hm0:#151617;                  /* пустой день тепловой карты */
-  /* граф: узлы по доменам → монохром + акцент (было 6 hues) */
-  --c-book:var(--accent); --c-bot:var(--accent-light); --c-personal:#8a8f98;
-  --c-project:var(--accent-hover); --c-vitality:rgba(94,106,210,.45); --c-dream:rgba(94,106,210,.6);
-  --c-pattern:var(--accent-light); --c-spirit:rgba(94,106,210,.75);
-  /* Вариант А «Тихая глубина» (пилот, экран «Сегодня»): карточки парят —
-     тонкая тень поверх лестницы поверхностей, не вместо неё. */
-  --sh1:0 1px 3px rgba(0,0,0,.4); --sh2:0 2px 6px rgba(0,0,0,.4); --sh3:0 4px 12px rgba(0,0,0,.45);
+  --blue-l: rgba(34,211,238,.14);
+  /* статусы */
+  --green:#34D399; --green-l:rgba(52,211,153,.13);
+  --red:#FB7185;   --red-l:rgba(251,113,133,.13);
+  --orange:#FBBF24; --orange-l:rgba(251,191,36,.13); /* «внимание/ниже» — тёплое золото */
+  /* полноценные hue — Dual Realm цветной, не монохром */
+  --purple:#A78BFA; --purple-l:rgba(167,139,250,.14);
+  --teal:  #22D3EE; --teal-l:  rgba(34,211,238,.14);
+  --gold:  #FBBF24; --gold-l:  rgba(251,191,36,.13);
+  --rose:  #F0ABFC; /* низ рампы тепловой карты — розовая туманность */
+  --hm0:rgba(255,255,255,.04);    /* пустой день тепловой карты */
+  /* граф: узлы по доменам — разные светила космоса */
+  --c-book:#22D3EE; --c-bot:#A78BFA; --c-personal:#8593ad;
+  --c-project:#38BDF8; --c-vitality:#34D399; --c-dream:#F0ABFC;
+  --c-pattern:#FBBF24; --c-spirit:#A78BFA;
+  /* тени ночи — глубокие, с холодным свечением */
+  --sh1:0 6px 20px rgba(0,0,0,.5); --sh2:0 12px 34px rgba(2,6,20,.55); --sh3:0 22px 54px rgba(2,6,20,.62);
   /* типо-шкала Linear: 12/13/15/18/24/32 */
   --tx2:.75rem; --tx3:.8125rem; --tx4:.9375rem; --tx5:.9375rem;
   --tx6:1.125rem; --tx7:1.5rem; --tx8:2rem;
@@ -72,19 +73,29 @@
 }
 
 [data-theme="dark"]{color-scheme:dark}
-/* ── СВЕТЛАЯ ТЕМА (равноценная; тёплая, как референсы) ──────────── */
+/* ── DUAL REALM · ДЕНЬ «Ethereal Light» ─────────────────────────────
+   Чистый белый, воздух, мягкие невесомые тени. Никакой «цветовой мазни»:
+   цвет живёт только в акцентах и данных, фон — белый с еле заметными лучами. */
 [data-theme="light"]{
   color-scheme:light;
-  --bg-base:#F2F1EC; --bg-panel:#FBFAF7; --bg-surface-2:#FFFFFF;
-  --bg-surface-3:#F1EFE9; --bg-surface-4:#FFFFFF;
-  --border-subtle:#E7E4DE; --border-medium:#D9D6CE; --border-strong:#C8C5BC;
-  --t1:#1C1B17; --t2:#4A4842; --t3:#8B887F; --t4:#B7B4AB;
-  --green:#1F8A3C; --green-l:rgba(31,138,60,.10);
-  --red:#D64545; --red-l:rgba(214,69,69,.10);
-  --orange:#B0722A; --orange-l:rgba(176,114,42,.10);
-  --gold:rgba(94,106,210,.55); --rose:rgba(94,106,210,.30); --hm0:#E9E7E1;
-  /* тень темнее фона выглядит грязно на светлом — та же лестница, ниже альфа */
-  --sh1:0 1px 3px rgba(28,27,23,.12); --sh2:0 2px 6px rgba(28,27,23,.14); --sh3:0 4px 12px rgba(28,27,23,.16);
+  --bg-base:#F7F9FC; --bg-panel:#FFFFFF; --bg-surface-2:#FFFFFF;
+  --bg-surface-3:#F1F5FA; --bg-surface-4:#FFFFFF;
+  --border-subtle:rgba(15,23,42,.07); --border-medium:rgba(15,23,42,.11); --border-strong:rgba(15,23,42,.16);
+  --t1:#0F1B2D; --t2:#42506A; --t3:#7D8AA0; --t4:#AAB4C4;
+  /* акценты дня — чуть глубже, чтобы держать контраст на белом */
+  --accent:#0EA5E9; --accent-hover:#0284C7; --accent-light:#0369A1;
+  --blue-l:rgba(14,165,233,.10);
+  --green:#059669; --green-l:rgba(5,150,105,.10);
+  --red:#E11D48; --red-l:rgba(225,29,72,.10);
+  --orange:#EA7317; --orange-l:rgba(234,115,23,.10);
+  --purple:#7C3AED; --purple-l:rgba(124,58,237,.10);
+  --teal:#0891B2; --teal-l:rgba(8,145,178,.10);
+  --gold:#D97706; --gold-l:rgba(217,119,6,.10);
+  --rose:#C026D3; --hm0:#EDF1F7;
+  --c-book:#0EA5E9;--c-bot:#7C3AED;--c-personal:#7D8AA0;--c-project:#0891B2;
+  --c-vitality:#059669;--c-dream:#C026D3;--c-pattern:#D97706;--c-spirit:#7C3AED;
+  /* невесомые тени — мягкий рассеянный свет, а не грязь */
+  --sh1:0 6px 20px rgba(20,40,90,.06); --sh2:0 10px 30px rgba(20,40,90,.07); --sh3:0 18px 44px rgba(20,40,90,.09);
 }
 
 /* ── RESET ─────────────────────────────────────────────────────── */
@@ -573,7 +584,7 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .oqrow:active{opacity:.65}
 
 /* ── AI-ОБЗОР ──────────────────────────────────────────────────── */
-.dg-ai{margin:var(--s3) 0;padding:var(--s3);background:var(--purple-l,rgba(94,106,210,.12));border-left:3px solid var(--purple,var(--accent));border-radius:0 var(--r8) var(--r8) 0;font-size:var(--tx3);line-height:1.6;color:var(--t2);white-space:pre-wrap}
+.dg-ai{margin:var(--s3) 0;padding:var(--s3);background:var(--purple-l,color-mix(in srgb,var(--accent) 12%,transparent));border-left:3px solid var(--purple,var(--accent));border-radius:0 var(--r8) var(--r8) 0;font-size:var(--tx3);line-height:1.6;color:var(--t2);white-space:pre-wrap}
 .dg-ai-badge{font-size:var(--tx2);font-weight:510;color:var(--purple,var(--accent));text-transform:uppercase;letter-spacing:.06em;margin-bottom:var(--s2)}
 .btn-xs{padding:3px 10px;font-size:var(--tx2);gap:3px}
 .btn-xs i,.btn-xs svg{width:12px;height:12px}
@@ -772,7 +783,7 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 
 /* AI «копни глубже» */
 .deeper-q{display:flex;align-items:center;gap:var(--s2);margin-top:var(--s2);padding:var(--s3);
-  background:var(--purple-l,rgba(94,106,210,.12));border:1px solid var(--purple,var(--accent));border-radius:12px;cursor:pointer}
+  background:var(--purple-l,color-mix(in srgb,var(--accent) 12%,transparent));border:1px solid var(--purple,var(--accent));border-radius:12px;cursor:pointer}
 .deeper-q span{flex:1;font-size:var(--tx3);font-weight:500;color:var(--t1);line-height:1.4}
 .deeper-q b{flex:none;font-size:var(--tx2);font-weight:510;color:var(--purple,var(--accent))}
 
@@ -802,7 +813,7 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .det-photo{max-width:100%;width:100%;border-radius:8px;display:block}
 
 /* Голосовые заметки */
-.mth-a{background:var(--purple-l,rgba(94,106,210,.12));display:grid;place-items:center}
+.mth-a{background:var(--purple-l,color-mix(in srgb,var(--accent) 12%,transparent));display:grid;place-items:center}
 .mth-a-ic{font-size:1.5rem}
 .rec-btn.rec{background:var(--rose,var(--rose));border-color:var(--rose,var(--rose));color:#fff;animation:recpulse 1s ease-in-out infinite}
 @keyframes recpulse{0%,100%{opacity:1}50%{opacity:.65}}
@@ -822,7 +833,7 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 
 /* ── AI-разбор записи (в деталях инсайта) ──────────────────────── */
 .deeper{margin-top:var(--s3);padding:var(--s3);border:1px solid var(--purple,var(--accent));border-left-width:3px;
-  border-radius:var(--r12,12px);background:var(--purple-l,rgba(94,106,210,.12))}
+  border-radius:var(--r12,12px);background:var(--purple-l,color-mix(in srgb,var(--accent) 12%,transparent))}
 .deeper-load{color:var(--purple,var(--accent));font-size:var(--tx3);font-weight:500;font-style:italic}
 .deeper-an{font-size:var(--tx4);color:var(--t1);line-height:1.6;white-space:pre-wrap}
 
@@ -892,10 +903,9 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 
 /* ═══ ВОЛНА 2 — дисциплина поверхностей (Linear/Oura) ═══ */
 /* Иконки без цветной заливки-подложки: форма — иконка, цвет — на самой иконке */
-.qa-ic{background:var(--bg3)!important;border:1px solid var(--bd)}
-[data-theme="dark"] .qa-ic{background:var(--bg4,var(--border-medium))!important;border-color:var(--hair)}
-.sic{background:var(--bg3)!important}
-[data-theme="dark"] .sic{background:var(--bg4,var(--border-medium))!important}
+/* Dual Realm: иконки несут свой цвет (инлайн-тон домена), а не серую заливку */
+.qa-ic{border:1px solid var(--bd)}
+.sic{border:1px solid var(--bd)}
 /* Тепловая карта: лёгкая текстура-градиент в ячейке вместо плоского цвета */
 .hc{background-image:none}
 /* «Что помогает» — акцентная подсветка рамки (сигнатурный момент) */
@@ -932,7 +942,7 @@ body{font-size:.9375rem;line-height:1.5}
 
 /* Чипы/бейджи: 4px, тихие */
 .tp,.fpill,.snpill,.sort-btn{border-radius:4px;font-weight:500}
-.fpill.on,.snpill.on,.sort-btn.on,.tp[class*=" a-"],.tp.on{background:rgba(94,106,210,.13);border-color:var(--accent);color:var(--accent-light)}
+.fpill.on,.snpill.on,.sort-btn.on,.tp[class*=" a-"],.tp.on{background:color-mix(in srgb,var(--accent) 13%,transparent);border-color:var(--accent);color:var(--accent-light)}
 .tag{border-radius:4px;font-weight:500}
 /* все цветные теги → монохром с тихим тоном */
 [class*="tg-"]{background:var(--bg-surface-3)!important;color:var(--t2)!important}
@@ -975,20 +985,17 @@ body{font-size:.9375rem;line-height:1.5}
 .hm-card{background:var(--sf)}
 .hc{border-radius:2px}
 
-/* Быстрые действия: тихие поверхности вместо цветных плиток */
-.qabtn .qa-ic{background:var(--bg-surface-2)!important;border:1px solid var(--border-subtle)}
-.qabtn .qa-ic svg{color:var(--t3)!important}
-.qabtn:active .qa-ic{border-color:var(--accent)}
-.qabtn:active .qa-ic svg{color:var(--accent-light)!important}
+/* Быстрые действия: цветные плитки-домены (Dual Realm) — тон задан инлайн */
+.qabtn .qa-ic{border:1px solid var(--border-subtle)}
+.qabtn:active .qa-ic{border-color:var(--accent);transform:scale(1.04)}
 
-/* Settings-строки: иконки — тихие */
-.sic{background:var(--bg-surface-2)!important;border:1px solid var(--border-subtle)}
-.sic svg{color:var(--t3)!important}
+/* Settings-строки: иконки несут свой доменный тон */
+.sic{border:1px solid var(--border-subtle)}
 
 /* Радар: подписи осей — третичный текст; точки/полигон — акцент (CSS бьёт SVG-атрибуты) */
 #compass text[font-size="8"]{fill:var(--t3);font-weight:500;letter-spacing:.06em}
 #compass circle{fill:var(--accent)}
-#compass polygon[stroke-linejoin]{fill:rgba(94,106,210,.12);stroke:var(--accent)}
+#compass polygon[stroke-linejoin]{fill:color-mix(in srgb,var(--accent) 12%,transparent);stroke:var(--accent)}
 
 /* Кольцо постоянства: прогресс — акцентом; статус несёт текст, не цвет */
 .cons.good,.cons.mid{--rng:var(--accent)}
@@ -1007,7 +1014,7 @@ body{font-size:.9375rem;line-height:1.5}
 
 /* Пилюли уровней/весов — чипы 4px */
 .wp{border-radius:4px;font-weight:500}
-.wp.on{background:rgba(94,106,210,.13);border-color:var(--accent);color:var(--accent-light)}
+.wp.on{background:color-mix(in srgb,var(--accent) 13%,transparent);border-color:var(--accent);color:var(--accent-light)}
 
 /* ═══ SHELL: сайдбар (desktop) / drawer (≤900px) ═══════════════ */
 body{display:flex;min-height:100dvh;overflow:hidden}
@@ -1084,7 +1091,7 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 /* ── Обзор недели: причины → следствия + подсветка свежей карточки ── */
 .dg-ce{font-size:var(--tx3);color:var(--t2);line-height:1.55;padding:2px 0}
 .dg-new{animation:dgnew 1.3s var(--e) 2;border-radius:8px}
-@keyframes dgnew{0%,100%{background:transparent}50%{background:rgba(94,106,210,.12)}}
+@keyframes dgnew{0%,100%{background:transparent}50%{background:color-mix(in srgb,var(--accent) 12%,transparent)}}
 
 /* ── Подменю «Разума»: 3 смысловые группы, всё видно без скролла ── */
 .subnav{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s5);overflow:visible}
@@ -1110,7 +1117,7 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .chat-done:active{opacity:.6}
 .chat-msgs{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:var(--s2);padding:var(--s3) var(--s4)}
 .cm{max-width:86%;padding:9px 13px;border-radius:14px;font-size:var(--tx3);line-height:1.55;color:var(--t1);white-space:normal;word-break:break-word}
-.cm-u{align-self:flex-end;background:rgba(94,106,210,.16);border:1px solid rgba(94,106,210,.35);border-bottom-right-radius:4px}
+.cm-u{align-self:flex-end;background:color-mix(in srgb,var(--accent) 16%,transparent);border:1px solid color-mix(in srgb,var(--accent) 35%,transparent);border-bottom-right-radius:4px}
 .cm-a{align-self:flex-start;background:var(--bg2);border:1px solid var(--bd);border-bottom-left-radius:4px}
 .cm-think{color:var(--t3);font-style:normal;animation:cmpulse 1.2s ease-in-out infinite}
 @keyframes cmpulse{0%,100%{opacity:.45}50%{opacity:1}}
@@ -1136,7 +1143,7 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .mdl-main{display:flex;align-items:center;gap:var(--s3)}
 .mdl-ic{width:22px;text-align:center;font-size:15px;color:var(--t2);flex-shrink:0}
 .mdl-main b{font-size:var(--tx4);font-weight:510;color:var(--t1)}
-.mdl-tag{font-size:var(--tx1,.6875rem);font-weight:510;background:rgba(94,106,210,.15);color:var(--accent-light,var(--accent));border-radius:6px;padding:2px 7px}
+.mdl-tag{font-size:var(--tx1,.6875rem);font-weight:510;background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent-light,var(--accent));border-radius:6px;padding:2px 7px}
 .mdl-check{margin-left:auto;color:var(--accent);font-weight:700}
 .mdl-desc{font-size:var(--tx2);color:var(--t3);margin:6px 0 0 34px;line-height:1.45;padding-bottom:var(--s2);border-bottom:1px solid var(--bd)}
 .mdl-nokey{color:var(--orange)}
@@ -1155,7 +1162,7 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 /* ── КАРТА ТЕМ: переключатель и выводы ─────────────────────────── */
 .map-toggle{display:flex;gap:var(--s2);margin-bottom:var(--s3)}
 .map-toggle button{flex:0 0 auto;background:var(--sf);border:1.5px solid var(--bd);border-radius:4px;color:var(--t2);font-size:var(--tx3);font-weight:500;padding:6px 14px;cursor:pointer}
-.map-toggle button.on{background:rgba(94,106,210,.13);border-color:var(--accent);color:var(--accent-light,var(--accent))}
+.map-toggle button.on{background:color-mix(in srgb,var(--accent) 13%,transparent);border-color:var(--accent);color:var(--accent-light,var(--accent))}
 .tm-card{background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:var(--s2) var(--s3)}
 .tm-row{display:flex;gap:var(--s3);align-items:flex-start;font-size:var(--tx3);color:var(--t2);line-height:1.55;padding:var(--s2) 0}
 .tm-row+.tm-row{border-top:1px solid var(--bd)}
@@ -1202,7 +1209,7 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .gpt-row input{margin-top:3px;accent-color:var(--accent)}
 .gpt-t{font-size:var(--tx3);color:var(--t1);font-weight:500;line-height:1.4}
 .gpt-m{font-size:var(--tx2);color:var(--t3);margin-top:2px}
-.gpt-badge{font-size:var(--tx1,.6875rem);font-weight:510;color:var(--accent-light,var(--accent));background:rgba(94,106,210,.12);border-radius:999px;padding:1px 7px;vertical-align:1px}
+.gpt-badge{font-size:var(--tx1,.6875rem);font-weight:510;color:var(--accent-light,var(--accent));background:color-mix(in srgb,var(--accent) 12%,transparent);border-radius:999px;padding:1px 7px;vertical-align:1px}
 
 /* ── ГЛАВНАЯ: сворачиваемые вторичные блоки («Показать больше») ──── */
 .h-more-btn{display:block;margin:var(--s2) var(--s4) var(--s4);padding:var(--s2) var(--s3);background:var(--sf);border:1px solid var(--bd);border-radius:var(--r8);color:var(--t2);font-size:var(--tx3);font-weight:500;text-align:center;cursor:pointer;width:calc(100% - var(--s4)*2)}
@@ -1214,3 +1221,67 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .cr-tip-box{background:var(--bg2);border:1px solid var(--bd);border-left:3px solid var(--orange);border-radius:8px;padding:var(--s3);margin:var(--s2) 0}
 .cr-tip-h{font-size:var(--tx3);color:var(--t1);font-weight:500;margin-bottom:var(--s2)}
 .cr-tip-row{font-size:var(--tx3);color:var(--t2);line-height:1.6}
+
+/* ═══════════════════════════════════════════════════════════════
+   DUAL REALM — космос ночью, воздух днём.
+   Токены выше уже перекрашены (Nebula / Ethereal). Здесь — атмосфера:
+   звёздный фон за стеклом, матовые панели, градиентное имя-героя.
+   Всё уважает prefers-reduced-motion.
+═══════════════════════════════════════════════════════════════ */
+
+/* ── Фон-космос (ночь): фиксирован за #app, просвечивает сквозь стекло ── */
+body::before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;
+  background:
+   radial-gradient(1200px 820px at 80% -10%, rgba(34,211,238,.12), transparent 60%),
+   radial-gradient(1050px 720px at 8% 6%, rgba(167,139,250,.14), transparent 60%),
+   radial-gradient(900px 900px at 55% 112%, rgba(251,191,36,.06), transparent 55%),
+   #04060e;}
+/* Звёздное поле — множество светил, мягкое мерцание */
+body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;
+  background-repeat:no-repeat;
+  background:
+   radial-gradient(1.4px 1.4px at 18% 22%,#fff,transparent),
+   radial-gradient(1px 1px at 68% 16%,#cbd5e1,transparent),
+   radial-gradient(1.2px 1.2px at 40% 62%,#fff,transparent),
+   radial-gradient(1.6px 1.6px at 86% 48%,#e2e8f0,transparent),
+   radial-gradient(1px 1px at 12% 74%,#fff,transparent),
+   radial-gradient(1.2px 1.2px at 58% 84%,#cbd5e1,transparent),
+   radial-gradient(1px 1px at 30% 34%,#a5b4fc,transparent),
+   radial-gradient(1.3px 1.3px at 92% 78%,#fff,transparent),
+   radial-gradient(1px 1px at 74% 66%,#67e8f9,transparent);
+  animation:drTwinkle 7s ease-in-out infinite;}
+@keyframes drTwinkle{0%,100%{opacity:.42}50%{opacity:.62}}
+
+/* ── День «Ethereal»: чистый воздух, еле заметные лучи, звёзды гаснут ── */
+[data-theme="light"] body::before{
+  background:
+   radial-gradient(1100px 720px at 82% -8%, rgba(56,189,248,.10), transparent 62%),
+   radial-gradient(960px 640px at 8% 4%, rgba(251,146,60,.07), transparent 62%),
+   #F7F9FC;}
+[data-theme="light"] body::after{opacity:0;animation:none}
+
+/* ── Матовое стекло на панелях (виден эффект только на прозрачной ночи) ── */
+.topbar,.tabbar,.card,.state-hero,.sheet,.onboard-sheet,.si-card,.hm-card,
+.corr-card,.sph-card,.cons,.trend-card,.gg,.sph-big,.ov .sheet{
+  -webkit-backdrop-filter:blur(18px) saturate(1.25);
+  backdrop-filter:blur(18px) saturate(1.25);}
+
+/* ── Имя-герой: градиент Nebula (циан → фиолет). Возвращаем em из монохрома ── */
+.h-hl em{
+  background:linear-gradient(104deg,var(--accent) 10%,var(--purple) 90%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  -webkit-text-fill-color:transparent;}
+
+/* ── Логотип-звезда: градиентная плитка с мягким свечением ── */
+.top-dot,.sp-icon{background:linear-gradient(135deg,var(--accent),var(--purple))!important;
+  box-shadow:0 0 20px color-mix(in srgb,var(--accent) 40%,transparent);}
+.top-dot svg,.sp-icon svg{color:#fff!important}
+
+/* ── Крупная цифра состояния — тёплое свечение сквозь стекло ── */
+.sh-score b{text-shadow:0 0 24px color-mix(in srgb,var(--teal) 45%,transparent)}
+[data-theme="light"] .sh-score b{text-shadow:none}
+
+/* ── Радар «Компас»: заливка — туманность акцента ── */
+#compass polygon[stroke-linejoin]{fill:color-mix(in srgb,var(--accent) 16%,transparent);stroke:var(--accent)}
+
+@media (prefers-reduced-motion: reduce){ body::after{animation:none} }
