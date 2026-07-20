@@ -27,3 +27,11 @@
 | D-023 | Medication interaction database | Blocked | Licence, update SLA, clinical/regulatory review |
 | D-024 | Advanced changepoint UI | Research preview | Minimum-data and false-alert validation |
 | D-025 | Future predictive probabilities | Blocked | TRIPOD+AI/PROBAST+AI gates |
+| D-026 | Internal LLM voice = Evidence-Grounded Direct Mentor | Accepted | User-facing name may be «Отрезвляющий наставник» |
+| D-027 | Oracle authority and causal astrology voice | Rejected | No mind-reading, fatalism or astrology as explanation |
+| D-028 | LLM tone is adaptive | Accepted | Directness lowers for exhaustion, pain, grief, anxiety and crisis |
+| D-029 | Prompt alone is insufficient | Accepted | Structured input/output, validators, evals and audit are mandatory |
+| D-030 | Every substantial LLM claim references allowed input IDs | Accepted | Unsupported claim blocks or degrades output |
+| D-031 | High-severity synthesis validator failure blocks display | Accepted | At most one controlled retry; safe degraded response otherwise |
+| D-032 | Dual Realm is current design baseline | Accepted and merged in MAIN | Extend through existing CSS tokens; no Tailwind/shadcn rewrite |
+| D-033 | Exact LLM implementation path waits for Phase 0 | Accepted | Do not create `synthesis_oracle.ts` or TypeScript layer by assumption |
