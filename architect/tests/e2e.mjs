@@ -164,9 +164,26 @@ ok(ai.blocked, 'исчерпанный месячный бюджет блоки�
 await page.evaluate(() => {
   DB.chats = []; CFG.aiProvider = 'anthropic'; CFG.chatModel = null; CFG.aiRoutes = null; setAiKey('sk-test');
   window.__aiBodies = [];
-  window.fetch = (u, o) => String(u).includes('anthropic')
-    ? (window.__aiBodies.push(JSON.parse(o.body)), Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: 'Слышу тебя. Что за этим страхом?' }], usage: { input_tokens: 90, output_tokens: 40 } }) }))
-    : Promise.reject(new Error('offline'));
+  window.fetch = (u, o) => {
+    if (!String(u).includes('anthropic')) return Promise.reject(new Error('offline'));
+    const body = JSON.parse(o.body); window.__aiBodies.push(body);
+    const text = body.output_config
+      ? JSON.stringify({
+          text: 'Я понял, что откладываю из страха оценки. Следующий шаг — показать маленький черновик.',
+          symptom: 'откладываю проект',
+          func: 'избежать оценки',
+          gain: 'сохранить чувство безопасности',
+          need: 'safety',
+          ego: 'child',
+          emotion: 'страх',
+          game: null,
+          state: { mood: 'mid', stress: 'mid', lonely: false },
+        })
+      : 'Слышу тебя. Что за этим страхом?';
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({
+      content: [{ type: 'text', text }], usage: { input_tokens: 90, output_tokens: 40 },
+    }) });
+  };
   openChatFor(null, 'Боюсь начать большой проект — откладываю неделями');
 });
 await page.waitForTimeout(350);
@@ -226,7 +243,7 @@ const psy = await page.evaluate(async () => {
   // в enum ловила реальную ошибку API «Invalid schema: Enum value … does not
   // match»; тест проверяет и код от ИИ, и перевод обратно в русское значение.
   window.fetch = (u) => String(u).includes('anthropic')
-    ? Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify({ items: [{ id: 501, symptom: 'жду сообщения, тревога', func: 'сохранить связь', gain: 'не оставаться с пустотой', need: 'closeness', ego: 'child', emotion: 'тревога', game: null, conf: 80 }] }) }], usage: { input_tokens: 200, output_tokens: 100 } }) })
+    ? Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify({ items: [{ id: 501, symptom: 'жду сообщения, тревога', func: 'сохранить связь', gain: 'не оставаться с пустотой', need: 'closeness', ego: 'child', emotion: 'тревога', game: null, conf: 80, themes: ['отношения'] }] }) }], usage: { input_tokens: 200, output_tokens: 100 } }) })
     : Promise.reject(new Error('offline'));
   await psyAutoRun();
   const i = DB.insights.find(x => x.id === 501);
