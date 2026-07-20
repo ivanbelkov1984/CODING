@@ -1,0 +1,36 @@
+name: Temporary mobile viewport screenshot update
+
+on:
+  push:
+    branches:
+      - agent/phase-0-5-mobile-ci-evidence
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/phase-0-5-mobile-ci-evidence
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Apply exact viewport screenshot update
+        working-directory: architect
+        run: node scripts/use-mobile-viewport-screenshots.mjs
+      - name: Validate and commit
+        run: |
+          node --check architect/tests/mobile-evidence.mjs
+          git diff --check
+          if git diff --quiet; then
+            echo 'No screenshot update to commit'
+            exit 0
+          fi
+          git config user.name 'mobile-evidence-bot'
+          git config user.email 'mobile-evidence@architect.app'
+          git add architect/tests/mobile-evidence.mjs
+          git commit -m 'test(mobile): capture viewport and app evidence'
+          git push origin HEAD:agent/phase-0-5-mobile-ci-evidence
