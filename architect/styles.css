@@ -1284,3 +1284,13 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 #compass polygon[stroke-linejoin]{fill:color-mix(in srgb,var(--accent) 16%,transparent);stroke:var(--accent)}
 
 @media (prefers-reduced-motion: reduce){ body::after{animation:none} }
+
+/* P1-C · privacy-safe feedback controls */
+.fb-notice,.fb-disclosure,.fb-retention{font-size:var(--tx2);line-height:1.55;color:var(--t2);background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:var(--s3)}
+.fb-notice b,.fb-disclosure b,.fb-retention b{color:var(--t1);font-weight:510}
+.fb-choice{display:flex;align-items:flex-start;gap:var(--s3);padding:var(--s3);border:1px solid var(--bd);border-radius:8px;background:var(--sf);cursor:pointer}
+.fb-choice input{margin-top:3px;accent-color:var(--accent);flex-shrink:0}
+.fb-choice span{display:flex;flex-direction:column;gap:2px;font-size:var(--tx3);color:var(--t1)}
+.fb-choice small{font-size:var(--tx2);line-height:1.4;color:var(--t3)}
+.fb-local-actions{display:flex;gap:var(--s2);flex-wrap:wrap}
+.fb-local-actions .btn{flex:1;min-width:130px}

@@ -572,27 +572,73 @@ ok(await page.evaluate(() => {
 }), 'после обновления показывается «Что нового» и версия запоминается');
 await page.evaluate(() => rcClose());
 
-// ── Обратная связь: форма → отправка (мок API) → id сохранён ──
-await page.evaluate(() => {
-  window.fetch = (u) => String(u).includes('/api/feedback')
-    ? Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 7 }) })
+// ── Privacy-safe feedback: explicit consent, redaction, retry and clear ──
+const feedbackSent = await page.evaluate(async () => {
+  localStorage.removeItem('arch5_errbuf'); localStorage.removeItem('arch5_fb_outbox'); localStorage.removeItem('arch5_fb_sent');
+  ARCH_FEEDBACK_PRIVACY.pushError(localStorage, {
+    message: 'Synthetic failure for owner@example.com with sk-ant-abcdefghijklmnop123456',
+    filename: 'https://example.test/private/app.js?token=secret', lineno: 12, colno: 3,
+  });
+  window.__feedbackPayload = null;
+  window.fetch = (url, options) => String(url).includes('/api/feedback')
+    ? (window.__feedbackPayload = JSON.parse(options.body), Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 7, retention: 'no-automatic-expiry', access: 'project-owner' }) }))
     : Promise.reject(new Error('offline'));
-  openOv('ov-feedback'); $('fb-text').value = 'Отличное приложение, спасибо!';
-  return sendFeedback();
+  openFeedback();
+  $('fb-text').value = 'Напишите owner@example.com, ключ sk-ant-abcdefghijklmnop123456 не отправлять';
+  $('fb-errors').checked = true; renderFeedbackDisclosure();
+  await sendFeedback();
+  return {
+    payload: window.__feedbackPayload,
+    sent: ARCH_FEEDBACK_PRIVACY.getSentIds(localStorage),
+    closed: !document.querySelector('#ov-feedback.on'),
+  };
 });
-await page.waitForTimeout(250);
-ok(await page.evaluate(() => JSON.parse(localStorage.getItem('arch5_fb_sent') || '[]').includes(7)), 'фидбэк отправлен, id сохранён для замыкания цикла');
-ok(await page.evaluate(() => !document.querySelector('#ov-feedback.on')), 'форма фидбэка закрывается после отправки');
+ok(feedbackSent.sent.includes(7), 'фидбэк отправлен, id сохранён для замыкания цикла');
+ok(feedbackSent.closed, 'форма фидбэка закрывается после отправки');
+ok(feedbackSent.payload.text.includes('[email]') && feedbackSent.payload.text.includes('[secret]'), 'контакты и API-ключи очищены до отправки');
+ok(feedbackSent.payload.privacy.contextIncluded && feedbackSent.payload.privacy.errorsIncluded && feedbackSent.payload.privacy.retention === 'no-automatic-expiry', 'отправлены только явно выбранные категории и честная retention-политика');
+ok(feedbackSent.payload.context.lastErrors.length === 1 && feedbackSent.payload.context.lastErrors[0].source === 'app.js', 'ошибка приложена только после opt-in, без полного пути');
+ok(!/(?:insights|checkins|dreams|spaceKey|apiKey)/.test(JSON.stringify(feedbackSent.payload)), 'дневник, конфигурация и ключи не попадают в feedback payload');
 
-// ── Замыкание цикла: статус «fixed» чистит список ожидания ──
+const feedbackQueued = await page.evaluate(async () => {
+  window.fetch = () => Promise.reject(new Error('offline'));
+  openFeedback(); $('fb-text').value = 'Синтетический офлайн-отзыв';
+  $('fb-ctx').checked = false; $('fb-errors').checked = false; renderFeedbackDisclosure();
+  await sendFeedback();
+  const queued = ARCH_FEEDBACK_PRIVACY.getOutbox(localStorage);
+  return { queued, closed: !document.querySelector('#ov-feedback.on') };
+});
+ok(feedbackQueued.closed && feedbackQueued.queued.length === 1, 'сетевой сбой сохраняет очищенный payload в локальную очередь');
+ok(Object.keys(feedbackQueued.queued[0].context).length === 1 && !!feedbackQueued.queued[0].context.ts, 'opt-out техконтекста оставляет только timestamp');
+
+const rejectedNotQueued = await page.evaluate(async () => {
+  const before = ARCH_FEEDBACK_PRIVACY.getOutbox(localStorage).length;
+  window.fetch = () => Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({ error: 'Некорректный текст', code: 'invalid_text' }) });
+  openFeedback(); $('fb-text').value = 'Исправь меня';
+  await sendFeedback();
+  return {
+    before, after: ARCH_FEEDBACK_PRIVACY.getOutbox(localStorage).length,
+    open: !!document.querySelector('#ov-feedback.on'), value: $('fb-text').value,
+  };
+});
+ok(rejectedNotQueued.after === rejectedNotQueued.before && rejectedNotQueued.open && rejectedNotQueued.value === 'Исправь меня', '4xx не зацикливается в outbox и оставляет текст для исправления');
+
+const clearedFeedbackLocal = await page.evaluate(() => {
+  clearFeedbackDiagnostics(); clearFeedbackOutbox();
+  return ARCH_FEEDBACK_PRIVACY.localState(localStorage);
+});
+ok(clearedFeedbackLocal.errors === 0 && clearedFeedbackLocal.queued === 0, 'пользователь может очистить ошибки и очередь локально');
+await page.evaluate(() => closeOv('ov-feedback'));
+
+// ── Замыкание цикла: статус fixed чистит список ожидания ──
 await page.evaluate(async () => {
-  localStorage.setItem('arch5_fb_sent', JSON.stringify([7]));
-  window.fetch = (u) => String(u).includes('/api/feedback/status')
+  ARCH_FEEDBACK_PRIVACY.setSentIds(localStorage, [7]);
+  window.fetch = url => String(url).includes('/api/feedback/status')
     ? Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [{ id: 7, status: 'fixed', type: 'bug' }] }) })
     : Promise.reject(new Error('offline'));
   await checkFeedbackStatus();
 });
-ok(await page.evaluate(() => !JSON.parse(localStorage.getItem('arch5_fb_sent') || '[]').includes(7)), 'замыкание цикла: «fixed» убирает id из ожидания');
+ok(await page.evaluate(() => !ARCH_FEEDBACK_PRIVACY.getSentIds(localStorage).includes(7)), 'замыкание цикла: fixed убирает id из ожидания');
 
 // ── Lagged-паттерн сферы: эффект «на следующий день» (Bearable) ──
 const lagged = await page.evaluate(() => {

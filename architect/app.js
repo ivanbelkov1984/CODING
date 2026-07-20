@@ -4730,85 +4730,197 @@ function rSidebar() {
   rSidebar();
 })();
 
-// ═══ ОБРАТНАЯ СВЯЗЬ (см. FEEDBACK_SPEC.md) ═══════════════════════
-// errorBuffer: кольцевой буфер последних JS-ошибок (только локально;
-// уходит на сервер ТОЛЬКО при явной отправке формы с включённым чекбоксом).
-const ERRBUF_KEY = 'arch5_errbuf';
-function pushErr(m) {
-  try {
-    const b = JSON.parse(localStorage.getItem(ERRBUF_KEY) || '[]');
-    b.push({ m: String(m).slice(0, 300), ts: nowISO() });
-    while (b.length > 10) b.shift();
-    localStorage.setItem(ERRBUF_KEY, JSON.stringify(b));
-  } catch (e) {}
+// ═══ ОБРАТНАЯ СВЯЗЬ · PRIVACY BOUNDARY (P1-C) ═════════════════════
+function feedbackPrivacy() {
+  const privacy = typeof globalThis !== 'undefined' ? globalThis.ARCH_FEEDBACK_PRIVACY : null;
+  if (!privacy) throw new Error('Feedback privacy module не загружен');
+  return privacy;
 }
-window.addEventListener('error', e => pushErr((e.message || 'error') + ' @' + (e.filename || '').split('/').pop() + ':' + (e.lineno || 0)));
-window.addEventListener('unhandledrejection', e => pushErr('promise: ' + ((e.reason && e.reason.message) || e.reason)));
 
-function fbContext() {
+function pushErr(error) {
+  try { feedbackPrivacy().pushError(localStorage, error); updateFeedbackLocalStatus(); } catch (_) {}
+}
+window.addEventListener('error', event => pushErr({
+  message: event.message || 'error', source: event.filename || '', line: event.lineno || 0, col: event.colno || 0, ts: nowISO(),
+}));
+window.addEventListener('unhandledrejection', event => pushErr({
+  message: 'promise: ' + ((event.reason && event.reason.message) || event.reason || 'rejection'), ts: nowISO(),
+}));
+
+function feedbackRawContext({ includeErrors = false, appVersion = '' } = {}) {
   let screen = '';
-  try { screen = (document.querySelector('.ov.on') || document.querySelector('.pg.on') || {}).id || ''; } catch (e) {}
+  try { screen = (document.querySelector('.ov.on') || document.querySelector('.pg.on') || {}).id || ''; } catch (_) {}
+  const privacy = feedbackPrivacy();
   return {
-    screen, lang: navigator.language, online: navigator.onLine,
-    ua: navigator.userAgent.slice(0, 200), viewport: innerWidth + 'x' + innerHeight,
-    ts: nowISO(), lastErrors: (JSON.parse(localStorage.getItem(ERRBUF_KEY) || '[]')).slice(-3),
+    appVersion,
+    screen,
+    lang: navigator.language,
+    online: navigator.onLine,
+    ua: navigator.userAgent.slice(0, 200),
+    viewport: innerWidth + 'x' + innerHeight,
+    ts: nowISO(),
+    lastErrors: includeErrors ? privacy.getErrors(localStorage).slice(-3) : [],
   };
 }
+
+function updateFeedbackLocalStatus() {
+  try {
+    const privacy = feedbackPrivacy();
+    const state = privacy.localState(localStorage);
+    const status = $('fb-local-status');
+    if (status) status.textContent = 'Локально: ошибок ' + state.errors + ' · в очереди ' + state.queued;
+    const errors = $('fb-errors-count');
+    if (errors) errors.textContent = state.errors ? 'Доступно: ' + Math.min(3, state.errors) + ' из ' + state.errors : 'Ошибок нет';
+    const clearErrors = $('fb-clear-errors');
+    if (clearErrors) clearErrors.disabled = state.errors === 0;
+    const clearOutbox = $('fb-clear-outbox');
+    if (clearOutbox) clearOutbox.disabled = state.queued === 0;
+  } catch (_) {}
+}
+
+function renderFeedbackDisclosure() {
+  const includeContext = !$('fb-ctx') || $('fb-ctx').checked;
+  const includeErrors = includeContext && !!$('fb-errors')?.checked;
+  const redactContacts = !$('fb-redact') || $('fb-redact').checked;
+  const el = $('fb-disclosure');
+  if (el) {
+    const items = ['текст формы'];
+    if (includeContext) items.push('версия, экран, устройство, язык, размер экрана и состояние сети');
+    if (includeErrors) items.push('до 3 последних очищенных ошибок без stack и полного пути');
+    el.innerHTML = '<b>Будет отправлено:</b> ' + items.join('; ') + '.<br><b>Не отправляется:</b> дневник, записи, ключи и конфигурация.<br>'
+      + (redactContacts ? 'Email и телефоны будут скрыты. ' : 'Email и телефоны останутся в тексте по твоему выбору. ')
+      + 'API-ключи и токены скрываются всегда.';
+  }
+  updateFeedbackLocalStatus();
+}
+
+function openFeedback() {
+  try { closeNav(); } catch (_) {}
+  renderFeedbackDisclosure();
+  openOv('ov-feedback');
+  setTimeout(() => $('fb-text')?.focus(), 80);
+}
+
+function clearFeedbackDiagnostics() {
+  feedbackPrivacy().clearErrors(localStorage);
+  updateFeedbackLocalStatus();
+  toast('Локальные ошибки очищены', 'ok');
+}
+
+function clearFeedbackOutbox() {
+  feedbackPrivacy().clearOutbox(localStorage);
+  updateFeedbackLocalStatus();
+  toast('Очередь обратной связи очищена', 'ok');
+}
+
+function feedbackRetryable(status) {
+  return status === 0 || status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+async function feedbackPost(base, payload) {
+  const response = await fetch(base + '/api/feedback', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data.error || ('HTTP ' + response.status));
+    error.status = response.status;
+    error.code = data.code || 'feedback_http_error';
+    throw error;
+  }
+  return data;
+}
+
 async function sendFeedback() {
-  const ta = $('fb-text'); const t = (ta && ta.value.trim()) || '';
-  if (t.length < 3) { toast('Напиши хотя бы пару слов', 'warn'); return; }
-  const withCtx = !$('fb-ctx') || $('fb-ctx').checked;
-  let ver = ''; try { ver = ((await caches.keys()) || []).find(k => k.startsWith('arch-')) || ''; } catch (e) {}
-  const payload = { text: t, context: withCtx ? { ...fbContext(), appVersion: ver } : { ts: nowISO() } };
+  const privacy = feedbackPrivacy();
+  const field = $('fb-text');
+  const originalText = (field && field.value) || '';
+  if (originalText.trim().length < 3) { toast('Напиши хотя бы пару слов', 'warn'); return; }
+  const includeContext = !$('fb-ctx') || $('fb-ctx').checked;
+  const includeErrors = includeContext && !!$('fb-errors')?.checked;
+  const redactContacts = !$('fb-redact') || $('fb-redact').checked;
+  let appVersion = '';
+  try { appVersion = ((await caches.keys()) || []).find(key => key.startsWith('arch-')) || ''; } catch (_) {}
+  let payload;
+  try {
+    payload = privacy.preparePayload({
+      text: originalText,
+      rawContext: feedbackRawContext({ includeErrors, appVersion }),
+      includeContext,
+      includeErrors,
+      redactContacts,
+    });
+  } catch (error) {
+    toast(error.message || 'Проверь текст обратной связи', 'warn');
+    return;
+  }
   const base = (typeof apiBase === 'function' && apiBase()) || window.ARCHITECT_API || '';
   try {
-    const r = await fetch(base + '/api/feedback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
-    const d = await r.json(); if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
-    const sent = JSON.parse(localStorage.getItem('arch5_fb_sent') || '[]');
-    sent.push(d.id); localStorage.setItem('arch5_fb_sent', JSON.stringify(sent.slice(-20)));
-    ta.value = ''; closeOv('ov-feedback'); if (typeof hptMed === 'function') hptMed();
+    if (!navigator.onLine) { const offline = new Error('offline'); offline.status = 0; throw offline; }
+    const data = await feedbackPost(base, payload);
+    privacy.addSentId(localStorage, data.id);
+    field.value = '';
+    closeOv('ov-feedback');
+    if (typeof hptMed === 'function') hptMed();
+    updateFeedbackLocalStatus();
     toast('Спасибо! Мы читаем каждое сообщение', 'ok');
-  } catch (e) {
-    // офлайн/сбой → outbox, фоновая доотправка при подключении
-    const ob = JSON.parse(localStorage.getItem('arch5_fb_outbox') || '[]');
-    ob.push(payload); localStorage.setItem('arch5_fb_outbox', JSON.stringify(ob.slice(-10)));
-    ta.value = ''; closeOv('ov-feedback');
-    toast('Сохранено — отправлю при подключении', 'ok');
+  } catch (error) {
+    const status = Number(error.status || 0);
+    if (feedbackRetryable(status)) {
+      privacy.enqueueOutbox(localStorage, payload);
+      field.value = '';
+      closeOv('ov-feedback');
+      updateFeedbackLocalStatus();
+      toast('Сохранено локально — отправлю при подключении', 'ok');
+    } else {
+      toast(error.message || 'Сообщение отклонено — проверь текст', 'warn');
+      renderFeedbackDisclosure();
+    }
   }
 }
+
 async function flushFeedbackOutbox() {
   try {
-    const ob = JSON.parse(localStorage.getItem('arch5_fb_outbox') || '[]');
-    if (!ob.length || !navigator.onLine) return;
+    const privacy = feedbackPrivacy();
+    const queued = privacy.getOutbox(localStorage);
+    if (!queued.length || !navigator.onLine) { updateFeedbackLocalStatus(); return; }
     const base = (typeof apiBase === 'function' && apiBase()) || window.ARCHITECT_API || '';
-    const rest = [];
-    for (const p of ob) {
-      try { const r = await fetch(base + '/api/feedback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(p) }); if (!r.ok) rest.push(p); }
-      catch (e) { rest.push(p); }
+    const retry = [];
+    for (const payload of queued) {
+      try {
+        privacy.assertNoForbiddenKeys(payload);
+        const data = await feedbackPost(base, payload);
+        privacy.addSentId(localStorage, data.id);
+      } catch (error) {
+        if (feedbackRetryable(Number(error.status || 0))) retry.push(payload);
+      }
     }
-    localStorage.setItem('arch5_fb_outbox', JSON.stringify(rest));
-  } catch (e) {}
+    privacy.setOutbox(localStorage, retry);
+    updateFeedbackLocalStatus();
+  } catch (_) {}
 }
 window.addEventListener('online', flushFeedbackOutbox);
 setTimeout(flushFeedbackOutbox, 4000);
+setTimeout(updateFeedbackLocalStatus, 1200);
 
-// Замыкание цикла (FEEDBACK_SPEC.md): раз в запуск спрашиваем статус
-// отправленных отзывов; «fixed» → благодарим и убираем из ожидания.
+// Замыкание цикла: fixed → благодарность и удаление id из ожидания.
 async function checkFeedbackStatus() {
   try {
     if (!navigator.onLine) return;
-    const sent = JSON.parse(localStorage.getItem('arch5_fb_sent') || '[]');
+    const privacy = feedbackPrivacy();
+    const sent = privacy.getSentIds(localStorage);
     if (!sent.length) return;
     const base = (typeof apiBase === 'function' && apiBase()) || window.ARCHITECT_API || '';
-    const r = await fetch(base + '/api/feedback/status?ids=' + sent.join(','));
-    if (!r.ok) return;
-    const d = await r.json();
-    const fixedIds = (d.items || []).filter(i => i.status === 'fixed').map(i => +i.id);
+    const response = await fetch(base + '/api/feedback/status?ids=' + sent.join(','));
+    if (!response.ok) return;
+    const data = await response.json();
+    const fixedIds = (data.items || []).filter(item => item.status === 'fixed').map(item => +item.id);
     if (fixedIds.length) {
       toast('Твой отзыв учтён — уже исправлено ✓', 'ok');
-      localStorage.setItem('arch5_fb_sent', JSON.stringify(sent.filter(id => !fixedIds.includes(+id))));
+      privacy.setSentIds(localStorage, sent.filter(id => !fixedIds.includes(+id)));
+      updateFeedbackLocalStatus();
     }
-  } catch (e) {}
+  } catch (_) {}
 }
 setTimeout(checkFeedbackStatus, 6000);
 
