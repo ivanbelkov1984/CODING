@@ -168,8 +168,8 @@ await test('runtime keeps no-key and budget gates before provider execution', ()
 
 await test('all provider fetches receive the central abort signal', () => {
   const providerBlock = appSource.slice(appSource.indexOf('const AI_PROVIDERS'), appSource.indexOf('async function callClaude'));
-  assert.equal((providerBlock.match(/signal,/g) || []).length >= 3, true);
-  assert.equal((providerBlock.match(/signal:\s*signal/g) || []).length >= 3, true);
+  assert.equal((providerBlock.match(/async call\(\{[^}]*\bsignal\b[^}]*\}\)/g) || []).length, 3);
+  assert.equal((providerBlock.match(/signal:\s*signal/g) || []).length, 3);
 });
 
 await test('response validation happens before ledger success and return', () => {

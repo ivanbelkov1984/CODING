@@ -4308,15 +4308,13 @@ function appendDeeper(q) {
 const AI_PROVIDERS = {
   anthropic: {
     name: 'Anthropic (Claude)',
-    async call({ key, model, system, user, messages, maxTokens, schema, reasoning }) {
+    async call({ key, model, system, user, messages, maxTokens, schema, reasoning, signal }) {
       const body = { model, max_tokens: maxTokens, messages: messages || [{ role: 'user', content: user }] };
       if (system) body.system = system;
       if (schema) body.output_config = { format: { type: 'json_schema', schema } };
       // «С рассуждением»: adaptive thinking на моделях 4.6+ (haiku — без параметра)
       if (reasoning != null && /claude-(sonnet-5|opus-4-[6-8]|fable)/.test(model))
         body.thinking = { type: reasoning ? 'adaptive' : 'disabled' };
-      const ctrl = new AbortController();
-      const to = setTimeout(() => ctrl.abort(), 60000);
       let r;
       try {
         r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -4328,13 +4326,12 @@ const AI_PROVIDERS = {
             'anthropic-dangerous-direct-browser-access': 'true',
           },
           body: JSON.stringify(body),
-          signal: ctrl.signal,
+          signal: signal,
         });
       } catch (e) {
-        clearTimeout(to);
-        throw new Error(e.name === 'AbortError' ? 'Таймаут запроса к Claude' : 'Нет соединения с Claude');
+        if (e.name === 'AbortError') throw e;
+        throw new Error('Нет соединения с Claude');
       }
-      clearTimeout(to);
       const data = await r.json().catch(() => null);
       if (!r.ok) {
         const msg = (data && data.error && data.error.message) || _httpMsg(r.status);
@@ -4351,7 +4348,7 @@ const AI_PROVIDERS = {
   },
   openai: {
     name: 'OpenAI (GPT)',
-    async call({ key, model, system, user, messages, maxTokens, schema }) {
+    async call({ key, model, system, user, messages, maxTokens, schema, signal }) {
       const msgs = [];
       if (system) msgs.push({ role: 'system', content: system });
       (messages || [{ role: 'user', content: user }]).forEach(m => msgs.push({ role: m.role, content: m.content }));
@@ -4361,7 +4358,8 @@ const AI_PROVIDERS = {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key },
         body: JSON.stringify(body),
-      }).catch(() => { throw new Error('Нет соединения с OpenAI'); });
+        signal: signal,
+      }).catch(e => { if (e.name === 'AbortError') throw e; throw new Error('Нет соединения с OpenAI'); });
       const data = await r.json().catch(() => null);
       if (!r.ok) { const e = new Error((data && data.error && data.error.message) || _httpMsg(r.status)); e.status = r.status; throw e; }
       const u = data.usage || {};
@@ -4373,14 +4371,14 @@ const AI_PROVIDERS = {
   },
   gemini: {
     name: 'Google (Gemini)',
-    async call({ key, model, system, user, messages, maxTokens }) {
+    async call({ key, model, system, user, messages, maxTokens, signal }) {
       const contents = (messages || [{ role: 'user', content: user }])
         .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
       const body = { contents, generationConfig: { maxOutputTokens: maxTokens } };
       if (system) body.systemInstruction = { parts: [{ text: system }] };
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-      }).catch(() => { throw new Error('Нет соединения с Gemini'); });
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: signal,
+      }).catch(e => { if (e.name === 'AbortError') throw e; throw new Error('Нет соединения с Gemini'); });
       const data = await r.json().catch(() => null);
       if (!r.ok) { const e = new Error((data && data.error && data.error.message) || _httpMsg(r.status)); e.status = r.status; throw e; }
       const u = data.usageMetadata || {};
@@ -4404,12 +4402,19 @@ async function callClaude({ system, user, messages = null, maxTokens = 1024, sch
     try { localStorage.setItem('arch5_ai_budget_warned', todayKey()); } catch (e) {}
     setTimeout(() => toast(`AI: потрачено ${Math.round(bs.spent / bs.budget * 100)}% месячного бюджета`, 'warn'), 400);
   }
-  const mdl = model || aiModelFor(task);
+  const policy = typeof globalThis !== 'undefined' ? globalThis.ARCH_AI_POLICY : null;
+  if (!policy) throw new Error('AI policy module не загружен');
+  const request = policy.prepareRequest({ system, user, messages, maxTokens, schema, task, reasoning });
+  const mdl = model || aiModelFor(request.task);
   const prov = AI_PROVIDERS[provName] || AI_PROVIDERS.anthropic;
-  const res = await prov.call({ key, model: mdl, system, user, messages, maxTokens, schema, reasoning });
-  aiLedgerAdd({ ts: Date.now(), task, model: mdl, ti: res.ti, to: res.to });
-  log('info', `AI ✓ ${AI_TASKS[task] || task} · ${String(mdl).replace('claude-', '')} · ${res.to} ток.`);
-  return res.text;
+  const res = await policy.runProvider(signal => prov.call({
+    key, model: mdl, system: request.system, user: request.user, messages: request.messages,
+    maxTokens: request.maxTokens, schema: request.schema, reasoning: request.reasoning, signal,
+  }), { task: request.task });
+  const validatedText = policy.validateResponse({ task: request.task, text: res.text, schema: request.schema });
+  aiLedgerAdd({ ts: Date.now(), task: request.task, model: mdl, ti: res.ti, to: res.to });
+  log('info', `AI ✓ ${AI_TASKS[request.task] || request.task} · ${String(mdl).replace('claude-', '')} · ${res.to} ток.`);
+  return validatedText;
 }
 
 // Контекст недели для AI (агрегаты + тексты за 7 дней).

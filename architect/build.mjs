@@ -24,7 +24,7 @@ const STATIC = ['lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2', 'manif
 // новую версию кэша. Гармонично с уже работающим механизмом sw.js.
 async function contentVersion() {
   const h = createHash('sha256');
-  for (const f of ['index.html', 'styles.css', 'data-metadata.js', 'app.js', 'sw.js', 'lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) h.update(await readFile(join(DIR, f)));
+  for (const f of ['index.html', 'styles.css', 'data-metadata.js', 'ai-policy.js', 'app.js', 'sw.js', 'lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) h.update(await readFile(join(DIR, f)));
   return 'v' + h.digest('hex').slice(0, 10);
 }
 
@@ -34,12 +34,14 @@ export async function buildCombined() {
   let html = await readFile(join(DIR, 'index.html'), 'utf8');
   const css = await readFile(join(DIR, 'styles.css'), 'utf8');
   const metadata = await readFile(join(DIR, 'data-metadata.js'), 'utf8');
+  const aiPolicy = await readFile(join(DIR, 'ai-policy.js'), 'utf8');
   const js  = await readFile(join(DIR, 'app.js'), 'utf8');
   html = html.replace('<link rel="stylesheet" href="styles.css">', () => '<style>\n' + css + '\n</style>');
   html = html.replace('<script src="data-metadata.js"></script>', () => '<script>\n' + metadata + '\n</script>');
+  html = html.replace('<script src="ai-policy.js"></script>', () => '<script>\n' + aiPolicy + '\n</script>');
   html = html.replace('<script src="app.js"></script>', () => '<script>\n' + js + '\n</script>');
-  if (/href="styles\.css"|src="data-metadata\.js"|src="app\.js"/.test(html)) throw new Error('не удалось заинлайнить (осталась ссылка)');
-  if (!html.includes(metadata.slice(0, 80)) || !html.includes(js.slice(0, 80))) throw new Error('JS не вставился дословно');
+  if (/href="styles\.css"|src="data-metadata\.js"|src="ai-policy\.js"|src="app\.js"/.test(html)) throw new Error('не удалось заинлайнить (осталась ссылка)');
+  if (!html.includes(metadata.slice(0, 80)) || !html.includes(aiPolicy.slice(0, 80)) || !html.includes(js.slice(0, 80))) throw new Error('JS не вставился дословно');
   return html;
 }
 
