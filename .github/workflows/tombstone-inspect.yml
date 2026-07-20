@@ -23,4 +23,10 @@ jobs:
           node-version: '22'
       - name: Inventory tomb calls
         working-directory: architect
-        run: node scripts/inspect-tombstone-calls.mjs
+        run: node scripts/inspect-tombstone-calls.mjs | tee tomb-calls.txt
+      - name: Upload inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: tombstone-call-inventory
+          path: architect/tomb-calls.txt
+          if-no-files-found: error
