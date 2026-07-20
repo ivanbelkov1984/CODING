@@ -1,32 +1,38 @@
-name: Temporary tombstone inventory
+name: Temporary tombstone remediation
 
 on:
   push:
     branches:
       - agent/tombstone-namespacing-remediation
-  pull_request:
-    paths:
-      - architect/app.js
-      - architect/scripts/inspect-tombstone-calls.mjs
-      - .github/workflows/tombstone-inspect.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  inspect:
+  remediate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: agent/tombstone-namespacing-remediation
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Inventory tomb calls
+      - name: Apply exact source patch
         working-directory: architect
-        run: node scripts/inspect-tombstone-calls.mjs | tee tomb-calls.txt
-      - name: Upload inventory
-        uses: actions/upload-artifact@v4
-        with:
-          name: tombstone-call-inventory
-          path: architect/tomb-calls.txt
-          if-no-files-found: error
+        run: node scripts/apply-tombstone-remediation.mjs
+      - name: Validate syntax and patch cleanliness
+        run: |
+          node --check architect/app.js
+          git diff --check
+      - name: Commit generated source patch
+        run: |
+          if git diff --quiet; then
+            echo 'No source changes to commit'
+            exit 0
+          fi
+          git config user.name 'remediation-bot'
+          git config user.email 'remediation@architect.app'
+          git add architect/app.js
+          git commit -m 'fix(data): namespace tombstones by collection'
+          git push origin HEAD:agent/tombstone-namespacing-remediation
