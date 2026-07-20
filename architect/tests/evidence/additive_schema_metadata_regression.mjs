@@ -53,7 +53,7 @@ test('first touch adds optional metadata without changing record payload', () =>
   assert.equal(record._meta.privacyClass, 'sensitive_personal');
   assert.equal(record._meta.provenance.origin, 'user_local');
   assert.equal(record._meta.correction.revision, 0);
-  assert.deepEqual(record._meta.correction.history, []);
+  assert.deepEqual(json(record._meta.correction.history), []);
 });
 
 test('later touch appends a bounded minimal correction event', () => {
