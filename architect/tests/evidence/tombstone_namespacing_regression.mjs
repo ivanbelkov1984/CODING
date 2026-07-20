@@ -126,7 +126,7 @@ test('production source declares the v3 collection namespace and migration hook'
 test('all known internal deletion paths pass an explicit collection', () => {
   assert.match(app, /tomb\(coll, id\);/);
   assert.match(app, /tomb\('spheres', id\);/);
-  assert.match(app, /tomb\('sphereLogs', l\.id\);/);
+  assert.match(app, /tomb\('sphereLogs',\s*l\.id\)/);
   assert.match(app, /tomb\('digests', d\.id\)/);
   assert.doesNotMatch(app, /if \(DB\._del\) delete DB\._del\[id\]/);
   assert.match(app, /untomb\(coll, id\);/);
