@@ -1,0 +1,43 @@
+name: Temporary tombstone E2E diagnostic
+
+on:
+  pull_request:
+    paths:
+      - architect/app.js
+      - architect/package.json
+      - architect/tests/**
+      - .github/workflows/tombstone-e2e-diagnostic.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: architect
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Capture complete npm test output
+        shell: bash
+        run: |
+          set +e
+          npm test > tombstone-e2e-output.txt 2>&1
+          code=$?
+          cat tombstone-e2e-output.txt
+          echo "$code" > tombstone-e2e-exit-code.txt
+          exit 0
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: tombstone-e2e-diagnostic
+          path: |
+            architect/tombstone-e2e-output.txt
+            architect/tombstone-e2e-exit-code.txt
+          if-no-files-found: error
