@@ -1,174 +1,87 @@
-# Claude Code installation and Phase 0 launch guide
+# Mobile-only Claude Code launch and Phase 0 guide
 
 ## Status
 
-`READY_FOR_OWNER_SETUP`
+`MOBILE_ONLY_OWNER_WORKFLOW_READY`
 
-This guide prepares the development machine and starts only the repository audit. It does not merge PR #40 and does not begin production implementation.
+This document supersedes the earlier desktop installation route for the project owner. Ivan has no Mac, Windows or Linux computer. The supported owner workflow uses iPad/iPhone, GitHub and cloud execution.
 
-## Official requirements
+No Node.js, terminal, local clone or desktop Claude Code installation is required for the primary path.
 
-According to the current Anthropic Claude Code setup documentation:
+## Supported surfaces
 
-- macOS 10.15+;
-- Ubuntu 20.04+/Debian 10+;
-- Windows 10+ using WSL or Git for Windows/Git Bash;
-- at least 4 GB RAM;
-- Node.js 18+ for the npm installation method;
-- internet access for authentication and model processing.
+### Primary — official Claude Code cloud
 
-Official setup reference:
+Use either:
 
-`https://docs.anthropic.com/en/docs/claude-code/getting-started`
+- the **Code** tab in the official Claude app for iOS/iPadOS; or
+- `https://claude.ai/code` in Safari.
 
-Official CLI reference:
+Claude runs in an Anthropic-managed isolated cloud environment, clones the selected GitHub repository, works on a branch and pushes results for review.
 
-`https://docs.anthropic.com/en/docs/claude-code/cli-usage`
+Official references:
 
-## 1. Verify prerequisites
+- `https://code.claude.com/docs/en/web-quickstart`
+- `https://code.claude.com/docs/en/claude-code-on-the-web`
+- `https://support.claude.com/en/articles/14898120-open-the-claude-mobile-app-with-a-link`
 
-Open Terminal, PowerShell with WSL, or Git Bash and run:
+### Secondary — GitHub Codespaces in Safari
 
-```bash
-node --version
-npm --version
-git --version
-```
+Use Codespaces only when a manual terminal, live forwarded port or deeper file inspection is needed. It is a cloud computer opened in the browser, not a physical computer owned by Ivan.
 
-Node must be version 18 or newer.
+### Last-resort fallback — owned Linux VPS
 
-If Node is missing, install a supported current LTS release from the official Node.js distribution or through a trusted version manager. On Windows/WSL, `which node` and `which npm` should point to Linux paths when working inside WSL, not to `/mnt/c/...` Windows binaries.
+A VPS plus an iOS SSH/Claude client is allowed only if official Claude Code cloud cannot perform a required task. It introduces server administration, credentials, patching and cost, so it is not the default.
 
-## 2. Install Claude Code
+Third-party mobile clients are optional interfaces, never the source of truth. The repository and pull requests remain the source of truth regardless of app name.
 
-Standard official npm installation:
+## Account prerequisites
 
-```bash
-npm install -g @anthropic-ai/claude-code
-```
+1. Claude account with Claude Code cloud access.
+2. GitHub account with access to `ivanbelkov1984/CODING`.
+3. Claude GitHub App authorized for this repository.
+4. Official Claude app installed on iPad/iPhone, or Safari access to `claude.ai/code`.
+5. GitHub app or GitHub web available for PR review.
 
-Do **not** use:
+Do not paste API keys, GitHub tokens, Apple certificates, medical data or personal diary content into prompts or repository files.
 
-```bash
-sudo npm install -g @anthropic-ai/claude-code
-```
+## Connect GitHub
 
-After installation:
+In Claude Code cloud:
 
-```bash
-claude --version
-claude doctor
-```
+1. Open the Code tab.
+2. Connect GitHub when prompted.
+3. Grant the minimum repository access needed: `ivanbelkov1984/CODING`.
+4. Confirm that repository and branch selectors are visible.
 
-Claude Code can update itself. Manual update command:
+Cloud sessions require GitHub access to clone the repository and push a result branch.
 
-```bash
-claude update
-```
+## Start Phase 0 from iPad or iPhone
 
-## 3. Authenticate
+Select:
 
-Run:
+- repository: `ivanbelkov1984/CODING`;
+- base branch: `agent/astrology-harness-foundation`;
+- mode: **Plan**.
 
-```bash
-claude
-```
+Do not start from `MAIN`, because the v2 architecture and harness are still in draft PR #40.
 
-Choose the authentication option matching the account:
-
-- Claude App subscription when the available Pro/Max plan includes Claude Code;
-- Anthropic Console/API billing;
-- enterprise Bedrock/Vertex configuration when intentionally used.
-
-Complete the browser/OAuth flow. Do not paste account passwords, API keys or tokens into this repository, chat prompts, issues or files.
-
-After authentication, exit Claude Code for the moment:
+A mobile deep link may be used when supported:
 
 ```text
-/exit
+claude://code/new?repo=ivanbelkov1984%2FCODING&branch=agent%2Fastrology-harness-foundation&mode=plan
 ```
 
-## 4. Get the repository
+The link only preselects context. Verify the repository and branch on screen before sending the task.
 
-### Fresh computer
+## Exact first mobile prompt
 
-```bash
-git clone https://github.com/ivanbelkov1984/CODING.git
-cd CODING
-```
-
-### Existing local clone
-
-```bash
-cd /path/to/CODING
-git status
-git fetch origin
-```
-
-If `git status` shows local changes, do not discard them. Commit them to their proper branch or make a named stash before switching:
-
-```bash
-git stash push -u -m "before-life-architect-v2-phase0"
-```
-
-## 5. Check out the architecture branch
-
-```bash
-git fetch origin
-git checkout agent/astrology-harness-foundation
-git pull --ff-only origin agent/astrology-harness-foundation
-```
-
-Verify:
-
-```bash
-git status
-git log --oneline --decorate -10
-```
-
-Expected state:
-
-- branch: `agent/astrology-harness-foundation`;
-- working tree clean;
-- branch contains the current `MAIN` Dual Realm baseline;
-- `architect/docs/life-architect-v2/00-INDEX.md` exists;
-- `architect/docs/life-architect-v2/16-LLM-SYNTHESIS-VOICE-AND-SAFETY.md` exists;
-- `architect/docs/life-architect-v2/17-CLAUDE-CODE-INSTALLATION-AND-PHASE0-START.md` exists.
-
-## 6. Start Claude Code in the repository root
-
-From the `CODING` directory:
-
-```bash
-claude
-```
-
-Do not use `--dangerously-skip-permissions`.
-
-Inside Claude Code run:
+Paste as one message:
 
 ```text
-/status
-```
+You are starting Phase 0 for Life Architect v2 in a cloud-only, mobile-owner workflow.
 
-The project may expose the custom skill:
-
-```text
-/life-architect-v2-kickoff
-```
-
-If the slash command is not discovered, this is not a blocker. Paste the start prompt below.
-
-Do **not** run `/init`: the repository already has a curated root `CLAUDE.md`, and regenerating it could overwrite or conflict with the architecture contract.
-
-`/effort ultracode` is not part of the guaranteed official CLI contract. Use it only if the installed Claude Code explicitly recognizes it, and confirm the result through `/status`. Otherwise continue normally.
-
-## 7. Exact first prompt
-
-Paste this as one message:
-
-```text
-You are starting Phase 0 for Life Architect v2.
+The owner has only an iPad and iPhone. Do not require a local computer, local terminal, desktop IDE or manual coding by the owner.
 
 Work only as a repository analyst. Do not implement product features and do not modify production application behavior.
 
@@ -180,8 +93,9 @@ Read completely, in this order:
 5. architect/docs/life-architect-v2/10-CLAUDE-CODE-EXECUTION-PLAN.md
 6. architect/docs/life-architect-v2/16-LLM-SYNTHESIS-VOICE-AND-SAFETY.md
 7. architect/docs/life-architect-v2/17-CLAUDE-CODE-INSTALLATION-AND-PHASE0-START.md
+8. architect/docs/life-architect-v2/18-MOBILE-ONLY-DEVELOPMENT-AND-NATIVE-MIGRATION.md
 
-Then inspect the actual repository and create REPOSITORY_REALITY_REPORT.md.
+Inspect the actual repository and prepare REPOSITORY_REALITY_REPORT.md.
 
 The report must include:
 - actual frontend, navigation, state and storage architecture;
@@ -189,14 +103,16 @@ The report must include:
 - local encryption, E2EE sync, server ciphertext/plaintext boundaries and profile isolation;
 - existing diary, check-in, psychological annotations, health, cravings, smart insights and nudges;
 - current AI routing, provider adapters, prompts, payloads, logging, retention, safety/post-processing and structured-output support;
-- current service worker, caches, offline/version behavior;
-- actual design system, Dual Realm implementation, tokens, components and accessibility constraints;
+- service worker, caches, offline/version behavior;
+- actual Dual Realm design, tokens, components, safe-area and accessibility behavior;
 - conceptual-v2-entity to current-code/storage/UI mapping;
 - conflicts between documentation and code;
 - privacy, security, migration, licensing and regulatory risks;
 - smallest safe module seams without rewriting the vanilla-JS application;
 - minimal ordered migration plan with rollback;
-- a repository-grounded proposal for LLM prompt-policy, validators and eval locations;
+- repository-grounded locations for LLM prompt policy, validators and evals;
+- current deployment/preview path and a mobile-accessible PR preview proposal;
+- readiness of the existing web app for a later Capacitor iOS/Android wrapper;
 - Phase 1 task contracts with owners, files, dependencies, acceptance criteria, tests and rollback.
 
 Strict restrictions:
@@ -204,74 +120,95 @@ Strict restrictions:
 - do not create Next.js, React, TypeScript, Tailwind, shadcn, RxDB or a second application;
 - do not create prompts/synthesis_oracle.ts by assumption;
 - do not put real personal, health, psychological, birth or diary data into git, logs, issues or fixtures;
+- do not add production secrets to Claude cloud environments;
 - do not merge PRs or deploy;
-- do not start Phase 1.
+- do not start Phase 1;
+- do not ask the owner to run desktop commands.
 
-You may create only audit/handoff documentation on a dedicated audit branch after showing the proposed file list. Use read-only commands first. At completion, run only relevant read-only or existing verification commands and show exact git diff/status evidence.
+Create only audit/handoff documentation on a new Claude-generated branch based on agent/astrology-harness-foundation. Before writing, show the proposed file list. At completion, open a draft PR and stop.
 ```
 
-## 8. Permission decisions during the audit
+## Permission mode
 
-Approve read-only commands such as:
+Use **Plan mode** for Phase 0.
 
-- `git status`, `git log`, `git diff`, `git grep`;
-- `find`, `ls`, `cat`, `sed`, `rg`;
-- existing syntax/build/test commands when they do not rewrite tracked source files.
+Cloud sessions may also offer an edit-accepting mode. Do not use it for the initial audit. The owner must first see the plan and proposed file list.
 
-Pause and inspect before approving:
+For later implementation tasks, auto-accepted edits are allowed only when all of the following are true:
 
-- package installation;
-- database migrations;
-- commands that delete or overwrite files;
-- secrets/environment access;
-- network uploads;
-- commits, pushes, merges or deploys;
-- changes outside audit documentation.
+- a dedicated task branch is used;
+- the files owned by the task are explicit;
+- migrations and rollback are defined;
+- production secrets and real personal data are absent;
+- CI and mobile preview gates are required;
+- merge remains manual.
 
-Never approve `--dangerously-skip-permissions` for this workflow.
+## Expected Phase 0 result
 
-## 9. What Claude must return before coding
+Claude must create a separate draft PR containing only audit/handoff documentation, including:
 
-Required Phase 0 handoff:
-
-1. repository reality summary;
-2. file/function/data map with evidence;
-3. current versus proposed architecture matrix;
-4. conflicts and risks;
-5. proposed audit-document diff;
-6. migration sequence and rollback strategy;
-7. Phase 1 task contracts;
-8. explicit list of questions requiring owner/legal/clinical/licensing decisions;
+1. `REPOSITORY_REALITY_REPORT.md`;
+2. conceptual entity → actual code/storage/UI map;
+3. AI routing and provider payload audit;
+4. current deploy and preview map;
+5. mobile-only development constraints;
+6. native-readiness findings;
+7. minimal migration sequence;
+8. Phase 1 task contracts;
 9. explicit statement that production behavior was not changed.
 
-Do not proceed to Phase 1 automatically. The owner sends the report for architecture review first.
+Claude must then stop.
 
-## 10. If installation fails
+## Review from iPad
 
-Run:
+Prefer iPad Safari in desktop-site mode for large diffs. The GitHub mobile app is suitable for status, comments, checks and simple diffs.
 
-```bash
-claude doctor
-npm config get prefix
-node --version
-npm --version
+Review only:
+
+- changed filenames;
+- whether any production file was touched;
+- report completeness;
+- CI/check status;
+- Claude's final summary;
+- unresolved owner/legal/licensing decisions.
+
+Do not merge the audit PR or PR #40 until the report is reviewed against the v2 architecture.
+
+## If official Claude Code cloud is unavailable
+
+### Fallback A — GitHub Codespaces
+
+Create a codespace from the architecture branch in Safari:
+
+```text
+https://codespaces.new/ivanbelkov1984/CODING/tree/agent/astrology-harness-foundation
 ```
 
-Common rules:
+Codespaces provides a browser editor, terminal and private forwarded ports. Use it for manual inspection and previews. Keep ports private unless a specific test requires a temporary public URL.
 
-- do not solve npm permissions with `sudo`;
-- on Windows, use supported WSL or Git Bash and ensure `bash.exe`/Node paths are correct;
-- check network/proxy configuration;
-- update with `claude update` when the installation is recognized;
-- use Anthropic's official troubleshooting documentation rather than random install scripts.
+Claude Code can be installed inside the Linux codespace using the current official native Linux installer when needed. Do not use obsolete desktop-specific instructions from earlier versions of this document.
 
-## 11. Current project status at launch
+### Fallback B — VPS
+
+Use a personal Linux VPS only after a security task defines:
+
+- non-root account;
+- SSH-key authentication;
+- firewall and automatic security updates;
+- encrypted backups;
+- secret storage;
+- repository access scope;
+- session persistence;
+- monthly budget and deletion procedure.
+
+## Current project status
 
 ```text
 UNIFIED_V2_ARCHITECTURE_COMPLETE
+MOBILE_ONLY_OWNER_WORKFLOW_DEFINED
 DUAL_REALM_BASELINE_SYNCED
 LLM_VOICE_AND_SAFETY_CONTRACT_COMPLETE
 DRAFT_PR_40_OPEN
 PRODUCTION_IMPLEMENTATION_NOT_STARTED
-READY_FOR_PHASE_0_REPOSITORY_AUDIT
+READY_FOR_CLOUD_PHASE_0_REPOSITORY_AUDIT
 ```
