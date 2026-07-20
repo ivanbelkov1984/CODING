@@ -190,7 +190,7 @@ async function runScenario(browser, engine, scenario, baseUrl) {
       record(engine, scenario.name, 'browser export excludes connection fields', !transfer.exportedSpaceKey && !transfer.exportedApiUrl);
       record(engine, scenario.name, 'browser export preserves database', transfer.exportedDb === 'mobile-export');
       record(engine, scenario.name, 'browser import restores portable config and data', transfer.importedUser === 'Imported Portable User' && transfer.importedDb === 'mobile-import');
-      record(engine, scenario.name, 'browser import preserves local connection', transfer.localApi === 'https://local-device.invalid' && transfer.localSpace === 'LOCAL-SPACE-KEY' && transfer.localSync === 'LOCAL-SYNC');
+      record(engine, scenario.name, 'browser import preserves local connection identity and rejects file sync metadata', transfer.localApi === 'https://local-device.invalid' && transfer.localSpace === 'LOCAL-SPACE-KEY' && transfer.localSync !== 'FILE-SYNC', `lastSync=${transfer.localSync}`);
     }
 
     await page.evaluate(() => { try { goTo('sys'); } catch {} });
