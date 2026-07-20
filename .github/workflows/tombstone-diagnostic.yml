@@ -1,9 +1,12 @@
 name: Temporary tombstone regression diagnostic
 
 on:
-  push:
-    branches:
-      - agent/tombstone-namespacing-remediation
+  pull_request:
+    paths:
+      - architect/app.js
+      - architect/package.json
+      - architect/tests/evidence/tombstone_namespacing_regression.mjs
+      - .github/workflows/tombstone-diagnostic.yml
 
 permissions:
   contents: read
