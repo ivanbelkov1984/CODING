@@ -1,0 +1,34 @@
+name: Temporary P1-C privacy inventory
+
+on:
+  push:
+    branches:
+      - agent/phase-1-privacy-feedback-boundaries
+  pull_request:
+    paths:
+      - architect/app.js
+      - architect/index.html
+      - architect/backend/feedback.js
+      - architect/scripts/p1c-boundary-inventory.mjs
+      - .github/workflows/tmp-p1c-inventory.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Inventory privacy boundaries
+        working-directory: architect
+        run: node scripts/p1c-boundary-inventory.mjs
+      - name: Upload inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1c-boundary-inventory
+          path: architect/test-results/p1c-inventory/p1c-boundaries.txt
+          retention-days: 1
