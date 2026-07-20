@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - agent/phase-1-ai-policy-validators
+  pull_request:
+    paths:
+      - architect/app.js
+      - architect/scripts/p1b-ai-inventory.mjs
+      - .github/workflows/tmp-p1b-inventory.yml
 
 permissions:
   contents: read
