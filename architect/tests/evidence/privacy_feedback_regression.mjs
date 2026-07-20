@@ -225,7 +225,7 @@ await test('portable export source remains limited to DB and safe CFG, excluding
   const end = appSource.indexOf('\n}', start) + 2;
   const block = appSource.slice(start, end);
   assert.match(block, /db:\s*DB/);
-  assert.match(block, /cfg:\s*portableCfg/);
+  assert.match(block, /cfg:\s*exportSafeCfg\(CFG\)/);
   assert.equal(/arch5_fb_|arch5_errbuf|ARCH_FEEDBACK_PRIVACY/.test(block), false);
 });
 
