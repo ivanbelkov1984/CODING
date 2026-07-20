@@ -1318,7 +1318,7 @@ function delUndo(coll, id, renderFn, label) {
 function undoDelete() {
   if (!_undo) return;
   const { coll, id, item, idx } = _undo;
-  if (DB._del) delete DB._del[id];
+  untomb(coll, id);
   DB[coll].splice(Math.min(idx, DB[coll].length), 0, item);
   _undo = null; clearTimeout(_undoTimer);
   persist();
@@ -3824,6 +3824,13 @@ function tomb(coll, id) {
   if (coll !== DEL_LEGACY && !IDCOLS.includes(coll)) { log('warn', 'tomb: неизвестная коллекция', coll); return; }
   const root = _delObj(DB._del) ? DB._del : (DB._del = {});
   _putDel(root, coll, id, Date.now());
+}
+function untomb(coll, id) {
+  const root = _delObj(DB._del) ? DB._del : null;
+  const bucket = root && _delObj(root[coll]) ? root[coll] : null;
+  if (!bucket) return;
+  delete bucket[String(id)];
+  if (!Object.keys(bucket).length) delete root[coll];
 }
 const _ru = r => r._u || r.id || 0;   // «когда обновлено» с откатом на id (id = Date.now())
 function mergeById(a = [], b = [], del = {}) {
