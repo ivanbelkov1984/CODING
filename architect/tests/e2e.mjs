@@ -341,7 +341,7 @@ const wkDedup = await page.evaluate(() => {
   const k = isoWeekKey(Date.now());
   DB.digests.push({ id: 999, createdAt: nowISO(), week: '1 янв – 7 янв', cnt: 1 });
   const removed = dedupeDigests();
-  return { removed, left: DB.digests.filter(d => digWk(d) === k).length, tombed: !!(DB._del || {})[999] };
+  return { removed, left: DB.digests.filter(d => digWk(d) === k).length, tombed: !!(DB._del && DB._del.digests && DB._del.digests[999]) };
 });
 ok(wkDedup.removed >= 1 && wkDedup.left === 1 && wkDedup.tombed, 'карточки одной календарной недели схлопываются даже при разных датах сборки');
 
