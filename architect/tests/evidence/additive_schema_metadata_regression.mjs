@@ -161,5 +161,34 @@ test('correction history is bounded to the documented limit', () => {
   assert.equal(record._meta.correction.revision, 30);
 });
 
+const appSource = await readFile(new URL('../../app.js', import.meta.url), 'utf8');
+const indexSource = await readFile(new URL('../../index.html', import.meta.url), 'utf8');
+const buildSource = await readFile(new URL('../../build.mjs', import.meta.url), 'utf8');
+const packageJson = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
+
+test('runtime touch boundary attaches metadata without eager hydration backfill', () => {
+  assert.match(appSource, /function touch\(rec, collection = ''\)/);
+  assert.match(appSource, /metadata\.touchRecord\(rec, \{ collection: resolvedCollection/);
+  assert.doesNotMatch(appSource, /migrateRecords[\s\S]{0,500}markImportedDB/);
+});
+
+test('JSON import marks only incoming records before assignment', () => {
+  const parseAt = appSource.indexOf('const data = JSON.parse(e.target.result);');
+  const assignAt = appSource.indexOf('if (data.db)  DB', parseAt);
+  const markAt = appSource.indexOf('metadata.markImportedDB(data.db, importOptions)', parseAt);
+  assert.ok(parseAt >= 0 && markAt > parseAt && assignAt > markAt);
+  assert.match(appSource, /else if \(Array\.isArray\(data\.insights\)\) metadata\.markImportedDB\(\{ insights: data\.insights \}, importOptions\)/);
+});
+
+test('metadata adapter loads before app runtime and is inlined by the build', () => {
+  assert.ok(indexSource.indexOf('<script src="data-metadata.js"></script>') < indexSource.indexOf('<script src="app.js"></script>'));
+  assert.match(buildSource, /readFile\(join\(DIR, 'data-metadata\.js'\)/);
+  assert.match(buildSource, /src="data-metadata\\.js"/);
+});
+
+test('focused metadata regression is part of the ordinary data gate', () => {
+  assert.match(packageJson.scripts['test:data'], /additive_schema_metadata_regression\.mjs/);
+});
+
 console.log(`ADDITIVE_SCHEMA_METADATA_TESTS=${passed}`);
 console.log('PHASE_1_ADDITIVE_SCHEMA_METADATA_REGRESSION_PASS');
