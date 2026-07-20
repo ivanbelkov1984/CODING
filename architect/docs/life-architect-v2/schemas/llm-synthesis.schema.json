@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://architect.local/schemas/llm-synthesis.schema.json",
+  "title": "LLM synthesis request and response",
+  "description": "Conceptual contract for evidence-grounded synthesis. Repository adapters are selected after Phase 0 audit.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestId": {"type": "string", "minLength": 1},
+        "profileId": {"type": "string", "minLength": 1},
+        "requestedPurpose": {
+          "type": "string",
+          "enum": ["daily_brief", "pattern_explanation", "scenario_outlook", "health_summary", "reflection", "review"]
+        },
+        "requestedHorizon": {"type": ["object", "null"]},
+        "locale": {"type": "string", "minLength": 2},
+        "timezone": {"type": "string", "minLength": 1},
+        "tonePreference": {"type": ["string", "null"]},
+        "directnessPreference": {"type": "integer", "minimum": 1, "maximum": 4},
+        "safetyState": {
+          "type": "string",
+          "enum": ["normal", "stabilizing", "clinical_boundary", "crisis_safe"]
+        },
+        "userContext": {"type": "object"},
+        "sourceEvidence": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}},
+        "userSelfReports": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}},
+        "momentaryState": {"type": ["object", "null"]},
+        "actionTrajectoryState": {"type": ["object", "null"]},
+        "healthContextObservations": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}},
+        "validatedMeasurements": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}},
+        "confirmedBarriers": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}},
+        "llmProcessHypotheses": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}},
+        "descriptiveStates": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}},
+        "detectedTrends": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}},
+        "detectedChangepoints": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}},
+        "scenarioOutlook": {"type": ["object", "null"]},
+        "predictionEstimates": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}},
+        "symbolicAstrologyAnnotations": {"type": "array", "items": {"$ref": "#/$defs/evidenceRef"}},
+        "dataQuality": {"type": "object"},
+        "uncertainties": {"type": "array", "items": {"type": "object"}},
+        "consentScope": {"type": "object"},
+        "prohibitedClaims": {"type": "array", "items": {"type": "string"}},
+        "sourceWindow": {"type": "object"},
+        "modelPolicyVersion": {"type": "string", "minLength": 1},
+        "promptPolicyVersion": {"type": "string", "minLength": 1}
+      },
+      "required": [
+        "requestId",
+        "profileId",
+        "requestedPurpose",
+        "locale",
+        "timezone",
+        "directnessPreference",
+        "safetyState",
+        "sourceEvidence",
+        "userSelfReports",
+        "healthContextObservations",
+        "validatedMeasurements",
+        "confirmedBarriers",
+        "llmProcessHypotheses",
+        "descriptiveStates",
+        "detectedTrends",
+        "detectedChangepoints",
+        "predictionEstimates",
+        "symbolicAstrologyAnnotations",
+        "dataQuality",
+        "uncertainties",
+        "consentScope",
+        "prohibitedClaims",
+        "sourceWindow",
+        "modelPolicyVersion",
+        "promptPolicyVersion"
+      ]
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestId": {"type": "string", "minLength": 1},
+        "generatedAt": {"type": "string", "format": "date-time"},
+        "toneMode": {
+          "type": "string",
+          "enum": ["direct_supportive", "neutral_analytical", "gentle_stabilizing", "clinical_boundary", "crisis_safe"]
+        },
+        "directnessApplied": {"type": "integer", "minimum": 1, "maximum": 4},
+        "headline": {"type": "string", "minLength": 1, "maxLength": 180},
+        "groundedObservations": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/groundedText"}
+        },
+        "interpretations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "text": {"type": "string", "minLength": 1},
+              "inputIds": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+              "confidenceClass": {"type": "string", "enum": ["low", "moderate", "high"]},
+              "alternatives": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["text", "inputIds", "confidenceClass", "alternatives"]
+          }
+        },
+        "importantBoundary": {"type": ["string", "null"]},
+        "nextAction": {
+          "type": ["object", "null"],
+          "properties": {
+            "text": {"type": "string"},
+            "rationale": {"type": "string"},
+            "effortLevel": {"type": "string", "enum": ["very_small", "small", "moderate", "recovery"]}
+          },
+          "required": ["text", "rationale", "effortLevel"],
+          "additionalProperties": false
+        },
+        "symbolicContext": {
+          "type": ["object", "null"],
+          "properties": {
+            "text": {"type": "string"},
+            "annotationIds": {"type": "array", "items": {"type": "string"}},
+            "disclaimer": {"type": "string"}
+          },
+          "required": ["text", "annotationIds", "disclaimer"],
+          "additionalProperties": false
+        },
+        "sourceSummary": {"type": "array", "items": {"type": "string"}},
+        "uncertaintySummary": {"type": "array", "items": {"type": "string"}},
+        "safetyFlags": {"type": "array", "items": {"type": "string"}},
+        "validatorStatus": {
+          "type": "object",
+          "properties": {
+            "status": {"type": "string", "enum": ["pass", "retry", "blocked", "degraded"]},
+            "violations": {"type": "array", "items": {"type": "object"}}
+          },
+          "required": ["status", "violations"],
+          "additionalProperties": false
+        },
+        "policyVersions": {"type": "object"}
+      },
+      "required": [
+        "requestId",
+        "generatedAt",
+        "toneMode",
+        "directnessApplied",
+        "headline",
+        "groundedObservations",
+        "interpretations",
+        "importantBoundary",
+        "nextAction",
+        "symbolicContext",
+        "sourceSummary",
+        "uncertaintySummary",
+        "safetyFlags",
+        "validatorStatus",
+        "policyVersions"
+      ]
+    }
+  },
+  "required": ["input", "output"],
+  "$defs": {
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "epistemicClass": {"type": "string", "minLength": 1},
+        "verificationStatus": {"type": "string", "minLength": 1},
+        "privacyClass": {"type": "string", "minLength": 1},
+        "source": {"type": "object"},
+        "provenance": {"type": "object"},
+        "observedAt": {"type": ["string", "null"], "format": "date-time"}
+      },
+      "required": ["id", "epistemicClass", "verificationStatus", "privacyClass", "source", "provenance"]
+    },
+    "groundedText": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {"type": "string", "minLength": 1},
+        "inputIds": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+      },
+      "required": ["text", "inputIds"]
+    }
+  }
+}
