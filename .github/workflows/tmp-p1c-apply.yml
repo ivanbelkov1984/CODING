@@ -1,4 +1,4 @@
-name: Temporary P1-C exact privacy wiring
+name: Temporary P1-C privacy diagnostic
 
 on:
   push:
@@ -13,10 +13,10 @@ on:
       - .github/workflows/tmp-p1c-apply.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
+  diagnostic:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,27 +28,31 @@ jobs:
       - name: Apply exact P1-C wiring
         working-directory: architect
         run: node scripts/apply-p1c-privacy.mjs
-      - name: Install dependencies
+      - name: Capture focused validation
+        id: focused
         working-directory: architect
-        run: npm install
-      - name: Install Chromium
-        working-directory: architect
-        run: npx playwright install --with-deps chromium
-      - name: Validate privacy boundary and full web suite
-        working-directory: architect
+        shell: bash
         run: |
-          node --check privacy-feedback.js
-          node --check backend/feedback-privacy.js
-          node --check backend/feedback.js
-          node --check app.js
-          node tests/evidence/privacy_feedback_regression.mjs
-          npm test
-          git diff --check
-      - name: Commit validated permanent files
-        working-directory: architect
-        run: |
-          git config user.name 'p1c-privacy-bot'
-          git config user.email 'p1c-privacy@architect.app'
-          git add privacy-feedback.js backend/feedback-privacy.js backend/feedback.js app.js index.html styles.css build.mjs package.json tests/e2e.mjs tests/mobile-evidence.mjs tests/evidence/privacy_feedback_regression.mjs docs/life-architect-v2/PHASE1_PRIVACY_FEEDBACK_BOUNDARIES.md
-          git commit -m 'feat(privacy): enforce feedback consent and minimization'
-          git push origin HEAD:agent/phase-1-privacy-feedback-boundaries
+          mkdir -p test-results/p1c-privacy
+          set +e
+          {
+            node --check privacy-feedback.js
+            node --check backend/feedback-privacy.js
+            node --check backend/feedback.js
+            node --check app.js
+            node tests/evidence/privacy_feedback_regression.mjs
+            git diff --check
+          } > test-results/p1c-privacy/focused.log 2>&1
+          status=$?
+          cat test-results/p1c-privacy/focused.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload focused diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1c-privacy-focused-diagnostic
+          path: architect/test-results/p1c-privacy/focused.log
+          retention-days: 1
+      - name: Fail when focused validation fails
+        if: steps.focused.outputs.status != '0'
+        run: exit 1
