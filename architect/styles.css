@@ -54,8 +54,9 @@
   --c-book:var(--accent); --c-bot:var(--accent-light); --c-personal:#8a8f98;
   --c-project:var(--accent-hover); --c-vitality:rgba(94,106,210,.45); --c-dream:rgba(94,106,210,.6);
   --c-pattern:var(--accent-light); --c-spirit:rgba(94,106,210,.75);
-  /* теней нет — глубина только поверхностями */
-  --sh1:none; --sh2:none; --sh3:none;
+  /* Вариант А «Тихая глубина» (пилот, экран «Сегодня»): карточки парят —
+     тонкая тень поверх лестницы поверхностей, не вместо неё. */
+  --sh1:0 1px 3px rgba(0,0,0,.4); --sh2:0 2px 6px rgba(0,0,0,.4); --sh3:0 4px 12px rgba(0,0,0,.45);
   /* типо-шкала Linear: 12/13/15/18/24/32 */
   --tx2:.75rem; --tx3:.8125rem; --tx4:.9375rem; --tx5:.9375rem;
   --tx6:1.125rem; --tx7:1.5rem; --tx8:2rem;
@@ -82,6 +83,8 @@
   --red:#D64545; --red-l:rgba(214,69,69,.10);
   --orange:#B0722A; --orange-l:rgba(176,114,42,.10);
   --gold:rgba(94,106,210,.55); --rose:rgba(94,106,210,.30); --hm0:#E9E7E1;
+  /* тень темнее фона выглядит грязно на светлом — та же лестница, ниже альфа */
+  --sh1:0 1px 3px rgba(28,27,23,.12); --sh2:0 2px 6px rgba(28,27,23,.14); --sh3:0 4px 12px rgba(28,27,23,.16);
 }
 
 /* ── RESET ─────────────────────────────────────────────────────── */
@@ -605,7 +608,7 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 /* ── ГЕРОЙ СОСТОЯНИЯ (Главная) ─────────────────────────────────── */
 .state-hero{position:relative;margin:var(--s3) var(--s4) 0;padding:var(--s4) var(--s4) var(--s3);
   background:var(--sf);
-  border:1px solid var(--bd);border-radius:12px;overflow:hidden}
+  border:1px solid var(--bd);border-radius:12px;overflow:hidden;box-shadow:var(--sh1)}
 .state-hero::before{content:"";position:absolute;top:-40px;right:-30px;width:180px;height:180px;
   background:transparent;pointer-events:none;opacity:.9}
 .sh-top{display:flex;justify-content:space-between;align-items:flex-start;position:relative;z-index:1}
@@ -905,7 +908,8 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 
 /* Типо-иерархия */
 body{font-size:.9375rem;line-height:1.5}
-.h-hl{font-size:2rem;font-weight:510;letter-spacing:-.02em}
+/* Вариант А «Тихая глубина»: заголовок «Сегодня» крупнее — данные говорят громче */
+.h-hl{font-size:3rem;font-weight:580;letter-spacing:-.02em}
 .sp-hl{font-size:2rem;font-weight:510;letter-spacing:-.02em}
 .sh-score b{font-weight:510;letter-spacing:-.02em}
 .sec-lbl{font-size:.75rem;font-weight:500;letter-spacing:.04em;color:var(--t3)}
