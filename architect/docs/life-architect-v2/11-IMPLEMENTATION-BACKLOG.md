@@ -6,7 +6,9 @@
 - entity mapping;
 - privacy threat map;
 - migration plan;
-- baseline tests.
+- baseline tests;
+- AI routing, prompts, provider payloads and post-processing;
+- current Dual Realm token/design baseline.
 
 Gate: no code until owner accepts reality report.
 
@@ -17,6 +19,7 @@ Gate: no code until owner accepts reality report.
 - invalidation graph;
 - consent receipt;
 - feature flag registry;
+- policy/version/hash registry;
 - import/export compatibility.
 
 Gate: roundtrip, rollback, profile isolation, E2EE unchanged.
@@ -29,7 +32,7 @@ Gate: roundtrip, rollback, profile isolation, E2EE unchanged.
 - no diagnosis;
 - personal pattern thresholds.
 
-Gate: accessibility, both themes, missingness honest.
+Gate: accessibility, Dual Realm themes, missingness honest.
 
 ## Epic 3 — Goals/actions
 
@@ -73,24 +76,49 @@ Gate: draft never appears in graph; deletion and temp cleanup tested.
 
 Gate: prediction null, no arbitrary composite score.
 
-## Epic 7 — Unified IA
+## Epic 7 — LLM synthesis and voice
+
+- repository-grounded input adapter;
+- output JSON Schema;
+- versioned prompt-policy blocks;
+- adaptive tone modes;
+- input-reference and claim-class validators;
+- astrology-isolation validator;
+- health/tone/numeric/temporal validators;
+- synthetic eval fixtures and mock provider;
+- low-risk `pattern_explanation` pilot;
+- user feedback and audit trail.
+
+Gate: direct but non-shaming; every substantial claim grounded; astrology separate; no medical/psychological diagnosis; high-severity violations blocked; cloud calls consented and auditable.
+
+## Epic 8 — Unified IA
 
 - navigation restructuring without deleting functionality;
 - Today orchestration;
 - deep evidence drawer;
 - Reviews;
-- Library.
+- Library;
+- extend existing Dual Realm tokens to new screens.
 
-Gate: mobile usability and no function orphaned.
+Gate: mobile usability, both themes, reduced motion, no function orphaned and no parallel Tailwind/shadcn design system.
 
-## Epic 8 — Astrology subsystem
+## Epic 9 — Astrology subsystem
 
 - calculation adapter;
 - school registry;
 - rectification preview;
-- symbolic context card.
+- symbolic context card;
+- LLM symbolic section adapter.
 
-Gate: no empirical/medical dependency.
+Gate: no empirical/medical dependency; empirical output unchanged when symbolic context is removed.
+
+## Epic 10 — Advanced research previews
+
+- changepoint candidates;
+- JITAI learning;
+- approved prediction-model work only after separate gates.
+
+Gate: research flags, minimum-data thresholds, evaluation and rollback.
 
 ## Quarantine epics
 
@@ -103,4 +131,5 @@ Not implementable for public release without additional gates:
 - future-event probabilities;
 - astrology incremental predictive model;
 - broad SNOMED distribution;
-- embedded copyrighted questionnaire translations.
+- embedded copyrighted questionnaire translations;
+- oracle/fatalist LLM mode or astrology-driven psychological claims.
