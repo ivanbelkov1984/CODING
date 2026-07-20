@@ -54,9 +54,15 @@
   --c-book:var(--accent); --c-bot:var(--accent-light); --c-personal:#8a8f98;
   --c-project:var(--accent-hover); --c-vitality:rgba(94,106,210,.45); --c-dream:rgba(94,106,210,.6);
   --c-pattern:var(--accent-light); --c-spirit:rgba(94,106,210,.75);
-  /* Вариант А «Тихая глубина» (пилот, экран «Сегодня»): карточки парят —
-     тонкая тень поверх лестницы поверхностей, не вместо неё. */
-  --sh1:0 1px 3px rgba(0,0,0,.4); --sh2:0 2px 6px rgba(0,0,0,.4); --sh3:0 4px 12px rgba(0,0,0,.45);
+  /* Вариант А «Тихая глубина» (пилот, экран «Сегодня»): карточки парят.
+     Чёрная тень на почти-чёрном фоне (#08090a) НЕ читается глазом — тёмная
+     тень темнее и card, и страницы, контраста нет. Комбинируем: мягкое тёмное
+     ядро с бОльшим blur/spread (создаёт видимый ореол даже на тёмном) + тонкий
+     светлый верхний rim (стандартный приём dark-mode elevation — MD3: подъём
+     тёмной темы через светлый оверлей/highlight, не через тень как таковую). */
+  --sh1:0 4px 16px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05);
+  --sh2:0 6px 24px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.06);
+  --sh3:0 10px 36px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.07);
   /* типо-шкала Linear: 12/13/15/18/24/32 */
   --tx2:.75rem; --tx3:.8125rem; --tx4:.9375rem; --tx5:.9375rem;
   --tx6:1.125rem; --tx7:1.5rem; --tx8:2rem;
@@ -83,8 +89,8 @@
   --red:#D64545; --red-l:rgba(214,69,69,.10);
   --orange:#B0722A; --orange-l:rgba(176,114,42,.10);
   --gold:rgba(94,106,210,.55); --rose:rgba(94,106,210,.30); --hm0:#E9E7E1;
-  /* тень темнее фона выглядит грязно на светлом — та же лестница, ниже альфа */
-  --sh1:0 1px 3px rgba(28,27,23,.12); --sh2:0 2px 6px rgba(28,27,23,.14); --sh3:0 4px 12px rgba(28,27,23,.16);
+  /* светлый фон уже даёт контраст обычной тени — light-rim не нужен */
+  --sh1:0 3px 10px rgba(28,27,23,.14); --sh2:0 5px 16px rgba(28,27,23,.16); --sh3:0 8px 24px rgba(28,27,23,.18);
 }
 
 /* ── RESET ─────────────────────────────────────────────────────── */
@@ -246,7 +252,7 @@ textarea.field{resize:none;line-height:1.6;min-height:96px}
 
 /* ── QUICK ACTIONS ─────────────────────────────────────────────── */
 .qarow{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--s2);padding:0 var(--s4) var(--s4)}
-.qabtn{display:flex;flex-direction:column;align-items:center;gap:var(--s1);padding:var(--s3) var(--s2);background:var(--sf);border:1px solid var(--bd);border-radius:var(--r12);cursor:pointer;box-shadow:none;-webkit-tap-highlight-color:transparent;transition:transform var(--dur1) var(--e),box-shadow var(--dur1)}
+.qabtn{display:flex;flex-direction:column;align-items:center;gap:var(--s1);padding:var(--s3) var(--s2);background:var(--sf2);border:1px solid var(--bd);border-radius:var(--r12);cursor:pointer;box-shadow:var(--sh1);-webkit-tap-highlight-color:transparent;transition:transform var(--dur1) var(--e),box-shadow var(--dur1)}
 .qabtn:active{transform:scale(.96);box-shadow:none}
 .qa-ic{width:40px;height:40px;border-radius:var(--r8);display:flex;align-items:center;justify-content:center}
 .qa-ic svg{width:20px;height:20px}
@@ -607,7 +613,7 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 
 /* ── ГЕРОЙ СОСТОЯНИЯ (Главная) ─────────────────────────────────── */
 .state-hero{position:relative;margin:var(--s3) var(--s4) 0;padding:var(--s4) var(--s4) var(--s3);
-  background:var(--sf);
+  background:var(--sf2);
   border:1px solid var(--bd);border-radius:12px;overflow:hidden;box-shadow:var(--sh1)}
 .state-hero::before{content:"";position:absolute;top:-40px;right:-30px;width:180px;height:180px;
   background:transparent;pointer-events:none;opacity:.9}
