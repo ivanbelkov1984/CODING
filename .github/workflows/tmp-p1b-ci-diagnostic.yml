@@ -22,7 +22,7 @@ jobs:
           node-version: "22"
       - name: Install dependencies
         working-directory: architect
-        run: npm ci
+        run: npm install
       - name: Install Chromium
         working-directory: architect
         run: npx playwright install --with-deps chromium
