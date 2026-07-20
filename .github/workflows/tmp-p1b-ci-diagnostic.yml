@@ -1,25 +1,54 @@
-name: Temporary P1-B full CI diagnostic
+name: Temporary P1-B compatibility fix
 
 on:
   push:
     branches:
       - agent/phase-1-ai-policy-validators
+    paths:
+      - .github/workflows/tmp-p1b-ci-diagnostic.yml
   pull_request:
     paths:
-      - architect/**
       - .github/workflows/tmp-p1b-ci-diagnostic.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnostic:
+  fix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: agent/phase-1-ai-policy-validators
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Apply exact default-token compatibility fix
+        working-directory: architect
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises';
+          async function replace(path, before, after) {
+            const source = await readFile(path, 'utf8');
+            if (!source.includes(before)) throw new Error(`missing anchor in ${path}`);
+            if (source.indexOf(before) !== source.lastIndexOf(before)) throw new Error(`non-unique anchor in ${path}`);
+            await writeFile(path, source.replace(before, after));
+          }
+          await replace('ai-policy.js',
+          `    react: 512,
+              deeper: 256,
+              prompts: 800,
+              digest: 1200,
+              map: 800,`,
+          `    react: 1024,
+              deeper: 1024,
+              prompts: 1024,
+              digest: 1200,
+              map: 1024,`);
+          await replace('tests/evidence/ai_policy_validators_regression.mjs',
+            "P.prepareRequest({ task: 'deeper', user: 'x', maxTokens: 257 })",
+            "P.prepareRequest({ task: 'deeper', user: 'x', maxTokens: 1025 })");
+          NODE
       - name: Install dependencies
         working-directory: architect
         run: npm install
@@ -44,6 +73,16 @@ jobs:
           name: p1b-full-ci-diagnostic
           path: architect/test-results/p1b-ci/npm-test.log
           retention-days: 1
+      - name: Commit compatible caps after full test passes
+        if: steps.test.outputs.status == '0'
+        working-directory: architect
+        run: |
+          git diff --check
+          git config user.name 'p1b-policy-bot'
+          git config user.email 'p1b-policy@architect.app'
+          git add ai-policy.js tests/evidence/ai_policy_validators_regression.mjs
+          git commit -m 'fix(ai): preserve default call token compatibility'
+          git push origin HEAD:agent/phase-1-ai-policy-validators
       - name: Fail if npm test failed
         if: steps.test.outputs.status != '0'
         run: exit 1
