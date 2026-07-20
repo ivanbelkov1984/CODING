@@ -6,10 +6,12 @@ on:
       - agent/phase-1-privacy-feedback-boundaries
     paths:
       - architect/scripts/apply-p1c-privacy.mjs
+      - architect/tests/evidence/privacy_feedback_regression.mjs
       - .github/workflows/tmp-p1c-apply.yml
   pull_request:
     paths:
       - architect/scripts/apply-p1c-privacy.mjs
+      - architect/tests/evidence/privacy_feedback_regression.mjs
       - .github/workflows/tmp-p1c-apply.yml
 
 permissions:
