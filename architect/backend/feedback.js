@@ -1,9 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
 //  АРХИТЕКТОР — Обратная связь (приём + статус). См. FEEDBACK_SPEC.md.
 //  Сырой лог append-only; AI-триаж — отдельным cron-процессом (не здесь).
-//  Приватность: сюда попадает ТОЛЬКО текст формы и явный тех-контекст,
-//  никогда — содержимое дневника.
+//  Приватность: сюда попадает ТОЛЬКО текст формы и явно выбранный,
+//  повторно минимизированный тех-контекст. Дневник и ключи запрещены.
 // ═══════════════════════════════════════════════════════════════
+import rateLimit from 'express-rate-limit';
+import { FEEDBACK_PRIVACY, sanitizeFeedbackPayload, publicFeedbackError } from './feedback-privacy.js';
+
 export default function mountFeedback(app, pool) {
   (async () => {
     try {
@@ -20,25 +23,33 @@ export default function mountFeedback(app, pool) {
     } catch (e) { console.error('feedback init:', e.message); }
   })();
 
-  // Приём: мгновенный INSERT, никакой обработки в запросе.
-  app.post('/api/feedback', async (req, res) => {
+  const feedbackWriteLimit = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Слишком много сообщений, попробуй позже', code: 'feedback_rate_limit' },
+  });
+
+  // Приём: мгновенная серверная минимизация + INSERT, никакой AI-обработки.
+  app.post('/api/feedback', feedbackWriteLimit, async (req, res) => {
     try {
-      const { text, context = {}, screenshot = null, spaceHint = null } = req.body || {};
-      const t = String(text || '').trim();
-      if (t.length < 3 || t.length > 4000) return res.status(400).json({ error: 'Текст: 3–4000 символов' });
-      if (screenshot && String(screenshot).length > 1_400_000) return res.status(400).json({ error: 'Скриншот слишком большой' });
-      if (typeof context !== 'object' || Array.isArray(context)) return res.status(400).json({ error: 'context — объект' });
+      const safe = sanitizeFeedbackPayload(req.body || {});
+      const context = { ...safe.context, feedbackPrivacy: safe.privacy };
       const r = await pool.query(
         'INSERT INTO raw_feedback_log (text, screenshot, context, space_hint) VALUES ($1,$2,$3,$4) RETURNING id',
-        [t, screenshot ? String(screenshot) : null, context, spaceHint]
+        [safe.text, null, context, null]
       );
-      res.json({ id: r.rows[0].id });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+      res.json({ id: r.rows[0].id, retention: FEEDBACK_PRIVACY.RETENTION, access: FEEDBACK_PRIVACY.ACCESS });
+    } catch (error) {
+      if (!(error && error.status && error.status < 500)) console.error('feedback submit:', error?.message || error);
+      const reply = publicFeedbackError(error);
+      res.status(reply.status).json(reply.body);
+    }
   });
 
   // Статус для замыкания цикла: received → triaged → fixed.
-  // Таблицы триажа создаёт cron (triage.mjs); до первого запуска их нет —
-  // тогда честно отвечаем «received», не падаем.
+  // Таблицы триажа создаёт cron; до первого запуска честно отвечаем received.
   app.get('/api/feedback/status', async (req, res) => {
     try {
       const ids = String(req.query.ids || '').split(',').map(n => +n).filter(n => n > 0).slice(0, 50);
@@ -49,13 +60,17 @@ export default function mountFeedback(app, pool) {
           `SELECT c.feedback_id AS id, c.type, p.status AS pstatus
              FROM classified_feedback c LEFT JOIN patterns p ON p.id = c.pattern_id
             WHERE c.feedback_id = ANY($1)`, [ids])).rows;
-      } catch (e) { /* триаж ещё не создавал таблиц */ }
-      const m = new Map(rows.map(r => [+r.id, r]));
+      } catch (_) { /* триаж ещё не создавал таблиц */ }
+      const byId = new Map(rows.map(row => [+row.id, row]));
       res.json({ items: ids.map(id => {
-        const r = m.get(id);
-        return r ? { id, status: r.pstatus === 'fixed' ? 'fixed' : 'triaged', type: r.type }
-                 : { id, status: 'received' };
+        const row = byId.get(id);
+        return row ? { id, status: row.pstatus === 'fixed' ? 'fixed' : 'triaged', type: row.type }
+                   : { id, status: 'received' };
       }) });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (error) {
+      console.error('feedback status:', error?.message || error);
+      const reply = publicFeedbackError(error);
+      res.status(reply.status).json(reply.body);
+    }
   });
 }
