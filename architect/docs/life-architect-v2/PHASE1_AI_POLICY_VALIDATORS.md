@@ -1,6 +1,6 @@
 # Phase 1 Governed AI Policy and Validators
 
-Status: `PHASE_1_P1_B_IMPLEMENTATION_PENDING_CI`
+Status: `PHASE_1_P1_B_IMPLEMENTATION_COMPLETE`
 
 Approved prerequisites:
 
@@ -57,7 +57,7 @@ The current task vocabulary is:
 - `psy`;
 - `other`.
 
-The caps are above or equal to every current call-site value, so valid existing requests are unchanged.
+The caps are above or equal to every current call-site value. Tasks that historically relied on the `callClaude()` default remain compatible with the existing 1024-token default; real feature call sites keep their current lower explicit limits.
 
 ## Provider execution policy
 
@@ -105,7 +105,7 @@ For valid current requests and valid provider responses:
 - provider selection is unchanged;
 - model selection is unchanged;
 - prompt text is unchanged;
-- max-token values are unchanged;
+- max-token values at real feature call sites are unchanged;
 - response text is unchanged except surrounding whitespace is trimmed for unstructured output;
 - structured JSON is parsed, validated and reserialized before the existing downstream `JSON.parse`.
 
@@ -137,7 +137,33 @@ The intentional behavior change is fail-closed handling of invalid or unsafe out
 - deterministic load/build order;
 - inclusion in ordinary CI.
 
+The existing E2E synthetic fixtures were made schema-valid for the already-existing chat-summary and psychological-markup contracts. Production prompts and schemas were not weakened.
+
 The existing tombstone, export privacy, metadata, build, Playwright and mobile evidence gates remain mandatory.
+
+## Validation evidence
+
+Final validated head before this documentation-only status update: `402798e91412d8cc235e677dbf6eaa38236cf1aa`.
+
+The implementation passed:
+
+- 23 focused AI policy and validator assertions;
+- all existing data/privacy/metadata regressions;
+- deterministic combined build;
+- full Chromium E2E: 162 of 162 checks;
+- ordinary repository CI;
+- mobile evidence: 117 of 117 checks with zero failures;
+- Chromium and WebKit across iPhone SE, iPhone 14, iPad Mini portrait and iPad landscape;
+- 16 visually inspected PNG artifacts and 8 Playwright traces;
+- offline reload, service-worker update and browser import/export privacy smoke.
+
+Visual inspection found no layout or rendering regression across the eight engine/viewport combinations.
+
+Validated artifact digests:
+
+- mobile evidence: `sha256:e09f7e5e7f1efaa622a71abe2a799b360f2718d6d19221b49b4cd44d7700ea90`;
+- static preview: `sha256:6b485ada9f66eba88e4a81ef667b84130b3133b03b5c166e395361011b25346e`;
+- successful full npm-test diagnostic: `sha256:e51ab9fb210b4b70c28f1ee1b9853356ec77ecd776ac63e067e684a2e1e12837`.
 
 ## Rollback
 
@@ -161,12 +187,14 @@ Do not merge if:
 - ordinary or mobile CI fails;
 - a visual regression appears.
 
-## Markers
+## Final markers
 
-`PHASE_1_AI_POLICY_SEAM_DEFINED`
+`PHASE_1_AI_POLICY_SEAM_COMPLETE`
 
 `VALID_STRUCTURED_OUTPUT_REQUIRED`
 
 `PROVIDER_ROUTING_UNCHANGED`
+
+`SYNTHETIC_FIXTURES_SCHEMA_VALID`
 
 `PHASE_1_P1_C_NOT_STARTED`
