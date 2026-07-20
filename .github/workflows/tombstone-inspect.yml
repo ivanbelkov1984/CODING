@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/tombstone-namespacing-remediation
+  pull_request:
     paths:
       - architect/app.js
       - architect/scripts/inspect-tombstone-calls.mjs
