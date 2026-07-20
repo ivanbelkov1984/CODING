@@ -197,9 +197,12 @@ async function runScenario(browser, engine, scenario, baseUrl) {
     }
 
     await page.evaluate(() => { try { goTo('sys'); } catch {} });
-    await page.waitForTimeout(100);
+    await page.locator('#pg-sys.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.waitForTimeout(300);
+    const activeContentVisible = await page.locator('#pg-sys.on .card').first().isVisible();
+    record(engine, scenario.name, 'active page content is visibly rendered', activeContentVisible);
     await page.screenshot({ path: join(OUT, `${engine}-${scenario.name}.png`), fullPage: true });
-    record(engine, scenario.name, 'screenshot captured', true);
+    record(engine, scenario.name, 'screenshot captured after page transition', true);
     record(engine, scenario.name, 'no uncaught application page errors', pageErrors.length === 0, pageErrors.join(' | '));
   } finally {
     await context.tracing.stop({ path: join(OUT, `${engine}-${scenario.name}-trace.zip`) });
