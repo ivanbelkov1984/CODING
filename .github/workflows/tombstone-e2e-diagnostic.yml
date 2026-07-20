@@ -1,43 +1,36 @@
-name: Temporary tombstone E2E diagnostic
+name: Temporary tombstone E2E expectation update
 
 on:
-  pull_request:
-    paths:
-      - architect/app.js
-      - architect/package.json
-      - architect/tests/**
-      - .github/workflows/tombstone-e2e-diagnostic.yml
+  push:
+    branches:
+      - agent/tombstone-namespacing-remediation
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnose:
+  patch:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: architect
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: agent/tombstone-namespacing-remediation
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install
-      - run: npx playwright install --with-deps chromium
-      - name: Capture complete npm test output
-        shell: bash
+      - name: Apply exact E2E assertion update
+        working-directory: architect
+        run: node scripts/update-tombstone-e2e-expectation.mjs
+      - name: Validate and commit
         run: |
-          set +e
-          npm test > tombstone-e2e-output.txt 2>&1
-          code=$?
-          cat tombstone-e2e-output.txt
-          echo "$code" > tombstone-e2e-exit-code.txt
-          exit 0
-      - name: Upload diagnostics
-        uses: actions/upload-artifact@v4
-        with:
-          name: tombstone-e2e-diagnostic
-          path: |
-            architect/tombstone-e2e-output.txt
-            architect/tombstone-e2e-exit-code.txt
-          if-no-files-found: error
+          node --check architect/tests/e2e.mjs
+          git diff --check
+          if git diff --quiet; then
+            echo 'No E2E change to commit'
+            exit 0
+          fi
+          git config user.name 'remediation-bot'
+          git config user.email 'remediation@architect.app'
+          git add architect/tests/e2e.mjs
+          git commit -m 'test(data): expect namespaced digest tombstone'
+          git push origin HEAD:agent/tombstone-namespacing-remediation
