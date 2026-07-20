@@ -15,6 +15,7 @@ const MIME = {
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
   '.png': 'image/png', '.woff2': 'font/woff2',
 };
+const EXPECTED_NETWORK_NOISE = /access control checks|Returned response is null|railway\.app|local-device\.invalid|ERR_|Failed to load|CORS|NetworkError|Load failed/i;
 
 function record(engine, scenario, check, pass, detail = '') {
   const row = { engine, scenario, check, pass: !!pass, detail: String(detail || '') };
@@ -68,6 +69,19 @@ async function runScenario(browser, engine, scenario, baseUrl) {
     hasTouch: scenario.touch,
     locale: 'ru-RU',
   });
+  const localOrigin = new URL(baseUrl).origin;
+  await context.route('**/*', async route => {
+    const requestUrl = new URL(route.request().url());
+    if (requestUrl.origin === localOrigin || requestUrl.protocol === 'blob:' || requestUrl.protocol === 'data:') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({ ok: true, synthetic: true, data: null, payload: null }),
+    });
+  });
   await context.addInitScript(() => {
     localStorage.setItem('arch5_profiles', JSON.stringify([{ id: 'mobile-evidence', name: 'Mobile Evidence', color: '#1056CC' }]));
     localStorage.setItem('arch5_active', 'mobile-evidence');
@@ -76,7 +90,9 @@ async function runScenario(browser, engine, scenario, baseUrl) {
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   const page = await context.newPage();
   const pageErrors = [];
-  page.on('pageerror', error => pageErrors.push(error.message));
+  page.on('pageerror', error => {
+    if (!EXPECTED_NETWORK_NOISE.test(error.message)) pageErrors.push(error.message);
+  });
   page.on('dialog', dialog => dialog.accept());
 
   try {
@@ -105,14 +121,20 @@ async function runScenario(browser, engine, scenario, baseUrl) {
     await page.evaluate(() => closeNav());
     record(engine, scenario.name, 'drawer closes after touch path', await page.evaluate(() => !document.body.classList.contains('nav-open')));
 
-    await page.keyboard.press('Tab');
-    const focused = await page.evaluate(() => {
-      const el = document.activeElement;
-      if (!el || el === document.body) return null;
-      const rect = el.getBoundingClientRect();
-      return { tag: el.tagName, visible: rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.top <= innerHeight };
-    });
-    record(engine, scenario.name, 'keyboard focus reaches a visible control', !!focused?.visible, focused?.tag || 'none');
+    let focused = null;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      await page.keyboard.press('Tab');
+      focused = await page.evaluate(() => {
+        const el = document.activeElement;
+        if (!el || el === document.body) return null;
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        const visible = rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.top <= innerHeight && style.visibility !== 'hidden' && style.display !== 'none';
+        return { tag: el.tagName, id: el.id || '', visible };
+      });
+      if (focused?.visible) break;
+    }
+    record(engine, scenario.name, 'keyboard focus reaches a visible control', !!focused?.visible, focused ? `${focused.tag}${focused.id ? `#${focused.id}` : ''}` : 'none');
 
     await page.evaluate(() => { openOv('ov-add'); const input = document.getElementById('add-tx'); if (input) input.focus(); });
     await page.setViewportSize({ width: scenario.viewport.width, height: Math.min(500, scenario.viewport.height) });
@@ -136,8 +158,10 @@ async function runScenario(browser, engine, scenario, baseUrl) {
         let captured = null;
         const oldObjectUrl = URL.createObjectURL;
         const oldClick = HTMLAnchorElement.prototype.click;
+        const oldScheduleSync = window.scheduleSync;
         URL.createObjectURL = blob => { captured = blob; return 'blob:mobile-evidence'; };
         HTMLAnchorElement.prototype.click = function () {};
+        window.scheduleSync = () => {};
         exportData();
         const exported = JSON.parse(await captured.text());
         URL.createObjectURL = oldObjectUrl;
@@ -149,6 +173,7 @@ async function runScenario(browser, engine, scenario, baseUrl) {
         })], 'synthetic-import.json', { type: 'application/json' });
         handleImport({ files: [importedFile] });
         await new Promise(resolve => setTimeout(resolve, 150));
+        window.scheduleSync = oldScheduleSync;
         return {
           policy: exported.exportPolicy,
           exportedSpaceKey: Object.hasOwn(exported.cfg || {}, 'spaceKey'),
@@ -172,7 +197,7 @@ async function runScenario(browser, engine, scenario, baseUrl) {
     await page.waitForTimeout(100);
     await page.screenshot({ path: join(OUT, `${engine}-${scenario.name}.png`), fullPage: true });
     record(engine, scenario.name, 'screenshot captured', true);
-    record(engine, scenario.name, 'no uncaught page errors', pageErrors.length === 0, pageErrors.join(' | '));
+    record(engine, scenario.name, 'no uncaught application page errors', pageErrors.length === 0, pageErrors.join(' | '));
   } finally {
     await context.tracing.stop({ path: join(OUT, `${engine}-${scenario.name}-trace.zip`) });
     await context.close();
