@@ -1,0 +1,55 @@
+name: Mobile evidence — Phase 0.5
+
+on:
+  pull_request:
+    paths:
+      - "architect/**"
+      - ".github/workflows/mobile-evidence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mobile-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: architect
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Chromium and WebKit
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Build deterministic mobile evidence bundle
+        run: node build.mjs mobile-evidence-v1
+
+      - name: Run iPhone, iPad, offline and update evidence
+        run: npm run test:mobile-evidence
+
+      - name: Upload mobile screenshots, traces and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-0-5-mobile-evidence
+          path: architect/test-results/mobile-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload static build preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-0-5-static-preview
+          path: architect/dist
+          if-no-files-found: error
+          retention-days: 30
