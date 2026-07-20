@@ -1,22 +1,40 @@
-name: Temporary remediation source snapshot
+name: Temporary tombstone remediation
 
 on:
-  pull_request:
-    paths:
-      - architect/app.js
-      - .github/workflows/tombstone-inspect.yml
+  push:
+    branches:
+      - agent/tombstone-namespacing-remediation
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  snapshot:
+  remediate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Upload exact patched source
-        uses: actions/upload-artifact@v4
         with:
-          name: remediation-source-snapshot
-          path: architect/app.js
-          if-no-files-found: error
+          ref: agent/tombstone-namespacing-remediation
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply exact source patches
+        working-directory: architect
+        run: |
+          node scripts/apply-tombstone-remediation.mjs
+          node scripts/apply-tombstone-undo-remediation.mjs
+      - name: Validate syntax and patch cleanliness
+        run: |
+          node --check architect/app.js
+          git diff --check
+      - name: Commit generated source patch
+        run: |
+          if git diff --quiet; then
+            echo 'No source changes to commit'
+            exit 0
+          fi
+          git config user.name 'remediation-bot'
+          git config user.email 'remediation@architect.app'
+          git add architect/app.js
+          git commit -m 'fix(data): make undo collection-aware'
+          git push origin HEAD:agent/tombstone-namespacing-remediation
