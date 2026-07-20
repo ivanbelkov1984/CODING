@@ -28,12 +28,11 @@ jobs:
       - name: Apply exact P1-A wiring
         working-directory: architect
         run: node scripts/apply-p1a-wiring.mjs
-      - name: Validate focused adapter and commit
+      - name: Syntax-check and commit for full repository CI
         working-directory: architect
         run: |
           node --check data-metadata.js
           node --check app.js
-          node tests/evidence/additive_schema_metadata_regression.mjs
           git diff --check
           git config user.name 'p1a-metadata-bot'
           git config user.email 'p1a-metadata@architect.app'
