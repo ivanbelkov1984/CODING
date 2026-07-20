@@ -4,31 +4,49 @@
 
 Claude Code is implementer and repository analyst, not scientific, medical or psychological authority. It receives approved contracts, finds actual integration points, proposes repository-grounded ADRs and builds one vertical slice at a time.
 
+## Owner operating environment
+
+The owner has only iPad Pro 11 and iPhone 14 Pro Max.
+
+Default execution path:
+
+```text
+Claude Code cloud
+→ dedicated GitHub branch
+→ draft PR
+→ GitHub Actions / preview
+→ owner review on iPad/iPhone
+→ explicit merge decision
+```
+
+Do not require a local computer, local clone, desktop IDE, terminal installation or manual coding by the owner.
+
+Read:
+
+- `17-CLAUDE-CODE-INSTALLATION-AND-PHASE0-START.md`;
+- `18-MOBILE-ONLY-DEVELOPMENT-AND-NATIVE-MIGRATION.md`.
+
 ## Current repository baseline
 
 - existing vanilla-JS/offline-first PWA is preserved;
 - local-first/E2EE remains invariant;
 - Dual Realm (`Deep Space` / `Ethereal Light`) is already merged into `MAIN` through the existing CSS token layer;
 - do not introduce Next.js, React, TypeScript, Tailwind, shadcn, RxDB or a new application root without a separately approved migration ADR;
-- the v2 documentation branch is synchronized with the current design baseline.
+- the v2 documentation branch is synchronized with the current design baseline;
+- PWA is the implementation core; native packaging is a later wrapper stage.
 
-## Session start
+## Mobile cloud session start
 
-```text
-/effort ultracode        # optional only if current Claude Code supports it
-/status                  # verify actual effort/model/features
-/life-architect-v2-kickoff
-```
+In the official Claude app Code tab or `claude.ai/code`:
 
-If the slash skill is not discovered, instruct Claude to read:
+1. select repository `ivanbelkov1984/CODING`;
+2. select base branch `agent/astrology-harness-foundation` for Phase 0;
+3. choose **Plan mode**;
+4. paste the exact prompt from document `17`;
+5. require a new Claude-generated branch and documentation-only draft PR;
+6. stop after Phase 0.
 
-1. `CLAUDE.md`;
-2. `STUDIO_HANDOFF.md`;
-3. `architect/AGENT_BRIEF.md`;
-4. `architect/docs/life-architect-v2/00-INDEX.md`;
-5. this execution plan.
-
-Do not claim ultracode active unless `/status` confirms it. Project configuration may use a supported persistent effort level, but session command support is version-dependent.
+Custom slash skills may be available, but the mobile workflow does not depend on them. Reading the indexed documents is sufficient.
 
 ## Phase 0 — repository audit only
 
@@ -46,6 +64,9 @@ No production changes. Audit:
 - UI routes/components/current Dual Realm tokens;
 - tests, synthetic seeding and mock-provider options;
 - server schema and what remains ciphertext;
+- current build/deploy/preview path;
+- mobile safe areas, keyboard, PWA install and offline behavior;
+- future Capacitor readiness and native adapter seams;
 - smallest safe module seams that avoid expanding `app.js`.
 
 Deliver:
@@ -56,7 +77,24 @@ Deliver:
 4. minimal migration sequence;
 5. Phase 1 task contracts;
 6. proposed repository path for LLM policy/validators, justified by actual code;
-7. no production-code commit except audit documents.
+7. proposed mobile-accessible preview and CI path;
+8. native-readiness findings;
+9. no production-code commit except audit documents.
+
+## Phase 0.5 — mobile cloud development foundation
+
+After owner acceptance of the reality report:
+
+- create repository-grounded GitHub Actions checks;
+- make CI summaries readable from GitHub mobile;
+- provide preview URL or artifact accessible on iPad/iPhone;
+- add synthetic fixtures only;
+- define protected secret boundaries;
+- add mobile viewport screenshot/accessibility tests;
+- document Codespaces fallback and private port use;
+- require final handoff and rollback for every cloud session.
+
+Gate: the owner can initiate, inspect, preview and approve/reject work using only mobile devices.
 
 ## Phase 1 — cross-cutting foundation
 
@@ -73,6 +111,8 @@ Deliver:
 
 Capture valence/activation, optional emotion/color, longitudinal view, personal association with minimum-data gates. Reuse existing check-in; no new menu.
 
+Mobile preview must cover iPhone/iPad, keyboard, safe area, correction and offline reload.
+
 ## Phase 3 — Goal/Action vertical slice
 
 GoalDefinition, OutcomeDefinition, ActionEvent ontology, ActionTrajectory descriptive summary, recovery-friendly UX.
@@ -81,9 +121,11 @@ GoalDefinition, OutcomeDefinition, ActionEvent ontology, ActionTrajectory descri
 
 HealthProduct/Ingredient, MedicationPlan, IntakeEvent, symptom observations, source-document metadata, encrypted blobs, visit-report draft. No interaction or diagnosis.
 
+Development and CI use synthetic/redacted health fixtures only.
+
 ## Phase 5 — Document extraction
 
-Local/manual first, then optional cloud extraction with consent. Draft field candidates, source bounding evidence, user confirmation, terminology providers behind feature flags.
+Mobile file-picker flow first, then optional cloud extraction with consent. Draft field candidates, source bounding evidence, user confirmation, terminology providers behind feature flags. Support interrupted review recovery.
 
 ## Phase 6 — PDRE descriptive analytics
 
@@ -117,14 +159,44 @@ Integrate existing subsystem as separately labelled symbolic context; preserve r
 
 Changepoint candidate, JITAI learning, predictive models only behind research flags and gates.
 
+# Native migration — after web stability
+
+## Native N0 — readiness audit
+
+Confirm build output, routing, WebView/service-worker behavior, IndexedDB persistence, deep links, blobs/files, CSP/network domains, background constraints and privacy requirements.
+
+## Native N1 — Capacitor shell spike
+
+Add Capacitor to the existing web app on an experimental branch. Create iOS/Android shells without rewriting domain logic. Introduce PlatformAdapter seams for native capabilities.
+
+## Native N2 — cloud builds and internal testing
+
+- Android: Linux CI builds APK/AAB and sends to internal testing.
+- iOS: macOS CI or Xcode Cloud builds archive and sends to TestFlight.
+- signing credentials live only in protected CI stores.
+- owner reviews from App Store Connect/TestFlight and Google Play tools on mobile.
+
+## Native N3 — native capabilities
+
+Add notifications, biometric lock, secure key storage, camera/file import, share sheet and background tasks one by one behind feature flags.
+
+Apple Health/Health Connect import requires separate privacy, consent and regulatory review.
+
+## Native N4 — store release
+
+Separate Apple and Google release gates: privacy/data safety, account deletion/export, screenshots, age rating, health-claims audit, signing, staged rollout and rollback.
+
 ## Task contract template
 
 ```yaml
 id:
 phase:
 owner:
+owner_workflow: mobile_only
 objective:
 out_of_scope:
+base_branch:
+branch:
 files_owned:
 read_dependencies:
 data_contracts:
@@ -135,12 +207,18 @@ migrations:
 rollback:
 acceptance_criteria:
 tests:
+mobile_viewports:
+preview_required: true
+ci_required: true
 manual_qa:
 evidence_handoff:
 release_gate:
+manual_merge_only: true
 ```
 
-## Verification commands
+## Verification
+
+Use exact repository commands confirmed by Phase 0. Current baseline:
 
 ```bash
 cd architect
@@ -149,7 +227,21 @@ node build.mjs --combined dist/app.html
 npm test
 ```
 
-UI: 390×844, Dual Realm light/dark, no console errors, reduced motion, offline reload, import/export roundtrip, profile isolation, E2EE sync and migration rollback fixture.
+UI matrix:
+
+- 390×844;
+- 430×932;
+- 834×1194;
+- 1194×834;
+- Dual Realm light/dark;
+- safe areas and software keyboard;
+- no console errors;
+- reduced motion;
+- offline reload and PWA standalone;
+- import/export roundtrip;
+- profile isolation;
+- E2EE sync;
+- migration rollback fixture.
 
 LLM slice additionally verifies:
 
@@ -165,4 +257,4 @@ LLM slice additionally verifies:
 
 ## Commit discipline
 
-One semantic vertical slice per commit. No drive-by refactor. Update handoff after each accepted slice. PR description distinguishes docs, implementation, research preview, quarantine and known gaps.
+One semantic vertical slice per commit. No drive-by refactor. Every cloud session ends with pushed changes or an explicit no-change report, exact branch/commit/PR evidence and a handoff that survives disconnects. PR description distinguishes docs, implementation, research preview, quarantine and known gaps.
