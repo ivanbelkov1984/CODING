@@ -3407,6 +3407,15 @@ function handleImport(input) {
   reader.onload = e => {
     try {
       const data = JSON.parse(e.target.result);
+      const metadata = typeof globalThis !== 'undefined' ? globalThis.ARCH_METADATA : null;
+      if (metadata) {
+        const importOptions = {
+          exportVersion: Number(data.exportVersion || data.version || 1),
+          importedAt: nowISO(),
+        };
+        if (data.db && typeof data.db === 'object') metadata.markImportedDB(data.db, importOptions);
+        else if (Array.isArray(data.insights)) metadata.markImportedDB({ insights: data.insights }, importOptions);
+      }
       if (data.db)  DB  = {...DEFAULT_DB,  ...data.db};
       if (data.cfg) {
         // Импорт не имеет права менять локальное подключение, даже если это
@@ -3555,10 +3564,10 @@ function gptRunImport() {
     const dateStr = new Date(ts).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
     const dream = dreamRe.test(m.t.slice(0, 80));
     if (dream) {
-      DB.dreams.push(touch({ id: ++uid, date: dateStr, createdAt: iso, day: dayK, sv: SCHEMA_VERSION, title: titleFrom(body).slice(0, 52), body, tone: null, arch: null, src: 'ChatGPT' }));
+      DB.dreams.push(touch({ id: ++uid, date: dateStr, createdAt: iso, day: dayK, sv: SCHEMA_VERSION, title: titleFrom(body).slice(0, 52), body, tone: null, arch: null, src: 'ChatGPT' }, 'dreams'));
       nDrm++;
     }
-    DB.insights.push(touch({ id: ++uid, tag: dream ? 'dream' : 'personal', w: 1, title: titleFrom(body), body, date: dateStr, createdAt: iso, day: dayK, sv: SCHEMA_VERSION, src: 'ChatGPT', links: [] }));
+    DB.insights.push(touch({ id: ++uid, tag: dream ? 'dream' : 'personal', w: 1, title: titleFrom(body), body, date: dateStr, createdAt: iso, day: dayK, sv: SCHEMA_VERSION, src: 'ChatGPT', links: [] }, 'insights'));
     nIns++;
   }
   DB.insights.sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
@@ -3790,7 +3799,17 @@ function genRecoveryKey() {
 // коллекции — при неоднозначности данные сохраняются, а не уничтожаются.
 const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','bots','digests','spheres','sphereLogs','chats','cravings'];
 const DEL_LEGACY = '_legacy';
-function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
+function touch(rec, collection = '') {
+  if (rec && typeof rec === 'object') {
+    rec._u = Date.now();
+    const metadata = typeof globalThis !== 'undefined' ? globalThis.ARCH_METADATA : null;
+    if (metadata) {
+      const resolvedCollection = collection || metadata.ID_COLLECTIONS.find(c => Array.isArray(DB[c]) && DB[c].includes(rec)) || '';
+      if (resolvedCollection) metadata.touchRecord(rec, { collection: resolvedCollection, at: new Date(rec._u).toISOString() });
+    }
+  }
+  return rec;
+}
 const _delObj = v => !!v && typeof v === 'object' && !Array.isArray(v);
 const _sameId = (a, b) => String(a) === String(b);
 function _recordCollections(id, ...dbs) {

@@ -7,7 +7,7 @@
   "scripts": {
     "build": "node build.mjs",
     "build:test": "node build.mjs --combined dist/app.html",
-    "test:data": "node tests/evidence/tombstone_namespacing_regression.mjs && node tests/evidence/export_privacy_regression.mjs",
+    "test:data": "node tests/evidence/tombstone_namespacing_regression.mjs && node tests/evidence/export_privacy_regression.mjs && node tests/evidence/additive_schema_metadata_regression.mjs",
     "test:mobile-evidence": "node tests/mobile-evidence.mjs",
     "test": "npm run test:data && node build.mjs --combined dist/app.html && node tests/e2e.mjs"
   },
