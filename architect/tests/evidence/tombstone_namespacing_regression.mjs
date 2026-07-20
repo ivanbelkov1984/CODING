@@ -5,6 +5,7 @@ const app = await readFile(new URL('../../app.js', import.meta.url), 'utf8');
 const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','bots','digests','spheres','sphereLogs','chats','cravings'];
 const DEL_LEGACY = '_legacy';
 const DAY = 864e5;
+const ACTIVE_TS = Date.now();
 let passed = 0;
 
 function test(name, fn) {
@@ -132,22 +133,25 @@ test('all known internal deletion paths pass an explicit collection', () => {
 });
 
 test('deleting insights/shared-id does not delete dreams/shared-id', () => {
-  const timestamp = 500;
   const local = {
-    insights: [{ id: 'shared-id', _u: 100, text: 'insight' }],
-    dreams: [{ id: 'shared-id', _u: 100, text: 'dream' }],
-    _del: { insights: { 'shared-id': timestamp } },
+    insights: [{ id: 'shared-id', _u: ACTIVE_TS - 1000, text: 'insight' }],
+    dreams: [{ id: 'shared-id', _u: ACTIVE_TS - 1000, text: 'dream' }],
+    _del: { insights: { 'shared-id': ACTIVE_TS } },
   };
-  const merged = mergeDB(local, {});
+  const merged = mergeDB(local, {}, ACTIVE_TS);
   assert.equal(merged.insights.length, 0);
   assert.equal(merged.dreams.length, 1);
 });
 
 test('collision remains safe in reverse merge direction', () => {
-  const local = { insights: [{ id: 'shared-id', _u: 100 }], dreams: [{ id: 'shared-id', _u: 100 }], _del: {} };
-  const remote = { _del: { dreams: { 'shared-id': 500 } } };
-  const forward = mergeDB(local, remote);
-  const reverse = mergeDB(remote, local);
+  const local = {
+    insights: [{ id: 'shared-id', _u: ACTIVE_TS - 1000 }],
+    dreams: [{ id: 'shared-id', _u: ACTIVE_TS - 1000 }],
+    _del: {},
+  };
+  const remote = { _del: { dreams: { 'shared-id': ACTIVE_TS } } };
+  const forward = mergeDB(local, remote, ACTIVE_TS);
+  const reverse = mergeDB(remote, local, ACTIVE_TS);
   for (const result of [forward, reverse]) {
     assert.equal(result.insights.length, 1);
     assert.equal(result.dreams.length, 0);
@@ -155,53 +159,60 @@ test('collision remains safe in reverse merge direction', () => {
 });
 
 test('a unique legacy flat tombstone migrates to its one collection', () => {
-  const db = { insights: [{ id: 'unique', _u: 100 }], dreams: [], _del: { unique: 500 } };
-  assert.deepEqual(normaliseDel(db), { insights: { unique: 500 } });
-  assert.equal(mergeDB(db, {}).insights.length, 0);
+  const db = {
+    insights: [{ id: 'unique', _u: ACTIVE_TS - 1000 }],
+    dreams: [],
+    _del: { unique: ACTIVE_TS },
+  };
+  assert.deepEqual(normaliseDel(db), { insights: { unique: ACTIVE_TS } });
+  assert.equal(mergeDB(db, {}, ACTIVE_TS).insights.length, 0);
 });
 
 test('an ambiguous legacy flat tombstone is fail-safe and deletes neither collection', () => {
   const db = {
-    insights: [{ id: 'shared', _u: 100 }],
-    dreams: [{ id: 'shared', _u: 100 }],
-    _del: { shared: 500 },
+    insights: [{ id: 'shared', _u: ACTIVE_TS - 1000 }],
+    dreams: [{ id: 'shared', _u: ACTIVE_TS - 1000 }],
+    _del: { shared: ACTIVE_TS },
   };
   const migrated = normaliseDel(db);
-  assert.deepEqual(migrated, { _legacy: { shared: 500 } });
-  const merged = mergeDB(db, {});
+  assert.deepEqual(migrated, { _legacy: { shared: ACTIVE_TS } });
+  const merged = mergeDB(db, {}, ACTIVE_TS);
   assert.equal(merged.insights.length, 1);
   assert.equal(merged.dreams.length, 1);
-  assert.deepEqual(merged._del, { _legacy: { shared: 500 } });
+  assert.deepEqual(merged._del, { _legacy: { shared: ACTIVE_TS } });
 });
 
 test('migration is idempotent', () => {
-  const first = { insights: [{ id: 'one', _u: 1 }], _del: { one: 20 } };
+  const first = { insights: [{ id: 'one', _u: ACTIVE_TS - 1 }], _del: { one: ACTIVE_TS } };
   const once = normaliseDel(first);
   const twice = normaliseDel({ ...first, _del: once });
   assert.deepEqual(twice, once);
 });
 
 test('newer tombstone timestamp wins and expired tombstones are removed', () => {
-  const now = Date.now();
+  const now = ACTIVE_TS;
   const local = { _del: { insights: { keep: now - DAY, old: now - 121 * DAY } } };
   const remote = { _del: { insights: { keep: now } } };
   assert.deepEqual(mergeDel(local, remote, now), { insights: { keep: now } });
 });
 
 test('undo removes only the selected collection tombstone', () => {
-  const db = { _del: { insights: { shared: 500 }, dreams: { shared: 600 } } };
+  const db = { _del: { insights: { shared: ACTIVE_TS }, dreams: { shared: ACTIVE_TS + 1 } } };
   untomb(db, 'insights', 'shared');
-  assert.deepEqual(db._del, { dreams: { shared: 600 } });
+  assert.deepEqual(db._del, { dreams: { shared: ACTIVE_TS + 1 } });
 });
 
 test('snapshot/export JSON roundtrip preserves namespaced tombstones', () => {
-  const db = { insights: [], dreams: [], _del: { insights: { a: 10 }, dreams: { a: 20 }, _legacy: { z: 30 } } };
+  const db = {
+    insights: [], dreams: [],
+    _del: { insights: { a: ACTIVE_TS }, dreams: { a: ACTIVE_TS + 1 }, _legacy: { z: ACTIVE_TS + 2 } },
+  };
   const restored = JSON.parse(JSON.stringify({ db })).db;
   assert.deepEqual(restored._del, db._del);
 });
 
 test('a newer record survives an older tombstone in its own collection', () => {
-  const result = mergeById([{ id: 'r', _u: 900 }], [], { r: 500 });
+  const result = mergeById([{ id: 'r', _u: ACTIVE_TS }], [], { r: ACTIVE_TS - 1000 });
   assert.equal(result.length, 1);
 });
 
