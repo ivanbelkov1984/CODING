@@ -10,6 +10,8 @@
 
 `DUAL_REALM_DESIGN_BASELINE_MERGED_IN_MAIN`
 
+`CLAUDE_CODE_PHASE0_GUIDE_READY`
+
 ## Назначение
 
 Это глобальный источник правды для продукта. Он объединяет существующий дневник, смысловой движок, метод «Зачем?», здоровье/JITAI, цели и действия, Personal Dynamics and Readiness, документы и лекарства, астрологию, память, LLM, privacy, UX и Claude Code execution.
@@ -52,6 +54,7 @@ Dual Realm (`Deep Space` / `Ethereal Light`) уже реализован в `MAI
 - `13-EVIDENCE-REGISTER.md`
 - `14-MIGRATION-FROM-V1.md`
 - `15-RESEARCH-GAP-REGISTER.md`
+- `17-CLAUDE-CODE-INSTALLATION-AND-PHASE0-START.md`
 
 ### Schemas
 
@@ -74,5 +77,6 @@ JSON Schemas находятся в `schemas/`. Они являются конц�
 - открытые gaps не маскируются;
 - каждая сущность имеет provenance/privacy/correction lifecycle;
 - LLM-вывод имеет input references, adaptive tone, validators and evals;
+- Claude Code setup and Phase 0 start are reproducible;
 - каждый вертикальный slice имеет tests и rollback;
 - regulated quarantine выражен в кодовых feature flags до реализации.
