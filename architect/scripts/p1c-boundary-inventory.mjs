@@ -9,6 +9,8 @@ const files = {
   index: await readFile(resolve(root, 'index.html'), 'utf8'),
   styles: await readFile(resolve(root, 'styles.css'), 'utf8'),
   feedback: await readFile(resolve(root, 'backend/feedback.js'), 'utf8'),
+  e2e: await readFile(resolve(root, 'tests/e2e.mjs'), 'utf8'),
+  mobile: await readFile(resolve(root, 'tests/mobile-evidence.mjs'), 'utf8'),
 };
 
 function windows(source, patterns, before = 8, after = 16) {
@@ -30,10 +32,16 @@ const report = [
   '# P1-C Privacy / Feedback Boundary Inventory',
   '',
   '## INDEX',
-  windows(files.index, [/id="pg-sys"/, /О приложении/, /Конфигурац/, /data-metadata\.js/, /ai-policy\.js/, /app\.js/], 10, 26),
+  windows(files.index, [/id="pg-settings"/, /id="ov-feedback"/, /id="fb-text"/, /openOv\('ov-feedback'\)/, /id="ov-privacy"/, /data-metadata\.js/, /ai-policy\.js/, /app\.js/], 12, 34),
   '',
   '## APP',
-  windows(files.app, [/function initAll\s*\(/, /function api\s*\(/, /async function api\s*\(/, /addEventListener\(['"]online/, /function openOv\s*\(/, /function closeOv\s*\(/, /function persistLocal\s*\(/, /function exportData\s*\(/], 10, 30),
+  windows(files.app, [/function initAll\s*\(/, /async function api\s*\(/, /addEventListener\(['"]online/, /function openOv\s*\(/, /function closeOv\s*\(/, /function exportData\s*\(/, /ОБРАТНАЯ СВЯЗЬ/, /function sendFeedback\s*\(/, /function flushFeedbackOutbox\s*\(/], 12, 38),
+  '',
+  '## E2E FEEDBACK',
+  windows(files.e2e, [/feedback/i, /fb-text/, /ov-feedback/, /arch5_errbuf/, /arch5_fb_outbox/], 14, 40),
+  '',
+  '## MOBILE EVIDENCE SCREENSHOT BOUNDARY',
+  windows(files.mobile, [/active page compositing state is stable/, /viewport screenshot captured/, /application element screenshot captured/], 16, 28),
   '',
   '## BACKEND FEEDBACK',
   files.feedback,
