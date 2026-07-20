@@ -51,6 +51,35 @@
 
 Evidence drawer показывает source records, method, window, alternatives, version, consent and limitations.
 
+## LLM insight card
+
+Пользовательский голос — «Отрезвляющий наставник», внутренний контракт — `EvidenceGroundedDirectMentor`.
+
+Первый уровень:
+
+- короткий headline;
+- что действительно видно;
+- что это может означать;
+- один реалистичный следующий шаг;
+- при необходимости важная граница вывода.
+
+Кнопка «Почему?» открывает input records, epistemic classes, alternatives, uncertainty, model/prompt policy versions and validator status.
+
+Астрологический текст всегда находится в отдельной подписанной секции **«Символический контекст»**. Он не смешивается с наблюдаемыми данными и медицинским/психологическим объяснением.
+
+Тон адаптивен: direct-supportive для обычной работы, neutral-analytical для неоднозначных данных, gentle-stabilizing при истощении/боли/утрате/сильной тревоге, отдельный crisis-safe режим.
+
+## Dual Realm design baseline
+
+Текущий принятый визуальный контракт уже реализован в `MAIN` через существующий token layer:
+
+- Dark: `Deep Space`;
+- Light: `Ethereal Light`.
+
+Новые экраны и карточки используют актуальные `architect/styles.css`, `architect/design_guide.md` и `design/tokens.json`.
+
+Запрещено создавать параллельную Tailwind/shadcn тему или заново переносить приложение на React ради дизайна. Визуальные изменения выполняются через существующие CSS variables/components и проверяются в обеих темах.
+
 ## Не перегружать
 
 - один primary action на экран;
@@ -59,7 +88,9 @@ Evidence drawer показывает source records, method, window, alternative
 - color optional;
 - health document extraction — review wizard, не background magic;
 - no dashboard of dozens of scores;
-- compassionate recovery, no hard streak reset.
+- compassionate recovery, no hard streak reset;
+- основной LLM-текст короткий, evidence находится в drawer;
+- не повторять один и тот же вывод в эмпирической и астрологической секции.
 
 ## Accessibility
 
@@ -70,7 +101,9 @@ Evidence drawer показывает source records, method, window, alternative
 - controls large enough for mobile;
 - explicit units and dates;
 - readable source links;
-- uncertainty expressed in words and icon/text, not color alone.
+- uncertainty expressed in words and icon/text, not color alone;
+- prefers-reduced-motion respected;
+- direct tone remains readable and non-coercive.
 
 ## Empty/degraded states
 
@@ -80,4 +113,5 @@ Every state explains:
 - why it matters;
 - smallest next step;
 - what functionality remains available;
-- whether cloud/service/license is required.
+- whether cloud/service/license is required;
+- whether LLM output was blocked by a safety/grounding validator.
