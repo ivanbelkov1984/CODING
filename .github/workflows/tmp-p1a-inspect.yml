@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - agent/phase-1-additive-schema-metadata
+  pull_request:
+    paths:
+      - architect/app.js
+      - architect/scripts/p1a-inspect-boundaries.mjs
+      - .github/workflows/tmp-p1a-inspect.yml
 
 permissions:
   contents: read
