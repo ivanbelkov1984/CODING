@@ -24,6 +24,7 @@
 .claude/skills/context-handoff/SKILL.md
 .claude/skills/health-evidence/SKILL.md
 .claude/skills/life-architect-v2-kickoff/SKILL.md
+.claude/skills/llm-synthesis/SKILL.md
 .claude/skills/momentary-state/SKILL.md
 .claude/skills/personal-dynamics/SKILL.md
 .claude/skills/rectification-engine/SKILL.md
@@ -64,9 +65,12 @@ architect/docs/life-architect-v2/12-DECISION-LEDGER.md
 architect/docs/life-architect-v2/13-EVIDENCE-REGISTER.md
 architect/docs/life-architect-v2/14-MIGRATION-FROM-V1.md
 architect/docs/life-architect-v2/15-RESEARCH-GAP-REGISTER.md
+architect/docs/life-architect-v2/16-LLM-SYNTHESIS-VOICE-AND-SAFETY.md
+architect/docs/life-architect-v2/17-CLAUDE-CODE-INSTALLATION-AND-PHASE0-START.md
 architect/docs/life-architect-v2/schemas/action-event.schema.json
 architect/docs/life-architect-v2/schemas/health-source-document.schema.json
 architect/docs/life-architect-v2/schemas/lab-observation.schema.json
+architect/docs/life-architect-v2/schemas/llm-synthesis.schema.json
 architect/docs/life-architect-v2/schemas/medication-intake-event.schema.json
 architect/docs/life-architect-v2/schemas/medication-plan.schema.json
 architect/docs/life-architect-v2/schemas/momentary-state.schema.json
