@@ -1,0 +1,36 @@
+name: Temporary export privacy remediation
+
+on:
+  push:
+    branches:
+      - agent/export-privacy-remediation
+
+permissions:
+  contents: write
+
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/export-privacy-remediation
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply exact source patch
+        working-directory: architect
+        run: node scripts/apply-export-privacy-remediation.mjs
+      - name: Validate and commit
+        run: |
+          node --check architect/app.js
+          git diff --check
+          if git diff --quiet; then
+            echo 'No source change to commit'
+            exit 0
+          fi
+          git config user.name 'remediation-bot'
+          git config user.email 'remediation@architect.app'
+          git add architect/app.js
+          git commit -m 'fix(privacy): exclude connection secrets from exports'
+          git push origin HEAD:agent/export-privacy-remediation
