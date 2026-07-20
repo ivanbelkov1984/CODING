@@ -35,3 +35,12 @@
 | D-031 | High-severity synthesis validator failure blocks display | Accepted | At most one controlled retry; safe degraded response otherwise |
 | D-032 | Dual Realm is current design baseline | Accepted and merged in MAIN | Extend through existing CSS tokens; no Tailwind/shadcn rewrite |
 | D-033 | Exact LLM implementation path waits for Phase 0 | Accepted | Do not create `synthesis_oracle.ts` or TypeScript layer by assumption |
+| D-034 | Owner workflow is mobile-only | Accepted | No physical computer or manual desktop workflow may be required |
+| D-035 | Official Claude Code cloud is primary execution plane | Accepted | Start tasks from iPad/iPhone, persist results in GitHub |
+| D-036 | GitHub Codespaces is secondary manual environment | Accepted | Use for terminal/live preview only when cloud agent surface is insufficient |
+| D-037 | Personal VPS is last resort | Accepted with security gate | Requires SSH, patching, backup, secret and cost policy |
+| D-038 | Every implementation PR needs mobile review evidence | Accepted | CI plus mobile-accessible preview/artifact and rollback |
+| D-039 | PWA remains product core during development | Accepted | Stabilize web/offline/data model before store packaging |
+| D-040 | Capacitor is preferred native wrapper candidate | Proposed until native-readiness audit | Add iOS/Android shells without React/Next rewrite |
+| D-041 | Native builds use cloud CI | Accepted direction | Android on Linux CI; iOS on macOS CI/Xcode Cloud/TestFlight |
+| D-042 | Real personal data is prohibited in cloud development | Accepted | Synthetic/redacted fixtures only; secrets stay in protected stores |
