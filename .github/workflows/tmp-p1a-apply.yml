@@ -7,6 +7,10 @@ on:
     paths:
       - architect/scripts/apply-p1a-wiring.mjs
       - .github/workflows/tmp-p1a-apply.yml
+  pull_request:
+    paths:
+      - architect/scripts/apply-p1a-wiring.mjs
+      - .github/workflows/tmp-p1a-apply.yml
 
 permissions:
   contents: write
