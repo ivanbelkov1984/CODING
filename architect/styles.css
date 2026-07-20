@@ -144,8 +144,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:none;outline:no
 /* ── CONTENT ───────────────────────────────────────────────────── */
 .content{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .pg{display:none}
-.pg.on{display:block;animation:pgIn var(--dur2) var(--e)}
-@keyframes pgIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.pg.on{display:block;opacity:1;transform:none}
 
 /* ── TABBAR ────────────────────────────────────────────────────── */
 .tabbar{flex-shrink:0;padding:var(--s2) var(--s3) max(env(safe-area-inset-bottom),10px);background:var(--sf);border-top:1px solid var(--bd)}
