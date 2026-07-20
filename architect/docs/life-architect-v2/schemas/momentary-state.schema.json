@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://architect.local/schemas/momentary-state.schema.json",
+  "title": "momentary-state",
+  "description": "Momentary user self-report; no diagnosis or universal color meaning.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "profileId": {"type": "string", "minLength": 1},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "schemaVersion": {"type": "integer", "minimum": 1},
+    "source": {"type": "object"},
+    "provenance": {"type": "object"},
+    "privacyClass": {"type": "string"},
+    "verificationStatus": {"type": "string"},
+    "recordedAt": {"type": "string", "format": "date-time"},
+    "valence": {"type": "number", "minimum": 0, "maximum": 100},
+    "activation": {"type": "number", "minimum": 0, "maximum": 100},
+    "emotionLabels": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
+    "colorSelection": {"type": ["object", "null"]},
+    "contextTags": {"type": "array", "items": {"type": "string"}},
+    "note": {"type": ["string", "null"]},
+    "inputSource": {"enum": ["daily_checkin", "diary_followup", "intervention_followup", "manual"]}
+  },
+  "required": ["id", "profileId", "createdAt", "schemaVersion", "recordedAt", "valence", "activation", "inputSource"]
+}

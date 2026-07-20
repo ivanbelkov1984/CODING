@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://architect.local/schemas/scenario-outlook.schema.json",
+  "title": "scenario-outlook",
+  "description": "Descriptive scenario outlook; prediction must remain null until approved model contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "profileId": {"type": "string", "minLength": 1},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "schemaVersion": {"type": "integer", "minimum": 1},
+    "source": {"type": "object"},
+    "provenance": {"type": "object"},
+    "privacyClass": {"type": "string"},
+    "verificationStatus": {"type": "string"},
+    "scenarioDefinitionId": {"type": "string"},
+    "generatedAt": {"type": "string", "format": "date-time"},
+    "observedState": {"type": "object"},
+    "descriptiveTrend": {"type": ["object", "null"]},
+    "conditionalContinuation": {"type": ["object", "null"]},
+    "supportingConditions": {"type": "array", "items": {"type": "object"}},
+    "barriers": {"type": "array", "items": {"type": "object"}},
+    "alternativeScenarios": {"type": "array", "items": {"type": "object"}},
+    "dataQuality": {"type": "object"},
+    "uncertainty": {"type": "object"},
+    "predictionEstimate": {"type": "null"},
+    "symbolicAstrologyContext": {"type": ["object", "null"]}
+  },
+  "required": ["id", "profileId", "createdAt", "schemaVersion", "scenarioDefinitionId", "generatedAt", "observedState", "dataQuality", "uncertainty", "predictionEstimate"]
+}

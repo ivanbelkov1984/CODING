@@ -1,48 +1,30 @@
-# Astrology Implementation Package — Index
+# Astrology Implementation Package — subsystem index
 
 ## Status
 
-`READY_FOR_PHASE_0_REPOSITORY_AUDIT`
+`ASTROLOGY_SUBSYSTEM_BASELINE_V1`
 
-This directory is the source of truth for implementing astrology, rectification and scenario forecasting. The earlier research journal is supporting evidence, not the coding contract.
+This directory remains the normative contract for astronomy, geometry, school rules, rectification and astrology UI internals. It is no longer the global source of truth for the whole application.
 
-## Read order by task
+Global architecture, health, momentary state, Personal Dynamics and Readiness, prediction boundaries, privacy and information architecture are governed by:
 
-### Every astrology task
+`architect/docs/life-architect-v2/00-INDEX.md`
 
-1. `CLAUDE.md`
-2. `STUDIO_HANDOFF.md`
-3. `architect/AGENT_BRIEF.md`
-4. this index
-5. task-specific document only
+## Read order
 
-### Foundation
+1. root `CLAUDE.md`;
+2. `STUDIO_HANDOFF.md`;
+3. `architect/AGENT_BRIEF.md`;
+4. global v2 index;
+5. this index;
+6. task-specific astrology document.
 
-- `01-MASTER_SPEC.md`
-- `02-HARNESS_EXECUTION_PLAN.md`
-- `05-DATA_MODEL_AND_MIGRATIONS.md`
-- `06-TEST_AND_RELEASE_GATES.md`
+## Conflict rule
 
-### Rectification
+- raw astronomy/time/geography/school/rectification: this package;
+- global epistemic, health, PDRE, UX and regulatory boundary: v2 package;
+- stricter safety and privacy rule wins.
 
-- `03-RECTIFICATION_SPEC.md`
+## Implementation
 
-### Forecasting
-
-- `04-SCENARIO_FORECASTING_SPEC.md`
-- `09-EPISTEMIC_SAFETY.md`
-
-### UI
-
-- `AWESOME_DESIGN.md`
-- existing `architect/design_guide.md`
-- existing `architect/PATTERN_LIBRARY.md`
-- `design/tokens.json`
-
-### Start Claude Code
-
-- `07-CLAUDE_CODE_START_PROMPT.md`
-
-## Implementation rule
-
-Do not ask Claude to “build the whole application” in one turn. Start with Phase 0 audit, then one spike/epic at a time. Each phase updates CURRENT handoff and decision log.
+Do not build the whole subsystem in one turn. Phase 0 repository audit remains mandatory. No production code is changed by documentation migration.

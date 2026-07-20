@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://architect.local/schemas/medication-plan.schema.json",
+  "title": "medication-plan",
+  "description": "User medication/supplement plan, distinct from prescription and actual intake.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "profileId": {"type": "string", "minLength": 1},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "schemaVersion": {"type": "integer", "minimum": 1},
+    "source": {"type": "object"},
+    "provenance": {"type": "object"},
+    "privacyClass": {"type": "string"},
+    "verificationStatus": {"type": "string"},
+    "healthProductId": {"type": "string"},
+    "origin": {"enum": ["clinician_prescribed", "user_created", "imported_from_document", "caregiver_reported", "unknown"]},
+    "schedule": {"type": "object"},
+    "dose": {"type": ["object", "null"]},
+    "startAt": {"type": ["string", "null"], "format": "date-time"},
+    "endAt": {"type": ["string", "null"], "format": "date-time"},
+    "status": {"enum": ["planned", "active", "paused", "completed", "discontinued"]},
+    "purpose": {"type": ["string", "null"]},
+    "sourceDocumentId": {"type": ["string", "null"]}
+  },
+  "required": ["id", "profileId", "createdAt", "schemaVersion", "healthProductId", "origin", "schedule", "status"]
+}

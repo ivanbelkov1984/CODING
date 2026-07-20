@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://architect.local/schemas/medication-intake-event.schema.json",
+  "title": "medication-intake-event",
+  "description": "Append-only actual intake event; correctable at any time via correction event.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "profileId": {"type": "string", "minLength": 1},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "schemaVersion": {"type": "integer", "minimum": 1},
+    "source": {"type": "object"},
+    "provenance": {"type": "object"},
+    "privacyClass": {"type": "string"},
+    "verificationStatus": {"type": "string"},
+    "medicationPlanId": {"type": ["string", "null"]},
+    "healthProductId": {"type": "string"},
+    "scheduledAt": {"type": ["string", "null"], "format": "date-time"},
+    "recordedAt": {"type": "string", "format": "date-time"},
+    "status": {"enum": ["taken", "missed", "skipped_intentionally", "postponed", "unknown"]},
+    "actualDose": {"type": ["object", "null"]},
+    "correctionOf": {"type": ["string", "null"]},
+    "reason": {"type": ["string", "null"]}
+  },
+  "required": ["id", "profileId", "createdAt", "schemaVersion", "healthProductId", "recordedAt", "status"]
+}

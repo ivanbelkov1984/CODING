@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://architect.local/schemas/action-event.schema.json",
+  "title": "action-event",
+  "description": "Goal-related action event with no automatic moral or negative weighting.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "profileId": {"type": "string", "minLength": 1},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "schemaVersion": {"type": "integer", "minimum": 1},
+    "source": {"type": "object"},
+    "provenance": {"type": "object"},
+    "privacyClass": {"type": "string"},
+    "verificationStatus": {"type": "string"},
+    "goalId": {"type": ["string", "null"]},
+    "actionType": {"enum": ["intention", "planning", "preparation", "initiation", "execution", "repetition", "maintenance", "deliberate_practice", "recovery", "adaptation", "help_seeking", "reflection", "externally_blocked", "intentionally_postponed", "intentionally_abandoned", "missed", "outcome_unknown", "possible_avoidance", "externally_verified_action"]},
+    "occurredAt": {"type": "string", "format": "date-time"},
+    "status": {"type": "string"},
+    "quality": {"type": ["object", "null"]},
+    "contextObservationIds": {"type": "array", "items": {"type": "string"}},
+    "correctionOf": {"type": ["string", "null"]}
+  },
+  "required": ["id", "profileId", "createdAt", "schemaVersion", "actionType", "occurredAt", "status"]
+}

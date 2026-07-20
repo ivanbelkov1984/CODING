@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://architect.local/schemas/health-source-document.schema.json",
+  "title": "health-source-document",
+  "description": "Immutable encrypted medical source document metadata.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "profileId": {"type": "string", "minLength": 1},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "schemaVersion": {"type": "integer", "minimum": 1},
+    "source": {"type": "object"},
+    "provenance": {"type": "object"},
+    "privacyClass": {"type": "string"},
+    "verificationStatus": {"type": "string"},
+    "documentType": {"type": "string"},
+    "capturedAt": {"type": "string", "format": "date-time"},
+    "issuer": {"type": ["object", "null"]},
+    "fileRef": {"type": "object"},
+    "checksum": {"type": "string"},
+    "extractionStatus": {"enum": ["not_requested", "draft", "review_required", "accepted", "rejected"]},
+    "consentReceiptId": {"type": ["string", "null"]}
+  },
+  "required": ["id", "profileId", "createdAt", "schemaVersion", "documentType", "capturedAt", "fileRef", "checksum", "extractionStatus"]
+}

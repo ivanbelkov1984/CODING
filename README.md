@@ -1,17 +1,7 @@
-# Claude Code Astrology Implementation Package
+# Life Architect Unified Architecture v2.0 — Claude Code Package
 
-Repository-ready files for `ivanbelkov1984/CODING`.
+Этот пакет заменяет прежний глобальный astrology-only implementation contract единым источником правды для «Архитектора жизни». Астрологический пакет v1 сохранён как подсистема и исторический baseline.
 
-Contains:
+Старт чтения: `architect/docs/life-architect-v2/00-INDEX.md`.
 
-- project `CLAUDE.md`;
-- safe project settings and TaskCompleted test gate;
-- Harness/Anti-Rot rules;
-- 14 project subagents;
-- 8 skills;
-- astrology master implementation docs;
-- rectification Research Preview spec;
-- scientifically constrained scenario forecasting spec;
-- schemas, backlog and start prompt.
-
-This package does not include production code or personal data.
+Статус: архитектура и execution contract готовы к Phase 0 repository audit. Production-код этим пакетом не изменяется.
