@@ -54,7 +54,7 @@ await test('message preflight accepts only user and assistant roles', () => {
 
 await test('unknown tasks and excessive token requests fail before provider execution', () => {
   expectPolicyError(() => P.prepareRequest({ task: 'autonomous-tool', user: 'x', maxTokens: 10 }), 'invalid_request');
-  expectPolicyError(() => P.prepareRequest({ task: 'deeper', user: 'x', maxTokens: 257 }), 'invalid_request');
+  expectPolicyError(() => P.prepareRequest({ task: 'deeper', user: 'x', maxTokens: 1025 }), 'invalid_request');
 });
 
 const questionsSchema = {

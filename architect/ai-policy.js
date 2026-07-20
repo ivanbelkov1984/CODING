@@ -5,11 +5,11 @@
   const DEFAULT_TIMEOUT_MS = 60000;
   const MAX_OUTPUT_CHARS = 24000;
   const TASK_MAX_TOKENS = Object.freeze({
-    react: 512,
-    deeper: 256,
-    prompts: 800,
+    react: 1024,
+    deeper: 1024,
+    prompts: 1024,
     digest: 1200,
-    map: 800,
+    map: 1024,
     analysis: 2000,
     chat: 1200,
     psy: 2400,
