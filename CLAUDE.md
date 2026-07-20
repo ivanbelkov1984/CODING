@@ -22,10 +22,13 @@
 ## Неподвижные ограничения
 
 - Дополняй существующий vanilla-JS/offline-first PWA; не переписывай его на новый framework без отдельного ADR владельца.
+- Не создавай второй проект в пустой папке и не вводи Next.js/React/TypeScript/Tailwind/shadcn/RxDB только потому, что это предложил внешний манифест.
+- Dual Realm (`Deep Space` / `Ethereal Light`) уже реализован через текущие CSS variables и `design/tokens.json`; расширяй эту систему, не создавай параллельную тему.
 - Реальные дневники, психологические материалы, медицинские документы, даты рождения и жизненные события никогда не попадают в git, issue, PR, logs или fixtures.
 - Личные данные остаются local-first и синхронизируются только E2EE; сервер не получает plaintext по умолчанию.
 - Самоотчёт, исходный документ, вычисленный признак, гипотеза LLM, астрологическая аннотация, прогноз и причинная оценка — разные классы данных.
 - LLM не создаёт медицинский диагноз, не меняет дозировку, не проверяет лекарственные взаимодействия без лицензированного детерминированного источника и отдельного regulatory gate.
+- LLM-голос следует `16-LLM-SYNTHESIS-VOICE-AND-SAFETY.md`: direct but adaptive, evidence-grounded, non-shaming, with deterministic validators and evals. Роль «оракула» запрещена.
 - Астрология не влияет на медицинский/психологический риск, readiness score, JITAI decision rule, эмпирический прогноз или causal estimate.
 - Вероятность будущего outcome разрешена только после формального outcome contract, независимой оценки и calibration; до этого `ScenarioOutlook` описателен.
 - Любые fallback, missingness, uncertainty, licensing block и degraded mode показываются явно.
@@ -44,7 +47,9 @@ node build.mjs --combined dist/app.html
 npm test
 ```
 
-Для UI: мобильный viewport 390×844, light/dark, accessibility, design tokens и регрессионный screenshot review.
+Для UI: мобильный viewport 390×844, обе Dual Realm темы, accessibility, reduced motion, design tokens и регрессионный screenshot review.
+
+Для LLM: JSON Schema, input references, claim-class rules, astrology isolation, health/tone/numeric/temporal validators, synthetic evals and safe degraded responses.
 
 ## Release policy
 
