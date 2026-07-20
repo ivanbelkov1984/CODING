@@ -1,6 +1,6 @@
 # Phase 1 Additive Schema Metadata
 
-Status: `PHASE_1_P1_A_IMPLEMENTATION_PENDING_CI`
+Status: `PHASE_1_P1_A_IMPLEMENTATION_COMPLETE`
 
 Approved prerequisite: `architect/docs/life-architect-v2/PHASE0_5_EXIT_DECISION.md`
 
@@ -156,9 +156,29 @@ The build inlines the adapter before `app.js` so production and combined E2E bui
 - original provenance preservation;
 - mixed old/new JSON roundtrip;
 - rollback readability;
-- absence of credential-shaped metadata fields.
+- absence of credential-shaped metadata fields;
+- exact runtime touch/import wiring;
+- adapter-before-runtime build order;
+- inclusion in the ordinary data test gate.
 
 The complete Phase 0.5 data/privacy tests, build, Playwright E2E and mobile evidence workflow remain mandatory.
+
+## Validation evidence
+
+The implementation head passed:
+
+- ordinary repository CI, including 17 focused additive-metadata assertions, the existing tombstone/privacy regressions, deterministic combined build and Playwright E2E;
+- mobile evidence in Chromium and WebKit across iPhone SE, iPhone 14, iPad Mini portrait and iPad landscape;
+- 117 of 117 mobile checks with zero failures;
+- 16 visually inspected PNG artifacts and 8 Playwright traces;
+- offline reload, service-worker update and browser import/export privacy smoke.
+
+Artifact digests for the validated implementation run:
+
+- mobile evidence: `sha256:d10a1ce716453a1b5b34dfc9b769e90ed83e9bdb509fb96cdd3afb23590afa2f`;
+- static preview: `sha256:52a11ccd0940dcbbf8a1f4f589033df5429af0ed95f2e5a20bbe21f629223537`.
+
+No unexplained visual change was found. The screenshots render the same application state across both engines and all four viewports.
 
 ## Stop conditions
 
@@ -184,7 +204,7 @@ No reverse data migration is required.
 
 ## Final markers
 
-`PHASE_1_ADDITIVE_SCHEMA_METADATA_DEFINED`
+`PHASE_1_ADDITIVE_SCHEMA_METADATA_COMPLETE`
 
 `BACKWARD_COMPATIBLE_OPTIONAL_FIELDS_ONLY`
 
