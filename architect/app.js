@@ -3350,8 +3350,16 @@ function deleteAxis(key) {
 }
 
 // ─── ЭКСПОРТ / ИМПОРТ ────────────────────────────────────────────
+// Обычный переносимый экспорт содержит пользовательские настройки, но не
+// параметры подключения конкретного устройства. Ключ пространства, URL
+// синк-сервера и служебные метки остаются локальными и не попадают в файл.
+function exportSafeCfg(cfg = CFG) {
+  const { spaceKey, apiUrl, lastSync, _ts, ...portable } = cfg || {};
+  return portable;
+}
 function exportData() {
-  const b = new Blob([JSON.stringify({exportedAt:new Date().toISOString(), db:DB, cfg:CFG}, null, 2)], {type:'application/json'});
+  const payload = {exportVersion:2, exportPolicy:'portable-no-connection-secrets', exportedAt:new Date().toISOString(), db:DB, cfg:exportSafeCfg(CFG)};
+  const b = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(b);
   a.download = `architect-${new Date().toISOString().slice(0,10)}.json`;
@@ -3400,7 +3408,13 @@ function handleImport(input) {
     try {
       const data = JSON.parse(e.target.result);
       if (data.db)  DB  = {...DEFAULT_DB,  ...data.db};
-      if (data.cfg) CFG = {...DEFAULT_CFG, ...data.cfg, axes:{...DEFAULT_CFG.axes,...(data.cfg.axes||{})}};
+      if (data.cfg) {
+        // Импорт не имеет права менять локальное подключение, даже если это
+        // старый экспорт, где поля ещё присутствовали.
+        const localConnection = {apiUrl:CFG.apiUrl || '', spaceKey:CFG.spaceKey || '', lastSync:CFG.lastSync || ''};
+        const {spaceKey:_fileSpaceKey, apiUrl:_fileApiUrl, lastSync:_fileLastSync, _ts:_fileTs, ...portableCfg} = data.cfg;
+        CFG = {...DEFAULT_CFG, ...portableCfg, axes:{...DEFAULT_CFG.axes,...(portableCfg.axes||{})}, ...localConnection};
+      }
       // legacy support
       if (data.insights) DB.insights = data.insights;
       persist(); closeOv('ov-import'); initAll();
