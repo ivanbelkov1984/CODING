@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 
+// One-time exact patch. The file is removed before the remediation PR is merged.
 const file = new URL('../app.js', import.meta.url);
 let source = await readFile(file, 'utf8');
 if (source.includes('function untomb(coll, id)')) {
