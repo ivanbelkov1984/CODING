@@ -584,13 +584,13 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .oqrow:active{opacity:.65}
 
 /* ── AI-ОБЗОР ──────────────────────────────────────────────────── */
-.dg-ai{margin:var(--s3) 0;padding:var(--s3);background:var(--purple-l,color-mix(in srgb,var(--accent) 12%,transparent));border-left:3px solid var(--purple,var(--accent));border-radius:0 var(--r8) var(--r8) 0;font-size:var(--tx3);line-height:1.6;color:var(--t2);white-space:pre-wrap}
+.dg-ai{margin:var(--s3) 0;padding:var(--s4);background:var(--purple-l,color-mix(in srgb,var(--accent) 12%,transparent));border:1px solid color-mix(in srgb,var(--purple,var(--accent)) 22%,transparent);border-radius:var(--r16);font-size:var(--tx3);line-height:1.6;color:var(--t2);white-space:pre-wrap}
 .dg-ai-badge{font-size:var(--tx2);font-weight:510;color:var(--purple,var(--accent));text-transform:uppercase;letter-spacing:.06em;margin-bottom:var(--s2)}
 .btn-xs{padding:3px 10px;font-size:var(--tx2);gap:3px}
 .btn-xs i,.btn-xs svg{width:12px;height:12px}
 
 /* ── ГОД НАЗАД ─────────────────────────────────────────────────── */
-.otd{margin-top:var(--s3);padding:var(--s3);background:var(--gold-l,var(--orange-l));border:1px solid var(--gold,var(--orange));border-left-width:3px;border-radius:var(--r12);cursor:pointer}
+.otd{margin-top:var(--s3);padding:var(--s4);background:var(--gold-l,var(--orange-l));border:1px solid color-mix(in srgb,var(--gold,var(--orange)) 35%,transparent);border-radius:var(--r16);cursor:pointer}
 .otd-h{font-size:var(--tx2);font-weight:510;color:var(--gold,var(--orange));text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
 .otd-t{font-size:var(--tx4);font-weight:500;color:var(--t1);line-height:1.3}
 .otd-b{font-size:var(--tx3);color:var(--t2);line-height:1.5;margin-top:2px}
@@ -711,8 +711,8 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .sph-tpl-b{border:1px solid var(--tc);color:var(--t1);background:var(--bg2);border-radius:12px;
   padding:8px 14px;font-size:var(--tx3);font-weight:500;cursor:pointer}
 .sph-tpl-b:active{transform:scale(.96)}
-.sph-card{background:var(--bg2);border:1px solid var(--bd);border-left:3px solid var(--sc);
-  border-radius:8px;padding:var(--s3) var(--s4);margin-bottom:var(--s2);cursor:pointer}
+.sph-card{background:var(--bg2);border:1px solid var(--bd);
+  border-radius:var(--r16);padding:var(--s4);margin-bottom:var(--s2);cursor:pointer}
 .sph-head{display:flex;align-items:center;gap:var(--s2)}
 .sph-ic{font-size:1.15rem}
 .sph-name{font-size:var(--tx5);font-weight:510;color:var(--t1);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -750,7 +750,7 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 
 /* ── КОНТЕКСТНЫЙ НАДЖ ──────────────────────────────────────────── */
 .nudge{display:flex;align-items:center;gap:var(--s2);margin:var(--s2) var(--s4) 0;padding:var(--s3);
-  background:var(--bg2);border:1px solid var(--blue);border-left-width:3px;border-radius:8px}
+  background:var(--bg2);border:1px solid color-mix(in srgb,var(--blue) 30%,transparent);border-radius:var(--r16)}
 .nudge-ic{font-size:1.1rem;flex:none}
 .nudge-tx{flex:1;min-width:0;font-size:var(--tx3);font-weight:500;color:var(--t1);line-height:1.35}
 .nudge-cta{flex:none;border:none;background:var(--blue-btn,var(--accent));color:#fff;border-radius:12px;padding:6px 12px;font-size:var(--tx2);font-weight:510;cursor:pointer}
@@ -832,15 +832,15 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 .tour-skip{background:none;border:none;color:var(--t3);font-size:var(--tx3);font-weight:500;cursor:pointer;margin-top:var(--s3);padding:var(--s2)}
 
 /* ── AI-разбор записи (в деталях инсайта) ──────────────────────── */
-.deeper{margin-top:var(--s3);padding:var(--s3);border:1px solid var(--purple,var(--accent));border-left-width:3px;
-  border-radius:var(--r12,12px);background:var(--purple-l,color-mix(in srgb,var(--accent) 12%,transparent))}
+.deeper{margin-top:var(--s3);padding:var(--s4);border:1px solid color-mix(in srgb,var(--purple,var(--accent)) 22%,transparent);
+  border-radius:var(--r16);background:var(--purple-l,color-mix(in srgb,var(--accent) 12%,transparent))}
 .deeper-load{color:var(--purple,var(--accent));font-size:var(--tx3);font-weight:500;font-style:italic}
 .deeper-an{font-size:var(--tx4);color:var(--t1);line-height:1.6;white-space:pre-wrap}
 
 /* ── ЖИВАЯ СЕТЬ (амбиентные кросс-доменные связи) ──────────────── */
 #home-ambient:empty{display:none}
 .amb{display:flex;align-items:flex-start;gap:var(--s3);margin:var(--s3) var(--s4) 0;padding:var(--s3);cursor:pointer;
-  background:var(--bg2);border:1px solid var(--purple,var(--accent));border-left-width:3px;border-radius:8px}
+  background:var(--bg2);border:1px solid color-mix(in srgb,var(--purple,var(--accent)) 22%,transparent);border-radius:var(--r16)}
 .amb+.amb{margin-top:var(--s2)}
 .amb-ic{font-size:1.2rem;flex:none;line-height:1.3}
 .amb-body{flex:1;min-width:0}
@@ -909,7 +909,7 @@ mark{background:var(--gold-l);color:var(--gold);border-radius:2px;padding:0 2px}
 /* Тепловая карта: лёгкая текстура-градиент в ячейке вместо плоского цвета */
 .hc{background-image:none}
 /* «Что помогает» — акцентная подсветка рамки (сигнатурный момент) */
-.si-card{border-left:3px solid var(--teal)}
+.si-card{border:1px solid color-mix(in srgb,var(--teal) 28%,transparent)}
 
 /* ═══════════════════════════════════════════════════════════════
    LINEAR DISCIPLINE — компонентный слой поверх токенов.
@@ -948,7 +948,7 @@ body{font-size:.9375rem;line-height:1.5}
 [class*="tg-"]{background:var(--bg-surface-3)!important;color:var(--t2)!important}
 
 /* Списки сфер: строки с разделителями, без карточных рамок */
-#spheres-list .sph-card{background:transparent;border:0;border-bottom:1px solid var(--border-subtle);border-left:2px solid var(--sc,var(--border-medium));border-radius:0;margin-bottom:0}
+#spheres-list .sph-card{background:transparent;border:0;border-bottom:1px solid var(--border-subtle);border-radius:0;margin-bottom:0}
 #spheres-list .sph-card:active{background:var(--bg-surface-2)}
 #spheres-list .sph-card:first-child{border-top:1px solid var(--border-subtle)}
 
@@ -1186,7 +1186,7 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .psy-game{font-size:var(--tx3);color:var(--t2);padding:3px 0}
 .psy-chain{font-size:var(--tx2);color:var(--t2);line-height:1.5;padding:5px 0;border-bottom:1px solid var(--bd);cursor:pointer}
 .psy-chain em{font-style:normal;color:var(--accent)}
-.psy-box{margin-top:var(--s3);background:var(--bg2);border:1px solid var(--bd);border-left:3px solid var(--accent);border-radius:8px;padding:var(--s3)}
+.psy-box{margin-top:var(--s3);background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r16);padding:var(--s4)}
 .psy-box-t{font-size:var(--tx1,.6875rem);font-weight:510;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:var(--s2)}
 .psy-row{display:flex;gap:var(--s3);font-size:var(--tx2);line-height:1.5;padding:3px 0}
 .psy-row span{flex:0 0 108px;color:var(--t4)}
@@ -1218,7 +1218,7 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .h-more.on{display:block}
 
 /* ── ЗДОРОВЬЕ: тяга/импульс — микро-интервенция на пике ─────────── */
-.cr-tip-box{background:var(--bg2);border:1px solid var(--bd);border-left:3px solid var(--orange);border-radius:8px;padding:var(--s3);margin:var(--s2) 0}
+.cr-tip-box{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r16);padding:var(--s4);margin:var(--s2) 0}
 .cr-tip-h{font-size:var(--tx3);color:var(--t1);font-weight:500;margin-bottom:var(--s2)}
 .cr-tip-row{font-size:var(--tx3);color:var(--t2);line-height:1.6}
 
