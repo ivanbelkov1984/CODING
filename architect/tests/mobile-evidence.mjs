@@ -76,10 +76,13 @@ async function runScenario(browser, engine, scenario, baseUrl) {
       await route.continue();
       return;
     }
+    const response = requestUrl.pathname.includes('/api/space/LOCAL-SPACE-KEY')
+      ? { db: {}, cfg: {}, updated_at: '2000-01-01T00:00:00.000Z' }
+      : { ok: true, synthetic: true };
     await route.fulfill({
       status: 200,
       contentType: 'application/json; charset=utf-8',
-      body: JSON.stringify({ ok: true, synthetic: true, data: null, payload: null }),
+      body: JSON.stringify(response),
     });
   });
   await context.addInitScript(() => {
@@ -152,7 +155,7 @@ async function runScenario(browser, engine, scenario, baseUrl) {
       const transfer = await page.evaluate(async () => {
         CFG.apiUrl = 'https://local-device.invalid';
         CFG.spaceKey = 'LOCAL-SPACE-KEY';
-        CFG.lastSync = 'LOCAL-SYNC';
+        CFG.lastSync = '2000-01-01T00:00:00.000Z';
         CFG.userName = 'Before Export';
         DB.insights = [{ id: 'mobile-export', title: 'Synthetic mobile export', body: 'synthetic only', _u: Date.now() }];
         let captured = null;
@@ -190,7 +193,7 @@ async function runScenario(browser, engine, scenario, baseUrl) {
       record(engine, scenario.name, 'browser export excludes connection fields', !transfer.exportedSpaceKey && !transfer.exportedApiUrl);
       record(engine, scenario.name, 'browser export preserves database', transfer.exportedDb === 'mobile-export');
       record(engine, scenario.name, 'browser import restores portable config and data', transfer.importedUser === 'Imported Portable User' && transfer.importedDb === 'mobile-import');
-      record(engine, scenario.name, 'browser import preserves local connection identity and rejects file sync metadata', transfer.localApi === 'https://local-device.invalid' && transfer.localSpace === 'LOCAL-SPACE-KEY' && transfer.localSync !== 'FILE-SYNC', `lastSync=${transfer.localSync}`);
+      record(engine, scenario.name, 'browser import preserves local connection and service timestamp', transfer.localApi === 'https://local-device.invalid' && transfer.localSpace === 'LOCAL-SPACE-KEY' && transfer.localSync === '2000-01-01T00:00:00.000Z', `lastSync=${transfer.localSync}`);
     }
 
     await page.evaluate(() => { try { goTo('sys'); } catch {} });
