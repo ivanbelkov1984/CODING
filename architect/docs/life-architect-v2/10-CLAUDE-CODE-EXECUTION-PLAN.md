@@ -2,7 +2,15 @@
 
 ## Fundamental rule
 
-Claude Code is implementer and repository analyst, not scientific authority. It receives approved contracts, finds actual integration points, proposes repository-grounded ADRs and builds one vertical slice at a time.
+Claude Code is implementer and repository analyst, not scientific, medical or psychological authority. It receives approved contracts, finds actual integration points, proposes repository-grounded ADRs and builds one vertical slice at a time.
+
+## Current repository baseline
+
+- existing vanilla-JS/offline-first PWA is preserved;
+- local-first/E2EE remains invariant;
+- Dual Realm (`Deep Space` / `Ethereal Light`) is already merged into `MAIN` through the existing CSS token layer;
+- do not introduce Next.js, React, TypeScript, Tailwind, shadcn, RxDB or a new application root without a separately approved migration ADR;
+- the v2 documentation branch is synchronized with the current design baseline.
 
 ## Session start
 
@@ -14,7 +22,11 @@ Claude Code is implementer and repository analyst, not scientific authority. It 
 
 If the slash skill is not discovered, instruct Claude to read:
 
-`architect/docs/life-architect-v2/00-INDEX.md`
+1. `CLAUDE.md`;
+2. `STUDIO_HANDOFF.md`;
+3. `architect/AGENT_BRIEF.md`;
+4. `architect/docs/life-architect-v2/00-INDEX.md`;
+5. this execution plan.
 
 Do not claim ultracode active unless `/status` confirms it. Project configuration may use a supported persistent effort level, but session command support is version-dependent.
 
@@ -27,11 +39,14 @@ No production changes. Audit:
 - local encryption and E2EE sync;
 - current check-in, diary, insights, psy annotations;
 - health/cravings/smartInsights/smartNudge;
-- AI routing and provider payloads;
+- AI routing, provider modules and exact payloads;
+- current prompt construction, safety/post-processing and logging;
+- structured-output capabilities and provider differences;
 - service worker/cache/versioning;
-- UI routes/components/tokens;
-- tests and synthetic seeding;
-- server schema and what remains ciphertext.
+- UI routes/components/current Dual Realm tokens;
+- tests, synthetic seeding and mock-provider options;
+- server schema and what remains ciphertext;
+- smallest safe module seams that avoid expanding `app.js`.
 
 Deliver:
 
@@ -40,7 +55,8 @@ Deliver:
 3. conflicts/debt;
 4. minimal migration sequence;
 5. Phase 1 task contracts;
-6. no code commit except audit docs.
+6. proposed repository path for LLM policy/validators, justified by actual code;
+7. no production-code commit except audit documents.
 
 ## Phase 1 — cross-cutting foundation
 
@@ -50,7 +66,8 @@ Deliver:
 - feature flags and regulatory quarantine;
 - invalidation/recompute infrastructure;
 - consent receipts;
-- synthetic fixtures.
+- synthetic fixtures;
+- versioned policy/hash registry usable later by the LLM synthesis layer.
 
 ## Phase 2 — Momentary State vertical slice
 
@@ -62,7 +79,7 @@ GoalDefinition, OutcomeDefinition, ActionEvent ontology, ActionTrajectory descri
 
 ## Phase 4 — Health Organizer foundation
 
-HealthProduct/Ingredient, MedicationPlan, IntakeEvent, symptom observations, source document metadata, encrypted blobs, visit-report draft. No interaction or diagnosis.
+HealthProduct/Ingredient, MedicationPlan, IntakeEvent, symptom observations, source-document metadata, encrypted blobs, visit-report draft. No interaction or diagnosis.
 
 ## Phase 5 — Document extraction
 
@@ -72,15 +89,31 @@ Local/manual first, then optional cloud extraction with consent. Draft field can
 
 Readiness dimensions, EWMA/null/linear comparisons, data-quality cards, ScenarioOutlook with prediction=null.
 
-## Phase 7 — unified UX
+## Phase 7 — LLM synthesis, voice and safety
 
-Today/Me/Path/Spheres/Health/Time/Reviews/Library information architecture, progressive disclosure, mobile light/dark QA.
+Read `16-LLM-SYNTHESIS-VOICE-AND-SAFETY.md` and `schemas/llm-synthesis.schema.json`.
 
-## Phase 8 — astrology integration
+Implement in this order:
 
-Integrate existing subsystem as separately labelled context; preserve rectification boundary; no empirical dependency.
+1. repository-grounded input/output adapters;
+2. versioned prompt-policy blocks;
+3. schema, input-reference, claim-class, astrology-isolation, health-safety, tone, numeric and temporal validators;
+4. synthetic eval fixtures and mock provider;
+5. one low-risk purpose such as `pattern_explanation`;
+6. user feedback/correction and audit trail;
+7. feature-flagged provider integration after consent review.
 
-## Phase 9 — advanced research previews
+Do not create an «oracle» persona, TypeScript file or new framework by assumption. Normative role: `EvidenceGroundedDirectMentor`.
+
+## Phase 8 — unified UX
+
+Today/Me/Path/Spheres/Health/Time/Reviews/Library information architecture, progressive disclosure, evidence drawer, mobile Dual Realm QA. New screens must use existing CSS variables and `design/tokens.json` rather than a parallel design system.
+
+## Phase 9 — astrology integration
+
+Integrate existing subsystem as separately labelled symbolic context; preserve rectification boundary; no empirical dependency. Removing the astrology section must not change the empirical conclusion.
+
+## Phase 10 — advanced research previews
 
 Changepoint candidate, JITAI learning, predictive models only behind research flags and gates.
 
@@ -116,7 +149,19 @@ node build.mjs --combined dist/app.html
 npm test
 ```
 
-UI: 390×844, light/dark, no console errors, offline reload, import/export roundtrip, profile isolation, E2EE sync, migration rollback fixture.
+UI: 390×844, Dual Realm light/dark, no console errors, reduced motion, offline reload, import/export roundtrip, profile isolation, E2EE sync and migration rollback fixture.
+
+LLM slice additionally verifies:
+
+- JSON Schema validation;
+- no nonexistent input references;
+- no probability without approved prediction;
+- astrology only in symbolic section;
+- no diagnosis/dose/interaction language;
+- no shame, coercion or unsupported mind-reading;
+- numeric/temporal fidelity;
+- safe degraded response on validator failure;
+- prompt-injection resistance with synthetic diary/document fixtures.
 
 ## Commit discipline
 
