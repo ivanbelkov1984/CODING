@@ -22,5 +22,13 @@ Open gaps do not block safe organizer MVP unless noted.
 | RG-EHDS-01 | 2027 implementing acts | FHIR-compatible, no certified claim | interoperability claim |
 | RG-ASTRO-01 | Incremental predictive value | symbolic only | empirical model |
 | RG-PRED-01 | Representative data and external evaluation | prediction=null | probabilities |
+| RG-LLM-01 | Current repository prompt/routing/provider seam | Phase 0 audit; no assumed TypeScript path | LLM implementation |
+| RG-LLM-02 | Semantic validator precision/recall in Russian | high-severity rules block; manual/synthetic review | broad auto display |
+| RG-LLM-03 | Adaptive directness and harm under exhaustion/grief/shame | conservative tone modes and user control | level-4 directness default |
+| RG-LLM-04 | Crisis detection and locale-specific escalation protocol | separate crisis-safe policy; no confrontational synthesis | crisis feature release |
+| RG-LLM-05 | Provider structured-output parity and retention | mock provider/local-only; explicit consent | multi-provider production |
+| RG-LLM-06 | Prompt-injection resistance in diary and uploaded documents | treat user/source text as data; deterministic validation | document-to-synthesis automation |
+| RG-LLM-07 | Evaluation of astrology-section counterfactual independence | symbolic section OFF by default; empirical text generated without astrology | combined synthesis release |
+| RG-DESIGN-01 | Dual Realm extension to all future v2 screens | use current tokens and screenshot QA | new-screen release |
 
 Every gap is represented with `research-gap.schema.json` and receives owner, closure criteria and evidence links before unblocking.
