@@ -1,0 +1,42 @@
+name: Temporary P1-B exact wiring
+
+on:
+  push:
+    branches:
+      - agent/phase-1-ai-policy-validators
+    paths:
+      - architect/scripts/apply-p1b-ai-policy.mjs
+      - .github/workflows/tmp-p1b-apply.yml
+  pull_request:
+    paths:
+      - architect/scripts/apply-p1b-ai-policy.mjs
+      - .github/workflows/tmp-p1b-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/phase-1-ai-policy-validators
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Apply exact P1-B wiring
+        working-directory: architect
+        run: node scripts/apply-p1b-ai-policy.mjs
+      - name: Validate focused policy and commit
+        working-directory: architect
+        run: |
+          node --check ai-policy.js
+          node --check app.js
+          node tests/evidence/ai_policy_validators_regression.mjs
+          git diff --check
+          git config user.name 'p1b-policy-bot'
+          git config user.email 'p1b-policy@architect.app'
+          git add app.js index.html build.mjs package.json tests/evidence/ai_policy_validators_regression.mjs
+          git commit -m 'feat(ai): govern requests and validate provider output'
+          git push origin HEAD:agent/phase-1-ai-policy-validators
