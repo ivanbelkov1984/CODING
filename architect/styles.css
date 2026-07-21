@@ -1294,3 +1294,11 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .fb-choice small{font-size:var(--tx2);line-height:1.4;color:var(--t3)}
 .fb-local-actions{display:flex;gap:var(--s2);flex-wrap:wrap}
 .fb-local-actions .btn{flex:1;min-width:130px}
+
+/* Phase 2 encrypted portable backup */
+.backup-sheet .sh-form{gap:var(--s3)}
+.backup-warning{padding:var(--s3);border-radius:var(--r12);background:var(--orange-l);color:var(--t2);font-size:var(--tx3);line-height:1.45;border:1px solid rgba(180,83,9,.18)}
+.backup-choice,.backup-ack{display:block;padding:var(--s3);border:1px solid var(--bd);border-radius:var(--r12);background:var(--card);font-size:var(--tx3);color:var(--t2)}
+.backup-choice span{display:block;margin-left:24px;color:var(--t3);font-size:var(--tx2);line-height:1.35}
+.backup-progress{min-height:36px;padding:var(--s3);border-radius:var(--r8);background:var(--bg2);color:var(--t3);font-size:var(--tx3);overflow-wrap:anywhere}
+#enc-pass1,#enc-pass2{width:100%;box-sizing:border-box;border:1px solid var(--bd);border-radius:var(--r12);padding:var(--s3);background:var(--card);color:var(--t1);font:inherit}

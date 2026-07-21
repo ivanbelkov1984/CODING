@@ -269,6 +269,7 @@
   <div class="sec-lbl">Данные</div>
   <div class="card mx">
     <div class="srow" onclick="openBackups()"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.85.99 6.57 2.6"/><polyline points="21 3 21 9 15 9"/></svg></div><span class="sl2">Резервные копии</span><span class="sv2">Восстановить</span></div>
+    <div class="srow" onclick="openOv('ov-enc-backup')"><div class="sic" style="background:var(--green-l)"><i data-lucide="shield-check" style="color:var(--green)"></i></div><span class="sl2">Зашифрованная копия</span><span class="sv2">Data/Complete</span></div>
     <div class="srow" onclick="exportData()"><div class="sic" style="background:var(--green-l)"><svg style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div><span class="sl2">Экспорт данных</span><span class="sv2">JSON</span></div>
     <div class="srow" onclick="exportMarkdown()"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg></div><span class="sl2">Экспорт дневника</span><span class="sv2">Markdown</span></div>
     <div class="srow" onclick="openOv('ov-import')"><div class="sic" style="background:var(--orange-l)"><svg style="color:var(--orange)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><span class="sl2">Импорт данных</span><span class="sv2">JSON</span></div>
@@ -1055,6 +1056,29 @@
   </div>
 </div>
 
+
+<!-- ЗАШИФРОВАННАЯ РЕЗЕРВНАЯ КОПИЯ -->
+<div class="ov" id="ov-enc-backup" onclick="if(event.target===this)closeOv('ov-enc-backup')">
+  <div class="sheet backup-sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Зашифрованная копия</div>
+    <div class="sh-form">
+      <div class="backup-warning">Пароль копии задаётся заново и не совпадает с синхронизацией. Если потерять пароль, файл не восстановить. Даже зашифрованный файл содержит чувствительную личную информацию.</div>
+      <label class="backup-choice"><input type="radio" name="enc-mode" value="data" checked> Данные без медиа <span>медиа будут помечены как неполные</span></label>
+      <label class="backup-choice"><input type="radio" name="enc-mode" value="complete"> Полная копия <span>включает локальные медиа из IndexedDB</span></label>
+      <input id="enc-pass1" type="password" placeholder="Новый пароль копии (минимум 8 символов)" autocomplete="new-password">
+      <input id="enc-pass2" type="password" placeholder="Повтори пароль" autocomplete="new-password">
+      <label class="backup-ack"><input id="enc-ack-loss" type="checkbox"> Я понимаю: без пароля копию не восстановить</label>
+      <label class="backup-ack"><input id="enc-ack-sensitive" type="checkbox"> Я понимаю: файл содержит чувствительные данные</label>
+      <div id="enc-progress" class="backup-progress">Готово к созданию</div>
+      <button class="btn btn-p btn-full" onclick="encryptedBackupExport()"><i data-lucide="download"></i>Создать .archbackup</button>
+      <input type="file" id="enc-file" accept=".archbackup,application/json" style="display:none" onchange="encryptedBackupRead(this)">
+      <button class="btn btn-s btn-full" onclick="document.getElementById('enc-file').click()"><i data-lucide="upload"></i>Восстановить из файла</button>
+      <button class="btn btn-s btn-full" onclick="closeOv('ov-enc-backup')">Закрыть</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── ИМПОРТ ИЗ CHATGPT: многолетний дневник из чатов → в систему ── -->
 <div class="ov" id="ov-gpt" onclick="if(event.target===this)closeOv('ov-gpt')">
   <div class="sheet">
@@ -1136,6 +1160,7 @@
 <script src="data-metadata.js"></script>
 <script src="ai-policy.js"></script>
 <script src="privacy-feedback.js"></script>
+<script src="backup-adapter.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

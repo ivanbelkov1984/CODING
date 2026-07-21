@@ -5659,3 +5659,55 @@ function rPsyView(elId) {
     ${egoHtml}${gamesHtml}${freshHtml}
   </div>`;
 }
+
+// ─── ЗАШИФРОВАННАЯ ПЕРЕНОСИМАЯ КОПИЯ (Phase 2 P2-A) ─────────────
+function encryptedBackupPassword() {
+  const p1 = $('enc-pass1')?.value || '', p2 = $('enc-pass2')?.value || '';
+  if (p1.length < 8) throw new Error('Пароль должен быть не короче 8 символов');
+  if (p1 !== p2) throw new Error('Пароли не совпадают');
+  if (!$('enc-ack-loss')?.checked || !$('enc-ack-sensitive')?.checked) throw new Error('Подтверди оба предупреждения');
+  return p1;
+}
+function encryptedBackupSetProgress(text) { const el = $('enc-progress'); if (el) el.textContent = text; }
+async function encryptedBackupExport() {
+  try {
+    const adapter = globalThis.ARCH_BACKUP;
+    if (!adapter) throw new Error('Адаптер копий недоступен');
+    const password = encryptedBackupPassword();
+    const mode = document.querySelector('input[name="enc-mode"]:checked')?.value || 'data';
+    encryptedBackupSetProgress(mode === 'complete' ? 'Собираю манифест и медиа…' : 'Собираю манифест данных…');
+    const envelope = await adapter.createBackup({ profileId: activeId(), db: DB, cfg: CFG, password, mode, mediaGet: idbGet });
+    const json = JSON.stringify(envelope, null, 2);
+    if (json.length > adapter.MAX_BACKUP_BYTES) throw new Error('Копия больше поддерживаемого лимита');
+    const blob = new Blob([json], {type:'application/json'});
+    const a = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    a.href = url; a.download = `architect-encrypted-${mode}-${new Date().toISOString().slice(0,10)}.archbackup`;
+    a.click(); setTimeout(() => URL.revokeObjectURL(url), 15000);
+    encryptedBackupSetProgress(`Готово: ${mode === 'complete' ? 'полная' : 'без медиа'}, ${Math.round(json.length/1024)} КБ`);
+    toast('Зашифрованная копия создана', 'ok');
+  } catch (e) { encryptedBackupSetProgress(e.message || 'Ошибка копии'); toast(e.message || 'Ошибка копии', 'warn'); }
+}
+async function encryptedBackupRead(input) {
+  const file = input.files && input.files[0]; input.value = '';
+  if (!file) return;
+  try {
+    const adapter = globalThis.ARCH_BACKUP;
+    if (file.size > adapter.MAX_BACKUP_BYTES) throw new Error(adapter.PUBLIC_ERRORS.too_large);
+    encryptedBackupSetProgress('Читаю заголовок файла…');
+    const envelope = JSON.parse(await file.text());
+    adapter.validateEnvelope(envelope, file.size);
+    const password = prompt('Пароль зашифрованной копии');
+    if (!password) return;
+    encryptedBackupSetProgress('Проверяю пароль и целостность…');
+    const plan = await adapter.planRestore(envelope, password, {size:file.size});
+    const summary = plan.summary;
+    const ok = confirm(`Восстановить в новый профиль?\nРежим: ${summary.mode}\nХранилищ: ${Object.keys(summary.stores).length}\nМедиа: ${summary.mediaCount}\nОтсутствует: ${summary.missingMedia.length}`);
+    if (!ok) { encryptedBackupSetProgress('Восстановление отменено до записи'); return; }
+    const result = await adapter.restore({decrypted:plan.decrypted, storage:localStorage, mediaPut:idbPut});
+    const profiles = loadProfiles();
+    profiles.push({id:result.profileId, name:'Восстановлено', color:PROFILE_COLORS[profiles.length % PROFILE_COLORS.length]});
+    saveProfiles(profiles); setActiveId(result.profileId); hydrate(); initAll(); closeOv('ov-enc-backup');
+    toast('Зашифрованная копия восстановлена', 'ok');
+  } catch (e) { encryptedBackupSetProgress(e.message || 'Восстановление не выполнено'); toast(e.message || 'Восстановление не выполнено', 'warn'); }
+}

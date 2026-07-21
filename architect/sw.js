@@ -6,7 +6,7 @@
 //  Версия кэша меняется при каждой сборке (__BUILD__), старые чистятся.
 // ═══════════════════════════════════════════════════════════════
 const V = 'arch-__BUILD__';
-const SHELL = ['./', './index.html', './lucide.js', './inter-latin.woff2', './inter-cyrillic.woff2', './manifest.json', './icon-192.png', './icon-512.png'];
+const SHELL = ['./', './index.html', './lucide.js', './backup-adapter.js', './inter-latin.woff2', './inter-cyrillic.woff2', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
   self.skipWaiting();

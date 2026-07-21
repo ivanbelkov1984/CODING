@@ -17,14 +17,14 @@ import { createHash } from 'crypto';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 // lucide.js — самохостинг иконок (без внешнего CDN); копируется рядом с HTML.
-const STATIC = ['lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2', 'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon-180.png'];
+const STATIC = ['lucide.js', 'backup-adapter.js', 'inter-latin.woff2', 'inter-cyrillic.woff2', 'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon-180.png'];
 
 // Версия сборки = короткий хеш контента (детерминированно): одинаковый код →
 // одинаковая версия → SW не «обновляется» зря, а изменённый код всегда даёт
 // новую версию кэша. Гармонично с уже работающим механизмом sw.js.
 async function contentVersion() {
   const h = createHash('sha256');
-  for (const f of ['index.html', 'styles.css', 'data-metadata.js', 'ai-policy.js', 'privacy-feedback.js', 'app.js', 'sw.js', 'lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) h.update(await readFile(join(DIR, f)));
+  for (const f of ['index.html', 'styles.css', 'data-metadata.js', 'ai-policy.js', 'privacy-feedback.js', 'backup-adapter.js', 'app.js', 'sw.js', 'lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) h.update(await readFile(join(DIR, f)));
   return 'v' + h.digest('hex').slice(0, 10);
 }
 
@@ -36,14 +36,16 @@ export async function buildCombined() {
   const metadata = await readFile(join(DIR, 'data-metadata.js'), 'utf8');
   const aiPolicy = await readFile(join(DIR, 'ai-policy.js'), 'utf8');
   const feedbackPrivacy = await readFile(join(DIR, 'privacy-feedback.js'), 'utf8');
+  const backupAdapter = await readFile(join(DIR, 'backup-adapter.js'), 'utf8');
   const js  = await readFile(join(DIR, 'app.js'), 'utf8');
   html = html.replace('<link rel="stylesheet" href="styles.css">', () => '<style>\n' + css + '\n</style>');
   html = html.replace('<script src="data-metadata.js"></script>', () => '<script>\n' + metadata + '\n</script>');
   html = html.replace('<script src="ai-policy.js"></script>', () => '<script>\n' + aiPolicy + '\n</script>');
   html = html.replace('<script src="privacy-feedback.js"></script>', () => '<script>\n' + feedbackPrivacy + '\n</script>');
+  html = html.replace('<script src="backup-adapter.js"></script>', () => '<script>\n' + backupAdapter + '\n</script>');
   html = html.replace('<script src="app.js"></script>', () => '<script>\n' + js + '\n</script>');
-  if (/href="styles\.css"|src="data-metadata\.js"|src="ai-policy\.js"|src="privacy-feedback\.js"|src="app\.js"/.test(html)) throw new Error('не удалось заинлайнить (осталась ссылка)');
-  if (!html.includes(metadata.slice(0, 80)) || !html.includes(aiPolicy.slice(0, 80)) || !html.includes(feedbackPrivacy.slice(0, 80)) || !html.includes(js.slice(0, 80))) throw new Error('JS не вставился дословно');
+  if (/href="styles\.css"|src="data-metadata\.js"|src="ai-policy\.js"|src="privacy-feedback\.js"|src="backup-adapter\.js"|src="app\.js"/.test(html)) throw new Error('не удалось заинлайнить (осталась ссылка)');
+  if (!html.includes(metadata.slice(0, 80)) || !html.includes(aiPolicy.slice(0, 80)) || !html.includes(feedbackPrivacy.slice(0, 80)) || !html.includes(backupAdapter.slice(0, 80)) || !html.includes(js.slice(0, 80))) throw new Error('JS не вставился дословно');
   return html;
 }
 
