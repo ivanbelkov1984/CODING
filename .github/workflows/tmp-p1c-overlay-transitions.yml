@@ -1,0 +1,50 @@
+name: Temporary P1-C deterministic overlays
+
+on:
+  push:
+    branches:
+      - agent/phase-1-privacy-feedback-boundaries
+    paths:
+      - architect/scripts/fix-p1c-overlay-transitions.mjs
+      - .github/workflows/tmp-p1c-overlay-transitions.yml
+  pull_request:
+    paths:
+      - architect/scripts/fix-p1c-overlay-transitions.mjs
+      - .github/workflows/tmp-p1c-overlay-transitions.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/phase-1-privacy-feedback-boundaries
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Remove overlay and sheet transitions
+        working-directory: architect
+        run: node scripts/fix-p1c-overlay-transitions.mjs
+      - name: Install dependencies
+        working-directory: architect
+        run: npm install
+      - name: Install Chromium
+        working-directory: architect
+        run: npx playwright install --with-deps chromium
+      - name: Validate focused and full web suite
+        working-directory: architect
+        run: |
+          node tests/evidence/privacy_feedback_regression.mjs
+          npm test
+          git diff --check
+      - name: Commit deterministic overlays
+        working-directory: architect
+        run: |
+          git config user.name 'p1c-privacy-bot'
+          git config user.email 'p1c-privacy@architect.app'
+          git add styles.css tests/evidence/privacy_feedback_regression.mjs
+          git commit -m 'fix(mobile): remove modal transition race'
+          git push origin HEAD:agent/phase-1-privacy-feedback-boundaries
