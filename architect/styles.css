@@ -184,10 +184,10 @@ textarea.field{resize:none;line-height:1.6;min-height:96px}
 .f-lbl{font-size:var(--tx2);font-weight:510;color:var(--t3);text-transform:uppercase;letter-spacing:.09em;display:block;margin-bottom:var(--s2)}
 
 /* ── SHEETS ────────────────────────────────────────────────────── */
-.ov{position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:100;display:flex;align-items:flex-end;opacity:0;pointer-events:none;transition:opacity var(--dur2) var(--e)}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:100;display:flex;align-items:flex-end;opacity:0;pointer-events:none;transition:none}
 [data-theme="dark"] .ov{background:rgba(0,0,0,.65)}
 .ov.on{opacity:1;pointer-events:all}
-.sheet{background:var(--sf);border-radius:var(--r20) var(--r20) 0 0;width:100%;max-height:90dvh;overflow-y:auto;padding-bottom:max(env(safe-area-inset-bottom),20px);border-top:1px solid var(--bd);box-shadow:none;transform:translateY(100%);transition:transform var(--dur3) var(--e)}
+.sheet{background:var(--sf);border-radius:var(--r20) var(--r20) 0 0;width:100%;max-height:90dvh;overflow-y:auto;padding-bottom:max(env(safe-area-inset-bottom),20px);border-top:1px solid var(--bd);box-shadow:none;transform:none;transition:none}
 .ov.on .sheet{transform:none}
 .sh-pull{width:36px;height:5px;background:var(--bd2);border-radius:var(--rF);margin:var(--s3) auto var(--s5)}
 .sh-title{font-size:var(--tx7);font-weight:510;color:var(--t1);letter-spacing:-.02em;padding:0 var(--s4) var(--s4)}
