@@ -1,0 +1,54 @@
+name: Temporary P2-A backup safety audit
+
+on:
+  push:
+    branches:
+      - codex/-agent/phase-2-encrypted-portable-backup
+    paths:
+      - .github/workflows/tmp-p2-backup-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Show actual media adapter boundaries
+        run: |
+          grep -n -E -A18 -B8 "(async )?function idb(Get|Put)|const idb(Get|Put)|MEDIA_DB|IDB" architect/app.js || true
+      - name: Run focused tests
+        working-directory: architect
+        run: |
+          npm install
+          npm run test:backup
+      - name: Run adversarial backup audit
+        working-directory: architect
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFile } from 'node:fs/promises';
+          import vm from 'node:vm';
+          import { webcrypto } from 'node:crypto';
+          const src = await readFile('backup-adapter.js','utf8');
+          const c={crypto:webcrypto,TextEncoder,TextDecoder,Date,JSON,Uint8Array,Array,Object,String,Error,Set,Promise,btoa:s=>Buffer.from(s,'binary').toString('base64'),atob:s=>Buffer.from(s,'base64').toString('binary')}; c.globalThis=c; vm.createContext(c); vm.runInContext(src,c); const B=c.ARCH_BACKUP;
+          const db=Object.fromEntries(B.STORES.map(k=>[k, Array.isArray(k)?[]:null]));
+          Object.assign(db,{insights:[{id:'i',media:['m1','m2']}],dreams:[],patterns:[],evolution:[],spiritual:[],checkins:[],spheres:[],sphereLogs:[],bots:[],chapters:[],digests:[],chats:[],cravings:[],oq:[],vit:{},env:{},_del:{},__ts:1});
+          const env=await B.createBackup({profileId:'p',db,cfg:{userName:'x'},password:'synthetic-password',mode:'complete',mediaGet:async id=>new Blob([id==='m1'?'alpha':'beta'],{type:'text/plain'})});
+          const dec=await B.decryptBackup(env,'synthetic-password');
+          console.log('media entries from real Blob:', JSON.stringify(dec.payload.media.entries));
+          const map=new Map(); const storage={getItem:k=>map.has(k)?map.get(k):null,setItem:(k,v)=>map.set(k,String(v)),removeItem:k=>map.delete(k)};
+          map.set('arch5_db_target',JSON.stringify({old:true})); map.set('arch5_cfg_target',JSON.stringify({oldCfg:true}));
+          let puts=0;
+          try { await B.restore({decrypted:dec,targetProfileId:'target',replace:true,storage,mediaPut:async()=>{puts++; if(puts===2) throw new Error('media failure');}}); } catch(e) { console.log('expected restore failure:',e.message); }
+          console.log('db after failed restore:',map.get('arch5_db_target'));
+          console.log('cfg after failed restore:',map.get('arch5_cfg_target'));
+          assert.deepEqual(JSON.parse(map.get('arch5_db_target')),{old:true},'DB rollback must restore old DB');
+          assert.deepEqual(JSON.parse(map.get('arch5_cfg_target')),{oldCfg:true},'CFG rollback must restore old CFG');
+          const bad={...env,kdf:{...env.kdf,iterations:999999}};
+          try { await B.decryptBackup(bad,'synthetic-password'); console.log('unexpected: altered KDF accepted'); } catch(e) { console.log('altered KDF rejected:',e.message); }
+          NODE
