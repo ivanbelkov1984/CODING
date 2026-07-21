@@ -1,0 +1,39 @@
+name: Temporary finalize P2-A contract
+
+on:
+  push:
+    branches:
+      - agent/phase-2-encrypted-portable-backup-contract
+    paths:
+      - .github/workflows/tmp-p2-contract-approve.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/phase-2-encrypted-portable-backup-contract
+      - name: Finalize contract evidence
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('architect/docs/life-architect-v2/PHASE2_ENCRYPTED_PORTABLE_BACKUP_CONTRACT.md')
+          text = p.read_text()
+          text = text.replace('Status: `PHASE_2_P2_A_CONTRACT_REVIEW`', 'Status: `PHASE_2_P2_A_CONTRACT_APPROVED`', 1)
+          anchor = '## Markers\n'
+          evidence = '''## Contract validation\n\nContract head before approval: `926e31b986350566afba62b1e9a26e0412f2b760`.\n\n- `CI — Архитектор`, run 293: `success`;\n- `Mobile evidence — Phase 0.5`, run 117: `success`;\n- PR changes exactly one permanent Markdown contract after temporary workflow removal;\n- Phase 1 exit PR #60 remains merged;\n- implementation remains not started;\n- authorization is limited strictly to P2-A.\n\n'''
+          if '## Contract validation' not in text:
+              text = text.replace(anchor, evidence + anchor, 1)
+          p.write_text(text)
+      - name: Commit finalized contract
+        run: |
+          git config user.name 'phase-contract-bot'
+          git config user.email 'phase-contract@architect.app'
+          git add architect/docs/life-architect-v2/PHASE2_ENCRYPTED_PORTABLE_BACKUP_CONTRACT.md
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'docs(phase2): approve encrypted backup contract'
+          git push origin HEAD:agent/phase-2-encrypted-portable-backup-contract
