@@ -1,6 +1,6 @@
 # Phase 1 Exit Decision
 
-Status: `PHASE_1_EXIT_PENDING_PR_VALIDATION`
+Status: `PHASE_1_EXIT_APPROVED_ON_MERGE`
 
 Decision date: 2026-07-21
 
@@ -84,7 +84,12 @@ Post-merge validation on baseline `179b017d3b14726ea55002d2103ef19f3a95390f`:
 - `CI — Архитектор`, run 288: `success`;
 - `Mobile evidence — Phase 0.5`, run 112: `success`.
 
-The merged Phase 1 implementation baseline is therefore validated independently after merge. This exit-decision PR must still pass its own ordinary and mobile CI before approval.
+Exit-decision PR validation on head `add1d561cddb4251d0d7d554262fef99b1f7a946`:
+
+- `CI — Архитектор`, run 290: `success`;
+- `Mobile evidence — Phase 0.5`, run 114: `success`.
+
+The implementation baseline and this one-file exit decision have therefore passed independent ordinary and mobile validation. Final approval becomes effective when this PR is merged into the canonical branch.
 
 ## Preserved safety boundaries
 
@@ -144,9 +149,9 @@ Each candidate requires its own branch, exact allowed/forbidden files, privacy/d
 
 ## Phase 1 exit acceptance
 
-Approve this exit only when:
+This exit is approved on merge because:
 
-- PRs #57, #58 and #59 remain merged in the canonical branch;
+- PRs #57, #58 and #59 are merged in the canonical branch;
 - post-merge ordinary and mobile CI on `179b017d3b14726ea55002d2103ef19f3a95390f` are green;
 - this documentation-only PR changes exactly one Markdown file;
 - no runtime, workflow, dependency, schema or deployment behavior changes;
@@ -160,7 +165,7 @@ This decision is documentation only. Reverting it changes no runtime behavior an
 
 Do not merge this exit decision if:
 
-- this PR's ordinary or mobile CI fails;
+- the final head's ordinary or mobile CI fails;
 - the branch contains any file other than this Markdown document;
 - any claim exceeds repository evidence;
 - the document is interpreted as automatic approval for native, gateway, health, analytics or storage migration work;
@@ -172,6 +177,6 @@ Do not merge this exit decision if:
 
 `PHASE_1_IMPLEMENTATION_BASELINE_VALIDATED`
 
-`PHASE_1_EXIT_PR_VALIDATION_PENDING`
+`PHASE_1_EXIT_APPROVED_ON_MERGE`
 
 `PHASE_2_NOT_AUTHORIZED`
