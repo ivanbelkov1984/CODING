@@ -288,8 +288,10 @@ await page.evaluate(() => {
   openOv('ov-add'); $('add-tx').value = 'Снова выгорание мешает начать важный проект — корень в страхе.';
   saveIns();
 });
-await page.waitForTimeout(250);
-ok(await page.evaluate(() => document.querySelectorAll('#react-card.on .rc-row').length >= 1), 'после сохранения инсайта появляется карточка-отклик');
+let reactCardVisible = true;
+try { await page.waitForSelector('#react-card.on .rc-row', { state: 'visible', timeout: 3000 }); }
+catch (_) { reactCardVisible = false; }
+ok(reactCardVisible, 'после сохранения инсайта появляется карточка-отклик');
 ok(await page.evaluate(() => /Перекликается|мысль|записей|запись/.test(document.getElementById('react-card').textContent)), 'отклик содержательный (эхо/темп/тема)');
 ok(await page.evaluate(() => !!document.querySelector('#h-vector .vec-card')), 'виджет «Вектор недели» построен');
 ok(await page.evaluate(() => /запис/.test(document.querySelector('#h-vector .vec-sub').textContent)), 'вектор показывает движение за неделю');
