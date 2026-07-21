@@ -1,6 +1,6 @@
 # Phase 2 Contract P2-A — Encrypted Portable Backup and Complete Restore
 
-Status: `PHASE_2_P2_A_CONTRACT_REVIEW`
+Status: `PHASE_2_P2_A_CONTRACT_APPROVED`
 
 Decision date: 2026-07-21
 
@@ -381,6 +381,17 @@ Approve this contract only when:
 - the feature remains user-controlled and PWA-compatible;
 - no claim implies encryption at rest for the application database;
 - Phase 2 authorization is limited strictly to P2-A.
+
+## Contract validation
+
+Contract head before approval: `926e31b986350566afba62b1e9a26e0412f2b760`.
+
+- `CI — Архитектор`, run 293: `success`;
+- `Mobile evidence — Phase 0.5`, run 117: `success`;
+- PR changes exactly one permanent Markdown contract after temporary workflow removal;
+- Phase 1 exit PR #60 remains merged;
+- implementation remains not started;
+- authorization is limited strictly to P2-A.
 
 ## Markers
 
