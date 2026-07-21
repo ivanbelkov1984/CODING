@@ -1,0 +1,49 @@
+name: Temporary P1-C deterministic react-card wait
+
+on:
+  push:
+    branches:
+      - agent/phase-1-privacy-feedback-boundaries
+    paths:
+      - architect/scripts/fix-p1c-react-card-wait.mjs
+      - .github/workflows/tmp-p1c-react-card-wait.yml
+  pull_request:
+    paths:
+      - architect/scripts/fix-p1c-react-card-wait.mjs
+      - .github/workflows/tmp-p1c-react-card-wait.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/phase-1-privacy-feedback-boundaries
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Replace fixed delay with DOM wait
+        working-directory: architect
+        run: node scripts/fix-p1c-react-card-wait.mjs
+      - name: Install dependencies
+        working-directory: architect
+        run: npm install
+      - name: Install Chromium
+        working-directory: architect
+        run: npx playwright install --with-deps chromium
+      - name: Validate full web suite
+        working-directory: architect
+        run: |
+          npm test
+          git diff --check
+      - name: Commit deterministic E2E wait
+        working-directory: architect
+        run: |
+          git config user.name 'p1c-privacy-bot'
+          git config user.email 'p1c-privacy@architect.app'
+          git add tests/e2e.mjs
+          git commit -m 'test(e2e): wait for rendered react card'
+          git push origin HEAD:agent/phase-1-privacy-feedback-boundaries
