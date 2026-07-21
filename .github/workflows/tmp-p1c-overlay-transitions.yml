@@ -1,4 +1,4 @@
-name: Temporary P1-C deterministic overlays
+name: Temporary P1-C deterministic overlay diagnostic
 
 on:
   push:
@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 jobs:
-  fix:
+  diagnostic:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,17 +34,37 @@ jobs:
       - name: Install Chromium
         working-directory: architect
         run: npx playwright install --with-deps chromium
-      - name: Validate focused and full web suite
+      - name: Capture focused and full web suite
+        id: tests
         working-directory: architect
+        shell: bash
         run: |
-          node tests/evidence/privacy_feedback_regression.mjs
-          npm test
-          git diff --check
-      - name: Commit deterministic overlays
+          mkdir -p test-results/p1c-overlay
+          set +e
+          {
+            node tests/evidence/privacy_feedback_regression.mjs
+            npm test
+            git diff --check
+          } > test-results/p1c-overlay/tests.log 2>&1
+          status=$?
+          cat test-results/p1c-overlay/tests.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload overlay diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1c-overlay-diagnostic
+          path: architect/test-results/p1c-overlay/tests.log
+          retention-days: 1
+      - name: Commit deterministic overlays after validation
+        if: steps.tests.outputs.status == '0'
         working-directory: architect
         run: |
           git config user.name 'p1c-privacy-bot'
           git config user.email 'p1c-privacy@architect.app'
-          git add styles.css tests/evidence/privacy_feedback_regression.mjs
+          git add styles.css
           git commit -m 'fix(mobile): remove modal transition race'
           git push origin HEAD:agent/phase-1-privacy-feedback-boundaries
+      - name: Fail if validation failed
+        if: steps.tests.outputs.status != '0'
+        run: exit 1
