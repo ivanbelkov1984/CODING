@@ -71,7 +71,7 @@ const stylesSource = await readFile(new URL('../../styles.css', import.meta.url)
   source = replaceOnce(
     source,
     `await test('focused privacy regression is part of ordinary data CI', () => {`,
-    `await test('active feedback sheets have deterministic cross-engine compositor state', () => {
+    `await test('active feedback sheets have deterministic cross-engine compositor state', async () => {
   assert.match(stylesSource, /\.ov\.on \.sheet,\.ov\.on \.onboard-sheet\{animation:none;opacity:1;transform:none\}/);
   assert.doesNotMatch(stylesSource, /@keyframes ovIn/);
   assert.match(await readFile(new URL('../mobile-evidence.mjs', import.meta.url), 'utf8'), /feedback sheet compositing state is stable/);
