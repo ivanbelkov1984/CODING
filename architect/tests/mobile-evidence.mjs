@@ -245,6 +245,26 @@ async function runScenario(browser, engine, scenario, baseUrl) {
       };
     });
     await page.locator('#ov-feedback.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.waitForTimeout(150);
+    const feedbackRender = await page.evaluate(() => {
+      const overlay = document.querySelector('#ov-feedback.on');
+      const sheet = overlay && overlay.querySelector('.sheet');
+      const overlayStyle = overlay ? getComputedStyle(overlay) : null;
+      const sheetStyle = sheet ? getComputedStyle(sheet) : null;
+      const rect = sheet ? sheet.getBoundingClientRect() : null;
+      return {
+        overlayOpacity: overlayStyle && overlayStyle.opacity,
+        sheetOpacity: sheetStyle && sheetStyle.opacity,
+        sheetTransform: sheetStyle && sheetStyle.transform,
+        sheetVisibility: sheetStyle && sheetStyle.visibility,
+        rect: rect && { width: rect.width, height: rect.height, top: rect.top, bottom: rect.bottom },
+      };
+    });
+    record(engine, scenario.name, 'feedback sheet compositing state is stable',
+      feedbackRender.overlayOpacity === '1' && feedbackRender.sheetOpacity === '1'
+      && feedbackRender.sheetTransform === 'none' && feedbackRender.sheetVisibility === 'visible'
+      && feedbackRender.rect?.width > 0 && feedbackRender.rect?.height > 0,
+      JSON.stringify(feedbackRender));
     record(engine, scenario.name, 'feedback contact redaction defaults on', feedbackPrivacy.redactChecked);
     record(engine, scenario.name, 'feedback technical context is explicit opt-in control', feedbackPrivacy.contextChecked);
     record(engine, scenario.name, 'feedback error attachment defaults off', !feedbackPrivacy.errorsChecked);

@@ -203,6 +203,7 @@ const indexSource = await readFile(new URL('../../index.html', import.meta.url),
 const buildSource = await readFile(new URL('../../build.mjs', import.meta.url), 'utf8');
 const packageJson = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
 const backendSource = await readFile(new URL('../../backend/feedback.js', import.meta.url), 'utf8');
+const stylesSource = await readFile(new URL('../../styles.css', import.meta.url), 'utf8');
 
 await test('privacy module loads before app and is inlined by deterministic build', () => {
   const tag = '<script src="privacy-feedback.js"></script>';
@@ -246,6 +247,12 @@ await test('backend uses the strict sanitizer, feedback limiter and public error
   assert.match(backendSource, /max:\s*5/);
   assert.match(backendSource, /publicFeedbackError/);
   assert.match(backendSource, /screenshot, context, space_hint/);
+});
+
+await test('active feedback sheets have deterministic cross-engine compositor state', async () => {
+  assert.match(stylesSource, /.ov.on .sheet,.ov.on .onboard-sheet{animation:none;opacity:1;transform:none}/);
+  assert.doesNotMatch(stylesSource, /@keyframes ovIn/);
+  assert.match(await readFile(new URL('../mobile-evidence.mjs', import.meta.url), 'utf8'), /feedback sheet compositing state is stable/);
 });
 
 await test('focused privacy regression is part of ordinary data CI', () => {

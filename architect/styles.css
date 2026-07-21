@@ -971,8 +971,8 @@ body{font-size:.9375rem;line-height:1.5}
 /* Оверлеи/шиты: modально = surface-4, radius 12, движение 100ms scale .98→1 */
 .ov{background:rgba(4,5,6,.6);backdrop-filter:blur(2px)}
 .sheet,.onboard-sheet{background:var(--bg-surface-4);border:1px solid var(--border-subtle);border-radius:12px 12px 0 0;box-shadow:none}
-.ov.on .sheet,.ov.on .onboard-sheet{animation:ovIn 100ms var(--e)}
-@keyframes ovIn{from{opacity:0;transform:scale(.98) translateY(4px)}to{opacity:1;transform:none}}
+/* Cross-engine safety: active sheets are deterministic, not left on a transparent compositor frame. */
+.ov.on .sheet,.ov.on .onboard-sheet{animation:none;opacity:1;transform:none}
 
 /* Иконки: monoline, по умолчанию третичные */
 .ib svg,.qa-ic svg{stroke-width:1.75}
