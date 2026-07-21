@@ -184,10 +184,10 @@ textarea.field{resize:none;line-height:1.6;min-height:96px}
 .f-lbl{font-size:var(--tx2);font-weight:510;color:var(--t3);text-transform:uppercase;letter-spacing:.09em;display:block;margin-bottom:var(--s2)}
 
 /* ── SHEETS ────────────────────────────────────────────────────── */
-.ov{position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:100;display:flex;align-items:flex-end;opacity:0;pointer-events:none;transition:opacity var(--dur2) var(--e)}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:100;display:flex;align-items:flex-end;opacity:0;pointer-events:none;transition:none}
 [data-theme="dark"] .ov{background:rgba(0,0,0,.65)}
 .ov.on{opacity:1;pointer-events:all}
-.sheet{background:var(--sf);border-radius:var(--r20) var(--r20) 0 0;width:100%;max-height:90dvh;overflow-y:auto;padding-bottom:max(env(safe-area-inset-bottom),20px);border-top:1px solid var(--bd);box-shadow:none;transform:translateY(100%);transition:transform var(--dur3) var(--e)}
+.sheet{background:var(--sf);border-radius:var(--r20) var(--r20) 0 0;width:100%;max-height:90dvh;overflow-y:auto;padding-bottom:max(env(safe-area-inset-bottom),20px);border-top:1px solid var(--bd);box-shadow:none;transform:none;transition:none}
 .ov.on .sheet{transform:none}
 .sh-pull{width:36px;height:5px;background:var(--bd2);border-radius:var(--rF);margin:var(--s3) auto var(--s5)}
 .sh-title{font-size:var(--tx7);font-weight:510;color:var(--t1);letter-spacing:-.02em;padding:0 var(--s4) var(--s4)}
@@ -971,8 +971,8 @@ body{font-size:.9375rem;line-height:1.5}
 /* Оверлеи/шиты: modально = surface-4, radius 12, движение 100ms scale .98→1 */
 .ov{background:rgba(4,5,6,.6);backdrop-filter:blur(2px)}
 .sheet,.onboard-sheet{background:var(--bg-surface-4);border:1px solid var(--border-subtle);border-radius:12px 12px 0 0;box-shadow:none}
-.ov.on .sheet,.ov.on .onboard-sheet{animation:ovIn 100ms var(--e)}
-@keyframes ovIn{from{opacity:0;transform:scale(.98) translateY(4px)}to{opacity:1;transform:none}}
+/* Cross-engine safety: active sheets are deterministic, not left on a transparent compositor frame. */
+.ov.on .sheet,.ov.on .onboard-sheet{animation:none;opacity:1;transform:none}
 
 /* Иконки: monoline, по умолчанию третичные */
 .ib svg,.qa-ic svg{stroke-width:1.75}
@@ -1284,3 +1284,13 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 #compass polygon[stroke-linejoin]{fill:color-mix(in srgb,var(--accent) 16%,transparent);stroke:var(--accent)}
 
 @media (prefers-reduced-motion: reduce){ body::after{animation:none} }
+
+/* P1-C · privacy-safe feedback controls */
+.fb-notice,.fb-disclosure,.fb-retention{font-size:var(--tx2);line-height:1.55;color:var(--t2);background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:var(--s3)}
+.fb-notice b,.fb-disclosure b,.fb-retention b{color:var(--t1);font-weight:510}
+.fb-choice{display:flex;align-items:flex-start;gap:var(--s3);padding:var(--s3);border:1px solid var(--bd);border-radius:8px;background:var(--sf);cursor:pointer}
+.fb-choice input{margin-top:3px;accent-color:var(--accent);flex-shrink:0}
+.fb-choice span{display:flex;flex-direction:column;gap:2px;font-size:var(--tx3);color:var(--t1)}
+.fb-choice small{font-size:var(--tx2);line-height:1.4;color:var(--t3)}
+.fb-local-actions{display:flex;gap:var(--s2);flex-wrap:wrap}
+.fb-local-actions .btn{flex:1;min-width:130px}

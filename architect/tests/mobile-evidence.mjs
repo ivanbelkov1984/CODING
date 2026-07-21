@@ -227,6 +227,54 @@ async function runScenario(browser, engine, scenario, baseUrl) {
     record(engine, scenario.name, 'viewport screenshot captured', true);
     await page.locator('#app').screenshot({ path: join(OUT, `${engine}-${scenario.name}-app.png`), animations: 'disabled', caret: 'hide' });
     record(engine, scenario.name, 'application element screenshot captured', true);
+
+    const feedbackPrivacy = await page.evaluate(() => {
+      ARCH_FEEDBACK_PRIVACY.clearErrors(localStorage);
+      ARCH_FEEDBACK_PRIVACY.pushError(localStorage, {
+        message: 'Synthetic mobile error owner@example.com sk-ant-abcdefghijklmnop123456',
+        filename: 'https://example.test/private/app.js?token=secret', lineno: 14,
+      });
+      openFeedback();
+      return {
+        redactChecked: !!document.getElementById('fb-redact')?.checked,
+        contextChecked: !!document.getElementById('fb-ctx')?.checked,
+        errorsChecked: !!document.getElementById('fb-errors')?.checked,
+        disclosure: document.getElementById('fb-disclosure')?.textContent || '',
+        retention: document.querySelector('#ov-feedback .fb-retention')?.textContent || '',
+        clearErrorsVisible: !!document.getElementById('fb-clear-errors')?.offsetParent,
+      };
+    });
+    await page.locator('#ov-feedback.on').waitFor({ state: 'visible', timeout: 5_000 });
+    await page.waitForTimeout(150);
+    const feedbackRender = await page.evaluate(() => {
+      const overlay = document.querySelector('#ov-feedback.on');
+      const sheet = overlay && overlay.querySelector('.sheet');
+      const overlayStyle = overlay ? getComputedStyle(overlay) : null;
+      const sheetStyle = sheet ? getComputedStyle(sheet) : null;
+      const rect = sheet ? sheet.getBoundingClientRect() : null;
+      return {
+        overlayOpacity: overlayStyle && overlayStyle.opacity,
+        sheetOpacity: sheetStyle && sheetStyle.opacity,
+        sheetTransform: sheetStyle && sheetStyle.transform,
+        sheetVisibility: sheetStyle && sheetStyle.visibility,
+        rect: rect && { width: rect.width, height: rect.height, top: rect.top, bottom: rect.bottom },
+      };
+    });
+    record(engine, scenario.name, 'feedback sheet compositing state is stable',
+      feedbackRender.overlayOpacity === '1' && feedbackRender.sheetOpacity === '1'
+      && feedbackRender.sheetTransform === 'none' && feedbackRender.sheetVisibility === 'visible'
+      && feedbackRender.rect?.width > 0 && feedbackRender.rect?.height > 0,
+      JSON.stringify(feedbackRender));
+    record(engine, scenario.name, 'feedback contact redaction defaults on', feedbackPrivacy.redactChecked);
+    record(engine, scenario.name, 'feedback technical context is explicit opt-in control', feedbackPrivacy.contextChecked);
+    record(engine, scenario.name, 'feedback error attachment defaults off', !feedbackPrivacy.errorsChecked);
+    record(engine, scenario.name, 'feedback disclosure excludes diary and keys', /дневник/i.test(feedbackPrivacy.disclosure) && /ключ/i.test(feedbackPrivacy.disclosure));
+    record(engine, scenario.name, 'feedback retention and owner access are visible', /без автоматического удаления/i.test(feedbackPrivacy.retention) && /владелец/i.test(feedbackPrivacy.retention));
+    record(engine, scenario.name, 'local diagnostic clear action is reachable', feedbackPrivacy.clearErrorsVisible);
+    await page.screenshot({ path: join(OUT, `${engine}-${scenario.name}-feedback.png`), fullPage: false, animations: 'disabled', caret: 'hide' });
+    record(engine, scenario.name, 'feedback consent screenshot captured', true);
+    await page.evaluate(() => closeOv('ov-feedback'));
+
     record(engine, scenario.name, 'no uncaught application page errors', pageErrors.length === 0, pageErrors.join(' | '));
   } finally {
     await context.tracing.stop({ path: join(OUT, `${engine}-${scenario.name}-trace.zip`) });

@@ -40,7 +40,7 @@
     <button class="navlink" data-tab="health" onclick="goTo('health')"><i data-lucide="heart-pulse"></i>Здоровье</button>
     <div class="side-div"></div>
     <button class="navlink" data-tab="settings" onclick="goTo('settings')"><i data-lucide="settings"></i>Настройки</button>
-    <button class="navlink" onclick="closeNav();openOv('ov-feedback')"><i data-lucide="message-square"></i>Обратная связь</button>
+    <button class="navlink" onclick="openFeedback()"><i data-lucide="message-square"></i>Обратная связь</button>
   </nav>
   <div class="side-foot"><span class="side-status" id="side-status">офлайн-first · зашифровано</span></div>
 </aside>
@@ -273,6 +273,11 @@
     <div class="srow" onclick="exportMarkdown()"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg></div><span class="sl2">Экспорт дневника</span><span class="sv2">Markdown</span></div>
     <div class="srow" onclick="openOv('ov-import')"><div class="sic" style="background:var(--orange-l)"><svg style="color:var(--orange)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><span class="sl2">Импорт данных</span><span class="sv2">JSON</span></div>
   </div>
+  <div class="sec-lbl">Поддержка и приватность</div>
+  <div class="card mx">
+    <div class="srow" onclick="openFeedback()"><div class="sic" style="background:var(--blue-l)"><i data-lucide="message-square" style="color:var(--blue-t)"></i></div><span class="sl2">Обратная связь</span><span class="sv2" id="fb-local-status">Локальные данные: —</span></div>
+    <div class="srow" onclick="openOv('ov-privacy')"><div class="sic" style="background:var(--green-l)"><i data-lucide="shield" style="color:var(--green)"></i></div><span class="sl2">Приватность</span><span class="sv2">Что и куда уходит</span></div>
+  </div>
   <div class="sec-lbl">Команды</div>
   <div class="cmd-wrap mx" style="position:relative">
     <div class="cmd-bar">
@@ -425,9 +430,18 @@
     <div class="sh-pull"></div>
     <div class="sh-title">Обратная связь</div>
     <div class="sh-form">
+      <div class="fb-notice"><b>Добровольный отдельный канал.</b> Дневник и записи никогда не прикрепляются автоматически.</div>
       <div class="f-lbl">Что расскажешь?</div>
-      <textarea class="field" id="fb-text" rows="4" placeholder="Похвала, идея, жалоба или ошибка — своими словами"></textarea>
-      <label class="fb-ctx-row"><input type="checkbox" id="fb-ctx" checked>Приложить тех-контекст: версия, экран, устройство</label>
+      <textarea class="field" id="fb-text" rows="4" maxlength="4000" placeholder="Похвала, идея, жалоба или ошибка — своими словами"></textarea>
+      <label class="fb-choice"><input type="checkbox" id="fb-redact" checked onchange="renderFeedbackDisclosure()"><span><b>Скрыть email и телефоны</b><small>API-ключи и токены скрываются всегда</small></span></label>
+      <label class="fb-choice"><input type="checkbox" id="fb-ctx" checked onchange="renderFeedbackDisclosure()"><span><b>Приложить тех-контекст</b><small>Версия, экран, устройство, язык, размер и сеть</small></span></label>
+      <label class="fb-choice"><input type="checkbox" id="fb-errors" onchange="renderFeedbackDisclosure()"><span><b>Приложить последние ошибки</b><small id="fb-errors-count">Ошибок нет</small></span></label>
+      <div class="fb-disclosure" id="fb-disclosure"></div>
+      <div class="fb-retention">После отправки текст и выбранный контекст хранятся <b>без автоматического удаления</b>. Доступ к сырому сообщению имеет владелец проекта. Дневник, check-in, сны и ключи не прикрепляются.</div>
+      <div class="fb-local-actions">
+        <button class="btn btn-s btn-sm" id="fb-clear-errors" onclick="clearFeedbackDiagnostics()">Очистить ошибки</button>
+        <button class="btn btn-s btn-sm" id="fb-clear-outbox" onclick="clearFeedbackOutbox()">Очистить очередь</button>
+      </div>
       <button class="btn btn-p btn-full" onclick="sendFeedback()">Отправить</button>
       <button class="btn btn-s btn-full" onclick="closeOv('ov-feedback')">Позже</button>
     </div>
@@ -672,6 +686,10 @@
       </div>
       <div class="card mx" style="padding:1rem;margin-bottom:.6rem">
         <div class="si-text" style="color:var(--t3)">Без парольной фразы синхронизация идёт в открытом виде. Задай фразу, чтобы включить end-to-end.</div>
+      </div>
+      <div class="card mx" style="padding:1rem;margin-bottom:.6rem">
+        <div class="si-text" style="font-weight:700;margin-bottom:.35rem">💬 Обратная связь — отдельный канал</div>
+        <div class="si-text">Отправляется только текст формы и выбранный тобой тех-контекст. Дневник, check-in, сны, конфигурация и ключи не прикрепляются. Последние ошибки добавляются только отдельной галочкой. Сообщение хранится без автоматического удаления; доступ к сырому сообщению имеет владелец проекта.</div>
       </div>
       <button class="btn btn-p btn-full" onclick="closeOv('ov-privacy')">Понятно</button>
     </div>
@@ -1117,6 +1135,7 @@
 <script>window.ARCHITECT_API='https://coding-production-1398.up.railway.app';</script>
 <script src="data-metadata.js"></script>
 <script src="ai-policy.js"></script>
+<script src="privacy-feedback.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
