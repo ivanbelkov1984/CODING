@@ -1,6 +1,6 @@
 # Phase 1 Privacy-Safe Feedback and Diagnostics
 
-Status: `PHASE_1_P1_C_IMPLEMENTATION_PENDING_CI`
+Status: `PHASE_1_P1_C_IMPLEMENTATION_COMPLETE`
 
 Approved prerequisites:
 
@@ -125,17 +125,61 @@ Feedback localStorage keys, error buffers, outbox contents and sent IDs are not 
 
 Focused tests freeze this boundary.
 
+## Cross-engine rendering hardening
+
+Mobile evidence found a real compositor race in the existing modal-sheet presentation. The feedback overlay could be present while the sheet remained on an intermediate transparent or translated frame in WebKit and some tablet runs.
+
+The non-essential overlay and sheet transitions were removed. Closed overlays still use `opacity:0` and `pointer-events:none`; opened overlays and sheets switch immediately to their deterministic final state.
+
+The mobile harness now verifies the computed feedback-sheet state before taking evidence:
+
+- overlay opacity is `1`;
+- sheet opacity is `1`;
+- sheet transform is `none`;
+- sheet visibility is `visible`;
+- the sheet has non-zero dimensions.
+
+This change affects only modal presentation timing. Feedback content, data, sync, AI, health and backend semantics are unchanged.
+
 ## Mobile evidence
 
 The permanent mobile evidence harness opens the feedback form on every Chromium/WebKit and phone/tablet scenario and verifies:
 
 - disclosure and consent controls are visible;
-- error attachment is opt-in;
-- diary exclusion, retention and access text is present;
+- contact masking defaults on;
+- technical context is a visible choice;
+- error attachment defaults off;
+- diary and key exclusion is disclosed;
+- retention and owner access are disclosed;
 - local diagnostic clear controls are reachable;
+- compositor state is stable;
 - a dedicated feedback screenshot is produced for every engine/viewport combination.
 
 No real feedback request is made in mobile evidence.
+
+## Validation evidence
+
+Final validated implementation head before this documentation-only status update: `20cd04906b83a9e6d1fcbf260aa9196eedbcf033`.
+
+The implementation passed:
+
+- 25 focused privacy/feedback assertions;
+- all existing tombstone, export-privacy, additive-metadata and AI-policy regressions;
+- deterministic combined build;
+- full Chromium E2E: 170 of 170 checks;
+- ordinary PR merge-ref CI;
+- mobile evidence: 181 of 181 checks with zero failures;
+- Chromium and WebKit across iPhone SE, iPhone 14, iPad Mini portrait and iPad landscape;
+- 24 PNG artifacts: viewport, application and feedback-consent evidence for all eight engine/viewport combinations;
+- 8 Playwright traces;
+- offline reload, service-worker update and browser import/export privacy smoke.
+
+All eight final feedback screenshots were visually inspected. The form, disclosure, checkboxes and local clear controls are fully rendered and readable in both browser engines on phone and tablet layouts.
+
+Validated artifact digests:
+
+- mobile evidence: `sha256:1a50f640e89e602b7d531a21cf2b0456dced2c7168884302994732b3623a0417`;
+- static preview: `sha256:8968da4996aa201ddd8fbe10fba36d858fbcfeb97add47ad0a986560d762ebd8`.
 
 ## Rollback
 
@@ -143,32 +187,35 @@ No real feedback request is made in mobile evidence.
 2. Keep the local diagnostic/outbox clear functions available.
 3. Restore the previous feedback backend handler if required.
 4. Remove privacy-module build wiring and focused tests.
+5. Existing local feedback keys may be cleared without touching diary or sync data.
 
 No diary record or sync migration is involved.
 
-## Stop conditions
+## Stop conditions verified
 
-Do not merge if:
+The final implementation does not:
 
-- diary or configuration content can enter feedback implicitly;
-- error attachment is enabled by default;
-- credential redaction can be disabled;
-- a 4xx response is queued forever;
-- server context accepts arbitrary fields;
-- internal backend errors are returned to clients;
-- retention/access disclosure is hidden or misleading;
-- ordinary or mobile CI fails;
-- consent/error mobile screenshots are missing;
-- a visual regression appears.
+- attach diary or configuration content implicitly;
+- enable error attachment by default;
+- permit credential-redaction opt-out;
+- queue rejected 4xx payloads indefinitely;
+- accept arbitrary server context fields;
+- return internal backend exceptions;
+- hide or misrepresent retention/access;
+- leave modal sheets in an intermediate compositor state.
 
-## Markers
+## Final markers
 
-`PHASE_1_PRIVACY_FEEDBACK_BOUNDARY_DEFINED`
+`PHASE_1_PRIVACY_BOUNDARIES_COMPLETE`
 
 `DIARY_NEVER_ATTACHED`
 
 `ERROR_ATTACHMENT_EXPLICIT_OPT_IN`
 
+`SERVER_MINIMIZATION_ENFORCED`
+
 `NO_AUTOMATIC_RETENTION_PROMISE`
 
-`PHASE_1_P1_C_PENDING_VALIDATION`
+`CROSS_ENGINE_FEEDBACK_EVIDENCE_COMPLETE`
+
+`PHASE_1_NEXT_CONTRACT_NOT_STARTED`
