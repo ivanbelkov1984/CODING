@@ -462,6 +462,31 @@
   </div>
 </div>
 
+
+<!-- ENCRYPTED PORTABLE BACKUP -->
+<div class="ov" id="ov-encrypted-backup" onclick="if(event.target===this)closeOv('ov-encrypted-backup')">
+  <div class="sheet" data-evidence="encrypted-backup-sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Encrypted portable backup</div>
+    <div class="sh-form">
+      <label><input type="radio" name="backup-mode" id="backup-mode-data" checked> Data-only backup (media incomplete)</label>
+      <label><input type="radio" name="backup-mode" id="backup-mode-complete"> Complete backup (includes IndexedDB media bytes)</label>
+      <input class="field" id="backup-pass" type="password" placeholder="New backup password">
+      <input class="field" id="backup-pass2" type="password" placeholder="Repeat backup password">
+      <label><input id="backup-ack-pass" type="checkbox"> I understand losing this password makes the file unrecoverable.</label>
+      <label><input id="backup-ack-sensitive" type="checkbox"> I understand the encrypted file still contains sensitive personal data.</label>
+      <button class="btn btn-p btn-full" onclick="createEncryptedPortableBackup()">Create encrypted backup</button>
+      <hr>
+      <input class="field" id="restore-pass" type="password" placeholder="Restore password">
+      <label><input type="radio" name="restore-dest" id="restore-dest-new" checked> Restore as a new profile</label>
+      <label><input type="radio" name="restore-dest" id="restore-dest-replace"> Replace current selected profile</label>
+      <label><input id="restore-confirm-replace" type="checkbox"> Second confirmation: permanently replace the selected profile after validation.</label>
+      <label class="btn btn-s btn-full" style="cursor:pointer">Choose encrypted backup file<input type="file" accept="application/json" style="display:none" onchange="restoreEncryptedPortableBackup(this)"></label>
+      <div id="backup-status" class="bk-cur" role="status" aria-live="polite">Ready.</div>
+    </div>
+  </div>
+</div>
+
 <!-- НОВЫЙ ИНСАЙТ -->
 <div class="ov" id="ov-add" onclick="if(event.target===this)closeOv('ov-add')">
   <div class="sheet">

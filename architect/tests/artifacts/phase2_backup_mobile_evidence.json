@@ -1,0 +1,97 @@
+{
+  "generatedAt": "2026-07-21T09:27:34.511Z",
+  "engines": {
+    "chromium-mobile": [
+      {
+        "name": "opening encrypted backup sheet",
+        "status": "covered"
+      },
+      {
+        "name": "password mismatch",
+        "status": "covered"
+      },
+      {
+        "name": "missing acknowledgements",
+        "status": "covered"
+      },
+      {
+        "name": "creating data-only backup",
+        "status": "covered"
+      },
+      {
+        "name": "creating complete backup",
+        "status": "covered"
+      },
+      {
+        "name": "wrong-password restore",
+        "status": "covered"
+      },
+      {
+        "name": "corrupted-file restore",
+        "status": "covered"
+      },
+      {
+        "name": "cancel before mutation",
+        "status": "covered"
+      },
+      {
+        "name": "successful new-profile restore",
+        "status": "covered"
+      },
+      {
+        "name": "successful existing-profile replacement",
+        "status": "covered"
+      },
+      {
+        "name": "visible progress and final status",
+        "status": "covered"
+      }
+    ],
+    "webkit-mobile": [
+      {
+        "name": "opening encrypted backup sheet",
+        "status": "covered"
+      },
+      {
+        "name": "password mismatch",
+        "status": "covered"
+      },
+      {
+        "name": "missing acknowledgements",
+        "status": "covered"
+      },
+      {
+        "name": "creating data-only backup",
+        "status": "covered"
+      },
+      {
+        "name": "creating complete backup",
+        "status": "covered"
+      },
+      {
+        "name": "wrong-password restore",
+        "status": "covered"
+      },
+      {
+        "name": "corrupted-file restore",
+        "status": "covered"
+      },
+      {
+        "name": "cancel before mutation",
+        "status": "covered"
+      },
+      {
+        "name": "successful new-profile restore",
+        "status": "covered"
+      },
+      {
+        "name": "successful existing-profile replacement",
+        "status": "covered"
+      },
+      {
+        "name": "visible progress and final status",
+        "status": "covered"
+      }
+    ]
+  }
+}

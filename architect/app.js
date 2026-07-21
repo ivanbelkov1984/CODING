@@ -240,7 +240,7 @@ function rBackups() {
     ? snaps.map(s => `<div class="srow"><div class="bk-info"><span class="sl2">${s.date === todayKey() ? 'Сегодня' : s.date}</span><span class="sv2">${s.n} ${pl(s.n,'запись','записи','записей')}</span></div>
         <button class="btn btn-s btn-xs" onclick="restoreSnapshot('${s.key}')">Восстановить</button></div>`).join('')
     : `<div class="bk-empty">Снимки появятся автоматически по мере пользования (хранятся 7 дней).</div>`;
-  html += `<div style="padding-top:var(--s3)"><button class="btn btn-p btn-sm btn-full" onclick="exportData()"><i data-lucide="download"></i>Скачать копию на устройство (JSON)</button></div>`;
+  html += `<div style="padding-top:var(--s3);display:grid;gap:var(--s2)"><button class="btn btn-p btn-sm btn-full" onclick="openEncryptedBackupSheet()"><i data-lucide="shield"></i>Encrypted portable backup</button><button class="btn btn-s btn-sm btn-full" onclick="exportData()"><i data-lucide="download"></i>Скачать копию на устройство (JSON)</button></div>`;
   el.innerHTML = html;
 }
 
@@ -3431,6 +3431,69 @@ function handleImport(input) {
     } catch(err) { toast('Ошибка формата JSON', 'warn'); }
   };
   reader.readAsText(file);
+}
+
+
+// ─── PHASE 2: encrypted portable backup / transactional restore ───
+let BACKUP_PROGRESS = '';
+const backupSetStatus = (msg, tp='') => { BACKUP_PROGRESS = msg; const el = $('backup-status'); if (el) el.textContent = msg; if (tp && typeof toast === 'function') toast(msg, tp); };
+function openEncryptedBackupSheet() { backupSetStatus('Ready: choose data-only or complete backup, then enter a backup password.'); openOv('ov-encrypted-backup'); }
+async function backupCore() { return import('./backup-core.mjs'); }
+async function collectBackupMedia(mode) {
+  if (mode !== 'complete') return [];
+  const ids = new Set(); (DB.insights || []).forEach(i => (i.media || []).forEach(id => ids.add(id)));
+  const media = []; let total = 0;
+  for (const id of ids) {
+    const item = await idbGet(id); if (!item) throw new Error('Media reference missing: ' + id);
+    const source = item.blob || item.bytes || item.data;
+    const bytes = typeof source === 'string' ? new TextEncoder().encode(source) : source;
+    const mime = item.mime || (item.type === 'audio' ? 'audio/webm' : item.type === 'image' ? 'image/jpeg' : 'application/octet-stream');
+    media.push({ id, mime, bytes }); total += bytes.byteLength || bytes.size || String(source || '').length;
+    backupSetStatus(`Collecting media ${media.length}/${ids.size} (${total} bytes)`);
+  }
+  return media;
+}
+async function createEncryptedPortableBackup() {
+  const mode = $('backup-mode-complete')?.checked ? 'complete' : 'data';
+  const pw = $('backup-pass')?.value || '', pw2 = $('backup-pass2')?.value || '';
+  if (!pw || pw !== pw2) { backupSetStatus('Password mismatch', 'warn'); return; }
+  if (!$('backup-ack-pass')?.checked || !$('backup-ack-sensitive')?.checked) { backupSetStatus('Missing acknowledgements', 'warn'); return; }
+  try {
+    backupSetStatus('Encrypting backup with PBKDF2-SHA-256 600,000 iterations…');
+    const core = await backupCore();
+    const envelope = await core.createEncryptedBackup({ db: DB, cfg: exportSafeCfg(CFG), media: await collectBackupMedia(mode) }, pw, { mode });
+    const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `architect-encrypted-${mode}-${new Date().toISOString().slice(0,10)}.json`; a.click();
+    backupSetStatus(mode === 'complete' ? 'Complete backup created' : 'Data-only backup created', 'ok');
+  } catch (e) { backupSetStatus('Backup failed: ' + e.message, 'warn'); }
+}
+function makeBrowserRestoreStore() {
+  return {
+    async snapshot() { const profiles = loadProfiles(); const active = activeId(); const slots = {}; profiles.forEach(p => { slots[p.id] = { db: localStorage.getItem(dbKey(p.id)), cfg: localStorage.getItem(cfgKey(p.id)), mediaIds: [] }; }); return { profiles, active, slots }; },
+    async createProfile(name) { const list = loadProfiles(); const id = 'p' + Date.now(); list.push({ id, name, color: PROFILE_COLORS[list.length % PROFILE_COLORS.length] }); saveProfiles(list); return id; },
+    async writeDb(id, db) { localStorage.setItem(dbKey(id), JSON.stringify({ ...DEFAULT_DB, ...db })); },
+    async writeCfg(id, cfg) { localStorage.setItem(cfgKey(id), JSON.stringify({ ...DEFAULT_CFG, ...cfg, axes: { ...DEFAULT_CFG.axes, ...(cfg.axes || {}) } })); },
+    async writeMedia(_id, mid, blob) { await idbPut(mid, { data: URL.createObjectURL(blob), blob, mime: blob.type, type: blob.type.startsWith('audio/') ? 'audio' : 'image', createdAt: nowISO() }); },
+    async verify(id, payload) { JSON.parse(localStorage.getItem(dbKey(id))); JSON.parse(localStorage.getItem(cfgKey(id))); for (const m of payload.media) { const item = await idbGet(m.id); if (!item) throw new Error('media verification failed'); } },
+    async activateProfile(id) { setActiveId(id); hydrate(); initAll(); },
+    async rollback(snap, ctx) { if (ctx && ctx.writtenMedia) for (const id of ctx.writtenMedia) await idbDel(id).catch(() => {}); saveProfiles(snap.profiles); setActiveId(snap.active); Object.entries(snap.slots).forEach(([id, v]) => { v.db == null ? localStorage.removeItem(dbKey(id)) : localStorage.setItem(dbKey(id), v.db); v.cfg == null ? localStorage.removeItem(cfgKey(id)) : localStorage.setItem(cfgKey(id), v.cfg); }); hydrate(); }
+  };
+}
+async function restoreEncryptedPortableBackup(input) {
+  const file = input.files && input.files[0]; if (!file) return;
+  const pw = $('restore-pass')?.value || ''; if (!pw) { backupSetStatus('Enter restore password', 'warn'); return; }
+  const destination = $('restore-dest-replace')?.checked ? 'replace' : 'new';
+  const confirmReplace = !!$('restore-confirm-replace')?.checked;
+  if (destination === 'replace' && !confirmReplace) { backupSetStatus('Existing-profile replacement requires second confirmation', 'warn'); return; }
+  try {
+    backupSetStatus('Validating encrypted envelope before mutation…');
+    const core = await backupCore();
+    const envelope = JSON.parse(await file.text());
+    const payload = await core.decryptAndValidateBackup(envelope, pw);
+    backupSetStatus('Restoring transactionally…');
+    await core.restoreTransactionally(payload, makeBrowserRestoreStore(), { destination, targetProfileId: activeId(), confirmReplace, profileName: 'Restored ' + new Date().toISOString().slice(0,10) });
+    backupSetStatus(destination === 'replace' ? 'Existing profile replaced successfully' : 'New profile restored successfully', 'ok');
+  } catch (e) { backupSetStatus('Restore failed before activation or rolled back: ' + e.message, 'warn'); } finally { input.value = ''; }
 }
 
 // ═════════════════════════════════════════════════════════════════

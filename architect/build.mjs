@@ -17,14 +17,14 @@ import { createHash } from 'crypto';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 // lucide.js — самохостинг иконок (без внешнего CDN); копируется рядом с HTML.
-const STATIC = ['lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2', 'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon-180.png'];
+const STATIC = ['lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2', 'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon-180.png', 'backup-core.mjs'];
 
 // Версия сборки = короткий хеш контента (детерминированно): одинаковый код →
 // одинаковая версия → SW не «обновляется» зря, а изменённый код всегда даёт
 // новую версию кэша. Гармонично с уже работающим механизмом sw.js.
 async function contentVersion() {
   const h = createHash('sha256');
-  for (const f of ['index.html', 'styles.css', 'data-metadata.js', 'ai-policy.js', 'privacy-feedback.js', 'app.js', 'sw.js', 'lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) h.update(await readFile(join(DIR, f)));
+  for (const f of ['index.html', 'styles.css', 'data-metadata.js', 'ai-policy.js', 'privacy-feedback.js', 'backup-core.mjs', 'app.js', 'sw.js', 'lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) h.update(await readFile(join(DIR, f)));
   return 'v' + h.digest('hex').slice(0, 10);
 }
 
@@ -56,7 +56,7 @@ async function main() {
     await mkdir(dirname(out), { recursive: true });
     await writeFile(out, await buildCombined());
     // рядом с HTML — для локальных ссылок (иконки + шрифт)
-    for (const f of ['lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) await copyFile(join(DIR, f), join(dirname(out), f));
+    for (const f of ['lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2', 'backup-core.mjs']) await copyFile(join(DIR, f), join(dirname(out), f));
     console.log('combined →', out);
     return;
   }
