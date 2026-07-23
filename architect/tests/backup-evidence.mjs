@@ -92,12 +92,15 @@ async function main() {
   const engine = ENGINE === 'webkit' ? pw.webkit : pw.chromium;
   const browser = await engine.launch({ executablePath: EXEC });
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, acceptDownloads: true });
+  // Никаких обращений к production backend/внешним сервисам: evidence работает
+  // только с локальным synthetic-профилем. Блокируем эти хосты на сетевом слое.
+  await ctx.route(u => /railway|anthropic|openai|googleapis|gstatic|keep\.example/i.test(u.href), r => r.abort().catch(() => {}));
   const page = await ctx.newPage();
-  // Сетевые ошибки к некэшированным ресурсам (особенно в офлайн-фазе) —
-  // это среда, а не баг приложения; корректность офлайна доказывается
-  // ПОЛОЖИТЕЛЬНОЙ проверкой (ArchBackup загрузился из кэша). Валим только на
-  // настоящих JS-ошибках (pageerror и console.error самого кода).
-  const EXT = /ERR_FAILED|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION|ERR_NETWORK|ERR_NAME_NOT_RESOLVED|net::|Failed to load resource|CORS policy|railway\.app|anthropic\.com|openai\.com|googleapis|gstatic|favicon|sync fail|Нет соединения/i;
+  // Сетевые/кросс-доменные ошибки к заблокированным/некэшированным ресурсам (в
+  // т.ч. WebKit-формулировка CORS и офлайн-фаза) — это среда, а не баг: валим
+  // только на настоящих JS-ошибках самого приложения. Корректность офлайна
+  // доказывается ПОЛОЖИТЕЛЬНОЙ проверкой (модули в кэше / ArchBackup доступен).
+  const EXT = /ERR_FAILED|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION|ERR_NETWORK|ERR_NAME_NOT_RESOLVED|ERR_ABORTED|net::|Failed to load resource|Load cannot follow|CORS policy|Access-Control-Allow-Origin|is not allowed by|Request aborted|railway|anthropic\.com|openai\.com|googleapis|gstatic|favicon|sync fail|Нет соединения/i;
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error' && !EXT.test(m.text())) errors.push('console: ' + m.text()); });
 
