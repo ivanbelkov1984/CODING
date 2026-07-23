@@ -6,7 +6,12 @@
 //  Версия кэша меняется при каждой сборке (__BUILD__), старые чистятся.
 // ═══════════════════════════════════════════════════════════════
 const V = 'arch-__BUILD__';
-const SHELL = ['./', './index.html', './lucide.js', './inter-latin.woff2', './inter-cyrillic.woff2', './manifest.json', './icon-192.png', './icon-512.png'];
+const SHELL = ['./', './index.html', './lucide.js', './inter-latin.woff2', './inter-cyrillic.woff2', './manifest.json', './icon-192.png', './icon-512.png',
+  // ESM-модули зашифрованного backup — в app shell, чтобы UI работал офлайн
+  // (dynamic import из index.html резолвится из кэша). Пути относительны scope
+  // (/CODING/architect/). Сами backup-ФАЙЛЫ пользователя (blob-скачивание) не
+  // проходят через этот кэш и не кэшируются.
+  './backup/backup-core.mjs', './backup/backup-adapter.mjs', './backup/backup-restore.mjs', './backup/backup-ui.mjs', './backup/backup-boot.mjs'];
 
 self.addEventListener('install', e => {
   self.skipWaiting();

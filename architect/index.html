@@ -1192,10 +1192,11 @@
 <div id="toasts"></div>
 <script>window.ARCHITECT_API='https://coding-production-1398.up.railway.app';</script>
 <script type="module">
-  // Подключается ТОЛЬКО вне combined-билда (в combined app.js инлайнится и внешнего
-  // тега нет). Slice 5 добавит модули в build output и service-worker cache.
-  if (document.querySelector('script[src$="app.js"]')) {
-    import('./backup/backup-boot.mjs').then(m => m.mount()).catch(() => {});
+  // ESM-модули backup грузятся по HTTP(S): обычный build, combined на localhost и
+  // GitHub Pages. Под file:// браузер не грузит ESM (null-origin CORS) — там
+  // пропускаем без ошибки; browser-evidence всегда идёт по HTTP (не file://).
+  if (location.protocol === 'http:' || location.protocol === 'https:') {
+    import('./backup/backup-boot.mjs').then(m => m.mount()).catch(() => { try { console.warn('[backup] module load failed'); } catch (_) {} });
   }
 </script>
 <script src="app.js"></script>
