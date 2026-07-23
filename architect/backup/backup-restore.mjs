@@ -177,19 +177,30 @@ export async function restoreBackup(p) {
   //   app.js (сброс sync-состояния, hydrate, обновление in-memory DB/CFG,
   //   initAll/render). ТОЛЬКО после успешной активации транзакции, чтобы старое
   //   in-memory состояние не перезаписало восстановленный профиль при следующем
-  //   persist(). Ошибка гидратации не откатывает уже зафиксированные данные —
-  //   транзакция хранилища завершена, профиль активирован и корректен.
+  //   persist(). ВАЖНО: storage-транзакция УЖЕ зафиксирована и профиль
+  //   активирован — сбой гидратации/render НЕ означает, что restore не удался и
+  //   НЕ откатывает данные. Ошибку callback ловим здесь и возвращаем truthful
+  //   success-with-warning (RESTORE_COMMITTED_RELOAD_REQUIRED), чтобы UI не
+  //   сообщил о несуществующем откате и мог выполнить безопасный controlled
+  //   reload вместо повторного restore (иначе — риск дубля профиля).
+  let hydration = { ok: true };
   if (typeof p.onActivated === 'function') {
-    await p.onActivated({ profileId: targetId, mode });
+    try {
+      await p.onActivated({ profileId: targetId, mode });
+    } catch (hydrErr) {
+      hydration = { ok: false, code: 'RESTORE_COMMITTED_RELOAD_REQUIRED', error: hydrErr };
+    }
   }
 
-  // ── 16. success result ──
+  // ── 16. success result (restore зафиксирован; hydration описывает post-commit) ──
   return {
     ok: true,
     mode,
     profileId: targetId,
     profileName: profileEntry.name,
     activated: true,
+    committed: true,
+    hydration,
     mediaWritten: plan.writes.length,
     mediaReused: plan.reuses.length,
     remaps: plan.remaps,

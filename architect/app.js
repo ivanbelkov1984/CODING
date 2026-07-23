@@ -531,8 +531,10 @@ function collectDbMediaRefs(db, out) {
 }
 // Сборка мусора медиа: удаляем из IndexedDB медиа, на которые никто не ссылается.
 // IndexedDB 'arch5_media' ОБЩИЙ для всех профилей, поэтому ссылки собираем из DB
-// КАЖДОГО профиля, из текущего in-memory DB и из активных черновиков. Если реестр
-// или любой слот профиля повреждён/нечитаем — GC ПРЕКРАЩАЕТСЯ (fail-safe: лучше
+// КАЖДОГО профиля (ВКЛЮЧАЯ активный — его raw-слот тоже читаем и валидируем, т.к.
+// in-memory DB мог подняться из default при повреждённом слоте), из текущего
+// in-memory DB и из активных черновиков. Если реестр или ЛЮБОЙ слот профиля
+// повреждён/нечитаем — GC ПРЕКРАЩАЕТСЯ без единого удаления (fail-safe: лучше
 // оставить лишнее медиа, чем удалить чужое/нужное из-за ошибки чтения).
 async function gcMedia() {
   try {
@@ -545,10 +547,13 @@ async function gcMedia() {
       try { profiles = JSON.parse(rawReg); } catch (e) { return; }
       if (!Array.isArray(profiles)) return;
     }
+    // Активный профиль обязан быть в списке даже если его нет в реестре: его
+    // повреждённый raw-слот тоже должен останавливать GC.
+    const ids = new Set(profiles.filter(p => p && p.id != null).map(p => String(p.id)));
     const active = activeId();
-    for (const p of profiles) {
-      if (!p || p.id == null || p.id === active) continue; // активный покрыт in-memory DB
-      const raw = localStorage.getItem(dbKey(p.id));
+    if (active && !ids.has(String(active))) { ids.add(String(active)); }
+    for (const id of ids) {
+      const raw = localStorage.getItem(dbKey(id));
       if (raw == null) continue;                           // пустой слот — нет ссылок, это ок
       let db;
       try { db = JSON.parse(raw); } catch (e) { return; }  // повреждён → стоп, ничего не удаляем

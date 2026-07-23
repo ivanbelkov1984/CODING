@@ -192,8 +192,13 @@ export function createBackupUI(deps) {
         onActivated,                 // гидратация app.js до возврата ok (item hydration)
       });
       st.restorePassword = '';
-      st.status = { phase: 'done', message: st.restoreMode === 'replace' ? 'Профиль заменён из резервной копии.' : 'Создан и активирован новый профиль из резервной копии.', profileId: result.profileId };
-      return { started: true, ok: true, result, state: snapshot() };
+      // Restore ЗАФИКСИРОВАН. Если пост-commit гидратация не удалась — это НЕ
+      // провал восстановления: данные на месте, но безопаснее перезагрузить экран
+      // (controlled reload делает boot). Сообщаем об этом честно, без «ошибки».
+      const hydrationWarning = !!(result && result.hydration && result.hydration.ok === false);
+      const baseMsg = st.restoreMode === 'replace' ? 'Профиль заменён из резервной копии.' : 'Создан и активирован новый профиль из резервной копии.';
+      st.status = { phase: 'done', message: hydrationWarning ? baseMsg + ' Обновляю экран…' : baseMsg, profileId: result.profileId };
+      return { started: true, ok: true, result, hydrationWarning, state: snapshot() };
     } catch (e) {
       const se = safeError(e);
       st.status = { phase: 'error', message: se.message, code: se.code };

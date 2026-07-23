@@ -68,6 +68,8 @@ async function seed(page) {
     localStorage.setItem('arch5_db_' + S.profileId, JSON.stringify(S.db));
     localStorage.setItem('arch5_cfg_' + S.profileId, JSON.stringify(S.cfg));
     localStorage.setItem('arch5_pass_' + S.profileId, 'PASSPHRASE_SECRET');
+    localStorage.setItem('arch5_rec_' + S.profileId, 'RECOVERY_SECRET');       // ключ восстановления
+    localStorage.setItem('arch5_aikey_' + S.profileId, 'AIKEY_SECRET');         // локальный AI/API-ключ
     localStorage.setItem('arch5_tour_done', '1');
     // media в IndexedDB arch5_media/media
     await new Promise((res, rej) => {
@@ -243,20 +245,28 @@ async function main() {
     await page.reload({ waitUntil: 'load' });
     const persisted = await page.evaluate(() => { const active = localStorage.getItem('arch5_active'); const db = JSON.parse(localStorage.getItem('arch5_db_' + active) || 'null'); return db && db.insights && db.insights.length; });
     ok(persisted >= 1, 'restore-new: после reload данные присутствуют');
-    // item10.4: рендер восстановленного медиа реальными <img>/<audio> + записи в IndexedDB.
-    const render = await page.evaluate(async () => {
+    // item10.4: рендер восстановленного медиа реальными <img>/<audio> + ТОЧНОЕ
+    // сравнение ОБЕИХ записей IndexedDB (data/type/createdAt) с ожидаемым.
+    const render = await page.evaluate(async (EXP) => {
       const db = JSON.parse(localStorage.getItem('arch5_db_' + localStorage.getItem('arch5_active')));
       const ins = (db.insights || []).find(i => Array.isArray(i.media) && i.media.length >= 2);
       if (!ins || typeof rDetMedia !== 'function') return { fail: true };
       await rDetMedia(ins);
       const el = document.getElementById('det-media');
       const img = el && el.querySelector('img'), aud = el && el.querySelector('audio');
-      const rec = await new Promise(res => { const r = indexedDB.open('arch5_media', 1); r.onsuccess = () => { const s = r.result.transaction('media', 'readonly').objectStore('media'); const g = s.get(ins.media[0]); g.onsuccess = () => res(g.result); g.onerror = () => res(null); }; r.onerror = () => res(null); });
-      return { img: !!(img && String(img.src).startsWith('data:')), aud: !!(aud && String(aud.src).startsWith('data:')), rec: !!(rec && String(rec.data).startsWith('data:')) };
-    });
-    ok(render.img, 'media render: реальный <img> с восстановленным data URL');
-    ok(render.aud, 'media render: реальный <audio> с восстановленным data URL');
-    ok(render.rec, 'media render: записи медиа в IndexedDB присутствуют и совпадают');
+      const get = id => new Promise(res => { const r = indexedDB.open('arch5_media', 1); r.onsuccess = () => { const s = r.result.transaction('media', 'readonly').objectStore('media'); const g = s.get(id); g.onsuccess = () => res(g.result); g.onerror = () => res(null); }; r.onerror = () => res(null); });
+      const r0 = await get(ins.media[0]), r1 = await get(ins.media[1]);
+      const match = (rec, e) => !!(rec && rec.data === e.data && rec.type === e.type && rec.createdAt === e.createdAt);
+      return {
+        img: !!(img && img.src === EXP.image.data),
+        aud: !!(aud && aud.src === EXP.audio.data),
+        rec0: match(r0, EXP.image), rec1: match(r1, EXP.audio),
+        ids: [ins.media[0], ins.media[1]].join(','),
+      };
+    }, { image: { data: IMG, type: 'image', createdAt: '2026-01-01T00:00:00.000Z' }, audio: { data: AUD, type: 'audio', createdAt: '2026-01-01T00:00:00.000Z' } });
+    ok(render.img, 'media render: реальный <img>, src = точный восстановленный data URL');
+    ok(render.aud, 'media render: реальный <audio>, src = точный восстановленный data URL');
+    ok(render.rec0 && render.rec1, 'media render: ОБЕ записи IndexedDB точно совпадают (data+type+createdAt)');
     await shot(page, '05-restore-new');
 
     // ── Item 3/10.5: Multi-profile GC — медиа НЕактивного профиля выживает ──
@@ -275,6 +285,22 @@ async function main() {
     ok(gc.mB === true, 'multi-profile GC: медиа НЕактивного профиля B сохранено');
     ok(gc.m1 === true, 'multi-profile GC: медиа, на которое ссылаются профили, сохранено');
     ok(gc.mOrphan === false, 'multi-profile GC: непривязанное медиа удалено');
+
+    // ── Round2/BLOCKING1: GC при ПОВРЕЖДЁННОМ активном профиле — ноль удалений ──
+    const goodSlot = await page.evaluate(async () => {
+      const active = localStorage.getItem('arch5_active');
+      const good = localStorage.getItem('arch5_db_' + active);
+      localStorage.setItem('arch5_db_' + active, '{ corrupt json <<< not valid');  // повреждаем raw-слот активного
+      await new Promise((res, rej) => { const r = indexedDB.open('arch5_media', 1); r.onsuccess = () => { const tx = r.result.transaction('media', 'readwrite'); const s = tx.objectStore('media'); s.put({ data: 'data:image/png;base64,CCCC', type: 'image', createdAt: '2026-01-01T00:00:00.000Z' }, 'mActiveRef'); s.put({ data: 'data:image/png;base64,DDDD', type: 'image', createdAt: '2026-01-01T00:00:00.000Z' }, 'mOrphan2'); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }; r.onerror = () => rej(r.error); });
+      return good;
+    });
+    await page.evaluate(async () => { if (typeof gcMedia === 'function') await gcMedia(); });
+    const corruptGc = await page.evaluate(async () => {
+      const has = id => new Promise(res => { const r = indexedDB.open('arch5_media', 1); r.onsuccess = () => { const g = r.result.transaction('media', 'readonly').objectStore('media').get(id); g.onsuccess = () => res(!!g.result); g.onerror = () => res(false); }; r.onerror = () => res(false); });
+      return { ref: await has('mActiveRef'), orphan: await has('mOrphan2'), m1: await has('m1'), mB: await has('mB') };
+    });
+    ok(corruptGc.ref && corruptGc.orphan && corruptGc.m1 && corruptGc.mB, 'GC fail-safe: повреждённый АКТИВНЫЙ профиль останавливает GC — ни одной записи не удалено');
+    await page.evaluate((good) => { localStorage.setItem('arch5_db_' + localStorage.getItem('arch5_active'), good); if (typeof hydrate === 'function') hydrate(); }, goodSlot);
 
     // ── Replace: требует destructive mode + второе подтверждение ──
     await openSheet(page);
@@ -307,15 +333,21 @@ async function main() {
         dbHasRestored: (db.insights || []).some(i => i.title === 'Заметка'),
         apiUrl: cfg.apiUrl, spaceKey: cfg.spaceKey, lastSync: cfg.lastSync,
         pass: localStorage.getItem('arch5_pass_pEvidence'),
+        rec: localStorage.getItem('arch5_rec_pEvidence'),
+        aikey: localStorage.getItem('arch5_aikey_pEvidence'),
         bakMatches: JSON.stringify(bak) === JSON.stringify(db),
         active: activeId(), staleGone: !(DB && DB.__staleMarker),
       };
     });
     ok(repl.dbHasRestored, 'replace(success): DB заменён содержимым backup');
     ok(repl.apiUrl === 'https://keep.example' && repl.spaceKey === 'KEEP_SPACE' && repl.lastSync === '2026-07-01T00:00:00.000Z', 'replace(success): connection (apiUrl/spaceKey/lastSync) сохранены');
-    ok(repl.pass === 'PASSPHRASE_SECRET', 'replace(success): локальная парольная фраза не тронута');
+    ok(repl.pass === 'PASSPHRASE_SECRET' && repl.rec === 'RECOVERY_SECRET' && repl.aikey === 'AIKEY_SECRET', 'replace(success): локальные секреты не тронуты (парольная фраза + ключ восстановления + AI-ключ)');
     ok(repl.bakMatches, 'replace(success): bak-слот = восстановленный DB (не старый профиль)');
     ok(repl.active === 'pEvidence' && repl.staleGone, 'replace(success): гидратация без ручного reload (устаревший in-memory сброшен)');
+    // Round2: немедленный persist ДО reload дополняет восстановленный DB (как в restore-new).
+    await page.evaluate(() => { DB.insights.push({ id: 543210, title: 'AFTER-REPLACE', createdAt: new Date().toISOString(), day: '2026-07-23', sv: 2 }); persist(); });
+    const replAppend = await page.evaluate(() => { const t = (JSON.parse(localStorage.getItem('arch5_db_pEvidence') || '{}').insights || []).map(i => i.title); return { hasNew: t.includes('AFTER-REPLACE'), hasRestored: t.includes('Заметка') }; });
+    ok(replAppend.hasNew && replAppend.hasRestored, 'replace(success): persist после замены дополняет восстановленный DB (не пишет старый профиль)');
     await page.reload({ waitUntil: 'load' });
     ok(await page.evaluate(() => (JSON.parse(localStorage.getItem('arch5_db_pEvidence') || '{}').insights || []).some(i => i.title === 'Заметка')), 'replace(success): после reload данные восстановленного профиля на месте');
     ok(await page.evaluate(async () => { const has = id => new Promise(res => { const r = indexedDB.open('arch5_media', 1); r.onsuccess = () => { const g = r.result.transaction('media', 'readonly').objectStore('media').get(id); g.onsuccess = () => res(!!g.result); g.onerror = () => res(false); }; r.onerror = () => res(false); }); return await has('mB'); }), 'replace(success): медиа другого (неактивного) профиля не затронуто');

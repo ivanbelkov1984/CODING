@@ -253,6 +253,17 @@ async function main() {
     await throwsCode(() => a.verifyProfile({ id: 'pN', db, cfg, profile: { name: 'WRONG' } }), 'VERIFY_PROFILE', 'verify: имя профиля не совпало → VERIFY_PROFILE');
   }
 
+  // J3b. verify ТОЧНОЙ записи: правильное имя, но неверный color/id → VERIFY_PROFILE.
+  {
+    const { storage, media } = seed();
+    const a = createBackupAdapter({ storage, media });
+    const db = { insights: [] }; const cfg = { userName: 'x' };
+    a.writeStagedProfile({ id: 'pN', profile: { name: 'Correct', color: '#1A7F3C' }, db, cfg });
+    await throwsCode(() => a.verifyProfile({ id: 'pN', db, cfg, profile: { name: 'Correct', color: '#FF0000' } }), 'VERIFY_PROFILE', 'verify: имя верное, но color не совпал → VERIFY_PROFILE');
+    ok(a.verifyProfile({ id: 'pN', db, cfg, profile: { name: 'Correct', color: '#1A7F3C' } }) === true, 'verify: точная запись профиля (name+color) совпадает');
+    await throwsCode(() => a.verifyProfile({ id: 'pN', db, cfg, profile: { name: 'Correct', color: '#1A7F3C', extra: 'X' } }), 'VERIFY_PROFILE', 'verify: лишнее ожидаемое поле профиля не совпало → VERIFY_PROFILE');
+  }
+
   // K. planMedia: детерминированный remap — сгенерированный id НЕ крадёт оригинал
   //    другой ВХОДЯЩЕЙ media. Вход [m1(collision), m2(collision)]; genMediaId
   //    сперва выдаёт 'm2' (оригинал следующей входящей) — планнер обязан отклонить

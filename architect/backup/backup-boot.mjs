@@ -119,7 +119,7 @@ export function mount() {
       ui.setRestoreModeNew();
       const r = await ui.doRestore({});
       renderRestore();
-      if (r && r.ok) { $('be-rpw').value = ''; }
+      if (r && r.ok) { $('be-rpw').value = ''; maybeReload(r); }
     };
     // Включение destructive replace (первый шаг)
     $('be-replace-arm').onclick = () => { fillTargets(); $('be-replace-panel').style.display = ''; $('be-confirm2').style.display = 'none'; };
@@ -141,7 +141,7 @@ export function mount() {
       $('be-confirm2').style.display = 'none';
       const r = await ui.doRestore({ secondConfirm: true });
       renderRestore();
-      if (r && r.ok) { $('be-rpw').value = ''; $('be-replace-panel').style.display = 'none'; }
+      if (r && r.ok) { $('be-rpw').value = ''; $('be-replace-panel').style.display = 'none'; maybeReload(r); }
     };
     // Закрытие
     $('be-close').onclick = requestClose;
@@ -165,6 +165,15 @@ export function mount() {
     if (typeof window.openOv === 'function') window.openOv('ov-backup-enc');
     // Фокус на первую вкладку после открытия sheet (доступность с клавиатуры).
     try { $('be-tab-create').focus(); } catch (_) {}
+  }
+  // Safe controlled reload ТОЛЬКО когда restore зафиксирован, но пост-commit
+  // гидратация не удалась. Данные уже записаны и профиль активирован, поэтому
+  // перезагрузка гарантированно поднимает корректный профиль (без окна изменения
+  // пользовательских данных). При успешной гидратации reload не нужен.
+  function maybeReload(r) {
+    if (r && r.hydrationWarning && typeof window !== 'undefined' && window.location && typeof window.location.reload === 'function') {
+      setTimeout(() => { try { window.location.reload(); } catch (_) {} }, 600);
+    }
   }
   function requestClose() {
     if (ui && ui.getState().busy) { setStatus($('be-create-status'), { phase: 'working', message: 'Дождитесь завершения операции…' }); return; }

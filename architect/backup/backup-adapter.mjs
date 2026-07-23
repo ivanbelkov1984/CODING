@@ -294,8 +294,15 @@ export function createBackupAdapter(deps) {
     const matches = listProfiles().filter(p => p && p.id === id);
     if (matches.length === 0) fail('VERIFY_REGISTRY', 'профиль отсутствует в реестре');
     if (matches.length > 1) fail('VERIFY_REGISTRY', 'дубликат профиля в реестре');
-    // Точная запись профиля (имя) — если передан ожидаемый профиль.
-    if (profile && String(matches[0].name) !== String(profile.name)) fail('VERIFY_PROFILE', 'запись профиля не совпадает');
+    // ТОЧНАЯ запись профиля: не только имя — id и КАЖДОЕ поле ожидаемого entry
+    // (name, color и любые дополнительные сохраняемые поля).
+    if (profile) {
+      const got = matches[0];
+      if (String(got.id) !== String(id)) fail('VERIFY_PROFILE', 'id профиля не совпадает');
+      for (const k of Object.keys(profile)) {
+        if (JSON.stringify(got[k]) !== JSON.stringify(profile[k])) fail('VERIFY_PROFILE', 'поле профиля «' + k + '» не совпадает');
+      }
+    }
     return true;
   }
 

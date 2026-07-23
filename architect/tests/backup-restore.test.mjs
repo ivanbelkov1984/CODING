@@ -335,6 +335,41 @@ async function main() {
     ok(storage.getItem(KEYS.bak('pOld')) === before, 'item2: старый bak восстановлен точно после отката');
   }
 
+  // 22. Round2 — сбой onActivated (hydration) ПОСЛЕ commit: restore НЕ считается
+  //     провалившимся, данные восстановлены, откат не выполнялся, честный warning.
+  {
+    const { storage, media } = freshDest();
+    const a = createBackupAdapter({ storage, media, now: () => NOW });
+    const file = await mkFile(await mkPayload('complete'), PW);
+    let called = false;
+    const r = await restoreBackup({ adapter: a, fileText: file, password: PW, mode: 'new', genProfileId: () => 'pH', now: () => NOW,
+      onActivated: async () => { called = true; throw new Error('render blew up'); } });
+    ok(called && r.ok === true && r.committed === true && r.activated === true, 'round2/hydration: restore зафиксирован несмотря на сбой callback');
+    ok(r.hydration && r.hydration.ok === false && r.hydration.code === 'RESTORE_COMMITTED_RELOAD_REQUIRED', 'round2/hydration: честный warning RESTORE_COMMITTED_RELOAD_REQUIRED (не rollback)');
+    ok(a.getActiveId() === 'pH' && a.readDB('pH').insights[0].title === 'привет', 'round2/hydration: данные восстановлены и профиль активен (никакого отката)');
+  }
+
+  // 23. Round2 — exact profile entry: verify возвращает верный DB/CFG/имя, но
+  //     реестр содержит неверный color → VERIFY_PROFILE → exact rollback, zero mutation.
+  {
+    const { storage, media } = replaceDest();
+    const before = state(storage, media);
+    const file = await mkFile(await mkPayload('data-only'), PW);
+    // Инъекция: writeStagedProfile пишет как обычно, но с «испорченным» color в
+    // реестре (правильные DB/CFG/имя), чтобы verifyProfile поймал точное поле.
+    const real = createBackupAdapter({ storage, media, now: () => NOW });
+    const a = passthru(storage, media, {
+      writeStagedProfile: (args) => {
+        real.writeStagedProfile(args);
+        const list = real.listProfiles();
+        const i = list.findIndex(p => p && p.id === args.id);
+        if (i >= 0) { list[i] = { ...list[i], color: '#DEADBE' }; storage.setItem(KEYS.PKEY, JSON.stringify(list)); }
+      },
+    });
+    await throwsCode(() => restoreBackup({ adapter: a, fileText: file, password: PW, mode: 'replace', targetId: 'pOld', now: () => NOW }), 'VERIFY_PROFILE', 'round2/exact-entry: неверный color в реестре → VERIFY_PROFILE');
+    ok(state(storage, media) === before, 'round2/exact-entry: exact rollback после VERIFY_PROFILE (zero mutation)');
+  }
+
   console.log(out.join('\n'));
   console.log('\nBackup restore (Slice 3): ' + pass + '/' + (pass + fail) + ' passed');
   if (fail > 0) process.exit(1);
