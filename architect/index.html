@@ -133,6 +133,10 @@
       <div class="qa-ic" style="background:var(--green-l)"><svg style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg></div>
       <span class="qa-lbl">Check-in</span>
     </button>
+    <button class="qabtn" onclick="openOv('ov-moment')" aria-label="Момент">
+      <div class="qa-ic" style="background:rgba(245,184,75,.16)"><svg style="color:#F5B84B" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+      <span class="qa-lbl">Момент</span>
+    </button>
     <button class="qabtn" onclick="openOv('ov-add')" aria-label="Инсайт">
       <div class="qa-ic" style="background:var(--blue-l)"><svg style="color:var(--blue-t)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
       <span class="qa-lbl">Инсайт</span>
@@ -147,6 +151,7 @@
     </button>
   </div>
   <div id="pat-suggest-home"></div>
+  <div id="h-moments"></div>
 
   <!-- ГЕРОЙ: состояние + радар + разбор -->
   <div class="state-hero">
@@ -536,6 +541,25 @@
 </div>
 
 <!-- CHECK-IN -->
+<div class="ov" id="ov-moment" onclick="if(event.target===this)closeOv('ov-moment')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Как ты сейчас?</div>
+    <div class="vgrid" style="padding:0 1rem 1rem">
+      <div class="vf" style="grid-column:1/-1"><label>Приятность</label><div class="sl"><input type="range" id="mo-val" min="0" max="100" value="50" oninput="document.getElementById('mo-val-v').textContent=this.value" aria-label="Приятность"><span class="slv" id="mo-val-v">50</span></div></div>
+      <div class="vf" style="grid-column:1/-1"><label>Энергия</label><div class="sl"><input type="range" id="mo-act" min="0" max="100" value="50" oninput="document.getElementById('mo-act-v').textContent=this.value" aria-label="Энергия"><span class="slv" id="mo-act-v">50</span></div></div>
+    </div>
+    <div style="padding:0 1rem">
+      <div class="f-lbl">Назови эмоцию <span style="font-weight:500;color:var(--t3)">(необязательно)</span></div>
+      <div class="ruler" id="mo-emo"></div>
+    </div>
+    <div style="padding:1rem">
+      <textarea class="field" id="mo-note" placeholder="Что происходит прямо сейчас… (необязательно)" rows="2"></textarea>
+      <div style="height:.75rem"></div>
+      <button class="btn btn-p btn-full" onclick="saveMoment()"><i data-lucide="check"></i>Записать состояние</button>
+    </div>
+  </div>
+</div>
 <div class="ov" id="ov-ci" onclick="if(event.target===this)closeOv('ov-ci')">
   <div class="sheet">
     <div class="sh-pull"></div>

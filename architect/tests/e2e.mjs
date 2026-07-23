@@ -1067,6 +1067,32 @@ ok(/end-to-end/i.test(privacyUI) && /ИИ/.test(privacyUI) && /Забыл фра
   'privacy-экран честен: E2EE-хранилище + оговорка про ИИ-разбор + про потерю фразы');
 await page.evaluate(() => { goTo('home'); });
 
+// ── Momentary State (двухосевой ввод состояния «здесь и сейчас») ──
+const mom = await page.evaluate(() => {
+  goTo('home');
+  openOv('ov-moment');
+  document.getElementById('mo-val').value = 80;
+  document.getElementById('mo-act').value = 30;
+  document.getElementById('mo-note').value = 'проверка момента';
+  saveMoment();
+  const active = localStorage.getItem('arch5_active');
+  const db = JSON.parse(localStorage.getItem('arch5_db_' + active) || '{}');
+  const list = db.moments || [];
+  const last = list[list.length - 1] || {};
+  const homeTxt = document.getElementById('h-moments').textContent || '';
+  return {
+    open: document.getElementById('ov-moment').classList.contains('on'),
+    count: list.length, valence: last.valence, activation: last.activation, note: last.note,
+    kType: last.kType, verif: last.verif, life: last.life,
+    homeShown: /Моменты сегодня/.test(homeTxt) && /приятность/.test(homeTxt),
+  };
+});
+ok(mom.count >= 1 && mom.valence === 80 && mom.activation === 30 && mom.note === 'проверка момента', 'Momentary State: запись сохранена (valence/activation/note)');
+ok(mom.kType === 'self_report' && mom.verif === 'unverified' && mom.life === 'current', 'Momentary State: «паспорт данных» (kType/verif/life) на записи');
+ok(!mom.open, 'Momentary State: sheet закрывается после сохранения');
+ok(mom.homeShown, 'Momentary State: «Моменты сегодня» отрендерены на «Сегодня»');
+await page.evaluate(() => { goTo('home'); });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
