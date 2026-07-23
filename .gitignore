@@ -1,5 +1,6 @@
 /.vscode
 architect/dist/
+architect/evidence/
 architect/node_modules
 node_modules
 

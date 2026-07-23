@@ -283,6 +283,22 @@ function switchProfile(id) {
   const p = activeProfile();
   hptMed(); toast('Профиль: ' + (p ? p.name : ''), 'ok');
 }
+// Гидратация ПОСЛЕ восстановления backup. Транзакция restore уже переключила
+// активный профиль (arch5_active = profileId) и записала DB/CFG/bak. Выполняем
+// безопасный эквивалент переключения профиля БЕЗ повторной активации и БЕЗ
+// дополнительного синка до завершения гидратации: сброс sync-состояния, hydrate()
+// (перечитывает DB/CFG активного слота в память), полный re-render. Так следующий
+// persist() запишет уже восстановленный DB, а не старый in-memory профиль.
+// Вызывается из backup-boot.mjs как window.onRestoreActivated(profileId, mode).
+async function onRestoreActivated(profileId, mode) {
+  resetSyncState();
+  if (activeId() !== profileId) setActiveId(profileId);   // страховка идентичности
+  hydrate();
+  if (typeof initAll === 'function') initAll();
+  if (typeof rProfileRow === 'function') rProfileRow();
+  if (typeof hptMed === 'function') hptMed();
+}
+try { window.onRestoreActivated = onRestoreActivated; } catch (e) {}
 function createProfile() {
   const name = ($('prof-new-name')?.value || '').trim();
   if (!name) { toast('Введи название профиля', 'warn'); return; }
@@ -505,14 +521,46 @@ function openOv(id) {
   if (id==='ov-ci')       rEmoPicker();
   if (id==='ov-add')      { STATE.addMedia = []; rAddMedia(); }
 }
-// Сборка мусора медиа: удаляем из IndexedDB картинки, на которые никто
-// не ссылается (после удаления инсайтов / брошенных черновиков).
+// Собрать ВСЕ media-id, на которые ссылается любая запись любой коллекции db.
+function collectDbMediaRefs(db, out) {
+  if (!db || typeof db !== 'object') return;
+  for (const c of Object.keys(db)) {
+    const arr = db[c]; if (!Array.isArray(arr)) continue;
+    for (const rec of arr) if (rec && Array.isArray(rec.media)) for (const m of rec.media) if (typeof m === 'string') out.add(m);
+  }
+}
+// Сборка мусора медиа: удаляем из IndexedDB медиа, на которые никто не ссылается.
+// IndexedDB 'arch5_media' ОБЩИЙ для всех профилей, поэтому ссылки собираем из DB
+// КАЖДОГО профиля (ВКЛЮЧАЯ активный — его raw-слот тоже читаем и валидируем, т.к.
+// in-memory DB мог подняться из default при повреждённом слоте), из текущего
+// in-memory DB и из активных черновиков. Если реестр или ЛЮБОЙ слот профиля
+// повреждён/нечитаем — GC ПРЕКРАЩАЕТСЯ без единого удаления (fail-safe: лучше
+// оставить лишнее медиа, чем удалить чужое/нужное из-за ошибки чтения).
 async function gcMedia() {
   try {
     const ref = new Set(STATE.addMedia || []);
-    (DB.insights || []).forEach(i => (i.media || []).forEach(m => ref.add(m)));
-    const db = await idbOpen();
-    const keys = await new Promise((res, rej) => { const tx = db.transaction(IDB_STORE, 'readonly'); const rq = tx.objectStore(IDB_STORE).getAllKeys(); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
+    collectDbMediaRefs(DB, ref);                          // текущий in-memory профиль
+    // Реестр профилей: если повреждён — стоп (иначе чужие медиа примем за мусор).
+    const rawReg = localStorage.getItem(PKEY);
+    let profiles = [];
+    if (rawReg != null) {
+      try { profiles = JSON.parse(rawReg); } catch (e) { return; }
+      if (!Array.isArray(profiles)) return;
+    }
+    // Активный профиль обязан быть в списке даже если его нет в реестре: его
+    // повреждённый raw-слот тоже должен останавливать GC.
+    const ids = new Set(profiles.filter(p => p && p.id != null).map(p => String(p.id)));
+    const active = activeId();
+    if (active && !ids.has(String(active))) { ids.add(String(active)); }
+    for (const id of ids) {
+      const raw = localStorage.getItem(dbKey(id));
+      if (raw == null) continue;                           // пустой слот — нет ссылок, это ок
+      let db;
+      try { db = JSON.parse(raw); } catch (e) { return; }  // повреждён → стоп, ничего не удаляем
+      if (!db || typeof db !== 'object') return;           // нечитаем → стоп
+      collectDbMediaRefs(db, ref);
+    }
+    const keys = await idbKeys();
     for (const k of keys) if (!ref.has(k)) await idbDel(k).catch(() => {});
   } catch (e) { /* IndexedDB недоступен — не критично */ }
 }
@@ -521,7 +569,15 @@ function closeOv(id) {
   document.body.style.overflow = '';
 }
 document.addEventListener('keydown', e => {
-  if (e.key==='Escape') document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
+  if (e.key !== 'Escape') return;
+  // Зашифрованный backup-sheet закрываем через контроллер: он чистит пароли/файл/
+  // destructive-состояние и не прерывает выполняющуюся операцию (busy).
+  const be = document.getElementById('ov-backup-enc');
+  if (be && be.classList.contains('on') && window.ArchBackup && typeof window.ArchBackup.requestClose === 'function') {
+    window.ArchBackup.requestClose();
+    return;
+  }
+  document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
 });
 
 // ─── ТЕМА ───────────────────────────────────────────────────────
@@ -1169,6 +1225,12 @@ function idbOpen() {
 async function idbPut(key, val) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction(IDB_STORE, 'readwrite'); tx.objectStore(IDB_STORE).put(val, key); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
 async function idbGet(key) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction(IDB_STORE, 'readonly'); const rq = tx.objectStore(IDB_STORE).get(key); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); }); }
 async function idbDel(key) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction(IDB_STORE, 'readwrite'); tx.objectStore(IDB_STORE).delete(key); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+async function idbKeys() { const db = await idbOpen(); return new Promise((res, rej) => { const rq = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).getAllKeys(); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); }); }
+// Медиа-примитив для модуля зашифрованного backup (backup-boot.mjs). Это тот же
+// IndexedDB-store, что и у приложения — не копия логики backup, а storage-примитив.
+try { window.__archMedia = { get: idbGet, put: idbPut, del: idbDel, keys: idbKeys }; } catch (e) {}
+// Точка входа зашифрованной резервной копии (UI живёт в модуле, см. index.html).
+function openEncBackup() { if (window.ArchBackup && typeof window.ArchBackup.open === 'function') window.ArchBackup.open(); else toast('Модуль резервной копии ещё загружается', 'warn'); }
 function compressImage(file, maxDim = 1280, q = 0.82) {
   return new Promise((res, rej) => {
     const img = new Image(), url = URL.createObjectURL(file);

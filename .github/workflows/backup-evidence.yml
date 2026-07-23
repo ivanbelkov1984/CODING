@@ -1,0 +1,55 @@
+name: Backup evidence — Chromium + WebKit mobile
+
+# Реальное browser/mobile evidence для зашифрованного переносимого backup
+# (Slice 6): focused tests + build + existing E2E + Chromium mobile + WebKit
+# mobile + offline reload по localhost HTTP (не file://). Артефакты
+# (скриншоты/отчёты/логи) грузятся всегда, даже при failure. Синтетические
+# данные, без обращения к production backend.
+
+on:
+  pull_request:
+    paths:
+      - "architect/**"
+      - ".github/workflows/backup-evidence.yml"
+  workflow_dispatch:
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: architect
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install deps (reproducible from lockfile)
+        run: npm ci
+
+      - name: Focused backup tests (core/adapter/restore/ui/build)
+        run: npm run test:backup
+
+      - name: Install browsers + system deps (Chromium + WebKit)
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Existing E2E (Chromium, file://)
+        run: npm test
+
+      - name: Production build (dist/ with backup modules + SW)
+        run: npm run build
+
+      - name: Chromium mobile evidence (localhost HTTP)
+        run: EVIDENCE_ENGINE=chromium node tests/backup-evidence.mjs
+
+      - name: WebKit mobile evidence (localhost HTTP)
+        run: EVIDENCE_ENGINE=webkit node tests/backup-evidence.mjs
+
+      - name: Upload evidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-evidence
+          path: architect/evidence/**
+          if-no-files-found: warn

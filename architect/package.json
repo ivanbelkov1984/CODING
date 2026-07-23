@@ -7,7 +7,8 @@
   "scripts": {
     "build": "node build.mjs",
     "build:test": "node build.mjs --combined dist/app.html",
-    "test": "node build.mjs --combined dist/app.html && node tests/e2e.mjs"
+    "test": "node build.mjs --combined dist/app.html && node tests/e2e.mjs",
+    "test:backup": "node tests/backup.test.mjs && node tests/backup-adapter.test.mjs && node tests/backup-restore.test.mjs && node tests/backup-ui.test.mjs && node tests/backup-build.test.mjs"
   },
   "devDependencies": {
     "playwright": "^1.61.0"
