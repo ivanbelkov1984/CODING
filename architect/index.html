@@ -560,6 +560,18 @@
     </div>
   </div>
 </div>
+<div class="ov" id="ov-why-det" onclick="if(event.target===this)closeOv('ov-why-det')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Разбор «Зачем?»</div>
+    <div class="be-note" id="why-det-date" style="margin:0 1rem .5rem;color:var(--t3)"></div>
+    <div id="why-det-body" style="padding:0 1rem 1rem"></div>
+    <div style="padding:0 1rem 1rem;display:flex;gap:var(--s2)">
+      <button class="btn btn-s" style="flex:1" onclick="closeOv('ov-why-det')">Закрыть</button>
+      <button class="btn btn-d" style="flex:1" onclick="deleteWhyDet()"><i data-lucide="trash-2"></i>Удалить</button>
+    </div>
+  </div>
+</div>
 <div class="ov" id="ov-moment" onclick="if(event.target===this)closeOv('ov-moment')">
   <div class="sheet">
     <div class="sh-pull"></div>

@@ -2058,8 +2058,27 @@ function rWhys() {
       const d = (w.day || '').slice(5);
       const head = esc(w.symptom || w.need || w.action || 'Разбор');
       const act = w.action ? `<div class="si-text" style="color:var(--t3);margin-top:.15rem">→ ${esc(w.action)}</div>` : '';
-      return `<div class="si-row"><div class="si-body"><div class="si-text"><b>${d}</b> — ${head}</div>${act}</div></div>`;
+      return `<div class="si-row tap" style="cursor:pointer" onclick="openWhy(${w.id})"><div class="si-body"><div class="si-text"><b>${d}</b> — ${head}</div>${act}</div></div>`;
     }).join('') + '</div>';
+}
+// Просмотр сохранённого разбора «Зачем?» (полная цепочка) + удаление.
+const WHY_LABELS = { symptom:'Симптом', function:'Функция', gain:'Вторичная выгода', need:'Потребность', cost:'Цена', alternative:'Альтернатива', action:'Действие' };
+function openWhy(id) {
+  const w = (DB.whys || []).find(x => x && x.id === id); if (!w) return;
+  STATE.whyDetId = id;
+  const rows = WHY_FIELDS.map(k => [WHY_LABELS[k], w[k]]).filter(([, v]) => v && String(v).trim());
+  const body = $('why-det-body');
+  if (body) body.innerHTML = rows.length
+    ? rows.map(([lbl, v]) => `<div style="margin-bottom:.7rem"><div class="f-lbl">${lbl}</div><div class="si-text">${esc(v)}</div></div>`).join('')
+    : '<div class="si-text" style="color:var(--t3)">Пусто</div>';
+  const dt = $('why-det-date'); if (dt) dt.textContent = w.day || '';
+  openOv('ov-why-det');
+}
+function deleteWhyDet() {
+  const id = STATE.whyDetId; if (id == null) return;
+  closeOv('ov-why-det');
+  delUndo('whys', id, () => { try { rWhys(); } catch (e) {} }, 'Разбор удалён');
+  STATE.whyDetId = null;
 }
 
 // ─── ЗДОРОВЬЕ: «Тяга» — лог импульса + микро-интервенция ─────────
