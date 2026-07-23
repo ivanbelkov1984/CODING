@@ -523,6 +523,7 @@ function openOv(id) {
   if (id==='ov-ci')       rEmoPicker();
   if (id==='ov-moment')   rMomEmo();
   if (id==='ov-why')      resetWhyForm();
+  if (id==='ov-history')  rHistory();
   if (id==='ov-add')      { STATE.addMedia = []; rAddMedia(); }
 }
 // Собрать ВСЕ media-id, на которые ссылается любая запись любой коллекции db.
@@ -2145,6 +2146,26 @@ function openWhy(id) {
   if (body) body.innerHTML = html;
   const dt = $('why-det-date'); if (dt) dt.textContent = w.day || '';
   openOv('ov-why-det');
+}
+// История состояний: моменты + разборы «Зачем?» одним хронологическим списком.
+// Только чтение накопленных записей (долговременная память), каждая — в деталь.
+function rHistory() {
+  const el = $('history-list'); if (!el) return;
+  const items = [];
+  (DB.moments || []).forEach(m => { if (m && m.id) items.push({ t: 'moment', at: Date.parse(m.createdAt) || 0, rec: m }); });
+  (DB.whys || []).forEach(w => { if (w && w.id) items.push({ t: 'why', at: Date.parse(w.createdAt) || 0, rec: w }); });
+  items.sort((a, b) => b.at - a.at);
+  if (!items.length) { el.innerHTML = '<div class="bk-empty" style="padding:1rem">Здесь появятся твои моменты и разборы «Зачем?».</div>'; return; }
+  el.innerHTML = items.slice(0, 200).map(it => {
+    const day = (it.rec.day || '').slice(5);
+    if (it.t === 'moment') {
+      const chip = it.rec.emo ? ' · ' + esc(it.rec.emo) : '';
+      return `<div class="srow tap" style="cursor:pointer" onclick="closeOv('ov-history');openMoment(${it.rec.id})"><div class="bk-info"><span class="sl2">${day} · момент</span><span class="sv2">приятность ${momentLabel(it.rec.valence)}, энергия ${momentLabel(it.rec.activation)}${chip}</span></div></div>`;
+    }
+    const done = it.rec.actionDone === true ? '<span style="color:var(--green)">✓</span> ' : '';
+    const head = esc(it.rec.symptom || it.rec.need || it.rec.action || 'разбор');
+    return `<div class="srow tap" style="cursor:pointer" onclick="closeOv('ov-history');openWhy(${it.rec.id})"><div class="bk-info"><span class="sl2">${day} · «Зачем?»</span><span class="sv2">${done}${head}</span></div></div>`;
+  }).join('');
 }
 // Отметка выполнения выбранного действия из разбора «Зачем?» (проверка результата).
 function markWhyAction(done) {

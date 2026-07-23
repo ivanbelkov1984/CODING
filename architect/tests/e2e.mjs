@@ -1194,6 +1194,19 @@ ok(followup.hasFollowup, '«Зачем?» проверка: раздел «ты 
 ok(followup.done && followup.checked && followup.listMark, '«Зачем?» проверка: действие отмечено сделанным (сохранено + ✓ в списке)');
 await page.evaluate(() => { goTo('home'); });
 
+// ── История состояний (моменты + разборы одним списком) ──
+const hist = await page.evaluate(() => {
+  const iso = new Date().toISOString(), day = iso.slice(0, 10);
+  DB.moments = [{ id: 9001, valence: 60, activation: 50, emo: 'Радость', kType: 'self_report', verif: 'unverified', life: 'current', createdAt: iso, day, sv: 2, _u: Date.now() }];
+  DB.whys = [{ id: 9002, symptom: 'исторический симптом', action: 'исторический шаг', kType: 'process_reflection', verif: 'user_confirmed', life: 'current', createdAt: iso, day, sv: 2, _u: Date.now() }];
+  openOv('ov-history');
+  const txt = document.getElementById('history-list').textContent || '';
+  const rows = document.querySelectorAll('#history-list .srow').length;
+  return { open: document.getElementById('ov-history').classList.contains('on'), rows, hasMoment: /момент/.test(txt), hasWhy: /«Зачем\?»/.test(txt) && /исторический симптом/.test(txt) };
+});
+ok(hist.open && hist.rows >= 2 && hist.hasMoment && hist.hasWhy, 'История состояний: моменты и разборы «Зачем?» в одном списке');
+await page.evaluate(() => { closeOv('ov-history'); goTo('home'); });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
