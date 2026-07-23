@@ -1207,6 +1207,21 @@ const hist = await page.evaluate(() => {
 ok(hist.open && hist.rows >= 2 && hist.hasMoment && hist.hasWhy, 'История состояний: моменты и разборы «Зачем?» в одном списке');
 await page.evaluate(() => { closeOv('ov-history'); goTo('home'); });
 
+// ── «За неделю» сводка (детерминированная, без ИИ) ──
+const week = await page.evaluate(() => {
+  const iso = new Date().toISOString(), day = iso.slice(0, 10);
+  DB.moments = [
+    { id: 9101, valence: 40, activation: 60, kType: 'self_report', verif: 'unverified', life: 'current', createdAt: iso, day, sv: 2, _u: Date.now() },
+    { id: 9102, valence: 80, activation: 40, kType: 'self_report', verif: 'unverified', life: 'current', createdAt: iso, day, sv: 2, _u: Date.now() },
+  ];
+  DB.whys = [{ id: 9103, symptom: 's', action: 'a', actionDone: true, kType: 'process_reflection', verif: 'user_confirmed', life: 'current', createdAt: iso, day, sv: 2, _u: Date.now() }];
+  rWeekSummary();
+  const txt = document.getElementById('h-week').textContent || '';
+  return { hasWeek: /За неделю/.test(txt), hasAvg: /приятность 60%/.test(txt) && /энергия 50%/.test(txt), hasWhy: /1 разбор/.test(txt) && /выполнено 1/.test(txt) };
+});
+ok(week.hasWeek && week.hasAvg && week.hasWhy, '«За неделю»: детерминированная сводка (средние + разборы + выполнено)');
+await page.evaluate(() => { goTo('home'); });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

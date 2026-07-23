@@ -753,6 +753,7 @@ function rHome() {
   try { rHomeMoments(); } catch (e) {}
   try { rMomentTrend(); } catch (e) {}
   try { rWhys(); } catch (e) {}
+  try { rWeekSummary(); } catch (e) {}
 }
 // ─── ПАМЯТЬ НА ГОДЫ: ресёрфейсинг (волна 2, механика Rosebud) ────
 // Движок сам поднимает релевантную запись прошлого: похожее состояние /
@@ -2146,6 +2147,21 @@ function openWhy(id) {
   if (body) body.innerHTML = html;
   const dt = $('why-det-date'); if (dt) dt.textContent = w.day || '';
   openOv('ov-why-det');
+}
+// «За неделю»: детерминированная сводка (без ИИ) по моментам и разборам «Зачем?»
+// за 7 дней — понимание с одного взгляда. Только чтение накопленных записей.
+function rWeekSummary() {
+  const el = $('h-week'); if (!el) return;
+  const now = Date.now(), wk = 7 * 864e5;
+  const recent = arr => (arr || []).filter(x => x && (now - (Date.parse(x.createdAt) || 0)) <= wk);
+  const mo = recent(DB.moments), wh = recent(DB.whys);
+  if (!mo.length && !wh.length) { el.innerHTML = ''; return; }
+  const avg = (a, k) => a.length ? Math.round(a.reduce((s, x) => s + (x[k] || 0), 0) / a.length) : 0;
+  const done = wh.filter(w => w.actionDone === true).length;
+  const parts = [];
+  if (mo.length) parts.push(`${mo.length} ${pl(mo.length, 'запись', 'записи', 'записей')} состояния (приятность ${avg(mo, 'valence')}%, энергия ${avg(mo, 'activation')}%)`);
+  if (wh.length) parts.push(`${wh.length} ${pl(wh.length, 'разбор', 'разбора', 'разборов')} «Зачем?»` + (done ? `, из них выполнено ${done}` : ''));
+  el.innerHTML = '<div class="sec-lbl">За неделю</div><div class="card mx mb" style="padding:.85rem 1rem"><div class="si-text">' + parts.join('. ') + '.</div></div>';
 }
 // История состояний: моменты + разборы «Зачем?» одним хронологическим списком.
 // Только чтение накопленных записей (долговременная память), каждая — в деталь.
