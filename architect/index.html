@@ -155,6 +155,7 @@
   <div id="h-moment-trend"></div>
   <button class="btn btn-s btn-sm btn-full" style="margin:0 var(--s4) .5rem;width:auto" onclick="openOv('ov-why')"><i data-lucide="help-circle"></i>Метод «Зачем?» — разобрать состояние</button>
   <div id="h-whys"></div>
+  <button class="btn btn-s btn-sm btn-full" style="margin:0 var(--s4) .5rem;width:auto" onclick="openOv('ov-history')"><i data-lucide="history"></i>История состояний</button>
 
   <!-- ГЕРОЙ: состояние + радар + разбор -->
   <div class="state-hero">
@@ -559,6 +560,14 @@
       <div><div class="f-lbl">Действие — что выбираешь сейчас?</div><textarea class="field" id="why-action" rows="2"></textarea></div>
       <button class="btn btn-p btn-full" onclick="saveWhy()"><i data-lucide="check"></i>Сохранить разбор</button>
     </div>
+  </div>
+</div>
+<div class="ov" id="ov-history" onclick="if(event.target===this)closeOv('ov-history')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">История состояний</div>
+    <div id="history-list" class="mx" style="padding:0 1rem 1.5rem;max-height:70vh;overflow-y:auto"></div>
+    <div style="padding:0 1rem 1rem"><button class="btn btn-s btn-full" onclick="closeOv('ov-history')">Закрыть</button></div>
   </div>
 </div>
 <div class="ov" id="ov-moment-det" onclick="if(event.target===this)closeOv('ov-moment-det')">
