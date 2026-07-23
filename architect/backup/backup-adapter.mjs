@@ -297,10 +297,13 @@ export function createBackupAdapter(deps) {
     return base;
   }
 
+  // Чтение media-записи (для reread-verification в оркестраторе restore).
+  function readMedia(id) { return media.get(id); }
+
   return {
     KEYS, CONNECTION_FIELDS,
     listProfiles, getActiveId, getProfile, readDB, readCFG, readConnectionSettings,
-    buildBundle, planMedia, writeStagedMedia,
+    buildBundle, planMedia, writeStagedMedia, readMedia,
     collectMediaRefs, rewriteRefs, stripConnection,
     snapshot, rollback, writeStagedProfile, verifyProfile, activate, buildRestoreCfg,
     _storageKeys: storageKeys,
