@@ -17,6 +17,17 @@
 | `04-IMPLEMENTATION-ROADMAP.md` | Реалистичная последовательность небольших вертикальных срезов |
 | `05-NEXT-VERTICAL-SLICE-OPTIONS.md` | Сравнение 3 кандидатов на следующий срез + рекомендация |
 | `06-MIGRATION-AND-COMPATIBILITY.md` | Как вводить v2-сущности без разрушительной миграции localStorage |
+| `07-EVIDENCE-AND-MODEL-KERNEL.md` | **Cross-cutting foundation (главный блокер): обёртка записи, corrections, invalidation/recompute** |
+| `08-REGISTRIES.md` | Реестры: consent, purpose, feature-flags, regulatory quarantine, models/rulesets, terminology/licence, migration |
+| `09-PRIVACY-AND-AI-SAFETY.md` | Local-at-rest threat model, encrypted blob vault, **универсальный AI validator framework** |
+| `10-PREDICTION-CONTRACT.md` | 5 уровней прогноза; `prediction=null` до валидированной модели |
+| `11-ASTROLOGY-FEASIBILITY-GATES.md` | Licence/WASM/tzdb/golden gates; ректификация = research preview |
+| `12-HEALTH-CONTOUR-SEPARATION.md` | Organizer / Behavioral / Clinical Quarantine; MDCG intended-purpose; FHIR profiling |
+| `13-SOURCE-OF-TRUTH-STATUS-REGISTRY.md` | Статусы документов Drive↔GitHub (7 статусов); норма живёт в MAIN |
+| `14-AUTONOMY-AND-REVIEW-GATES.md` | Границы автономии Claude, independent review gates, auto-merge limits |
+| `PROGRAM_STATUS.md` | **Durable** снимок состояния программы + карта 18 пробелов review |
+
+> **Correction pass (round: independent architectural review).** Документы 07–14 и `PROGRAM_STATUS.md` добавлены по независимому review, закрывая 18 пробелов первой версии PR #67. Ключевой вывод: **сначала общий Evidence and Model Kernel и privacy/AI-safety, и только потом доменные фичи** — не наоборот. Карта пробелов — в `PROGRAM_STATUS.md`.
 
 ## 2. Иерархия источников (что чему подчиняется)
 

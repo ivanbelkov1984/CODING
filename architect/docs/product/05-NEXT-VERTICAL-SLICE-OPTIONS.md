@@ -47,20 +47,26 @@
 | Mobile testability | высокая | средняя | высокая |
 | Regulatory/privacy | низкий | высокий | средний |
 
-## Рекомендация
+## Рекомендация (скорректирована по независимому review)
 
-**Начать с A — Psych / Momentary State**, конкретно с **двухосевого Momentary State (S2)**, предварив его малым инфраструктурным срезом **S1** (эпистемическая обёртка + один LLM-safety validator).
+**Важно:** следующее действие — **не** сразу продуктовый домен. По независимому review сначала строится общий фундамент, иначе психика/здоровье/астрология лягут без доказательного и защитного ядра.
 
-**Почему A:**
+**Порядок:**
+1. **Этап A — исправить PR #67** (текущий correction pass, documentation-only). *Не начинать runtime.*
+2. **Этап B — Evidence & Model Kernel** (`product/07`) — первый runtime-срез фундамента.
+3. **Этап C — Privacy at-rest + AI validator framework** (`product/09`).
+4. **Этап D — затем** низкорисковый продуктовый домен: **A. Psych / Momentary State + «Зачем?»**.
+
+**Среди доменных вариантов (D/E/F) рекомендуется A (Psych/Momentary):**
 - Максимальная ежедневная польза при минимальном data-риске и сложности.
-- Чистый вертикальный срез **без разрушительной миграции** (новая коллекция поверх существующего DB).
-- Легко проверяется на iPhone/iPad; не требует regulatory-контракта.
-- Готовит базовые данные (RawObservation/UserSelfReport/DescriptiveState), на которые later опираются health, PDRE и scenario.
+- Чистый вертикальный срез **без разрушительной миграции** (новая коллекция поверх DB).
+- Легко проверяется на iPhone/iPad; не требует regulatory/license контракта.
+- Готовит базовые данные (RawObservation/UserSelfReport/DescriptiveState) для health/PDRE/scenario.
 
-**Почему не B/C первыми:** Health несёт наибольший regulatory/privacy риск и требует крупного owner-approved контракта; Astrology ценна, но не даёт ежедневной пользы и зависит от новой модели. Оба логичнее после того, как эпистемическая обёртка и первый продуктовый домен обкатаны.
+**Почему health/astrology не первыми (даже после фундамента):** Health несёт наибольший regulatory/privacy риск (нужен encrypted vault + regulatory review); Astrology зависит от license/WASM/tzdb/golden gates. Оба — после того, как ядро, privacy/AI-safety и первый лёгкий домен обкатаны.
 
-**Условие:** реализацию A начинать только после явного «go» Ивана и утверждённого task-контракта S1→S2 (scope, схемы, тесты, rollback, мобильная приёмка).
+**Условие:** любую runtime-реализацию (начиная с B) начинать только после явного «go» Ивана и утверждённого task-контракта, с independent review для high-risk (`product/14`).
 
 ## Финальная рекомендация (для статуса задачи)
 
-`RECOMMENDATION=psych` (Momentary State + метод «Зачем?», через инфраструктурный S1).
+`RECOMMENDATION=psych` — **но только после Этапов B (Evidence & Model Kernel) и C (Privacy + AI validator framework).** Momentary State + «Зачем?» — это этап D, не первый шаг.

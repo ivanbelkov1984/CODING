@@ -88,16 +88,17 @@
 - **Не хватает:** связывание материалов творческого архива, версия личной модели.
 - **Риск:** низкий. **Мин. срез:** связка «глава ↔ инсайты/паттерны».
 
-## 15. AI synthesis and validators — **PARTIAL**
-- **Есть:** единый вход `callClaude()` (`app.js:4350`), реестр `AI_PROVIDERS` (anthropic/openai/gemini, `app.js:4264`), ledger `arch5_ai_ledger`, optional JSON schema per call.
-- **Не хватает:** input/output validators (grounding, unsupported psychology, astrology isolation, health safety, tone/shame, numeric, temporal, uncertainty, alternatives, crisis). Голос `EvidenceGroundedDirectMentor` не формализован в коде.
-- **Риск:** средний (leakage/injection — есть в `09` §12). **Зависимость:** `product/03`, `life-architect-v2/16` (reference).
-- **Мин. срез:** один validator-seam на choke-point `callClaude` (например astrology-isolation или tone/shame) без смены провайдеров.
+## 15. AI synthesis and validators — **PARTIAL (транспорт, не синтезатор)**
+- **Есть:** единый вход `callClaude()` (`app.js:4350`) — **транспорт и роутер** (провайдеры `AI_PROVIDERS` `app.js:4264`, модели, task-маршруты, ledger `arch5_ai_ledger`, бюджет, optional JSON schema).
+- **Существенная проблема:** AI-оценки из диалога (`mood/stress/lonely`, сохраняются как `stateNote` `app.js:844`) **уже подмешиваются** в алгоритм `cravingRisk` (факторы `chat-stress`/`chat-lonely`, `app.js:1002–1003`) — **без** эпистемического лейбла «гипотеза ИИ», evidence spans, alternatives, подтверждения, expiry и без invalidation после исправления.
+- **Не хватает:** не «один validator», а **framework** (`product/09` §3): eligibility→consent→minimisation→labels→structured input→policy→LLM→schema→grounding→claim-class→domain safety→numeric/temporal→uncertainty/alternatives→crisis override→retry→safe fallback. Голос `EvidenceGroundedDirectMentor` не формализован.
+- **Риск:** средний–высокий (AI-гипотеза влияет на решение без лейбла; leakage/injection — `claude-handoff/09` §12). **Зависимость:** `product/07` (kernel), `product/09`.
+- **Мин. срез:** AI-safety framework с 2–3 включёнными валидаторами + перевод AI→risk связи под контракт (лейбл, отдельный сигнал, отклонение). **Не** одиночный validator.
 
 ## 16. Profiles / sync / backup — **RUNTIME**
 - **Есть:** профили (`app.js:104`), E2EE sync (`encryptPayload` `app.js:3800`, PBKDF2 600k+AES-GCM-256), recovery key, **encrypted portable backup (PR #66 merged)**.
-- **Не хватает:** ничего блокирующего; forward-encryption gap при пустой passphrase (см. `09` §12, отдельно).
-- **Риск:** низкий. **Не переписывать** без отдельного крипто-контракта.
+- **Не хватает:** для дневника — ничего блокирующего. Но **local-at-rest данные в открытом виде**: `DB`=plaintext JSON в localStorage (`app.js:166–168`), медиа=plaintext в IndexedDB (`app.js:1169`); E2EE защищает sync, не локальный профиль; forward-encryption gap при пустой passphrase. Это **блокер для добавления медицинских документов** (`product/09` §1, `product/12` §3), не для дневника одного пользователя.
+- **Риск:** низкий (дневник) / высокий (health). **Не переписывать** крипто без отдельного контракта.
 
 ## 17. Mobile / offline / native readiness — **RUNTIME (web) / DEFER (native)**
 - **Есть:** PWA offline-first, service worker (`sw.js`), mobile-only workflow (GitHub→CI→PR→preview), backup-модули в SW cache (PR #66).

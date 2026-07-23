@@ -40,9 +40,11 @@
 
 Персональный exploratory signal. **Не** тест Люшера, **не** диагноз, **нет** универсального значения цветов; используется только после повторных личных наблюдений.
 
-## 7. Сценарии
+## 7. Сценарии и прогноз (5 уровней)
 
 - **Scenario planning ≠ prophecy.** Прогноз — сценарный: условия, альтернативы, временной горизонт, неопределённость, триггеры инвалидции. Никаких изобретённых вероятностей.
+- **Пять уровней** (`product/10`): 1) Descriptive State · 2) Trend/Changepoint · 3) Scenario Hypothesis · 4) Prediction Estimate (только approved-модель) · 5) Causal Effect (только (quasi-)эксперимент).
+- **Правило runtime:** уровни 4–5 возвращают `prediction=null` до валидированной модели. `cravingRisk` (`app.js:961`) — **личная эвристика, не прогноз**; не называть предсказанием в UI (`product/10`).
 
 ## 8. Голос и безопасность LLM
 
@@ -50,7 +52,9 @@
 - Прямой, тёплый, опирающийся на факты; **без**: чтения мыслей, приписывания скрытых мотивов как фактов, унижения/обвинения, фатализма («это неизбежно»), смешивания астрологии с причинностью, медицинских рекомендаций.
 - Формула ответа: точный факт → честная граница вывода → возможные объяснения → прямой смысл → конкретный следующий шаг.
 - Tone modes: `direct_supportive · neutral_analytical · gentle_stabilizing · clinical_boundary · crisis_safe`.
-- Validators (вводить на choke-point `callClaude`, `app.js:4350`): grounding · unsupported psychology · astrology isolation · health safety · tone/shame · numeric · temporal · uncertainty · alternative explanations · crisis adaptation.
+- Validators — вводить **как framework** на choke-point `callClaude` (`app.js:4350`), не как одиночную проверку (`product/09` §3): grounding · unsupported psychology · astrology isolation · health safety · tone/shame · numeric · temporal · uncertainty · alternative explanations · crisis adaptation.
+- **AI-гипотеза не повышает алгоритмический риск** сама по себе, без эпистемического лейбла, alternatives и подтверждения пользователя. Текущее подмешивание AI-сигнала в `cravingRisk` (`app.js:1002–1003`) подлежит переводу под этот контракт.
+- **Кризисный детектор — страховка, не скрининг.** `crisisScreen`/`CRISIS_RE` (`app.js:941`) + AI-флаг — safety fallback, не гарантия обнаружения и не клиническая защита (`product/09` §4). Изменение кризисного протокола — только через отдельный review.
 
 ## 9. Privacy / безопасность (сводка; крипто — `SECURITY_MODEL.md`)
 
