@@ -283,6 +283,22 @@ function switchProfile(id) {
   const p = activeProfile();
   hptMed(); toast('Профиль: ' + (p ? p.name : ''), 'ok');
 }
+// Гидратация ПОСЛЕ восстановления backup. Транзакция restore уже переключила
+// активный профиль (arch5_active = profileId) и записала DB/CFG/bak. Выполняем
+// безопасный эквивалент переключения профиля БЕЗ повторной активации и БЕЗ
+// дополнительного синка до завершения гидратации: сброс sync-состояния, hydrate()
+// (перечитывает DB/CFG активного слота в память), полный re-render. Так следующий
+// persist() запишет уже восстановленный DB, а не старый in-memory профиль.
+// Вызывается из backup-boot.mjs как window.onRestoreActivated(profileId, mode).
+async function onRestoreActivated(profileId, mode) {
+  resetSyncState();
+  if (activeId() !== profileId) setActiveId(profileId);   // страховка идентичности
+  hydrate();
+  if (typeof initAll === 'function') initAll();
+  if (typeof rProfileRow === 'function') rProfileRow();
+  if (typeof hptMed === 'function') hptMed();
+}
+try { window.onRestoreActivated = onRestoreActivated; } catch (e) {}
 function createProfile() {
   const name = ($('prof-new-name')?.value || '').trim();
   if (!name) { toast('Введи название профиля', 'warn'); return; }
@@ -505,14 +521,41 @@ function openOv(id) {
   if (id==='ov-ci')       rEmoPicker();
   if (id==='ov-add')      { STATE.addMedia = []; rAddMedia(); }
 }
-// Сборка мусора медиа: удаляем из IndexedDB картинки, на которые никто
-// не ссылается (после удаления инсайтов / брошенных черновиков).
+// Собрать ВСЕ media-id, на которые ссылается любая запись любой коллекции db.
+function collectDbMediaRefs(db, out) {
+  if (!db || typeof db !== 'object') return;
+  for (const c of Object.keys(db)) {
+    const arr = db[c]; if (!Array.isArray(arr)) continue;
+    for (const rec of arr) if (rec && Array.isArray(rec.media)) for (const m of rec.media) if (typeof m === 'string') out.add(m);
+  }
+}
+// Сборка мусора медиа: удаляем из IndexedDB медиа, на которые никто не ссылается.
+// IndexedDB 'arch5_media' ОБЩИЙ для всех профилей, поэтому ссылки собираем из DB
+// КАЖДОГО профиля, из текущего in-memory DB и из активных черновиков. Если реестр
+// или любой слот профиля повреждён/нечитаем — GC ПРЕКРАЩАЕТСЯ (fail-safe: лучше
+// оставить лишнее медиа, чем удалить чужое/нужное из-за ошибки чтения).
 async function gcMedia() {
   try {
     const ref = new Set(STATE.addMedia || []);
-    (DB.insights || []).forEach(i => (i.media || []).forEach(m => ref.add(m)));
-    const db = await idbOpen();
-    const keys = await new Promise((res, rej) => { const tx = db.transaction(IDB_STORE, 'readonly'); const rq = tx.objectStore(IDB_STORE).getAllKeys(); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
+    collectDbMediaRefs(DB, ref);                          // текущий in-memory профиль
+    // Реестр профилей: если повреждён — стоп (иначе чужие медиа примем за мусор).
+    const rawReg = localStorage.getItem(PKEY);
+    let profiles = [];
+    if (rawReg != null) {
+      try { profiles = JSON.parse(rawReg); } catch (e) { return; }
+      if (!Array.isArray(profiles)) return;
+    }
+    const active = activeId();
+    for (const p of profiles) {
+      if (!p || p.id == null || p.id === active) continue; // активный покрыт in-memory DB
+      const raw = localStorage.getItem(dbKey(p.id));
+      if (raw == null) continue;                           // пустой слот — нет ссылок, это ок
+      let db;
+      try { db = JSON.parse(raw); } catch (e) { return; }  // повреждён → стоп, ничего не удаляем
+      if (!db || typeof db !== 'object') return;           // нечитаем → стоп
+      collectDbMediaRefs(db, ref);
+    }
+    const keys = await idbKeys();
     for (const k of keys) if (!ref.has(k)) await idbDel(k).catch(() => {});
   } catch (e) { /* IndexedDB недоступен — не критично */ }
 }
@@ -521,7 +564,15 @@ function closeOv(id) {
   document.body.style.overflow = '';
 }
 document.addEventListener('keydown', e => {
-  if (e.key==='Escape') document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
+  if (e.key !== 'Escape') return;
+  // Зашифрованный backup-sheet закрываем через контроллер: он чистит пароли/файл/
+  // destructive-состояние и не прерывает выполняющуюся операцию (busy).
+  const be = document.getElementById('ov-backup-enc');
+  if (be && be.classList.contains('on') && window.ArchBackup && typeof window.ArchBackup.requestClose === 'function') {
+    window.ArchBackup.requestClose();
+    return;
+  }
+  document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
 });
 
 // ─── ТЕМА ───────────────────────────────────────────────────────

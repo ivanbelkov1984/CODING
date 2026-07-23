@@ -25,6 +25,7 @@ const SAFE_MESSAGES = {
   BAD_VERSION: 'Версия файла не поддерживается.',
   MANIFEST_MISMATCH: 'Файл резервной копии неполный или повреждён.',
   MEDIA_HASH_MISMATCH: 'Медиа в файле повреждено.',
+  MISSING_MEDIA: 'Некоторые фотографии или аудио сейчас недоступны — полная копия не создана. Сделайте копию «только данные» или восстановите медиа и повторите.',
   ROLLBACK_FAILED: 'Ошибка восстановления. Данные возвращены в прежнее состояние не полностью — не активируйте профиль и обратитесь к резервной копии.',
   NO_TARGET: 'Выбранный профиль не найден.',
   NO_DB: 'Нет данных для резервной копии.',
@@ -66,6 +67,7 @@ export function createBackupUI(deps) {
   const restore = (deps && deps.restore) || prodRestore;
   const platform = (deps && deps.platform) || browserPlatform;
   const now = (deps && deps.now) || (() => new Date().toISOString());
+  const onActivated = (deps && deps.onActivated) || null;   // гидратация app.js после активации
 
   // ── UI-state ──
   const st = {
@@ -88,7 +90,19 @@ export function createBackupUI(deps) {
   const snapshot = () => JSON.parse(JSON.stringify({ ...st, file: st.file ? { name: st.file.name, size: st.file.size } : null }));
 
   // ── Сеттеры (UI-виджеты) ──
-  function openSheet() { st.open = true; st.status = { phase: 'idle' }; return snapshot(); }
+  // Открытие sheet: защитный сброс ВСЕГО временного состояния, чтобы ни пароли,
+  // ни выбранный файл, ни destructive-режим, ни устаревший статус не «протекли»
+  // из прошлой сессии (в т.ч. после закрытия по Escape).
+  function openSheet() {
+    st.mode = 'data-only';
+    st.password = ''; st.password2 = '';
+    st.ackLoss = false; st.ackSensitive = false;
+    st.file = null; st.restorePassword = '';
+    st.restoreMode = 'new'; st.destructiveArmed = false; st.targetProfileId = null;
+    st.busy = false;
+    st.open = true; st.status = { phase: 'idle' };
+    return snapshot();
+  }
   function setMode(m) { if (m === 'data-only' || m === 'complete') st.mode = m; return snapshot(); }
   function setPassword(p) { st.password = String(p == null ? '' : p); return snapshot(); }
   function setPassword2(p) { st.password2 = String(p == null ? '' : p); return snapshot(); }
@@ -175,6 +189,7 @@ export function createBackupUI(deps) {
         mode: st.restoreMode,
         targetId: st.restoreMode === 'replace' ? st.targetProfileId : undefined,
         now,
+        onActivated,                 // гидратация app.js до возврата ok (item hydration)
       });
       st.restorePassword = '';
       st.status = { phase: 'done', message: st.restoreMode === 'replace' ? 'Профиль заменён из резервной копии.' : 'Создан и активирован новый профиль из резервной копии.', profileId: result.profileId };

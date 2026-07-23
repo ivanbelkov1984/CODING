@@ -263,6 +263,78 @@ async function main() {
     await throwsCode(() => restoreBackup({ adapter: a, fileText: file, password: PW, mode: 'replace' }), 'BAD_TARGET', 'replace без targetId → BAD_TARGET');
   }
 
+  // 18. Item 4 — complete: ЛИШНЯЯ непривязанная media в payload → MANIFEST_MISMATCH,
+  //     ноль мутаций (DB ссылается только на m1, payload несёт m1+m2).
+  {
+    const { storage, media } = freshDest();
+    const a = createBackupAdapter({ storage, media, now: () => NOW });
+    const m1 = await mediaItem('m1', IMG);
+    const m2 = await mediaItem('m2', IMG_DIFF);
+    const payload = { payloadVersion: 1, app: 'architect', mode: 'complete', createdAt: NOW, profileName: 'X', db: { insights: [{ id: 1, title: 't', media: ['m1'] }], dreams: [] }, cfg: { userName: 'x' }, media: [m1, m2] };
+    const file = await mkFile(payload, PW);
+    const before = state(storage, media);
+    await throwsCode(() => restoreBackup({ adapter: a, fileText: file, password: PW, mode: 'new', genProfileId: () => 'pN', now: () => NOW }), 'MANIFEST_MISMATCH', 'item4: лишняя непривязанная media → MANIFEST_MISMATCH');
+    ok(state(storage, media) === before, 'item4: ноль мутаций при MANIFEST_MISMATCH');
+  }
+
+  // 19. Item 1 — onActivated вызывается ПОСЛЕ активации (профиль уже активен),
+  //     с {profileId, mode}.
+  {
+    const { storage, media } = freshDest();
+    const a = createBackupAdapter({ storage, media, now: () => NOW });
+    const file = await mkFile(await mkPayload('complete'), PW);
+    let seen = null, activeAtCall = null;
+    const r = await restoreBackup({ adapter: a, fileText: file, password: PW, mode: 'new', genProfileId: () => 'pH', now: () => NOW,
+      onActivated: async ({ profileId, mode }) => { seen = { profileId, mode }; activeAtCall = a.getActiveId(); } });
+    ok(r.ok && seen && seen.profileId === 'pH' && seen.mode === 'new', 'item1: onActivated получил {profileId, mode}');
+    ok(activeAtCall === 'pH', 'item1: на момент onActivated профиль уже активирован');
+  }
+
+  // 20. Item 9 — reread media: верная data, но неверный type → VERIFY_MEDIA → rollback.
+  {
+    const { storage, media } = freshDest();
+    const file = await mkFile(await mkPayload('complete'), PW);
+    const before = state(storage, media);
+    const a = passthru(storage, media, { readMedia: async (id) => { const r = await media.get(id); if (r) r.type = 'WRONG'; return r; } });
+    await throwsCode(() => restoreBackup({ adapter: a, fileText: file, password: PW, mode: 'new', genProfileId: () => 'pN', now: () => NOW }), 'VERIFY_MEDIA', 'item9: неверный type при reread → VERIFY_MEDIA');
+    ok(state(storage, media) === before, 'item9: откат после VERIFY_MEDIA(type) — ноль мутаций');
+  }
+  // 20b. Item 9 — reread media: верная data, но неверный createdAt → VERIFY_MEDIA.
+  {
+    const { storage, media } = freshDest();
+    const file = await mkFile(await mkPayload('complete'), PW);
+    const before = state(storage, media);
+    const a = passthru(storage, media, { readMedia: async (id) => { const r = await media.get(id); if (r) r.createdAt = '1999-01-01T00:00:00.000Z'; return r; } });
+    await throwsCode(() => restoreBackup({ adapter: a, fileText: file, password: PW, mode: 'new', genProfileId: () => 'pN', now: () => NOW }), 'VERIFY_MEDIA', 'item9: неверный createdAt при reread → VERIFY_MEDIA');
+    ok(state(storage, media) === before, 'item9: откат после VERIFY_MEDIA(createdAt)');
+  }
+
+  // 21. Item 2 — bak в транзакции. Заменяемый профиль имеет СТАРЫЙ bak; восстановление
+  //     профиля с пустым (zero-count) DB → после успеха bak = восстановленный DB
+  //     (НЕ старый), recovery не подменит восстановленные данные.
+  {
+    const { storage, media } = replaceDest();
+    storage.setItem(KEYS.bak('pOld'), JSON.stringify({ insights: [{ id: 99, title: 'OLD-BAK' }] }));
+    const a = createBackupAdapter({ storage, media, now: () => NOW });
+    const emptyPayload = { payloadVersion: 1, app: 'architect', mode: 'data-only', createdAt: NOW, profileName: 'Empty', db: { insights: [], dreams: [] }, cfg: { userName: 'E' }, media: [] };
+    const file = await mkFile(emptyPayload, PW);
+    const r = await restoreBackup({ adapter: a, fileText: file, password: PW, mode: 'replace', targetId: 'pOld', now: () => NOW });
+    ok(r.ok, 'item2: replace пустым DB успешен');
+    ok(JSON.parse(storage.getItem(KEYS.bak('pOld'))).insights.length === 0, 'item2: bak = восстановленный (пустой) DB');
+    ok(!storage.getItem(KEYS.bak('pOld')).includes('OLD-BAK'), 'item2: bak НЕ содержит старый DB заменённого профиля');
+  }
+  // 21b. Item 2 — инъекция сбоя ПОСЛЕ мутации: старый bak восстановлен ТОЧНО.
+  {
+    const { storage, media } = replaceDest();
+    const OLDBAK = JSON.stringify({ insights: [{ id: 99, title: 'OLD-BAK' }] });
+    storage.setItem(KEYS.bak('pOld'), OLDBAK);
+    const before = storage.getItem(KEYS.bak('pOld'));
+    const file = await mkFile(await mkPayload('data-only'), PW);
+    const a = passthru(storage, media, { verifyProfile: () => { throw new BackupError('VERIFY_DB', 'inject'); } });
+    await throwsAny(() => restoreBackup({ adapter: a, fileText: file, password: PW, mode: 'replace', targetId: 'pOld', now: () => NOW }), 'item2: сбой verify после мутации');
+    ok(storage.getItem(KEYS.bak('pOld')) === before, 'item2: старый bak восстановлен точно после отката');
+  }
+
   console.log(out.join('\n'));
   console.log('\nBackup restore (Slice 3): ' + pass + '/' + (pass + fail) + ' passed');
   if (fail > 0) process.exit(1);

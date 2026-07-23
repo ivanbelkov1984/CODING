@@ -2,7 +2,6 @@
 architect/dist/
 architect/evidence/
 architect/node_modules
-architect/package-lock.json
 node_modules
 
 # Секреты (наряд #205: TMCManager объявляет flutter_dotenv, но .env-паттернов

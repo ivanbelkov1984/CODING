@@ -117,15 +117,17 @@ async function main() {
     ok(complete.payload.media.length === 1 && complete.payload.db.oq.length === 2, 'реальная DB: complete собирает media и сохраняет oq/объекты');
   }
 
-  // B2. complete с битой ссылкой → ссылка убрана из копии + warning, без падения
+  // B2. complete с недоступной media → MISSING_MEDIA (не молчаливый неполный
+  //     файл): живой DB не мутирован; data-only при этом продолжает работать.
   {
     const { storage, media } = seed();
     await media.del('m2');
+    const dbBefore = storage.getItem(KEYS.db('pA'));
     const a = createBackupAdapter({ storage, media, now: () => NOW });
-    const { payload, warnings } = await a.buildBundle({ id: 'pA', mode: 'complete' });
-    ok(payload.media.length === 1 && payload.media[0].id === 'm1', 'complete: битая ссылка не даёт media-запись');
-    ok(payload.db.insights[0].media.join() === 'm1', 'complete: битая ссылка убрана из копии');
-    ok(warnings.some(w => w === 'missing_media:m2'), 'complete: warning о missing media');
+    await throwsCode(() => a.buildBundle({ id: 'pA', mode: 'complete' }), 'MISSING_MEDIA', 'complete: недоступная media → MISSING_MEDIA (без неполного файла)');
+    ok(storage.getItem(KEYS.db('pA')) === dbBefore, 'complete MISSING_MEDIA: живой DB не изменён');
+    const dataOnly = await a.buildBundle({ id: 'pA', mode: 'data-only' });
+    ok(dataOnly.payload.media.length === 0 && !('media' in dataOnly.payload.db.insights[0]), 'data-only работает даже при недоступной media');
   }
 
   // C. identical-media reuse без перезаписи
@@ -217,18 +219,59 @@ async function main() {
     ok(fresh.apiUrl === '' && fresh.spaceKey === '' && fresh.lastSync === '', 'new profile: connection пустые/default');
   }
 
-  // J. writeStagedProfile → verify → activate
+  // J. writeStagedProfile → verify (DB/CFG/bak/registry/profile) → activate
   {
     const { storage, media } = seed();
     const a = createBackupAdapter({ storage, media });
     const db = { insights: [{ id: 9, title: 'z' }], dreams: [] };
     const cfg = { userName: 'Bob', apiUrl: '', spaceKey: '', lastSync: '' };
     a.writeStagedProfile({ id: 'pNew', profile: { name: 'Bob', color: '#1A7F3C' }, db, cfg });
-    ok(a.verifyProfile({ id: 'pNew', db, cfg }) === true, 'verify: перечитанное состояние совпадает');
+    ok(a.verifyProfile({ id: 'pNew', db, cfg, profile: { name: 'Bob' } }) === true, 'verify: перечитанное состояние совпадает (вкл. bak/profile)');
+    ok(storage.getItem(KEYS.bak('pNew')) === JSON.stringify(db), 'bak-слот записан и точно равен восстановленному DB');
     a.activate('pNew');
     ok(a.getActiveId() === 'pNew', 'activate: активный профиль переключён');
     ok(a.listProfiles().some(p => p.id === 'pNew') && a.listProfiles().some(p => p.id === 'pA'), 'registry: новый профиль добавлен, старый сохранён');
     await throwsCode(() => a.activate('pGhost'), 'NO_PROFILE', 'activate несуществующего → NO_PROFILE');
+  }
+
+  // J2. verify: bak, содержащий СТАРЫЙ DB заменяемого профиля, отвергается.
+  {
+    const { storage, media } = seed();
+    const a = createBackupAdapter({ storage, media });
+    const db = { insights: [{ id: 1, title: 'restored' }] }; const cfg = { userName: 'x' };
+    a.writeStagedProfile({ id: 'pA', profile: { name: 'Alice' }, db, cfg });
+    storage.setItem(KEYS.bak('pA'), JSON.stringify({ insights: [{ id: 99, title: 'OLD' }] })); // подмена старым bak
+    await throwsCode(() => a.verifyProfile({ id: 'pA', db, cfg, profile: { name: 'Alice' } }), 'VERIFY_BAK', 'verify: bak со старым DB заменяемого профиля → VERIFY_BAK');
+  }
+
+  // J3. verify: несовпадение записи профиля (имя) → VERIFY_PROFILE.
+  {
+    const { storage, media } = seed();
+    const a = createBackupAdapter({ storage, media });
+    const db = { insights: [] }; const cfg = { userName: 'x' };
+    a.writeStagedProfile({ id: 'pN', profile: { name: 'Correct' }, db, cfg });
+    await throwsCode(() => a.verifyProfile({ id: 'pN', db, cfg, profile: { name: 'WRONG' } }), 'VERIFY_PROFILE', 'verify: имя профиля не совпало → VERIFY_PROFILE');
+  }
+
+  // K. planMedia: детерминированный remap — сгенерированный id НЕ крадёт оригинал
+  //    другой ВХОДЯЩЕЙ media. Вход [m1(collision), m2(collision)]; genMediaId
+  //    сперва выдаёт 'm2' (оригинал следующей входящей) — планнер обязан отклонить
+  //    кандидата и запросить следующий id; обе записи сохраняются отдельно.
+  {
+    const { storage, media } = seed();   // существуют m1(IMG), m2(AUD)
+    const core = await import('../backup/backup-core.mjs');
+    const d = core.canonicalMediaBytes(IMG2);
+    const items = [
+      { id: 'm1', mime: 'image/jpeg', sha256: await sha256Hex(d.bytes), bytes: bytesToBase64(d.bytes) },
+      { id: 'm2', mime: 'image/jpeg', sha256: await sha256Hex(d.bytes), bytes: bytesToBase64(d.bytes) },
+    ];
+    const seq = ['m2', 'mNew1', 'mNew2']; let i = 0;
+    const a = createBackupAdapter({ storage, media, now: () => NOW, genMediaId: () => seq[i++] });
+    const plan = await a.planMedia(items);
+    ok(plan.remaps.m1 && plan.remaps.m1 !== 'm2' && plan.remaps.m1 !== 'm1', 'remap: id для m1 не равен оригиналу другой входящей (m2) и своему');
+    ok(plan.writes.length === 2, 'remap: обе конфликтующие media записаны отдельно');
+    const ids = plan.writes.map(w => w.id);
+    ok(new Set(ids).size === 2 && !ids.includes('m1') && !ids.includes('m2'), 'remap: target id уникальны и не перезаписывают существующие m1/m2');
   }
 
   console.log(out.join('\n'));

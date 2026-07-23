@@ -56,10 +56,15 @@ function refsOf(db) {
 function verifyManifest(payload) {
   const refs = refsOf(payload.db);
   const provided = new Set(payload.media.map(m => m.id));
+  if (provided.size !== payload.media.length) fail('MANIFEST_MISMATCH', 'дубликаты media id в backup');
   if (payload.mode === 'data-only') {
     if (refs.size > 0) fail('MANIFEST_MISMATCH', 'data-only не должен ссылаться на media');
+    if (provided.size > 0) fail('MANIFEST_MISMATCH', 'data-only не должен нести media');
   } else {
+    // complete: ТОЧНОЕ равенство множеств. Каждая ссылка присутствует в payload
+    // и НЕТ ни одной лишней (непривязанной) media — иначе backup отвергается.
     for (const r of refs) if (!provided.has(r)) fail('MANIFEST_MISMATCH', 'ссылка на отсутствующее в backup media: ' + r);
+    for (const m of provided) if (!refs.has(m)) fail('MANIFEST_MISMATCH', 'лишнее media без ссылки в DB: ' + m);
   }
 }
 
@@ -74,6 +79,7 @@ function verifyManifest(payload) {
  * @param {string} [p.targetId] — обязателен для 'replace'
  * @param {function} [p.genProfileId]
  * @param {function} [p.now]
+ * @param {function} [p.onActivated] — async ({profileId, mode}) => гидратация в app.js
  * @returns {Promise<object>} success result
  */
 export async function restoreBackup(p) {
@@ -129,7 +135,7 @@ export async function restoreBackup(p) {
 
   // ── 9. snapshot до первой мутации ──
   const snap = await adapter.snapshot({
-    storageKeys: [KEYS.PKEY, KEYS.AKEY, KEYS.db(targetId), KEYS.cfg(targetId)],
+    storageKeys: [KEYS.PKEY, KEYS.AKEY, KEYS.db(targetId), KEYS.cfg(targetId), KEYS.bak(targetId)],
     mediaIds: plan.writes.map(w => w.id),
   });
 
@@ -140,11 +146,14 @@ export async function restoreBackup(p) {
     await adapter.writeStagedMedia(plan.writes);
     // ── 12–13. staged DB/CFG + registry write ──
     adapter.writeStagedProfile({ id: targetId, profile: profileEntry, db: dbFinal, cfg: cfgFinal });
-    // ── 14. reread + verification (DB/CFG/registry + media) ──
-    adapter.verifyProfile({ id: targetId, db: dbFinal, cfg: cfgFinal });
+    // ── 14. reread + verification (DB/CFG/bak/registry/profile + media) ──
+    adapter.verifyProfile({ id: targetId, db: dbFinal, cfg: cfgFinal, profile: profileEntry });
     for (const w of plan.writes) {
       const r = await adapter.readMedia(w.id);
-      if (!r || r.data !== w.record.data) fail('VERIFY_MEDIA', 'проверка media не прошла: ' + w.id);
+      // Точная проверка перечитанной записи: data + type + createdAt.
+      if (!r || r.data !== w.record.data || r.type !== w.record.type || r.createdAt !== w.record.createdAt) {
+        fail('VERIFY_MEDIA', 'проверка media не прошла: ' + w.id);
+      }
     }
     // ── 15. activation только после успешной verification ──
     adapter.activate(targetId);
@@ -162,6 +171,16 @@ export async function restoreBackup(p) {
       if (origErr && typeof origErr === 'object') { try { origErr.rolledBack = true; } catch (e) { /* frozen */ } }
     }
     throw origErr;
+  }
+
+  // ── 15b. Немедленная гидратация активированного профиля через callback из
+  //   app.js (сброс sync-состояния, hydrate, обновление in-memory DB/CFG,
+  //   initAll/render). ТОЛЬКО после успешной активации транзакции, чтобы старое
+  //   in-memory состояние не перезаписало восстановленный профиль при следующем
+  //   persist(). Ошибка гидратации не откатывает уже зафиксированные данные —
+  //   транзакция хранилища завершена, профиль активирован и корректен.
+  if (typeof p.onActivated === 'function') {
+    await p.onActivated({ profileId: targetId, mode });
   }
 
   // ── 16. success result ──

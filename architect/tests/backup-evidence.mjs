@@ -28,7 +28,11 @@ const OUT = join(ROOT, 'evidence', ENGINE);
 const MIME = { '.html': 'text/html; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.png': 'image/png' };
 
 let pass = 0, fail = 0; const results = [];
-const ok = (c, n) => { if (c) { pass++; results.push({ ok: true, n }); console.log('  ✓ ' + n); } else { fail++; results.push({ ok: false, n }); console.log('  ✗ ' + n); } };
+const ok = (c, n) => { if (c) { pass++; results.push({ ok: true, status: 'PASS', n }); console.log('  ✓ ' + n); } else { fail++; results.push({ ok: false, status: 'FAIL', n }); console.log('  ✗ ' + n); } };
+// Некоторые проверки честно НЕ являются PASS (SKIP/BLOCKED). Их НЕ засчитываем
+// как pass — фиксируем реальный статус в отчёте (см. item 10: no ok(true) для
+// невыполненного теста; отчёт различает PASS/FAIL/SKIP/BLOCKED).
+const mark = (status, n) => { results.push({ ok: null, status, n }); console.log('  • ' + status + ' ' + n); };
 
 function serveDist() {
   const server = http.createServer(async (req, res) => {
@@ -83,6 +87,29 @@ async function openSheet(page) {
 }
 
 async function shot(page, name) { try { await mkdir(OUT, { recursive: true }); await page.screenshot({ path: join(OUT, name + '.png') }); } catch (e) {} }
+
+// Полный снимок мутируемого состояния для zero-mutation проверок: весь
+// localStorage (registry/active/db/cfg/bak/…) + все записи IndexedDB arch5_media.
+async function fullSnapshot(page) {
+  return await page.evaluate(async () => {
+    const ls = {};
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); ls[k] = localStorage.getItem(k); }
+    const md = await new Promise((res) => {
+      const out = {};
+      const r = indexedDB.open('arch5_media', 1);
+      r.onsuccess = () => {
+        const db = r.result;
+        if (!db.objectStoreNames.contains('media')) return res(out);
+        const tx = db.transaction('media', 'readonly'); const s = tx.objectStore('media');
+        const kq = s.getAllKeys(), vq = s.getAll();
+        tx.oncomplete = () => { kq.result.forEach((k, i) => { out[k] = JSON.stringify(vq.result[i]); }); res(out); };
+        tx.onerror = () => res(out);
+      };
+      r.onerror = () => res(out);
+    });
+    return JSON.stringify({ ls, md });
+  });
+}
 
 async function main() {
   await mkdir(OUT, { recursive: true });
@@ -160,33 +187,94 @@ async function main() {
     ok(!text2.includes('PASSPHRASE_SECRET'), 'complete: секретов нет в файле');
     await shot(page, '03-complete-done');
 
-    // ── Wrong password: safe error + zero mutation ──
+    // ── Wrong password: safe error + ПОЛНЫЙ zero-mutation snapshot ──
+    // (registry, active, все DB/CFG/bak + все записи IndexedDB arch5_media).
     await page.click('#be-tab-restore');
-    const before = await page.evaluate(() => ({ prof: localStorage.getItem('arch5_profiles'), active: localStorage.getItem('arch5_active'), db: localStorage.getItem('arch5_db_pEvidence') }));
+    const beforeWP = await fullSnapshot(page);
     await page.setInputFiles('#be-file', { name: 'backup.json', mimeType: 'application/json', buffer: Buffer.from(text1) });
     await page.fill('#be-rpw', 'WRONG-PASSWORD');
     await page.click('#be-restore-new-btn');
     await page.waitForFunction(() => /Неверный пароль/.test((document.getElementById('be-restore-status') || {}).textContent || ''), null, { timeout: 8000 });
     const errText = await page.locator('#be-restore-status').textContent();
     ok(/Неверный пароль/.test(errText) && !errText.includes('WRONG-PASSWORD'), 'wrong password: безопасное сообщение без пароля');
-    const after = await page.evaluate(() => ({ prof: localStorage.getItem('arch5_profiles'), active: localStorage.getItem('arch5_active'), db: localStorage.getItem('arch5_db_pEvidence') }));
-    ok(JSON.stringify(before) === JSON.stringify(after), 'wrong password: zero mutation (registry/active/DB)');
+    ok((await fullSnapshot(page)) === beforeWP, 'wrong password: полный zero-mutation (registry/active/DB/CFG/bak/IndexedDB)');
     await shot(page, '04-wrong-password');
+
+    // ── Corrupted ciphertext: safe error + ПОЛНЫЙ zero-mutation snapshot ──
+    {
+      const corrupt = (() => { const e = JSON.parse(text2); const b = Buffer.from(e.ciphertext, 'base64'); b[10] ^= 0xff; b[20] ^= 0xff; e.ciphertext = b.toString('base64'); return JSON.stringify(e); })();
+      const beforeCC = await fullSnapshot(page);
+      await page.setInputFiles('#be-file', { name: 'corrupt.json', mimeType: 'application/json', buffer: Buffer.from(corrupt) });
+      await page.fill('#be-rpw', 'evidence-pass-2');
+      await page.click('#be-restore-new-btn');
+      await page.waitForFunction(() => /повреждён|Неверный пароль/i.test((document.getElementById('be-restore-status') || {}).textContent || ''), null, { timeout: 8000 });
+      ok(true, 'corrupted ciphertext: показано безопасное сообщение');
+      ok((await fullSnapshot(page)) === beforeCC, 'corrupted ciphertext: полный zero-mutation (registry/active/DB/CFG/bak/IndexedDB)');
+    }
+    // Чистый сброс controller-состояния между сценариями восстановления.
+    await page.click('#be-close');
+    await openSheet(page);
+    await page.click('#be-tab-restore');
 
     // ── Restore as new profile (default) + persistence ──
     await page.fill('#be-rpw', 'evidence-pass-2');
     await page.setInputFiles('#be-file', { name: 'complete.json', mimeType: 'application/json', buffer: Buffer.from(text2) });
+    // item1: помечаем УСТАРЕВШЕЕ in-memory состояние — гидратация обязана его убрать.
+    await page.evaluate(() => { if (typeof DB === 'object' && DB) DB.__staleMarker = 'STALE-NEW'; });
     await page.click('#be-restore-new-btn');
     await page.waitForFunction(() => /новый профиль/i.test((document.getElementById('be-restore-status') || {}).textContent || ''), null, { timeout: 15000 });
     const afterRestore = await page.evaluate(() => { const profs = JSON.parse(localStorage.getItem('arch5_profiles')); const active = localStorage.getItem('arch5_active'); const cfg = JSON.parse(localStorage.getItem('arch5_cfg_' + active) || '{}'); return { count: profs.length, activeIsNew: active !== 'pEvidence', apiUrl: cfg.apiUrl, oldUntouched: !!localStorage.getItem('arch5_db_pEvidence') }; });
     ok(afterRestore.count === 2 && afterRestore.activeIsNew, 'restore-new: создан отдельный новый профиль и активирован');
     ok(afterRestore.oldUntouched, 'restore-new: существующий профиль не изменён');
     ok(afterRestore.apiUrl === '', 'restore-new: connection fields нового профиля пустые/default');
+    // item1: гидратация БЕЗ ручного reload — in-memory = восстановленный профиль.
+    const hydr = await page.evaluate(() => ({
+      active: activeId(),
+      staleGone: !(DB && DB.__staleMarker),
+      hasRestored: !!(DB && DB.insights && DB.insights.some(i => i.title === 'Заметка')),
+    }));
+    ok(hydr.active !== 'pEvidence', 'item1(new): активный профиль — новый (в памяти)');
+    ok(hydr.staleGone && hydr.hasRestored, 'item1(new): гидратация без reload заменила in-memory DB на восстановленный');
+    // item1: немедленная правка — persist ДОБАВЛЯЕТ к восстановленному, не пишет старый.
+    await page.evaluate(() => { DB.insights.push({ id: 987654, title: 'AFTER-RESTORE', createdAt: new Date().toISOString(), day: '2026-07-23', sv: 2 }); persist(); });
+    const appended = await page.evaluate(() => { const db = JSON.parse(localStorage.getItem('arch5_db_' + activeId())); const titles = (db.insights || []).map(i => i.title); return { hasNew: titles.includes('AFTER-RESTORE'), hasRestored: titles.includes('Заметка'), noStale: !('__staleMarker' in db) }; });
+    ok(appended.hasNew && appended.hasRestored && appended.noStale, 'item1(new): persist после restore добавляет к восстановленному DB (не перезаписывает старым)');
     // reload → данные присутствуют
     await page.reload({ waitUntil: 'load' });
     const persisted = await page.evaluate(() => { const active = localStorage.getItem('arch5_active'); const db = JSON.parse(localStorage.getItem('arch5_db_' + active) || 'null'); return db && db.insights && db.insights.length; });
     ok(persisted >= 1, 'restore-new: после reload данные присутствуют');
+    // item10.4: рендер восстановленного медиа реальными <img>/<audio> + записи в IndexedDB.
+    const render = await page.evaluate(async () => {
+      const db = JSON.parse(localStorage.getItem('arch5_db_' + localStorage.getItem('arch5_active')));
+      const ins = (db.insights || []).find(i => Array.isArray(i.media) && i.media.length >= 2);
+      if (!ins || typeof rDetMedia !== 'function') return { fail: true };
+      await rDetMedia(ins);
+      const el = document.getElementById('det-media');
+      const img = el && el.querySelector('img'), aud = el && el.querySelector('audio');
+      const rec = await new Promise(res => { const r = indexedDB.open('arch5_media', 1); r.onsuccess = () => { const s = r.result.transaction('media', 'readonly').objectStore('media'); const g = s.get(ins.media[0]); g.onsuccess = () => res(g.result); g.onerror = () => res(null); }; r.onerror = () => res(null); });
+      return { img: !!(img && String(img.src).startsWith('data:')), aud: !!(aud && String(aud.src).startsWith('data:')), rec: !!(rec && String(rec.data).startsWith('data:')) };
+    });
+    ok(render.img, 'media render: реальный <img> с восстановленным data URL');
+    ok(render.aud, 'media render: реальный <audio> с восстановленным data URL');
+    ok(render.rec, 'media render: записи медиа в IndexedDB присутствуют и совпадают');
     await shot(page, '05-restore-new');
+
+    // ── Item 3/10.5: Multi-profile GC — медиа НЕактивного профиля выживает ──
+    await page.evaluate(async () => {
+      const profs = JSON.parse(localStorage.getItem('arch5_profiles'));
+      profs.push({ id: 'pB', name: 'Второй', color: '#1A7F3C' });
+      localStorage.setItem('arch5_profiles', JSON.stringify(profs));
+      localStorage.setItem('arch5_db_pB', JSON.stringify({ insights: [{ id: 5, title: 'B', media: ['mB'] }] }));
+      await new Promise((res, rej) => { const r = indexedDB.open('arch5_media', 1); r.onsuccess = () => { const tx = r.result.transaction('media', 'readwrite'); const s = tx.objectStore('media'); s.put({ data: 'data:image/png;base64,AAAA', type: 'image', createdAt: '2026-01-01T00:00:00.000Z' }, 'mB'); s.put({ data: 'data:image/png;base64,BBBB', type: 'image', createdAt: '2026-01-01T00:00:00.000Z' }, 'mOrphan'); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }; r.onerror = () => rej(r.error); });
+    });
+    await page.evaluate(async () => { if (typeof gcMedia === 'function') await gcMedia(); });
+    const gc = await page.evaluate(async () => {
+      const has = id => new Promise(res => { const r = indexedDB.open('arch5_media', 1); r.onsuccess = () => { const g = r.result.transaction('media', 'readonly').objectStore('media').get(id); g.onsuccess = () => res(!!g.result); g.onerror = () => res(false); }; r.onerror = () => res(false); });
+      return { mB: await has('mB'), mOrphan: await has('mOrphan'), m1: await has('m1') };
+    });
+    ok(gc.mB === true, 'multi-profile GC: медиа НЕактивного профиля B сохранено');
+    ok(gc.m1 === true, 'multi-profile GC: медиа, на которое ссылаются профили, сохранено');
+    ok(gc.mOrphan === false, 'multi-profile GC: непривязанное медиа удалено');
 
     // ── Replace: требует destructive mode + второе подтверждение ──
     await openSheet(page);
@@ -204,7 +292,93 @@ async function main() {
     ok(await page.locator('#be-confirm2').isHidden() && (await page.evaluate(() => localStorage.getItem('arch5_profiles'))) === beforeReplace, 'replace: отказ второго подтверждения — без мутаций');
     await shot(page, '06-replace-confirm');
 
+    // ── Item 10.1: УСПЕШНАЯ замена pEvidence + connection/секреты + гидратация ──
+    // Панель всё ещё armed, файл выбран, rpw заполнен, target = pEvidence (первый).
+    await page.click('#be-replace-btn');
+    ok(await page.locator('#be-confirm2').isVisible(), 'replace(success): второе подтверждение показано снова');
+    await page.evaluate(() => { if (typeof DB === 'object' && DB) DB.__staleMarker = 'STALE-REPL'; });
+    await page.click('#be-confirm2-yes');
+    await page.waitForFunction(() => /заменён/i.test((document.getElementById('be-restore-status') || {}).textContent || ''), null, { timeout: 15000 });
+    const repl = await page.evaluate(() => {
+      const cfg = JSON.parse(localStorage.getItem('arch5_cfg_pEvidence') || '{}');
+      const db = JSON.parse(localStorage.getItem('arch5_db_pEvidence') || '{}');
+      const bak = JSON.parse(localStorage.getItem('arch5_bak_pEvidence') || 'null');
+      return {
+        dbHasRestored: (db.insights || []).some(i => i.title === 'Заметка'),
+        apiUrl: cfg.apiUrl, spaceKey: cfg.spaceKey, lastSync: cfg.lastSync,
+        pass: localStorage.getItem('arch5_pass_pEvidence'),
+        bakMatches: JSON.stringify(bak) === JSON.stringify(db),
+        active: activeId(), staleGone: !(DB && DB.__staleMarker),
+      };
+    });
+    ok(repl.dbHasRestored, 'replace(success): DB заменён содержимым backup');
+    ok(repl.apiUrl === 'https://keep.example' && repl.spaceKey === 'KEEP_SPACE' && repl.lastSync === '2026-07-01T00:00:00.000Z', 'replace(success): connection (apiUrl/spaceKey/lastSync) сохранены');
+    ok(repl.pass === 'PASSPHRASE_SECRET', 'replace(success): локальная парольная фраза не тронута');
+    ok(repl.bakMatches, 'replace(success): bak-слот = восстановленный DB (не старый профиль)');
+    ok(repl.active === 'pEvidence' && repl.staleGone, 'replace(success): гидратация без ручного reload (устаревший in-memory сброшен)');
+    await page.reload({ waitUntil: 'load' });
+    ok(await page.evaluate(() => (JSON.parse(localStorage.getItem('arch5_db_pEvidence') || '{}').insights || []).some(i => i.title === 'Заметка')), 'replace(success): после reload данные восстановленного профиля на месте');
+    ok(await page.evaluate(async () => { const has = id => new Promise(res => { const r = indexedDB.open('arch5_media', 1); r.onsuccess = () => { const g = r.result.transaction('media', 'readonly').objectStore('media').get(id); g.onsuccess = () => res(!!g.result); g.onerror = () => res(false); }; r.onerror = () => res(false); }); return await has('mB'); }), 'replace(success): медиа другого (неактивного) профиля не затронуто');
+
+    // ── Item 6: XSS-safe профиль-select (имя как текст, без инъекции DOM) ──
+    await page.evaluate(() => {
+      const profs = JSON.parse(localStorage.getItem('arch5_profiles'));
+      profs.push({ id: 'p"q\'x', name: '</option><img src=x onerror=window.__xss=1>', color: '#1056CC' });
+      localStorage.setItem('arch5_profiles', JSON.stringify(profs));
+      localStorage.setItem('arch5_db_p"q\'x', JSON.stringify({ insights: [] }));
+      window.__xss = 0;
+    });
+    await openSheet(page);
+    await page.click('#be-tab-restore');
+    await page.click('#be-replace-arm');
+    const sel = await page.evaluate(() => {
+      const s = document.getElementById('be-target');
+      const opts = Array.from(s.options);
+      const evil = opts.find(o => o.value.indexOf('q') >= 0 && o.value.indexOf('"') >= 0);
+      return { regCount: JSON.parse(localStorage.getItem('arch5_profiles')).length, optCount: opts.length, img: s.querySelectorAll('img').length, xss: window.__xss, evilText: evil ? evil.textContent : null, evilOk: !!evil };
+    });
+    ok(sel.img === 0 && sel.xss === 0, 'item6: имя профиля не инъектирует DOM/скрипт (нет <img>, onerror не сработал)');
+    ok(sel.evilText === '</option><img src=x onerror=window.__xss=1>', 'item6: злонамеренное имя показано как литеральный текст');
+    ok(sel.evilOk && sel.optCount === sel.regCount, 'item6: профиль с кавычками в id — ровно один option, счёт совпадает с реестром');
+    await page.click('#be-close');
+
+    // ── Item 7: Escape закрывает через контроллер + полный сброс при reopen ──
+    await openSheet(page);
+    await page.fill('#be-pw1', 'secretpw'); await page.fill('#be-pw2', 'secretpw');
+    await page.click('#be-tab-restore');
+    await page.setInputFiles('#be-file', { name: 'complete.json', mimeType: 'application/json', buffer: Buffer.from(text2) });
+    await page.click('#be-replace-arm');
+    await page.keyboard.press('Escape');
+    ok(await page.locator('#ov-backup-enc.on').count() === 0, 'item7: Escape закрыл backup-sheet через контроллер');
+    await openSheet(page);
+    const reset = await page.evaluate(() => ({ pw1: document.getElementById('be-pw1').value, pw2: document.getElementById('be-pw2').value, rpw: document.getElementById('be-rpw').value, file: document.getElementById('be-file').value, panelHidden: document.getElementById('be-replace-panel').style.display === 'none', createDisabled: document.getElementById('be-create-btn').disabled }));
+    ok(reset.pw1 === '' && reset.pw2 === '' && reset.rpw === '' && reset.file === '', 'item7: после Escape+reopen все поля пусты');
+    ok(reset.panelHidden && reset.createDisabled, 'item7: destructive-панель скрыта, создание заблокировано');
+    await page.click('#be-close');
+
+    // ── Item 8: complete при недоступном медиа → отказ, без скачивания ──
+    await page.evaluate(async () => { await new Promise((res, rej) => { const r = indexedDB.open('arch5_media', 1); r.onsuccess = () => { const tx = r.result.transaction('media', 'readwrite'); tx.objectStore('media').delete('m2'); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }; r.onerror = () => rej(r.error); }); });
+    const liveBeforeMM = await page.evaluate(() => localStorage.getItem('arch5_db_' + localStorage.getItem('arch5_active')));
+    await openSheet(page);
+    await page.click('#be-mode .tp[data-be-mode="complete"]');
+    await page.fill('#be-pw1', 'evidence-pass-3'); await page.fill('#be-pw2', 'evidence-pass-3');
+    if (!(await page.isChecked('#be-ack-loss'))) await page.check('#be-ack-loss');
+    if (!(await page.isChecked('#be-ack-sens'))) await page.check('#be-ack-sens');
+    await page.waitForSelector('#be-create-btn:not([disabled])', { timeout: 5000 });
+    let mmDownload = false; const onDl = () => { mmDownload = true; }; page.on('download', onDl);
+    await page.click('#be-create-btn');
+    await page.waitForFunction(() => /недоступн|только данные/i.test((document.getElementById('be-create-status') || {}).textContent || ''), null, { timeout: 8000 });
+    await page.waitForTimeout(300); page.off('download', onDl);
+    ok(!mmDownload, 'item8: complete с недоступным медиа — скачивание не началось');
+    ok((await page.evaluate(() => localStorage.getItem('arch5_db_' + localStorage.getItem('arch5_active')))) === liveBeforeMM, 'item8: живой DB не изменён при MISSING_MEDIA');
+    const [dl3] = await Promise.all([page.waitForEvent('download'), (async () => { await page.click('#be-mode .tp[data-be-mode="data-only"]'); await page.click('#be-create-btn'); })()]);
+    ok(!!(await dl3.path()), 'item8: data-only работает даже при недоступном медиа');
+    await page.click('#be-close');
+
     // ── Cleanup при закрытии ──
+    await openSheet(page);
+    await page.click('#be-tab-restore');
+    await page.fill('#be-rpw', 'x'); await page.setInputFiles('#be-file', { name: 'complete.json', mimeType: 'application/json', buffer: Buffer.from(text2) });
     await page.click('#be-close');
     const cleaned = await page.evaluate(() => ({ rpw: document.getElementById('be-rpw').value, file: document.getElementById('be-file').value, open: document.getElementById('ov-backup-enc').classList.contains('on') }));
     ok(cleaned.rpw === '' && cleaned.file === '' && !cleaned.open, 'закрытие: пароль и выбор файла очищены, sheet закрыт');
@@ -221,10 +395,10 @@ async function main() {
       }
       return false;
     });
-    ok(cached, 'offline shell: backup-модули присутствуют в service-worker cache');
-    // Полный офлайн-reload прогоняем на Chromium (в WebKit headless reload при
-    // offline бросает internal error самого движка — это ограничение движка, а
-    // не приложения; кэш backup-модулей подтверждён выше на обоих движках).
+    ok(cached, (ENGINE === 'webkit' ? 'WEBKIT_CACHE_PRESENCE=PASS — ' : '') + 'offline shell: backup-модули присутствуют в service-worker cache');
+    // Полный офлайн-reload — обязательный PASS минимум на Chromium. В WebKit
+    // headless reload при offline бросает internal error самого движка (не
+    // приложения) — честно фиксируем BLOCKED_ENGINE_LIMITATION, а НЕ ok(true).
     if (ENGINE === 'chromium') {
       await ctx.setOffline(true);
       await page.reload({ waitUntil: 'load' });
@@ -232,7 +406,7 @@ async function main() {
       ok(offlineOk, 'offline reload: backup-модуль загрузился из кэша (без import error)');
       await ctx.setOffline(false);
     } else {
-      ok(true, 'offline reload: полный reload проверен на Chromium; WebKit headless не поддерживает reload в offline (engine limitation), кэш модулей подтверждён выше');
+      mark('BLOCKED_ENGINE_LIMITATION', 'WEBKIT_OFFLINE_RELOAD — WebKit headless не поддерживает reload в offline (ограничение движка); кэш модулей подтверждён (WEBKIT_CACHE_PRESENCE=PASS)');
     }
     await shot(page, '07-offline');
 
@@ -244,8 +418,9 @@ async function main() {
     await browser.close(); server.close();
   }
 
-  await writeFile(join(OUT, 'report.json'), JSON.stringify({ engine: ENGINE, pass, fail, results, errors, ts: new Date().toISOString() }, null, 2));
-  console.log('\nBackup evidence [' + ENGINE + ']: ' + pass + '/' + (pass + fail) + ' passed  (report: evidence/' + ENGINE + '/report.json)');
+  const statuses = results.reduce((acc, r) => { const s = r.status || (r.ok ? 'PASS' : 'FAIL'); acc[s] = (acc[s] || 0) + 1; return acc; }, {});
+  await writeFile(join(OUT, 'report.json'), JSON.stringify({ engine: ENGINE, pass, fail, statuses, results, errors, ts: new Date().toISOString() }, null, 2));
+  console.log('\nBackup evidence [' + ENGINE + ']: ' + pass + '/' + (pass + fail) + ' passed  · статусы ' + JSON.stringify(statuses) + '  (report: evidence/' + ENGINE + '/report.json)');
   if (fail > 0) process.exit(1);
 }
 main().catch(e => { console.error('RUNNER FATAL', e); process.exit(1); });

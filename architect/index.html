@@ -1120,45 +1120,45 @@
     <div class="sh-pull"></div>
     <div class="sh-title">Зашифрованная резервная копия</div>
     <div class="subnav" style="padding-top:0">
-      <div class="sn-row">
-        <div class="snpill on" id="be-tab-create" data-be-tab="create"><i data-lucide="lock" style="width:13px;height:13px"></i>Создать</div>
-        <div class="snpill" id="be-tab-restore" data-be-tab="restore"><i data-lucide="upload" style="width:13px;height:13px"></i>Восстановить</div>
+      <div class="sn-row" role="tablist" aria-label="Резервная копия">
+        <div class="snpill on" id="be-tab-create" data-be-tab="create" role="tab" tabindex="0" aria-selected="true" aria-controls="be-create"><i data-lucide="lock" style="width:13px;height:13px"></i>Создать</div>
+        <div class="snpill" id="be-tab-restore" data-be-tab="restore" role="tab" tabindex="0" aria-selected="false" aria-controls="be-restore"><i data-lucide="upload" style="width:13px;height:13px"></i>Восстановить</div>
       </div>
     </div>
 
     <!-- Создание -->
-    <div class="sh-form" id="be-create">
+    <div class="sh-form" id="be-create" role="tabpanel" aria-labelledby="be-tab-create">
       <div>
-        <div class="f-lbl">Что включить</div>
-        <div class="trow" id="be-mode">
+        <div class="f-lbl" id="be-mode-lbl">Что включить</div>
+        <div class="trow" id="be-mode" role="group" aria-labelledby="be-mode-lbl">
           <button class="tp on" data-be-mode="data-only">Только данные</button>
           <button class="tp" data-be-mode="complete">Полная копия</button>
         </div>
         <div class="be-note" id="be-mode-note"></div>
       </div>
       <div>
-        <div class="f-lbl">Пароль резервной копии</div>
+        <label class="f-lbl" for="be-pw1">Пароль резервной копии</label>
         <input class="field" id="be-pw1" type="password" autocomplete="new-password" placeholder="Придумай пароль">
       </div>
       <div>
-        <div class="f-lbl">Повтори пароль</div>
+        <label class="f-lbl" for="be-pw2">Повтори пароль</label>
         <input class="field" id="be-pw2" type="password" autocomplete="new-password" placeholder="Ещё раз">
       </div>
       <label class="be-ack"><input type="checkbox" id="be-ack-loss"> Я понимаю: без этого пароля файл невозможно восстановить — его нельзя сбросить.</label>
       <label class="be-ack"><input type="checkbox" id="be-ack-sens"> Я понимаю: файл содержит мои личные данные и его нужно хранить в безопасном месте (он зашифрован).</label>
       <button class="btn btn-p btn-full" id="be-create-btn" disabled><i data-lucide="download"></i>Создать и скачать</button>
-      <div class="be-status" id="be-create-status"></div>
+      <div class="be-status" id="be-create-status" role="status" aria-live="polite"></div>
     </div>
 
     <!-- Восстановление -->
-    <div class="sh-form" id="be-restore" style="display:none">
+    <div class="sh-form" id="be-restore" role="tabpanel" aria-labelledby="be-tab-restore" style="display:none">
       <div>
-        <div class="f-lbl">Файл резервной копии</div>
+        <label class="f-lbl" for="be-file">Файл резервной копии</label>
         <label class="btn btn-s btn-full" style="cursor:pointer"><i data-lucide="file"></i><span id="be-file-name">Выбрать файл…</span><input type="file" id="be-file" accept="application/json,.json" style="display:none"></label>
         <div class="be-note" id="be-file-info"></div>
       </div>
       <div>
-        <div class="f-lbl">Пароль восстановления</div>
+        <label class="f-lbl" for="be-rpw">Пароль восстановления</label>
         <input class="field" id="be-rpw" type="password" autocomplete="off" placeholder="Пароль от этого файла">
       </div>
       <div class="be-note">По умолчанию будет создан <b>новый профиль</b>. Существующие профили не изменяются; новый профиль активируется только после полной проверки.</div>
@@ -1168,7 +1168,7 @@
       <button class="btn btn-s btn-full" id="be-replace-arm"><i data-lucide="alert-triangle"></i>Заменить существующий профиль…</button>
       <div id="be-replace-panel" style="display:none">
         <div>
-          <div class="f-lbl">Какой профиль заменить</div>
+          <label class="f-lbl" for="be-target">Какой профиль заменить</label>
           <select class="field" id="be-target"></select>
         </div>
         <div class="be-warn"><i data-lucide="alert-triangle" style="width:14px;height:14px"></i> Данные выбранного профиля будут заменены содержимым резервной копии. Отменить нельзя.</div>
@@ -1182,7 +1182,7 @@
           <button class="btn btn-d" style="flex:1" id="be-confirm2-yes">Да, заменить</button>
         </div>
       </div>
-      <div class="be-status" id="be-restore-status"></div>
+      <div class="be-status" id="be-restore-status" role="status" aria-live="polite"></div>
     </div>
 
     <button class="btn btn-s btn-full" id="be-close" style="margin:0 var(--s4) var(--s4)">Закрыть</button>

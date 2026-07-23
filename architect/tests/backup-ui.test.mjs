@@ -176,6 +176,40 @@ async function main() {
     ok(r2.ok === true, 'после failure повторная операция проходит');
   }
 
+  // 21. Item 7 — openSheet защитно сбрасывает ВСЁ временное состояние.
+  {
+    const ui = createBackupUI({ adapter: fakeAdapter(), platform: fakePlatform(), now: () => NOW });
+    // «Загрязняем» состояние прошлой сессии.
+    armCreate(ui); ui.setMode('complete'); ui.setRestorePassword('leak'); ui.selectFile(fileOf('{}')); ui.armReplace('pX');
+    const s = ui.openSheet();
+    ok(s.password === '' && s.password2 === '' && s.restorePassword === '', 'openSheet: все пароли очищены');
+    ok(s.file === null && s.restoreMode === 'new' && s.destructiveArmed === false && s.targetProfileId === null, 'openSheet: файл/destructive-состояние сброшены');
+    ok(s.ackLoss === false && s.ackSensitive === false && s.mode === 'data-only', 'openSheet: acknowledgements и режим сброшены');
+    ok(s.status.phase === 'idle' && !ui.canCreate(), 'openSheet: статус idle, create заблокирован');
+  }
+  // 22. Item 8 — MISSING_MEDIA (complete неполный) → безопасное сообщение, без деталей.
+  {
+    const a = fakeAdapter({ buildBundle: async () => { const e = new BackupError('MISSING_MEDIA', 'internal: m7,m8'); e.missingCount = 2; throw e; } });
+    const pl = fakePlatform();
+    const ui = createBackupUI({ adapter: a, platform: pl, now: () => NOW });
+    ui.setMode('complete'); armCreate(ui);
+    const r = await ui.create({ profileId: 'pActive' });
+    const s = ui.getState();
+    ok(r.ok === false && r.code === 'MISSING_MEDIA', 'MISSING_MEDIA: create вернул код ошибки');
+    ok(/недоступн|только данные/i.test(s.status.message) && !s.status.message.includes('m7'), 'MISSING_MEDIA: сообщение без внутренних деталей');
+    ok(pl.triggers.length === 0, 'MISSING_MEDIA: скачивание НЕ началось');
+  }
+  // 23. Item 1 — onActivated прокидывается в restore.
+  {
+    let received;
+    const rs = restoreSpy(args => { received = args.onActivated; return { ok: true, profileId: 'pNew', mode: 'new' }; });
+    const cb = async () => {};
+    const ui = createBackupUI({ adapter: fakeAdapter(), restore: rs, platform: fakePlatform(), now: () => NOW, onActivated: cb });
+    ui.selectFile(fileOf('{}'));
+    await ui.doRestore({});
+    ok(received === cb, 'onActivated проброшен из UI в production restore');
+  }
+
   console.log(out.join('\n'));
   console.log('\nBackup UI (Slice 4): ' + pass + '/' + (pass + fail) + ' passed');
   if (fail > 0) process.exit(1);

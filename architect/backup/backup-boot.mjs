@@ -28,7 +28,13 @@ export function mount() {
     const media = window.__archMedia;
     if (!media) throw new Error('backup: media store недоступен');
     adapter = createBackupAdapter({ storage: window.localStorage, media });
-    ui = createBackupUI({ adapter });
+    // Явный callback из app.js: после успешной активации восстановленного
+    // профиля выполнить production-гидратацию (сброс sync, hydrate, in-memory
+    // DB/CFG, initAll/render) — код профиля НЕ копируется в backup-модули.
+    const onActivated = async ({ profileId, mode }) => {
+      if (typeof window.onRestoreActivated === 'function') await window.onRestoreActivated(profileId, mode);
+    };
+    ui = createBackupUI({ adapter, onActivated });
     if (!bound) { bind(); bound = true; }
     return ui;
   }
@@ -55,20 +61,37 @@ export function mount() {
   function showTab(tab) {
     $('be-create').style.display = tab === 'create' ? '' : 'none';
     $('be-restore').style.display = tab === 'restore' ? '' : 'none';
-    $('be-tab-create').classList.toggle('on', tab === 'create');
-    $('be-tab-restore').classList.toggle('on', tab === 'restore');
+    const tc = $('be-tab-create'), tr = $('be-tab-restore');
+    tc.classList.toggle('on', tab === 'create'); tr.classList.toggle('on', tab === 'restore');
+    tc.setAttribute('aria-selected', tab === 'create' ? 'true' : 'false');
+    tr.setAttribute('aria-selected', tab === 'restore' ? 'true' : 'false');
   }
 
   function fillTargets() {
     const sel = $('be-target'); if (!sel || !adapter) return;
     const profiles = adapter.listProfiles();
-    sel.innerHTML = profiles.map(p => '<option value="' + p.id + '">' + (p.name || p.id) + '</option>').join('');
+    // Без innerHTML: имя профиля — недоверенный текст (может содержать HTML/JS).
+    // Строим <option> через DOM, кладём имя как textContent (экранируется браузером)
+    // и валидируем, что каждый id реально существует в реестре профилей.
+    const opts = [];
+    for (const p of profiles) {
+      if (!p || p.id == null) continue;
+      if (!adapter.getProfile(p.id)) continue;
+      const o = document.createElement('option');
+      o.value = String(p.id);
+      o.textContent = String(p.name != null ? p.name : p.id);
+      opts.push(o);
+    }
+    sel.replaceChildren(...opts);
   }
 
   function bind() {
-    // Вкладки
+    // Вкладки: клик + клавиатура (Enter/Space) для role="tab" tabindex="0".
+    const tabKey = tab => e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showTab(tab); } };
     $('be-tab-create').onclick = () => showTab('create');
     $('be-tab-restore').onclick = () => showTab('restore');
+    $('be-tab-create').onkeydown = tabKey('create');
+    $('be-tab-restore').onkeydown = tabKey('restore');
     // Режим создания
     document.querySelectorAll('#be-mode .tp').forEach(b => { b.onclick = () => { ui.setMode(b.dataset.beMode); renderCreate(); }; });
     // Пароли/подтверждения создания
@@ -108,6 +131,8 @@ export function mount() {
       const opt = sel.options[sel.selectedIndex];
       $('be-confirm2-name').textContent = opt ? opt.textContent : id;
       $('be-confirm2').style.display = '';
+      // Фокус на безопасное действие (Отмена) второго destructive-подтверждения.
+      try { $('be-confirm2-cancel').focus(); } catch (_) {}
     };
     // Отмена второго подтверждения — без мутаций
     $('be-confirm2-cancel').onclick = () => { $('be-confirm2').style.display = 'none'; };
@@ -138,6 +163,8 @@ export function mount() {
     resetDom();
     renderCreate();
     if (typeof window.openOv === 'function') window.openOv('ov-backup-enc');
+    // Фокус на первую вкладку после открытия sheet (доступность с клавиатуры).
+    try { $('be-tab-create').focus(); } catch (_) {}
   }
   function requestClose() {
     if (ui && ui.getState().busy) { setStatus($('be-create-status'), { phase: 'working', message: 'Дождитесь завершения операции…' }); return; }

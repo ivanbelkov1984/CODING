@@ -154,22 +154,20 @@ export function createBackupAdapter(deps) {
     } else {
       db = stripDbInternal(rawDb);
       const refs = collectMediaRefs(db);
-      const keep = new Set();
+      const missing = [];
       for (const mid of refs) {
         const rec = await media.get(mid);
-        if (!rec || typeof rec.data !== 'string') { warnings.push('missing_media:' + mid); continue; }
+        if (!rec || typeof rec.data !== 'string') { missing.push(mid); continue; }
         const { mime, bytes } = canonicalMediaBytes(rec.data); // canonical bytes + MIME (вкл. параметры)
         mediaItems.push({ id: mid, mime, sha256: await sha256Hex(bytes), bytes: bytesToBase64(bytes) });
-        keep.add(mid);
       }
-      // Отброшенные (missing) ссылки убираем из копии, чтобы не осталось битых ref.
-      if (keep.size !== refs.size) {
-        const drop = {}; for (const r of refs) if (!keep.has(r)) drop[r] = null;
-        db = (function pruneMissing(d) {
-          const out = clone(d);
-          for (const c of Object.keys(out)) { const a = out[c]; if (!Array.isArray(a)) continue; for (const rec of a) if (rec && Array.isArray(rec.media)) rec.media = rec.media.filter(m => !(m in drop)); }
-          return out;
-        })(db);
+      // Complete НЕ должен молча создавать неполный файл. Любая недоступная media
+      // → отказ (без мутаций живого DB, без начала скачивания). UI сообщит, что
+      // не удалось включить, без внутренних деталей. Data-only сюда не попадает.
+      if (missing.length) {
+        const err = new BackupError('MISSING_MEDIA', 'complete backup: недоступно media');
+        err.missingCount = missing.length;
+        throw err;
       }
     }
 
@@ -191,7 +189,16 @@ export function createBackupAdapter(deps) {
   // Возвращает { writes:[{id,record}], reuses:[id], remaps:{old:new} }.
   async function planMedia(bundleMedia) {
     const writes = [], reuses = [], remaps = {};
+    // Резервируем заранее ВСЕ id, которые новый target id принимать не должен:
+    //   (1) оригинальные id всех входящих media (в т.ч. ещё не обработанных),
+    //   (2) все существующие id в IndexedDB (проверяем точечно через media.get),
+    //   (3) все уже назначенные в этом плане target id.
+    // Иначе сгенерированный id мог бы совпасть с оригиналом другой входящей media
+    // и позднее её перезаписать.
+    const incomingIds = new Set();
+    for (const item of bundleMedia) incomingIds.add(item.id);
     const targetTaken = new Set();
+    const isReserved = async nid => targetTaken.has(nid) || incomingIds.has(nid) || !!(await media.get(nid));
     for (const item of bundleMedia) {
       const existing = await media.get(item.id);
       if (existing && typeof existing.data === 'string') {
@@ -202,8 +209,9 @@ export function createBackupAdapter(deps) {
           same = (mime === item.mime) && (await sha256Hex(bytes)) === item.sha256;
         } catch (e) { same = false; }
         if (same) { reuses.push(item.id); continue; }          // identical → reuse, НЕ перезаписываем
-        // collision: тот же id, но другие bytes/MIME → новый id.
-        let nid; do { nid = genMediaId(); } while (targetTaken.has(nid) || await media.get(nid));
+        // collision: тот же id, но другие bytes/MIME → новый id, гарантированно
+        // не равный существующим media, другим target и оригиналам входящих.
+        let nid; do { nid = genMediaId(); } while (await isReserved(nid));
         targetTaken.add(nid); remaps[item.id] = nid;
         writes.push({ id: nid, record: { data: dataUrlOf(item.mime, item.bytes), type: mediaTypeFor(item.mime), createdAt: now() } });
       } else {
@@ -257,10 +265,15 @@ export function createBackupAdapter(deps) {
     return true;
   }
 
-  // ── Staged write профиля (DB/CFG + upsert в registry). Без активации. ──
+  // ── Staged write профиля (DB/CFG + bak + upsert в registry). Без активации. ──
   function writeStagedProfile({ id, profile, db, cfg }) {
-    storage.setItem(KEYS.db(id), JSON.stringify(db));
+    const dbText = JSON.stringify(db);
+    storage.setItem(KEYS.db(id), dbText);
     storage.setItem(KEYS.cfg(id), JSON.stringify(cfg));
+    // Backup fallback slot (arch5_bak_<id>) обязан отражать ВОССТАНОВЛЕННЫЙ DB, а
+    // не старый DB заменяемого профиля: иначе recovery/следующее чтение могло бы
+    // затереть восстановленные данные старой копией. Политика: bak := restored DB.
+    storage.setItem(KEYS.bak(id), dbText);
     const list = listProfiles();
     const i = list.findIndex(p => p && p.id === id);
     if (i >= 0) list[i] = { ...list[i], ...profile, id };
@@ -268,13 +281,21 @@ export function createBackupAdapter(deps) {
     storage.setItem(KEYS.PKEY, JSON.stringify(list));
   }
 
-  // ── Verify: перечитать из хранилища и сравнить с ожидаемым. ──
-  function verifyProfile({ id, db, cfg }) {
+  // ── Verify: перечитать из хранилища и сравнить с ожидаемым (точно). ──
+  function verifyProfile({ id, db, cfg, profile }) {
     const gotDb = readDB(id), gotCfg = readCFG(id);
     if (JSON.stringify(gotDb) !== JSON.stringify(db)) fail('VERIFY_DB', 'проверка DB не прошла');
     if (JSON.stringify(gotCfg) !== JSON.stringify(cfg)) fail('VERIFY_CFG', 'проверка CFG не прошла');
-    const inReg = listProfiles().some(p => p && p.id === id);
-    if (!inReg) fail('VERIFY_REGISTRY', 'профиль отсутствует в реестре');
+    // bak fallback slot по политике: должен точно совпадать с восстановленным DB
+    // (и НЕ содержать старый DB заменяемого профиля).
+    const gotBak = readJSON(KEYS.bak(id));
+    if (JSON.stringify(gotBak) !== JSON.stringify(db)) fail('VERIFY_BAK', 'backup-слот не совпадает с восстановленным DB');
+    // Реестр: профиль присутствует ровно один раз (без дубликатов).
+    const matches = listProfiles().filter(p => p && p.id === id);
+    if (matches.length === 0) fail('VERIFY_REGISTRY', 'профиль отсутствует в реестре');
+    if (matches.length > 1) fail('VERIFY_REGISTRY', 'дубликат профиля в реестре');
+    // Точная запись профиля (имя) — если передан ожидаемый профиль.
+    if (profile && String(matches[0].name) !== String(profile.name)) fail('VERIFY_PROFILE', 'запись профиля не совпадает');
     return true;
   }
 
