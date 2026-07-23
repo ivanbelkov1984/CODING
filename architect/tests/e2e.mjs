@@ -1154,6 +1154,26 @@ ok(whyDet.detOpen && whyDet.hasChain, '«Зачем?» detail: полная це
 ok(whyDet.gone && whyDet.tomb, '«Зачем?» detail: удаление убирает запись и ставит надгробие (синк-безопасно)');
 await page.evaluate(() => { goTo('home'); });
 
+// ── Момент detail: просмотр + удаление (парити с «Зачем?») ──
+const momDet = await page.evaluate(() => {
+  goTo('home');
+  DB.moments = [{ id: 7771, valence: 80, activation: 30, emo: 'Спокойствие', note: 'заметка момента',
+    kType: 'self_report', verif: 'unverified', life: 'current',
+    createdAt: new Date().toISOString(), day: new Date().toISOString().slice(0, 10), sv: 2, _u: Date.now() }];
+  rHomeMoments();
+  openMoment(7771);
+  const detOpen = document.getElementById('ov-moment-det').classList.contains('on');
+  const body = document.getElementById('mom-det-body').textContent || '';
+  deleteMomentDet();
+  const active = localStorage.getItem('arch5_active');
+  const db = JSON.parse(localStorage.getItem('arch5_db_' + active) || '{}');
+  const gone = !(db.moments || []).some(m => m && m.id === 7771);
+  return { detOpen, hasInfo: /Спокойствие/.test(body) && /заметка момента/.test(body), gone, tomb: !!(db._del && db._del[7771]) };
+});
+ok(momDet.detOpen && momDet.hasInfo, 'Момент detail: полная информация открывается по тапу');
+ok(momDet.gone && momDet.tomb, 'Момент detail: удаление убирает запись и ставит надгробие');
+await page.evaluate(() => { goTo('home'); });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
