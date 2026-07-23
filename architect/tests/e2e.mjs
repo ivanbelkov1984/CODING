@@ -1118,6 +1118,21 @@ ok(why.kType === 'process_reflection' && why.verif === 'user_confirmed', 'Мет
 ok(!why.open && why.homeShown, 'Метод «Зачем?»: лист закрывается, разбор виден на «Сегодня»');
 await page.evaluate(() => { goTo('home'); });
 
+// ── Динамика «Моментов» (спарклайн за 2 недели) ──
+const trend = await page.evaluate(() => {
+  const dk = ms => new Date(ms).toISOString().slice(0, 10);
+  const now = Date.now();
+  DB.moments = (DB.moments || []).concat([
+    { id: 1, valence: 30, activation: 40, day: dk(now - 5 * 864e5), createdAt: new Date(now - 5 * 864e5).toISOString(), kType: 'self_report', verif: 'unverified', life: 'current' },
+    { id: 2, valence: 70, activation: 60, day: dk(now - 1 * 864e5), createdAt: new Date(now - 1 * 864e5).toISOString(), kType: 'self_report', verif: 'unverified', life: 'current' },
+  ]);
+  rMomentTrend();
+  const el = document.getElementById('h-moment-trend');
+  return { hasSvg: el.querySelectorAll('polyline').length === 2, hasLabel: /Динамика состояния/.test(el.textContent || '') };
+});
+ok(trend.hasSvg && trend.hasLabel, 'Динамика «Моментов»: спарклайн приятности/энергии рендерится при данных ≥2 дней');
+await page.evaluate(() => { goTo('home'); });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
