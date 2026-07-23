@@ -26,6 +26,9 @@
 | `13-SOURCE-OF-TRUTH-STATUS-REGISTRY.md` | Статусы документов Drive↔GitHub (7 статусов); норма живёт в MAIN |
 | `14-AUTONOMY-AND-REVIEW-GATES.md` | Границы автономии Claude, independent review gates, auto-merge limits |
 | `PROGRAM_STATUS.md` | **Durable** снимок состояния программы + карта 18 пробелов review |
+| `PROPOSAL.md` | **Owner-readable предложение на утро:** что реализуем первым + что ответить |
+| `contracts/CONTRACT-B-EVIDENCE-KERNEL.md` | Готовый task-контракт Этапа B (ядро) — READY_FOR_OWNER_GO |
+| `contracts/CONTRACT-C-PRIVACY-AI-SAFETY.md` | Готовый task-контракт Этапа C (privacy + AI-safety) |
 
 > **Correction pass (round: independent architectural review).** Документы 07–14 и `PROGRAM_STATUS.md` добавлены по независимому review, закрывая 18 пробелов первой версии PR #67. Ключевой вывод: **сначала общий Evidence and Model Kernel и privacy/AI-safety, и только потом доменные фичи** — не наоборот. Карта пробелов — в `PROGRAM_STATUS.md`.
 

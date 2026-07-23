@@ -62,6 +62,12 @@ A. Исправить PR #67 (этот correction pass) → B. Evidence & Model 
 
 > «Оформлено» = зафиксировано как норма/контракт в документах (documentation-only). Runtime-реализация — отдельные будущие срезы по явному решению владельца.
 
+## Готовое предложение (READY_FOR_OWNER_GO)
+
+- `PROPOSAL.md` — owner-readable предложение на утро (что делаем первым, зачем, как проверю, что ответить).
+- `contracts/CONTRACT-B-EVIDENCE-KERNEL.md` — полный готовый task-контракт Этапа B (`riskClass=medium`).
+- `contracts/CONTRACT-C-PRIVACY-AI-SAFETY.md` — готовый контракт Этапа C (C1 AI-safety + C2 vault, `riskClass=high`).
+
 ## Следующее правильное действие
 
-Не сливать PR #67 автоматически и **не начинать runtime S1**. После review Ивана correction-версии PR #67 — начинать с **Этапа B (Evidence & Model Kernel)**, не с Momentary State.
+Не сливать PR #67 автоматически и **не начинать runtime без явного «go» Ивана**. Рекомендуемый первый runtime-срез — **Этап B (Evidence & Model Kernel)**, не Momentary State. Контракт готов; ожидается решение владельца (`PROPOSAL.md`). Реализацию Claude ведёт автономно до зелёного CI, **merge — только после independent review + owner-approval** (`product/14`).
