@@ -56,6 +56,7 @@ const DEFAULT_DB = {
   evolution: [],
   spiritual: [],
   checkins: [],
+  moments: [],        // Momentary State: быстрый двухосевой ввод «здесь и сейчас» (valence×activation)
   spheres: [],        // пользовательские сферы жизни (тип трекера у каждой)
   sphereLogs: [],     // дневные записи по сферам: {sphereId, date, value, note}
   bots: [
@@ -146,7 +147,7 @@ const bakKey = id => 'arch5_bak_' + id;
 function dbCount(db) {
   if (!db || typeof db !== 'object') return 0;
   let n = 0;
-  ['insights','checkins','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings']
+  ['insights','checkins','moments','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings']
     .forEach(c => { if (Array.isArray(db[c])) n += db[c].length; });
   return n;
 }
@@ -519,6 +520,7 @@ function openOv(id) {
   if (id==='ov-axis-all') rAxisSliders();
   if (id==='ov-cfg')      rCfgForm();
   if (id==='ov-ci')       rEmoPicker();
+  if (id==='ov-moment')   rMomEmo();
   if (id==='ov-add')      { STATE.addMedia = []; rAddMedia(); }
 }
 // Собрать ВСЕ media-id, на которые ссылается любая запись любой коллекции db.
@@ -745,6 +747,7 @@ function rHome() {
   rPrompts();
   rOnThisDay();
   rHIns();
+  try { rHomeMoments(); } catch (e) {}
 }
 // ─── ПАМЯТЬ НА ГОДЫ: ресёрфейсинг (волна 2, механика Rosebud) ────
 // Движок сам поднимает релевантную запись прошлого: похожее состояние /
@@ -1963,6 +1966,64 @@ function saveCI() {
   hptMed(); toast('Check-in сохранён', 'ok');
   reactToCheckin((v.cl + v.mv + (10-v.st)) / 3);
   try { rVector(); } catch (e) {}
+}
+
+// ─── MOMENTARY STATE ─────────────────────────────────────────────
+// Быстрый двухосевой ввод состояния «здесь и сейчас»: приятность (valence)
+// × энергия (activation), опц. эмоция и заметка. Отдельный от дневного
+// чек-ина поток. Каждая запись несёт минимальный «паспорт данных»
+// (kType/verif/life) — зачаток Evidence Kernel: это САМООТЧЁТ, а не факт,
+// диагноз или причинный вывод. Цвет/эмоция — персональный сигнал, не тест.
+function rMomEmo() {
+  const el = $('mo-emo'); if (!el) return;
+  el.innerHTML = EMOTIONS.map(g => g.list.map(e =>
+    `<button class="emo${e===STATE.moEmo?' on':''}" style="--ec:${g.c}" data-e="${esc(e)}" onclick="sMomEmo(this)">${esc(e)}</button>`
+  ).join('')).join('');
+}
+function sMomEmo(btn) {
+  const wasOn = btn.classList.contains('on');
+  document.querySelectorAll('#mo-emo .emo').forEach(x => x.classList.remove('on'));
+  if (!wasOn) { btn.classList.add('on'); STATE.moEmo = btn.dataset.e; } else STATE.moEmo = '';
+  if (typeof hpt === 'function') hpt();
+}
+function saveMoment() {
+  const rv = $('mo-val'), ra = $('mo-act');
+  const val = rv ? parseInt(rv.value, 10) : 50;
+  const act = ra ? parseInt(ra.value, 10) : 50;
+  const noteEl = $('mo-note');
+  const m = {
+    id: Date.now(),
+    kType: 'self_report',                 // паспорт: тип знания (самоотчёт)
+    valence:   isFinite(val) ? val : 50,  // 0–100 приятность
+    activation: isFinite(act) ? act : 50, // 0–100 энергия
+    emo: STATE.moEmo || '',
+    note: noteEl ? noteEl.value.trim() : '',
+    verif: 'unverified',                  // паспорт: степень проверки
+    life: 'current',                      // паспорт: current / stale / invalidated
+    createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+  };
+  if (!Array.isArray(DB.moments)) DB.moments = [];
+  DB.moments.push(m);
+  STATE.moEmo = '';
+  if (noteEl) noteEl.value = '';
+  closeOv('ov-moment'); persist();
+  try { rHomeMoments(); } catch (e) {}
+  hptMed(); toast('Состояние записано', 'ok');
+}
+function momentLabel(v) { return v >= 75 ? 'высокая' : v >= 50 ? 'средняя' : v >= 25 ? 'ниже средней' : 'низкая'; }
+function rHomeMoments() {
+  const el = $('h-moments'); if (!el) return;
+  const today = todayKey();
+  const list = (DB.moments || []).filter(m => m && m.day === today).slice(-5).reverse();
+  if (!list.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="sec-lbl">Моменты сегодня</div><div class="card mx mb">' +
+    list.map(m => {
+      const t = new Date(m.createdAt);
+      const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
+      const chip = m.emo ? ` · ${esc(m.emo)}` : '';
+      const note = m.note ? `<div class="si-text" style="color:var(--t3);margin-top:.15rem">${esc(m.note)}</div>` : '';
+      return `<div class="si-row"><div class="si-body"><div class="si-text"><b>${hh}</b> — приятность ${momentLabel(m.valence)}, энергия ${momentLabel(m.activation)}${chip}</div>${note}</div></div>`;
+    }).join('') + '</div>';
 }
 
 // ─── ЗДОРОВЬЕ: «Тяга» — лог импульса + микро-интервенция ─────────
@@ -3834,7 +3895,7 @@ function genRecoveryKey() {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','bots','digests','spheres','sphereLogs','chats','cravings'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','bots','digests','spheres','sphereLogs','chats','cravings'];
 function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
 function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
 const _ru = r => r._u || r.id || 0;   // «когда обновлено» с откатом на id (id = Date.now())
