@@ -1285,3 +1285,15 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 #compass polygon[stroke-linejoin]{fill:color-mix(in srgb,var(--accent) 16%,transparent);stroke:var(--accent)}
 
 @media (prefers-reduced-motion: reduce){ body::after{animation:none} }
+
+/* ── Зашифрованная резервная копия (Slice 4) — в системе токенов ── */
+.be-sheet{max-height:92dvh;overflow-y:auto}
+.be-note{font-size:var(--tx2);color:var(--t3);line-height:1.5;margin-top:var(--s2)}
+.be-ack{display:flex;gap:var(--s2);align-items:flex-start;font-size:var(--tx2);color:var(--t2);line-height:1.45;cursor:pointer}
+.be-ack input{margin-top:2px;flex-shrink:0;accent-color:var(--accent)}
+.be-status{font-size:var(--tx2);line-height:1.5;min-height:1.2em;margin-top:var(--s2)}
+.be-status.be-ok{color:var(--green)}
+.be-status.be-err{color:var(--red)}
+.be-status.be-work{color:var(--t2)}
+.be-warn{display:flex;gap:var(--s2);align-items:flex-start;font-size:var(--tx2);color:var(--orange);background:var(--orange-l);border:1px solid var(--orange);border-radius:var(--r8,8px);padding:var(--s2) var(--s3);line-height:1.45;margin:var(--s2) 0}
+.be-confirm2{border:1px solid var(--red);border-radius:var(--r8,8px);padding:var(--s3);margin-top:var(--s3)}

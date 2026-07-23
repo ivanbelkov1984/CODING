@@ -1169,6 +1169,12 @@ function idbOpen() {
 async function idbPut(key, val) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction(IDB_STORE, 'readwrite'); tx.objectStore(IDB_STORE).put(val, key); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
 async function idbGet(key) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction(IDB_STORE, 'readonly'); const rq = tx.objectStore(IDB_STORE).get(key); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); }); }
 async function idbDel(key) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction(IDB_STORE, 'readwrite'); tx.objectStore(IDB_STORE).delete(key); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+async function idbKeys() { const db = await idbOpen(); return new Promise((res, rej) => { const rq = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).getAllKeys(); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); }); }
+// Медиа-примитив для модуля зашифрованного backup (backup-boot.mjs). Это тот же
+// IndexedDB-store, что и у приложения — не копия логики backup, а storage-примитив.
+try { window.__archMedia = { get: idbGet, put: idbPut, del: idbDel, keys: idbKeys }; } catch (e) {}
+// Точка входа зашифрованной резервной копии (UI живёт в модуле, см. index.html).
+function openEncBackup() { if (window.ArchBackup && typeof window.ArchBackup.open === 'function') window.ArchBackup.open(); else toast('Модуль резервной копии ещё загружается', 'warn'); }
 function compressImage(file, maxDim = 1280, q = 0.82) {
   return new Promise((res, rej) => {
     const img = new Image(), url = URL.createObjectURL(file);
