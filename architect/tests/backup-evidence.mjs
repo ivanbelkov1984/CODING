@@ -103,7 +103,7 @@ async function main() {
   // т.ч. WebKit-формулировка CORS и офлайн-фаза) — это среда, а не баг: валим
   // только на настоящих JS-ошибках самого приложения. Корректность офлайна
   // доказывается ПОЛОЖИТЕЛЬНОЙ проверкой (модули в кэше / ArchBackup доступен).
-  const EXT = /ERR_FAILED|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION|ERR_NETWORK|ERR_NAME_NOT_RESOLVED|ERR_ABORTED|net::|Failed to load resource|Load cannot follow|Load failed|Returned response is null|CORS policy|Access-Control-Allow-Origin|is not allowed by|Request aborted|503|railway|anthropic\.com|openai\.com|googleapis|gstatic|favicon|sync fail|Нет соединения/i;
+  const EXT = /ERR_FAILED|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION|ERR_NETWORK|ERR_NAME_NOT_RESOLVED|ERR_ABORTED|net::|Failed to load resource|Load cannot follow|Load failed|Returned response is null|CORS policy|Access-Control-Allow-Origin|is not allowed by|Request aborted|503|railway|keep\.example|\/health|anthropic\.com|openai\.com|googleapis|gstatic|favicon|sync fail|Нет соединения/i;
   page.on('pageerror', e => { if (!EXT.test(e.message)) errors.push('pageerror: ' + e.message); });
   page.on('console', m => { if (m.type() === 'error' && !EXT.test(m.text())) errors.push('console: ' + m.text()); });
 
