@@ -1133,6 +1133,27 @@ const trend = await page.evaluate(() => {
 ok(trend.hasSvg && trend.hasLabel, 'Динамика «Моментов»: спарклайн приятности/энергии рендерится при данных ≥2 дней');
 await page.evaluate(() => { goTo('home'); });
 
+// ── «Зачем?» detail: просмотр полной цепочки + удаление ──
+const whyDet = await page.evaluate(() => {
+  goTo('home');
+  DB.whys = [{ id: 5551, symptom: 'детальный симптом', need: 'детальная нужда', action: 'детальное действие',
+    kType: 'process_reflection', verif: 'user_confirmed', life: 'current',
+    createdAt: new Date().toISOString(), day: new Date().toISOString().slice(0, 10), sv: 2, _u: Date.now() }];
+  rWhys();
+  openWhy(5551);
+  const detOpen = document.getElementById('ov-why-det').classList.contains('on');
+  const body = document.getElementById('why-det-body').textContent || '';
+  deleteWhyDet();
+  const active = localStorage.getItem('arch5_active');
+  const db = JSON.parse(localStorage.getItem('arch5_db_' + active) || '{}');
+  const gone = !(db.whys || []).some(w => w && w.id === 5551);
+  const tomb = !!(db._del && db._del[5551]);
+  return { detOpen, hasChain: /детальный симптом/.test(body) && /детальное действие/.test(body), gone, tomb };
+});
+ok(whyDet.detOpen && whyDet.hasChain, '«Зачем?» detail: полная цепочка открывается по тапу');
+ok(whyDet.gone && whyDet.tomb, '«Зачем?» detail: удаление убирает запись и ставит надгробие (синк-безопасно)');
+await page.evaluate(() => { goTo('home'); });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
