@@ -93,15 +93,18 @@ async function main() {
   const browser = await engine.launch({ executablePath: EXEC });
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, acceptDownloads: true });
   // Никаких обращений к production backend/внешним сервисам: evidence работает
-  // только с локальным synthetic-профилем. Блокируем эти хосты на сетевом слое.
-  await ctx.route(u => /railway|anthropic|openai|googleapis|gstatic|keep\.example/i.test(u.href), r => r.abort().catch(() => {}));
+  // только с локальным synthetic-профилем. Отдаём этим хостам локальный 503
+  // (запрос НЕ уходит наружу; приложение штатно ловит неуспех синка — без
+  // uncaught-ошибок, в отличие от abort, который WebKit роняет в pageerror).
+  await ctx.route(u => /railway|anthropic|openai|googleapis|gstatic|keep\.example/i.test(u.href),
+    r => r.fulfill({ status: 503, contentType: 'text/plain', body: '' }).catch(() => {}));
   const page = await ctx.newPage();
   // Сетевые/кросс-доменные ошибки к заблокированным/некэшированным ресурсам (в
   // т.ч. WebKit-формулировка CORS и офлайн-фаза) — это среда, а не баг: валим
   // только на настоящих JS-ошибках самого приложения. Корректность офлайна
   // доказывается ПОЛОЖИТЕЛЬНОЙ проверкой (модули в кэше / ArchBackup доступен).
-  const EXT = /ERR_FAILED|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION|ERR_NETWORK|ERR_NAME_NOT_RESOLVED|ERR_ABORTED|net::|Failed to load resource|Load cannot follow|CORS policy|Access-Control-Allow-Origin|is not allowed by|Request aborted|railway|anthropic\.com|openai\.com|googleapis|gstatic|favicon|sync fail|Нет соединения/i;
-  page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+  const EXT = /ERR_FAILED|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION|ERR_NETWORK|ERR_NAME_NOT_RESOLVED|ERR_ABORTED|net::|Failed to load resource|Load cannot follow|Load failed|Returned response is null|CORS policy|Access-Control-Allow-Origin|is not allowed by|Request aborted|503|railway|anthropic\.com|openai\.com|googleapis|gstatic|favicon|sync fail|Нет соединения/i;
+  page.on('pageerror', e => { if (!EXT.test(e.message)) errors.push('pageerror: ' + e.message); });
   page.on('console', m => { if (m.type() === 'error' && !EXT.test(m.text())) errors.push('console: ' + m.text()); });
 
   try {
