@@ -57,6 +57,7 @@ const DEFAULT_DB = {
   spiritual: [],
   checkins: [],
   moments: [],        // Momentary State: быстрый двухосевой ввод «здесь и сейчас» (valence×activation)
+  whys: [],           // метод «Зачем?»: симптом→функция→выгода→потребность→цена→альтернатива→действие
   spheres: [],        // пользовательские сферы жизни (тип трекера у каждой)
   sphereLogs: [],     // дневные записи по сферам: {sphereId, date, value, note}
   bots: [
@@ -147,7 +148,7 @@ const bakKey = id => 'arch5_bak_' + id;
 function dbCount(db) {
   if (!db || typeof db !== 'object') return 0;
   let n = 0;
-  ['insights','checkins','moments','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings']
+  ['insights','checkins','moments','whys','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings']
     .forEach(c => { if (Array.isArray(db[c])) n += db[c].length; });
   return n;
 }
@@ -521,6 +522,7 @@ function openOv(id) {
   if (id==='ov-cfg')      rCfgForm();
   if (id==='ov-ci')       rEmoPicker();
   if (id==='ov-moment')   rMomEmo();
+  if (id==='ov-why')      resetWhyForm();
   if (id==='ov-add')      { STATE.addMedia = []; rAddMedia(); }
 }
 // Собрать ВСЕ media-id, на которые ссылается любая запись любой коллекции db.
@@ -748,6 +750,7 @@ function rHome() {
   rOnThisDay();
   rHIns();
   try { rHomeMoments(); } catch (e) {}
+  try { rWhys(); } catch (e) {}
 }
 // ─── ПАМЯТЬ НА ГОДЫ: ресёрфейсинг (волна 2, механика Rosebud) ────
 // Движок сам поднимает релевантную запись прошлого: похожее состояние /
@@ -2023,6 +2026,39 @@ function rHomeMoments() {
       const chip = m.emo ? ` · ${esc(m.emo)}` : '';
       const note = m.note ? `<div class="si-text" style="color:var(--t3);margin-top:.15rem">${esc(m.note)}</div>` : '';
       return `<div class="si-row"><div class="si-body"><div class="si-text"><b>${hh}</b> — приятность ${momentLabel(m.valence)}, энергия ${momentLabel(m.activation)}${chip}</div>${note}</div></div>`;
+    }).join('') + '</div>';
+}
+
+// ─── МЕТОД «ЗАЧЕМ?» ───────────────────────────────────────────────
+// Личная методика Ивана: структурированный разбор состояния/импульса по
+// цепочке симптом → функция → вторичная выгода → потребность → цена →
+// альтернатива → выбранное действие. Это ТВОЯ рефлексия (самоотчёт), а не
+// диагноз и не вывод ИИ. Несёт «паспорт данных» (kType/verif/life). В этой
+// версии — без ИИ (заполняешь сам); AI-помощь появится после validator-framework.
+const WHY_FIELDS = ['symptom','function','gain','need','cost','alternative','action'];
+function resetWhyForm() { WHY_FIELDS.forEach(k => { const el = $('why-' + k); if (el) el.value = ''; }); }
+function saveWhy() {
+  const rec = { id: Date.now(), kType: 'process_reflection', verif: 'user_confirmed', life: 'current',
+    createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now() };
+  let filled = 0;
+  WHY_FIELDS.forEach(k => { const el = $('why-' + k); const val = el ? el.value.trim() : ''; rec[k] = val; if (val) filled++; });
+  if (filled === 0) { toast('Опиши хотя бы, что происходит', 'warn'); return; }
+  if (!Array.isArray(DB.whys)) DB.whys = [];
+  DB.whys.push(rec);
+  closeOv('ov-why'); persist();
+  try { rWhys(); } catch (e) {}
+  hptMed(); toast('Разбор сохранён', 'ok');
+}
+function rWhys() {
+  const el = $('h-whys'); if (!el) return;
+  const list = (DB.whys || []).slice(-3).reverse();
+  if (!list.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="sec-lbl">Разборы «Зачем?»</div><div class="card mx mb">' +
+    list.map(w => {
+      const d = (w.day || '').slice(5);
+      const head = esc(w.symptom || w.need || w.action || 'Разбор');
+      const act = w.action ? `<div class="si-text" style="color:var(--t3);margin-top:.15rem">→ ${esc(w.action)}</div>` : '';
+      return `<div class="si-row"><div class="si-body"><div class="si-text"><b>${d}</b> — ${head}</div>${act}</div></div>`;
     }).join('') + '</div>';
 }
 
@@ -3895,7 +3931,7 @@ function genRecoveryKey() {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','bots','digests','spheres','sphereLogs','chats','cravings'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','bots','digests','spheres','sphereLogs','chats','cravings'];
 function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
 function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
 const _ru = r => r._u || r.id || 0;   // «когда обновлено» с откатом на id (id = Date.now())

@@ -152,6 +152,8 @@
   </div>
   <div id="pat-suggest-home"></div>
   <div id="h-moments"></div>
+  <button class="btn btn-s btn-sm btn-full" style="margin:0 var(--s4) .5rem;width:auto" onclick="openOv('ov-why')"><i data-lucide="help-circle"></i>Метод «Зачем?» — разобрать состояние</button>
+  <div id="h-whys"></div>
 
   <!-- ГЕРОЙ: состояние + радар + разбор -->
   <div class="state-hero">
@@ -541,6 +543,23 @@
 </div>
 
 <!-- CHECK-IN -->
+<div class="ov" id="ov-why" onclick="if(event.target===this)closeOv('ov-why')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Метод «Зачем?»</div>
+    <div class="be-note" style="margin:0 1rem .5rem">Это твой разбор, не диагноз. Заполни сколько получится — по шагам от симптома к действию.</div>
+    <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.75rem">
+      <div><div class="f-lbl">Симптом — что происходит?</div><textarea class="field" id="why-symptom" rows="2"></textarea></div>
+      <div><div class="f-lbl">Функция — зачем это тебе?</div><textarea class="field" id="why-function" rows="2"></textarea></div>
+      <div><div class="f-lbl">Вторичная выгода — что получаешь?</div><textarea class="field" id="why-gain" rows="2"></textarea></div>
+      <div><div class="f-lbl">Потребность — какая настоящая нужда?</div><textarea class="field" id="why-need" rows="2"></textarea></div>
+      <div><div class="f-lbl">Цена — чего это стоит?</div><textarea class="field" id="why-cost" rows="2"></textarea></div>
+      <div><div class="f-lbl">Альтернатива — как ещё закрыть нужду?</div><textarea class="field" id="why-alternative" rows="2"></textarea></div>
+      <div><div class="f-lbl">Действие — что выбираешь сейчас?</div><textarea class="field" id="why-action" rows="2"></textarea></div>
+      <button class="btn btn-p btn-full" onclick="saveWhy()"><i data-lucide="check"></i>Сохранить разбор</button>
+    </div>
+  </div>
+</div>
 <div class="ov" id="ov-moment" onclick="if(event.target===this)closeOv('ov-moment')">
   <div class="sheet">
     <div class="sh-pull"></div>
