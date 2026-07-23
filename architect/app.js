@@ -750,6 +750,7 @@ function rHome() {
   rOnThisDay();
   rHIns();
   try { rHomeMoments(); } catch (e) {}
+  try { rMomentTrend(); } catch (e) {}
   try { rWhys(); } catch (e) {}
 }
 // ─── ПАМЯТЬ НА ГОДЫ: ресёрфейсинг (волна 2, механика Rosebud) ────
@@ -2014,6 +2015,40 @@ function saveMoment() {
   hptMed(); toast('Состояние записано', 'ok');
 }
 function momentLabel(v) { return v >= 75 ? 'высокая' : v >= 50 ? 'средняя' : v >= 25 ? 'ниже средней' : 'низкая'; }
+// Динамика «Моментов» за 14 дней: средние приятность/энергия по дню, спарклайн.
+// Только описание наблюдаемого окна (DescriptiveState), без прогноза.
+function rMomentTrend() {
+  const el = $('h-moment-trend'); if (!el) return;
+  const moments = DB.moments || [];
+  const dayKey = ms => new Date(ms).toISOString().slice(0, 10);
+  const now = Date.now();
+  const days = []; for (let i = 13; i >= 0; i--) days.push(dayKey(now - i * 864e5));
+  const byDay = {};
+  moments.forEach(m => { if (m && m.day) (byDay[m.day] = byDay[m.day] || []).push(m); });
+  const series = days.map(day => {
+    const arr = byDay[day]; if (!arr || !arr.length) return null;
+    return {
+      v: arr.reduce((s, m) => s + (m.valence || 0), 0) / arr.length,
+      a: arr.reduce((s, m) => s + (m.activation || 0), 0) / arr.length,
+    };
+  });
+  const present = []; series.forEach((s, i) => { if (s) present.push({ i, v: s.v, a: s.a }); });
+  if (present.length < 2) { el.innerHTML = ''; return; }
+  const W = 280, H = 56, n = days.length;
+  const x = i => (n === 1 ? 0 : (i / (n - 1)) * W);
+  const y = val => H - (Math.max(0, Math.min(100, val)) / 100) * H;
+  const poly = key => present.map(p => `${x(p.i).toFixed(1)},${y(p[key]).toFixed(1)}`).join(' ');
+  const first = present[0], last = present[present.length - 1];
+  const arrow = (cur, prev) => cur > prev + 5 ? '↑' : cur < prev - 5 ? '↓' : '→';
+  el.innerHTML = '<div class="sec-lbl">Динамика состояния (2 недели)</div>' +
+    '<div class="card mx mb" style="padding:.85rem 1rem">' +
+      `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block">` +
+        `<polyline points="${poly('v')}" fill="none" stroke="#F5B84B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` +
+        `<polyline points="${poly('a')}" fill="none" stroke="#4C8DFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` +
+      '</svg>' +
+      `<div class="si-text" style="color:var(--t3);margin-top:.45rem"><span style="color:#F5B84B">●</span> приятность ${arrow(last.v, first.v)}&nbsp;&nbsp;<span style="color:#4C8DFF">●</span> энергия ${arrow(last.a, first.a)}</div>` +
+    '</div>';
+}
 function rHomeMoments() {
   const el = $('h-moments'); if (!el) return;
   const today = todayKey();
