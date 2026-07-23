@@ -2115,8 +2115,9 @@ function rWhys() {
     list.map(w => {
       const d = (w.day || '').slice(5);
       const head = esc(w.symptom || w.need || w.action || 'Разбор');
+      const mk = w.actionDone === true ? '<span style="color:var(--green)">✓</span> ' : '';
       const act = w.action ? `<div class="si-text" style="color:var(--t3);margin-top:.15rem">→ ${esc(w.action)}</div>` : '';
-      return `<div class="si-row tap" style="cursor:pointer" onclick="openWhy(${w.id})"><div class="si-body"><div class="si-text"><b>${d}</b> — ${head}</div>${act}</div></div>`;
+      return `<div class="si-row tap" style="cursor:pointer" onclick="openWhy(${w.id})"><div class="si-body"><div class="si-text"><b>${d}</b> ${mk}— ${head}</div>${act}</div></div>`;
     }).join('') + '</div>';
 }
 // Просмотр сохранённого разбора «Зачем?» (полная цепочка) + удаление.
@@ -2126,11 +2127,34 @@ function openWhy(id) {
   STATE.whyDetId = id;
   const rows = WHY_FIELDS.map(k => [WHY_LABELS[k], w[k]]).filter(([, v]) => v && String(v).trim());
   const body = $('why-det-body');
-  if (body) body.innerHTML = rows.length
+  let html = rows.length
     ? rows.map(([lbl, v]) => `<div style="margin-bottom:.7rem"><div class="f-lbl">${lbl}</div><div class="si-text">${esc(v)}</div></div>`).join('')
     : '<div class="si-text" style="color:var(--t3)">Пусто</div>';
+  // Проверка результата: если есть выбранное действие — дать отметить, сделал ли.
+  if (w.action && String(w.action).trim()) {
+    html += '<div class="side-div"></div><div class="f-lbl">Проверка: ты сделал это?</div>';
+    if (w.actionDone == null) {
+      html += '<div style="display:flex;gap:var(--s2);margin-top:.4rem">' +
+        '<button class="btn btn-s" style="flex:1" onclick="markWhyAction(true)">Да, сделал</button>' +
+        '<button class="btn btn-s" style="flex:1" onclick="markWhyAction(false)">Пока нет</button></div>';
+    } else {
+      const st = w.actionDone ? '<span style="color:var(--green)">✓ сделано</span>' : '<span style="color:var(--t3)">пока нет</span>';
+      html += `<div class="si-text" style="margin-top:.35rem">${st} · <span style="color:var(--accent);cursor:pointer" onclick="markWhyAction(null)">изменить</span></div>`;
+    }
+  }
+  if (body) body.innerHTML = html;
   const dt = $('why-det-date'); if (dt) dt.textContent = w.day || '';
   openOv('ov-why-det');
+}
+// Отметка выполнения выбранного действия из разбора «Зачем?» (проверка результата).
+function markWhyAction(done) {
+  const id = STATE.whyDetId;
+  const w = (DB.whys || []).find(x => x && x.id === id); if (!w) return;
+  w.actionDone = done;
+  w.checkedAt = (done == null) ? '' : nowISO();
+  w._u = Date.now();
+  persist(); openWhy(id); try { rWhys(); } catch (e) {}
+  if (done != null) { hptMed(); toast(done ? 'Отмечено: сделано' : 'Отмечено', 'ok'); }
 }
 function deleteWhyDet() {
   const id = STATE.whyDetId; if (id == null) return;

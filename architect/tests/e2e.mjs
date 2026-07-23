@@ -1174,6 +1174,26 @@ ok(momDet.detOpen && momDet.hasInfo, 'Момент detail: полная инфо
 ok(momDet.gone && momDet.tomb, 'Момент detail: удаление убирает запись и ставит надгробие');
 await page.evaluate(() => { goTo('home'); });
 
+// ── «Зачем?» проверка результата: отметить действие сделанным ──
+const followup = await page.evaluate(() => {
+  goTo('home');
+  DB.whys = [{ id: 8881, symptom: 'проверочный симптом', action: 'сделать шаг',
+    kType: 'process_reflection', verif: 'user_confirmed', life: 'current',
+    createdAt: new Date().toISOString(), day: new Date().toISOString().slice(0, 10), sv: 2, _u: Date.now() }];
+  rWhys();
+  openWhy(8881);
+  const hasFollowup = /ты сделал это/i.test(document.getElementById('why-det-body').textContent || '');
+  markWhyAction(true);
+  const active = localStorage.getItem('arch5_active');
+  const db = JSON.parse(localStorage.getItem('arch5_db_' + active) || '{}');
+  const rec = (db.whys || []).find(w => w && w.id === 8881) || {};
+  const listMark = /✓/.test(document.getElementById('h-whys').textContent || '');
+  return { hasFollowup, done: rec.actionDone === true, checked: !!rec.checkedAt, listMark };
+});
+ok(followup.hasFollowup, '«Зачем?» проверка: раздел «ты сделал это?» показан при наличии действия');
+ok(followup.done && followup.checked && followup.listMark, '«Зачем?» проверка: действие отмечено сделанным (сохранено + ✓ в списке)');
+await page.evaluate(() => { goTo('home'); });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
