@@ -1093,6 +1093,31 @@ ok(!mom.open, 'Momentary State: sheet закрывается после сохр
 ok(mom.homeShown, 'Momentary State: «Моменты сегодня» отрендерены на «Сегодня»');
 await page.evaluate(() => { goTo('home'); });
 
+// ── Метод «Зачем?» (структурированный разбор) ──
+const why = await page.evaluate(() => {
+  goTo('home');
+  openOv('ov-why');
+  document.getElementById('why-symptom').value = 'тянет проверять телефон';
+  document.getElementById('why-need').value = 'снять тревогу';
+  document.getElementById('why-action').value = 'сделать паузу 5 минут';
+  saveWhy();
+  const active = localStorage.getItem('arch5_active');
+  const db = JSON.parse(localStorage.getItem('arch5_db_' + active) || '{}');
+  const list = db.whys || [];
+  const last = list[list.length - 1] || {};
+  const homeTxt = document.getElementById('h-whys').textContent || '';
+  return {
+    open: document.getElementById('ov-why').classList.contains('on'),
+    count: list.length, symptom: last.symptom, need: last.need, action: last.action,
+    kType: last.kType, verif: last.verif,
+    homeShown: /Разборы «Зачем\?»/.test(homeTxt) && /тянет проверять/.test(homeTxt),
+  };
+});
+ok(why.count >= 1 && why.symptom === 'тянет проверять телефон' && why.action === 'сделать паузу 5 минут', 'Метод «Зачем?»: разбор сохранён (цепочка симптом→…→действие)');
+ok(why.kType === 'process_reflection' && why.verif === 'user_confirmed', 'Метод «Зачем?»: «паспорт данных» (process_reflection / user_confirmed)');
+ok(!why.open && why.homeShown, 'Метод «Зачем?»: лист закрывается, разбор виден на «Сегодня»');
+await page.evaluate(() => { goTo('home'); });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
