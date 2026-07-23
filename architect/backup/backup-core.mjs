@@ -186,14 +186,19 @@ export function validatePayload(p) {
   if (p.db === null || typeof p.db !== 'object' || Array.isArray(p.db)) fail('BAD_DB', 'db должен быть объектом');
   if (p.cfg === null || typeof p.cfg !== 'object' || Array.isArray(p.cfg)) fail('BAD_CFG', 'cfg должен быть объектом');
 
+  // DB реального приложения — не только массивы: есть строковые массивы (oq),
+  // объекты состояния (vit/env), карта надгробий (_del) и скалярные маркеры.
+  // Портируем как есть; лимитируем число ключей и суммарный объём array-коллекций.
   const collections = Object.keys(p.db);
   if (collections.length > LIMITS.maxCollections) fail('TOO_MANY_COLLECTIONS', 'слишком много коллекций');
   let objectCount = 0;
   for (const c of collections) {
     const arr = p.db[c];
-    if (!Array.isArray(arr)) fail('BAD_COLLECTION', 'коллекция "' + c + '" не массив');
-    objectCount += arr.length;
-    if (objectCount > LIMITS.maxObjects) fail('TOO_MANY_OBJECTS', 'слишком много объектов');
+    if (Array.isArray(arr)) {
+      objectCount += arr.length;
+      if (objectCount > LIMITS.maxObjects) fail('TOO_MANY_OBJECTS', 'слишком много объектов');
+    }
+    // не-массивы (объекты состояния / скаляры) допускаются как часть данных
   }
 
   if (!Array.isArray(p.media)) fail('BAD_MEDIA', 'media должен быть массивом');

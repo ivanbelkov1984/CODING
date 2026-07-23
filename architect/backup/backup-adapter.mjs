@@ -87,7 +87,7 @@ function stripMediaRefs(db) {
   for (const c of Object.keys(out)) {
     const arr = out[c];
     if (!Array.isArray(arr)) continue;
-    for (const rec of arr) { if (rec && 'media' in rec) delete rec.media; }
+    for (const rec of arr) { if (rec && typeof rec === 'object' && 'media' in rec) delete rec.media; }
   }
   return out;
 }

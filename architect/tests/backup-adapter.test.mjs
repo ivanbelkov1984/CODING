@@ -96,6 +96,27 @@ async function main() {
     ok(warnings.length === 0, 'complete: без warnings');
   }
 
+  // A2. реальная форма DB: строковый массив (oq), объекты (vit/env/_del), скаляр (__ts)
+  {
+    const storage = makeStorage({
+      [KEYS.PKEY]: JSON.stringify([{ id: 'pR', name: 'Real', color: '#1056CC' }]),
+      [KEYS.AKEY]: 'pR',
+      [KEYS.db('pR')]: JSON.stringify({
+        insights: [{ id: 1, title: 'x', media: ['m1'] }],
+        oq: ['Что важно?', 'Что мешает?'],
+        vit: { sl: 7, note: '' }, env: { ritual: false }, _del: { 5: 123 }, __ts: 999,
+      }),
+      [KEYS.cfg('pR')]: JSON.stringify({ userName: 'Real' }),
+    });
+    const media = makeMedia({ m1: { data: IMG, type: 'image', createdAt: '2026-01-01T00:00:00.000Z' } });
+    const a = createBackupAdapter({ storage, media, now: () => NOW });
+    const dataOnly = await a.buildBundle({ id: 'pR', mode: 'data-only' });
+    ok(dataOnly.payload.db.oq.length === 2 && dataOnly.payload.db.vit.sl === 7 && dataOnly.payload.db._del['5'] === 123, 'реальная DB: строки/объекты/скаляры сохранены (data-only не падает на oq-строках)');
+    ok(!('__ts' in dataOnly.payload.db) && !('media' in dataOnly.payload.db.insights[0]), 'реальная DB: __ts снят, media-ссылка снята в копии');
+    const complete = await a.buildBundle({ id: 'pR', mode: 'complete' });
+    ok(complete.payload.media.length === 1 && complete.payload.db.oq.length === 2, 'реальная DB: complete собирает media и сохраняет oq/объекты');
+  }
+
   // B2. complete с битой ссылкой → ссылка убрана из копии + warning, без падения
   {
     const { storage, media } = seed();

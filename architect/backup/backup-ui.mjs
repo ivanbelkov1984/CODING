@@ -43,7 +43,9 @@ function dateStamp(iso) { const d = new Date(iso); return d.getUTCFullYear() + '
 const browserPlatform = {
   makeBlob: (parts, type) => new Blob(parts, { type }),
   createObjectURL: blob => URL.createObjectURL(blob),
-  revokeObjectURL: url => URL.revokeObjectURL(url),
+  // Отзыв откладываем: синхронный revoke сразу после click отменяет скачивание
+  // blob: в реальном браузере. Память всё равно освобождается (через таймаут).
+  revokeObjectURL: url => { try { setTimeout(() => URL.revokeObjectURL(url), 10000); } catch (_) { URL.revokeObjectURL(url); } },
   triggerDownload: (url, filename) => {
     const a = document.createElement('a');
     a.href = url; a.download = filename; a.rel = 'noopener';
