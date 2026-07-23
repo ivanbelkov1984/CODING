@@ -2015,6 +2015,29 @@ function saveMoment() {
   hptMed(); toast('Состояние записано', 'ok');
 }
 function momentLabel(v) { return v >= 75 ? 'высокая' : v >= 50 ? 'средняя' : v >= 25 ? 'ниже средней' : 'низкая'; }
+// Просмотр сохранённого «Момента» (полностью) + удаление.
+function openMoment(id) {
+  const m = (DB.moments || []).find(x => x && x.id === id); if (!m) return;
+  STATE.momDetId = id;
+  const t = new Date(m.createdAt);
+  const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
+  const rows = [
+    ['Приятность', momentLabel(m.valence) + ' (' + Math.round(m.valence) + ')'],
+    ['Энергия', momentLabel(m.activation) + ' (' + Math.round(m.activation) + ')'],
+  ];
+  if (m.emo) rows.push(['Эмоция', m.emo]);
+  if (m.note) rows.push(['Заметка', m.note]);
+  const body = $('mom-det-body');
+  if (body) body.innerHTML = rows.map(([lbl, v]) => `<div style="margin-bottom:.6rem"><div class="f-lbl">${lbl}</div><div class="si-text">${esc(v)}</div></div>`).join('');
+  const dt = $('mom-det-date'); if (dt) dt.textContent = (m.day || '') + ' · ' + hh;
+  openOv('ov-moment-det');
+}
+function deleteMomentDet() {
+  const id = STATE.momDetId; if (id == null) return;
+  closeOv('ov-moment-det');
+  delUndo('moments', id, () => { try { rHomeMoments(); } catch (e) {} try { rMomentTrend(); } catch (e) {} }, 'Момент удалён');
+  STATE.momDetId = null;
+}
 // Динамика «Моментов» за 14 дней: средние приятность/энергия по дню, спарклайн.
 // Только описание наблюдаемого окна (DescriptiveState), без прогноза.
 function rMomentTrend() {
@@ -2060,7 +2083,7 @@ function rHomeMoments() {
       const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
       const chip = m.emo ? ` · ${esc(m.emo)}` : '';
       const note = m.note ? `<div class="si-text" style="color:var(--t3);margin-top:.15rem">${esc(m.note)}</div>` : '';
-      return `<div class="si-row"><div class="si-body"><div class="si-text"><b>${hh}</b> — приятность ${momentLabel(m.valence)}, энергия ${momentLabel(m.activation)}${chip}</div>${note}</div></div>`;
+      return `<div class="si-row tap" style="cursor:pointer" onclick="openMoment(${m.id})"><div class="si-body"><div class="si-text"><b>${hh}</b> — приятность ${momentLabel(m.valence)}, энергия ${momentLabel(m.activation)}${chip}</div>${note}</div></div>`;
     }).join('') + '</div>';
 }
 
