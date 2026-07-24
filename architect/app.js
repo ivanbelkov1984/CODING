@@ -763,6 +763,7 @@ function rHome() {
   rStateHero(); rVector(); rAmbient('home-ambient'); rSmartInsights('home-smart'); rHeatmap('home-heatmap', 90); rGraph('home-graph', 190, true);
   rPrompts();
   rOnThisDay();
+  try { rAstroDaily(); } catch (e) {}
   rHIns();
   try { rHomeMoments(); } catch (e) {}
   try { rMomentTrend(); } catch (e) {}
@@ -3529,6 +3530,7 @@ function asub(name) {
 
 // Главный экран раздела: превью-колесо (или пустое состояние) + сетка карточек.
 function rAstroHome() {
+  const tg = $('astro-daily-tog'); if (tg) tg.classList.toggle('on', !!CFG.astroDaily);
   const hero = $('astro-hero'); if (!hero) return;
   const last = (DB.astroCharts || []).slice(-1)[0];
   if (!DB.astroBirth) {
@@ -3938,6 +3940,41 @@ async function aiDeepAstroAnalysis() {
     persist();
   } catch (e) { toast(e && e.message ? e.message : 'Не удалось выполнить анализ', 'warn'); }
   rChartSummary();
+}
+
+// ─── «ТРАНЗИТ ДНЯ» НА ГЛАВНОЙ (opt-in) ──────────────────────────────
+// Символическая карточка: самый точный транзитный аспект дня к натальной
+// карте. Только отображение — ни во что не подмешивается. Кэш на день,
+// чтобы не грузить движок при каждом рендере главной.
+function rAstroDaily() {
+  const el = $('h-astro-daily'); if (!el) return;
+  if (!CFG.astroDaily || !DB.astroBirth || !(DB.astroCharts || []).length) { el.innerHTML = ''; return; }
+  let cache = null;
+  try { cache = JSON.parse(localStorage.getItem('arch5_astro_daily') || 'null'); } catch (e) {}
+  if (cache && cache.day === todayKey()) { el.innerHTML = cache.html; return; }
+  el.innerHTML = '';
+  // Считаем асинхронно один раз в день; карточка появится после расчёта.
+  Promise.all([loadAstroEngine(), loadAstroRules().catch(() => {})]).then(() => {
+    const last = (DB.astroCharts || []).slice(-1)[0]; if (!last) return;
+    const tr = computeTransits(last.chart, new Date());
+    const hits = [...tr.hits].sort((a, b) => parseFloat(a.exact) - parseFloat(b.exact));
+    let html = '';
+    if (hits.length) {
+      const h = hits[0], tx = transitHitText(h);
+      html = `<div class="card mx mb tap" style="padding:.7rem 1rem;cursor:pointer" onclick="goTo('astro');asub('transits')" role="button">
+        <div class="si-text">✦ <b>Транзит дня:</b> ${esc(h.transit)} → ваш ${esc(h.natal)}. ${tx ? esc(tx.text) : esc(h.aspect)}
+        <span style="color:var(--t4);font-size:.72rem"> · символическое, не прогноз</span></div></div>`;
+    }
+    try { localStorage.setItem('arch5_astro_daily', JSON.stringify({ day: todayKey(), html })); } catch (e) {}
+    el.innerHTML = html;
+  }).catch(() => {});
+}
+function toggleAstroDaily() {
+  CFG.astroDaily = !CFG.astroDaily;
+  persist(); try { localStorage.removeItem('arch5_astro_daily'); } catch (e) {}
+  const tg = $('astro-daily-tog'); if (tg) tg.classList.toggle('on', !!CFG.astroDaily);
+  toast(CFG.astroDaily ? 'Карточка «Транзит дня» включена' : 'Карточка выключена', 'ok');
+  rAstroDaily();
 }
 
 // ─── СИНАСТРИЯ (3.6/4.5): межличностные аспекты двух карт ───────────

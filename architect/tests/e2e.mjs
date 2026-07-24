@@ -2047,6 +2047,44 @@ ok(p2T.outer, 'аспекты с внешними планетами → шаб�
 ok(p2T.aspUI, 'таб «Аспекты»: текст Луна-секстиль-Солнце с rule id (golden J2000)');
 ok(p2T.houseUI, 'таб «Дома»: 12 текстов знаков на куспидах с rule id');
 
+// ── Астрология: карточка «Транзит дня» на главной (opt-in) ──
+const dailyT = await page.evaluate(async () => {
+  await loadAstroEngine(); await loadAstroRules();
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = [];
+  await runNatalChart();
+  localStorage.removeItem('arch5_astro_daily');
+  // 1) Выключено по умолчанию → карточки нет.
+  CFG.astroDaily = false;
+  rAstroDaily();
+  await new Promise(r => setTimeout(r, 300));
+  const offEmpty = document.getElementById('h-astro-daily').innerHTML === '';
+  // 2) Включаем → карточка с самым точным транзитом и пометкой символичности; кэш на день.
+  CFG.astroDaily = true;
+  rAstroDaily();
+  await new Promise(r => setTimeout(r, 600));
+  const html1 = document.getElementById('h-astro-daily').innerHTML;
+  const cardOk = /Транзит дня/.test(html1) && /символическое, не прогноз/.test(html1);
+  let cache = null; try { cache = JSON.parse(localStorage.getItem('arch5_astro_daily')); } catch (e) {}
+  const cacheOk = cache && cache.day === new Date().toISOString().slice(0, 10) && cache.html === html1;
+  // 3) Повторный рендер берёт кэш (мгновенно, без пересчёта).
+  document.getElementById('h-astro-daily').innerHTML = '';
+  rAstroDaily();
+  const fromCache = document.getElementById('h-astro-daily').innerHTML === html1;
+  // 4) Тумблер в разделе синхронизирован с CFG.
+  goTo('astro');
+  const togOn = document.getElementById('astro-daily-tog').classList.contains('on');
+  goTo('home');
+  CFG.astroDaily = false;
+  localStorage.removeItem('arch5_astro_daily');
+  DB.astroBirth = null; DB.astroCharts = [];
+  return { offEmpty, cardOk, cacheOk, fromCache, togOn };
+});
+ok(dailyT.offEmpty, '«Транзит дня»: выключено по умолчанию — карточки нет (opt-in)');
+ok(dailyT.cardOk, '«Транзит дня»: карточка с самым точным транзитом и пометкой «символическое»');
+ok(dailyT.cacheOk && dailyT.fromCache, '«Транзит дня»: кэш на день, повторный рендер без пересчёта');
+ok(dailyT.togOn, '«Транзит дня»: тумблер в разделе отражает состояние');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
