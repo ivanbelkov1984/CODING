@@ -1587,6 +1587,37 @@ ok(progT.solarOk, 'соляр: Солнце в момент возвращени
 ok(progT.lunarOk, 'лунар: Луна в момент возвращения = натальная долгота ±0.01°');
 ok(progT.tertOk, 'третичные прогрессии: 1 лунный месяц жизни → сдвиг Луны ~13.2° (1 день)');
 
+// ── Астрология оч.3: джйотиш — golden-проверки ──
+const jyoT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  const A = window.Astronomy;
+  const t0 = A.MakeTime(new Date(Date.UTC(2000, 0, 1, 12)));
+  // 1) Айанамши: сид = троп − айанамша (точно); Фаган − Лахири ≈ 0.883° (стабильная разность).
+  const ayaL = ayanamsha('lahiri', t0), ayaF = ayanamsha('fagan', t0);
+  const ayaOk = Math.abs(ayaL - 23.85306) < 1e-5 && Math.abs((ayaF - ayaL) - 0.88325) < 0.001;
+  // 2) Раху (mean) golden J2000 = 125.0445° (Меёс).
+  const rahuOk = Math.abs(meanRahuLon(t0) - 125.0445) < 0.001;
+  // 3) Навамша-классика: Овен 0° → Овен; Телец 0° → Козерог; Овен 26°40'+ → Стрелец (9-я часть).
+  const navOk = vargaSign(9, 0) === 0 && vargaSign(9, 30) === 9 && vargaSign(9, 28) === 8;
+  // 4) Вимшоттари: сумма 120 лет; сид. Луна 0° (Ашвини 0) → маха Кету, баланс полный (from = рождение).
+  const total = VIMSHOTTARI.reduce((s, v) => s + v[1], 0);
+  const birth = new Date(Date.UTC(2000, 0, 1, 12));
+  const d = vimshottariDasha(0, birth, new Date(Date.UTC(2003, 0, 1)));
+  const dashaOk = total === 120 && d.seq[0].lord === 'Кету' && Math.abs(d.seq[0].from.getTime() - birth.getTime()) < 1000 && d.current.lord === 'Кету';
+  // 5) Тити: Луна−Солнце = 5° → тити 1 (Пратипада, шукла); 180° → №16 (кришна начинается)... 179° → 15 Пурнима.
+  const p1 = panchanga(0, 5, new Date(Date.UTC(2000, 0, 1))), p15 = panchanga(0, 179, new Date(Date.UTC(2000, 0, 1)));
+  const tithiOk = p1.tithi === 1 && p1.paksha === 'шукла' && p15.tithi === 15 && p15.tithiName === 'Пурнима';
+  // 6) Уччабала: Солнце в 10° Овна (сид) = 60; в 10° Весов = 0.
+  const uOk = Math.abs(ucchaBala('Sun', 10) - 60) < 1e-9 && Math.abs(ucchaBala('Sun', 190) - 0) < 1e-9;
+  return { ayaOk, rahuOk, navOk, dashaOk, tithiOk, uOk };
+});
+ok(jyoT.ayaOk, 'джйотиш: айанамша Лахири J2000 = 23.85306°, Фаган−Лахири = 0.883°');
+ok(jyoT.rahuOk, 'джйотиш: Раху (mean) golden J2000 = 125.0445° (Меёс)');
+ok(jyoT.navOk, 'джйотиш: навамша — Овен 0°→Овен, Телец 0°→Козерог (классика Парашары)');
+ok(jyoT.dashaOk, 'джйотиш: Вимшоттари = 120 лет; Луна в 0° Ашвини → маха Кету от рождения');
+ok(jyoT.tithiOk, 'джйотиш: тити 1 (Пратипада) при 5°, Пурнима при 179°');
+ok(jyoT.uOk, 'джйотиш: уччабала Солнца — 60 в экзальтации (10° Овна), 0 в дебилитации');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

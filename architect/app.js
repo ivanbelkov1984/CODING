@@ -2859,6 +2859,137 @@ function searchReturn(body, targetLon, startDate, windowDays) {
   }
   return null;
 }
+// ─── ДЖЙОТИШ / ВЕДИЧЕСКАЯ (очередь 3) ───────────────────────────────
+// Нативная реализация открытых формул (VedAstro/Jyotish — только как
+// референс определений; GPL-код НЕ копировался). Сидерическая долгота =
+// тропическая − айанамша. Значения айанамш на J2000 — широко публикуемые
+// константы; ход — линейная прецессия 50.2888″/год (аппроксимация,
+// расхождение с эталонными реализациями — единицы угловых минут; для
+// символических целей достаточно, задокументировано).
+const AYANAMSHAS = {
+  lahiri:  { ru: 'Лахири',        j2000: 23.85306 },
+  raman:   { ru: 'Раман',         j2000: 22.49703 },
+  kp:      { ru: 'Кришнамурти',   j2000: 23.75210 },
+  fagan:   { ru: 'Фаган-Брэдли',  j2000: 24.73631 },
+  yukteshwar: { ru: 'Юктешвар',   j2000: 22.74660 },
+};
+const PRECESSION_DEG_PER_YEAR = 50.2888 / 3600;
+function ayanamsha(key, t) { const a = AYANAMSHAS[key] || AYANAMSHAS.lahiri; return a.j2000 + PRECESSION_DEG_PER_YEAR * (t.tt / 365.25); }
+// Средний восходящий узел Луны (Раху, mean) — Ж. Меёс.
+function meanRahuLon(t) {
+  const T = t.tt / 36525;
+  return norm360(125.0445479 - 1934.1362891 * T + 0.0020754 * T * T + T * T * T / 467441);
+}
+const NAKSHATRAS = ['Ашвини','Бхарани','Криттика','Рохини','Мригашира','Ардра','Пунарвасу','Пушья','Ашлеша','Магха','Пурва-Пхалгуни','Уттара-Пхалгуни','Хаста','Читра','Свати','Вишакха','Анурадха','Джьештха','Мула','Пурва-Ашадха','Уттара-Ашадха','Шравана','Дхаништха','Шатабхиша','Пурва-Бхадрапада','Уттара-Бхадрапада','Ревати'];
+const RASHI = ['Меша (Овен)','Вришабха (Телец)','Митхуна (Близнецы)','Карка (Рак)','Симха (Лев)','Канья (Дева)','Тула (Весы)','Вришчика (Скорпион)','Дхану (Стрелец)','Макара (Козерог)','Кумбха (Водолей)','Мина (Рыбы)'];
+// Варги (классические правила Парашары). Реализованы уверенные: D1/D7/D9/D10/D12.
+// D16/D20/D24/D30/D60 отложены (правила вариативны) — задокументировано.
+function vargaSign(dn, sidLon) {
+  const signIdx = Math.floor(sidLon / 30), deg = sidLon % 30;
+  if (dn === 1) return signIdx;
+  if (dn === 9)  return (signIdx * 9 + Math.floor(deg / (30 / 9))) % 12;                       // навамша
+  if (dn === 12) return (signIdx + Math.floor(deg / 2.5)) % 12;                                 // двадашамша: от самого знака
+  if (dn === 7)  { const p = Math.floor(deg / (30 / 7)); return ((signIdx % 2 === 0) ? (signIdx + p) : (signIdx + 6 + p)) % 12; }  // саптамша: нечётный знак (0-based чётный) от себя, чётный — от 7-го
+  if (dn === 10) { const p = Math.floor(deg / 3); return ((signIdx % 2 === 0) ? (signIdx + p) : (signIdx + 8 + p)) % 12; }          // дашамша: нечётный от себя, чётный от 9-го
+  return null;
+}
+// Вимшоттари-даша: старт от накшатры Луны. 120 лет.
+const VIMSHOTTARI = [ ['Кету', 7], ['Венера', 20], ['Солнце', 6], ['Луна', 10], ['Марс', 7], ['Раху', 18], ['Юпитер', 16], ['Сатурн', 19], ['Меркурий', 17] ];
+function vimshottariDasha(sidMoonLon, birthDate, now) {
+  const nakLen = 360 / 27;
+  const nak = Math.floor(sidMoonLon / nakLen);
+  const frac = (sidMoonLon % nakLen) / nakLen;                    // пройденная доля накшатры
+  const startIdx = nak % 9;
+  const seq = [];
+  let cursor = birthDate.getTime() - frac * VIMSHOTTARI[startIdx][1] * YEAR_DAYS * 864e5;   // начало текущей махадаши
+  for (let i = 0; i < 18; i++) {
+    const [lord, yrs] = VIMSHOTTARI[(startIdx + i) % 9];
+    const from = cursor, to = cursor + yrs * YEAR_DAYS * 864e5;
+    seq.push({ lord, yrs, from: new Date(from), to: new Date(to) });
+    cursor = to;
+  }
+  const cur = seq.find(d => now.getTime() >= d.from.getTime() && now.getTime() < d.to.getTime()) || null;
+  let antar = null;
+  if (cur) {   // антардаши текущей махи — пропорционально годам лордов от лорда махи
+    const maIdx = VIMSHOTTARI.findIndex(v => v[0] === cur.lord);
+    let c2 = cur.from.getTime();
+    for (let i = 0; i < 9; i++) {
+      const [lord, yrs] = VIMSHOTTARI[(maIdx + i) % 9];
+      const len = cur.yrs * (yrs / 120) * YEAR_DAYS * 864e5;
+      if (now.getTime() >= c2 && now.getTime() < c2 + len) { antar = { lord, from: new Date(c2), to: new Date(c2 + len) }; break; }
+      c2 += len;
+    }
+  }
+  return { nakshatra: NAKSHATRAS[nak], pada: Math.floor((sidMoonLon % nakLen) / (nakLen / 4)) + 1, balanceStart: seq[0], current: cur, antar, seq: seq.slice(0, 9) };
+}
+// Панчанга (на момент рождения). Вара — упрощение: календарный день местного
+// времени без коррекции на восход (задокументировано).
+const TITHI_NAMES_HALF = ['Пратипада','Двития','Трития','Чатуртхи','Панчами','Шаштхи','Саптами','Аштами','Навами','Дашами','Экадаши','Двадаши','Трайодаши','Чатурдаши'];
+const VARA_RU = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
+const YOGA_COUNT = 27, KARANA_MOVABLE = ['Бава','Балава','Каулава','Тайтила','Гара','Ваниджа','Вишти'];
+function panchanga(sidSun, sidMoon, birthLocal) {
+  const d = norm360(sidMoon - sidSun);
+  const tithiNum = Math.floor(d / 12) + 1;                        // 1..30
+  const paksha = tithiNum <= 15 ? 'шукла' : 'кришна';
+  const tithiName = (tithiNum === 15) ? 'Пурнима' : (tithiNum === 30) ? 'Амавасья' : TITHI_NAMES_HALF[(tithiNum - 1) % 15];
+  const yoga = Math.floor(norm360(sidSun + sidMoon) / (360 / YOGA_COUNT));
+  const karanaIdx = Math.floor(d / 6);                            // 0..59
+  const karana = (karanaIdx === 0) ? 'Кимстугхна' : (karanaIdx >= 57) ? ['Шакуни','Чатушпада','Нага'][karanaIdx - 57] : KARANA_MOVABLE[(karanaIdx - 1) % 7];
+  return { tithi: tithiNum, tithiName, paksha, vara: VARA_RU[birthLocal.getUTCDay()], yoga: yoga + 1, karana };
+}
+// Классические йоги (базовый проверяемый набор; список не полный).
+const EXALT = { Sun: 10, Moon: 33, Mars: 298, Mercury: 165, Jupiter: 95, Venus: 357, Saturn: 200 };  // сид. долготы экзальтаций
+function jyotishYogas(sid) {
+  const L = {}; sid.forEach(p => L[p.body] = p.lon);
+  const kendra = (a, b) => [0, 3, 6, 9].includes((Math.floor(L[a] / 30) - Math.floor(L[b] / 30) + 12) % 12);
+  const conj = (a, b) => Math.abs(((L[a] - L[b] + 180) % 360 + 360) % 360 - 180) < 12 && Math.floor(L[a] / 30) === Math.floor(L[b] / 30);
+  const out = [];
+  if (kendra('Jupiter', 'Moon')) out.push('Гаджакесари (Юпитер в кендре от Луны)');
+  if (conj('Mercury', 'Sun')) out.push('Будха-Адитья (Меркурий с Солнцем)');
+  if (conj('Moon', 'Mars')) out.push('Чандра-Мангала (Луна с Марсом)');
+  return out;
+}
+// Уччабала (сила экзальтации, шаштиамши 0..60) — простейший компонент Шадбалы.
+// Полная Шадбала (6 компонентов с поправками) отложена — задокументировано.
+function ucchaBala(body, sidLon) {
+  if (!(body in EXALT)) return null;
+  const deb = norm360(EXALT[body] + 180);
+  const dist = Math.abs(((sidLon - deb + 180) % 360 + 360) % 360 - 180);
+  return Math.round(dist / 180 * 60 * 10) / 10;
+}
+async function rJyotish() {
+  const out = $('astro-jyo'); if (!out) return;
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (!last || !DB.astroBirth) { out.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай натальную карту.</div>'; return; }
+  out.innerHTML = '<div class="ai-sp-empty">Считаю джйотиш…</div>';
+  try {
+    await loadAstroEngine();
+    const A = window.Astronomy;
+    const b0 = birthUTCDate(DB.astroBirth);
+    const t = A.MakeTime(b0);
+    const ayaKey = ($('astro-aya') && $('astro-aya').value) || 'lahiri';
+    const aya = ayanamsha(ayaKey, t);
+    const sid = last.chart.planets.map(p => { const L = norm360(p.lon - aya); return { body: p.body, name: p.name, lon: L, sign: RASHI[Math.floor(L / 30)], deg: L % 30 }; });
+    const rahu = norm360(meanRahuLon(t) - aya), ketu = norm360(rahu + 180);
+    const moon = sid.find(p => p.body === 'Moon'), sun = sid.find(p => p.body === 'Sun');
+    const dasha = vimshottariDasha(moon.lon, b0, new Date());
+    const pan = panchanga(sun.lon, moon.lon, new Date(b0.getTime() + (DB.astroBirth.utcOffset || 0) * 3600e3));
+    const yogas = jyotishYogas(sid);
+    let html = `<div class="f-lbl" style="margin-top:.5rem">Сидерические позиции (${esc(AYANAMSHAS[ayaKey].ru)}, айанамша ${aya.toFixed(2)}°)</div>` +
+      sid.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°${(ucchaBala(p.body, p.lon) != null) ? ' · уччабала ' + ucchaBala(p.body, p.lon) : ''}</div>`).join('') +
+      `<div class="si-text" style="color:var(--t3)">Раху (ср.): ${esc(RASHI[Math.floor(rahu / 30)])} ${(rahu % 30).toFixed(1)}° · Кету: ${esc(RASHI[Math.floor(ketu / 30)])} ${(ketu % 30).toFixed(1)}°</div>`;
+    html += `<div class="f-lbl" style="margin-top:.4rem">Накшатра Луны</div><div class="si-text">${esc(dasha.nakshatra)}, пада ${dasha.pada}</div>`;
+    html += `<div class="f-lbl" style="margin-top:.4rem">Панчанга рождения</div><div class="si-text" style="color:var(--t3)">Тити: ${esc(pan.tithiName)} (${pan.paksha}, №${pan.tithi}) · Вара: ${esc(pan.vara)} · Йога: №${pan.yoga} · Карана: ${esc(pan.karana)}</div>`;
+    const d9 = ['Sun', 'Moon'].map(b => { const p = sid.find(x => x.body === b); return `${esc(p.name)}: ${esc(RASHI[vargaSign(9, p.lon)])}`; }).join(' · ');
+    const d10 = ['Sun', 'Moon'].map(b => { const p = sid.find(x => x.body === b); return `${esc(p.name)}: ${esc(RASHI[vargaSign(10, p.lon)])}`; }).join(' · ');
+    html += `<div class="f-lbl" style="margin-top:.4rem">Варги</div><div class="si-text" style="color:var(--t3)">D9 (навамша): ${d9}</div><div class="si-text" style="color:var(--t3)">D10 (дашамша): ${d10}</div>`;
+    if (dasha.current) html += `<div class="f-lbl" style="margin-top:.4rem">Вимшоттари-даша</div><div class="si-text">Маха: <b>${esc(dasha.current.lord)}</b> (до ${dasha.current.to.toISOString().slice(0, 10)})${dasha.antar ? ` · Антар: ${esc(dasha.antar.lord)} (до ${dasha.antar.to.toISOString().slice(0, 10)})` : ''}</div>`;
+    if (yogas.length) html += `<div class="f-lbl" style="margin-top:.4rem">Йоги</div>` + yogas.map(y => `<div class="si-text" style="color:var(--t3)">${esc(y)}</div>`).join('');
+    html += '<div class="be-note" style="color:var(--t3)">Джйотиш — сидерическая традиция. Символическое; не прогноз и не диагноз. Айанамша — линейная аппроксимация (±минуты дуги); вара без коррекции на восход; D16–D60 и полная Шадбала — отложены.</div>';
+    out.innerHTML = html;
+  } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
+}
+
 async function rPrognostics() {
   const out = $('astro-prog'); if (!out) return;
   const last = (DB.astroCharts || []).slice(-1)[0];
