@@ -1368,6 +1368,22 @@ ok(docT.open && docT.meds && docT.sym && docT.mea, '«Отчёт врачу»: �
 ok(docT.disclaimer, '«Отчёт врачу»: явная пометка «не медицинский документ»');
 await page.evaluate(() => { DB.meds = []; DB.medIntakes = []; DB.symptoms = []; DB.measures = []; closeOv('ov-doc-report'); goTo('home'); });
 
+// ── Напоминание о приёме на «Сегодня» ──
+const remT = await page.evaluate(() => {
+  const iso = new Date().toISOString(), day = iso.slice(0, 10);
+  goTo('home');
+  DB.meds = [{ id: 9501, kType: 'medication_plan', name: 'Магний', active: true, verif: 'user_confirmed', life: 'current', createdAt: iso, day, sv: 2, _u: Date.now() }];
+  DB.medIntakes = [];
+  rMedReminder();
+  const pendingShown = /Магний/.test(document.getElementById('h-med-reminder').textContent || '');
+  DB.medIntakes = [{ id: 9502, kType: 'medication_intake', medId: 9501, status: 'taken', at: iso, verif: 'user_confirmed', life: 'current', createdAt: iso, day, sv: 2, _u: Date.now() }];
+  rMedReminder();
+  const clearedAfterTake = (document.getElementById('h-med-reminder').innerHTML || '') === '';
+  DB.meds = []; DB.medIntakes = [];
+  return { pendingShown, clearedAfterTake };
+});
+ok(remT.pendingShown && remT.clearedAfterTake, 'напоминание: показано пока приём не отмечен, исчезает после отметки');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

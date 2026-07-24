@@ -762,6 +762,7 @@ function rHome() {
   try { rMomentTrend(); } catch (e) {}
   try { rWhys(); } catch (e) {}
   try { rWeekSummary(); } catch (e) {}
+  try { rMedReminder(); } catch (e) {}
 }
 // ─── ПАМЯТЬ НА ГОДЫ: ресёрфейсинг (волна 2, механика Rosebud) ────
 // Движок сам поднимает релевантную запись прошлого: похожее состояние /
@@ -2598,6 +2599,20 @@ function bodySectionHTML() {
     <button class="btn btn-s btn-sm" onclick="openDoctorReport()"><i data-lucide="file-text"></i>Отчёт врачу</button>
   </div>`;
   return html;
+}
+
+// Мягкое напоминание на «Сегодня»: по каким активным планам сегодня ещё не
+// отмечен приём. Только по плану, заданному пользователем; не медицина.
+function rMedReminder() {
+  const el = $('h-med-reminder'); if (!el) return;
+  const today = todayKey();
+  const meds = projAll('meds').filter(m => m && m.active !== false);
+  const pending = meds.filter(m => !(DB.medIntakes || []).some(i => i && i.medId === m.id && i.day === today && i.status === 'taken'));
+  if (!pending.length) { el.innerHTML = ''; return; }
+  const names = pending.slice(0, 3).map(m => esc(m.name)).join(', ') + (pending.length > 3 ? '…' : '');
+  el.innerHTML = `<div class="card mx mb tap" style="padding:.7rem 1rem;cursor:pointer" onclick="goTo('health')" role="button">
+    <div class="si-text">💊 Сегодня ещё не отмечено: <b>${names}</b> — <span style="color:var(--accent)">отметить в «Здоровье» →</span></div>
+  </div>`;
 }
 
 // ─── HEALTH ORGANIZER: «Отчёт врачу» (детерминированная сводка) ─────
