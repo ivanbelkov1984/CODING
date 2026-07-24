@@ -2782,6 +2782,73 @@ function vertexLon(ramcDeg, epsDeg, phiDeg) {
 // Антисция: зеркало относительно оси 0°Рака–0°Козерога.
 const antisciaLon = lon => norm360(180 - lon);
 
+// ─── МИДПОИНТЫ И ГАРМОНИКИ (очередь 1.3–1.4) ────────────────────────
+// Мидпоинты — классическая уранская астрология (Витте/Эбертин), формула
+// общеизвестна: середина КОРОТКОЙ дуги между двумя долготами. Дерево
+// мидпоинтов: какие натальные точки стоят в ЖЁСТКОМ аспекте (0/45/90/135/180°)
+// к мидпоинту пары — орб 1.5° (версия midpoints-v1). Гармоники — техника
+// Джона Аддея: долгота × N (mod 360). Обе техники — открытая арифметика.
+function midpointLon(a, b) {
+  const m = norm360((a + b) / 2);
+  // Выбираем середину короткой дуги: если m дальше 90° от a — берём m+180.
+  const sep = Math.abs(((a - b + 180) % 360 + 360) % 360 - 180);
+  const dm = Math.abs(((m - a + 180) % 360 + 360) % 360 - 180);
+  return (Math.abs(dm - sep / 2) < 1e-9) ? m : norm360(m + 180);
+}
+const MIDPOINT_ORB = 1.5;
+const HARD_ANGLES = [0, 45, 90, 135, 180];
+// Дерево мидпоинтов: точки карты (планеты + Asc/MC) в жёстком аспекте к
+// мидпоинтам пар планет. Возвращает [{point, pair, angle, orb}].
+function computeMidpointTree(chart) {
+  const pts = chart.planets.map(p => ({ name: p.name, lon: p.lon }));
+  if (chart.angles) { pts.push({ name: 'Asc', lon: chart.angles.asc.lon }); pts.push({ name: 'MC', lon: chart.angles.mc.lon }); }
+  const hits = [];
+  for (let i = 0; i < chart.planets.length; i++) for (let j = i + 1; j < chart.planets.length; j++) {
+    const A1 = chart.planets[i], B1 = chart.planets[j];
+    const m = midpointLon(A1.lon, B1.lon);
+    for (const pt of pts) {
+      if (pt.name === A1.name || pt.name === B1.name) continue;
+      const sep = Math.abs(((pt.lon - m + 180) % 360 + 360) % 360 - 180);
+      for (const ang of HARD_ANGLES) {
+        if (Math.abs(sep - ang) <= MIDPOINT_ORB) { hits.push({ point: pt.name, pair: A1.name + '/' + B1.name, angle: ang, orb: Math.abs(sep - ang).toFixed(2) }); break; }
+      }
+    }
+  }
+  hits.sort((x, y) => parseFloat(x.orb) - parseFloat(y.orb));
+  return hits;
+}
+// Гармоническая карта: долготы × n (mod 360) + соединения в гармонике (орб 6°).
+function computeHarmonic(chart, n) {
+  const planets = chart.planets.map(p => { const L = norm360(p.lon * n); const z = zodiacOf(L); return { name: p.name, lon: L, sign: z.sign, deg: z.deg }; });
+  const conj = [];
+  for (let i = 0; i < planets.length; i++) for (let j = i + 1; j < planets.length; j++) {
+    const sep = Math.abs(((planets[i].lon - planets[j].lon + 180) % 360 + 360) % 360 - 180);
+    if (sep <= 6) conj.push({ a: planets[i].name, b: planets[j].name, orb: sep.toFixed(1) });
+  }
+  return { n, planets, conj, versions: { harmonic: 'addey-v1(orb6)' } };
+}
+function rMidpoints() {
+  const out = $('astro-mid'); if (!out) return;
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (!last) { out.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай натальную карту.</div>'; return; }
+  const hits = computeMidpointTree(last.chart);
+  out.innerHTML = '<div class="f-lbl" style="margin-top:.5rem">Дерево мидпоинтов <span style="font-weight:500;color:var(--t3)">(жёсткие аспекты, орб 1.5°)</span></div>' +
+    (hits.length ? hits.slice(0, 15).map(h => `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(h.point)}</b> = ${esc(h.pair)} (${h.angle}°, орб ${h.orb}°)</div></div></div>`).join('')
+      : '<div class="si-text" style="color:var(--t3)">Нет попаданий в орб 1.5°.</div>') +
+    '<div class="be-note" style="color:var(--t3)">Уранская техника (Витте/Эбертин). Символическое, не прогноз.</div>';
+}
+function rHarmonic() {
+  const out = $('astro-harm'); if (!out) return;
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (!last) { out.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай натальную карту.</div>'; return; }
+  const n = Math.max(2, Math.min(64, parseInt(($('astro-harm-n') && $('astro-harm-n').value) || '5', 10) || 5));
+  const h = computeHarmonic(last.chart, n);
+  out.innerHTML = `<div class="f-lbl" style="margin-top:.5rem">Гармоника H${n}</div>` +
+    h.planets.map(p => `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°</div></div></div>`).join('') +
+    (h.conj.length ? '<div class="f-lbl" style="margin-top:.4rem">Соединения в гармонике</div>' + h.conj.map(c => `<div class="si-text" style="color:var(--t3)">${esc(c.a)} ∪ ${esc(c.b)} (орб ${c.orb}°)</div>`).join('') : '') +
+    '<div class="be-note" style="color:var(--t3)">Техника Дж. Аддея: долгота × N. Символическое.</div>';
+}
+
 // ─── СИСТЕМЫ ДОМОВ (очередь 1.1) ────────────────────────────────────
 // Формулы — открытая сферическая астрономия (public domain):
 //  · Equal — Asc + 30°·k; Whole-sign — знаковые границы от знака Asc.

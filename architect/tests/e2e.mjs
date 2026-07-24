@@ -1518,6 +1518,32 @@ const horizonsT = await page.evaluate(async () => {
 });
 ok(horizonsT.all, `астероиды: golden против JPL Horizons (2026-07-24) — все 5 тел в пределах 0.05° (макс ${horizonsT.maxErr.toFixed(4)}°)`);
 
+// ── Астрология 1.3–1.4: мидпоинты + гармоники (арифметические инварианты) ──
+const midT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  const sep = (a, b) => Math.abs(((a - b + 180) % 360 + 360) % 360 - 180);
+  // Мидпоинт: равноудалён и на короткой дуге (вкл. wrap 350↔10 → 0, не 180).
+  const cases = [[350, 10, 0], [10, 90, 50], [0, 180, 90], [300, 100, 20]];
+  let mpOk = true;
+  for (const [a, b, want] of cases) {
+    const m = midpointLon(a, b);
+    if (sep(m, a) > sep(a, b) / 2 + 1e-6 || Math.abs(sep(m, a) - sep(m, b)) > 1e-6) mpOk = false;
+    if (want !== null && sep(m, want) > 1e-6 && Math.abs(sep(a, b) - 180) > 1e-9) mpOk = false;
+  }
+  // Дерево: синтетика — Солнце 0°, Луна 90°, Марс 45° → Марс = Солнце/Луна (0°).
+  const fake = { planets: [{ name: 'Солнце', lon: 0 }, { name: 'Луна', lon: 90 }, { name: 'Марс', lon: 45.3 }], angles: null };
+  const tree = computeMidpointTree(fake);
+  const treeOk = tree.some(h => h.point === 'Марс' && h.pair === 'Солнце/Луна' && h.angle === 0 && parseFloat(h.orb) <= 0.31);
+  // Гармоника: точный трин (0° и 120°) в H3 → соединение (инвариант Аддея).
+  const fake3 = { planets: [{ name: 'A', lon: 10 }, { name: 'B', lon: 130 }] };
+  const h3 = computeHarmonic(fake3, 3);
+  const harmOk = h3.conj.length === 1 && parseFloat(h3.conj[0].orb) < 1e-6 && Math.abs(h3.planets[0].lon - 30) < 1e-9;
+  return { mpOk, treeOk, harmOk };
+});
+ok(midT.mpOk, 'мидпоинты: середина короткой дуги, равноудалённость (вкл. wrap 350↔10 → 0°)');
+ok(midT.treeOk, 'дерево мидпоинтов: Марс = Солнце/Луна при синтетике 0°/90°/45.3°');
+ok(midT.harmOk, 'гармоники: точный трин → соединение в H3 (инвариант Аддея), 10°×3=30°');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
