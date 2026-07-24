@@ -307,10 +307,17 @@
     <div style="padding:0 1rem 1rem" id="astro-ntab-out"></div>
   </div>
 
-  <!-- Экран «Транзиты сегодня» -->
+  <!-- Экран «Транзиты» (3.2: календарь, bi-wheel, карточки по силе) -->
   <div class="asub" id="as-transits" style="display:none">
     <button class="as-back" onclick="asub('menu')">‹ Астрология</button>
-    <div style="padding:0 1rem 1rem"><div id="astro-transits"></div></div>
+    <div style="padding:0 1rem 1rem">
+      <div style="display:flex;gap:.5rem;align-items:flex-end;margin-bottom:.5rem">
+        <div style="flex:1"><div class="f-lbl">Дата (ГГГГ-ММ-ДД)</div><input class="field" id="astro-tr-date" placeholder="сегодня"></div>
+        <button class="btn btn-s" style="flex:1" onclick="runTransits()"><i data-lucide="orbit"></i>Показать</button>
+      </div>
+      <div id="astro-tr-wheel"></div>
+      <div id="astro-transits"></div>
+    </div>
   </div>
 
   <!-- Экран «Прогрессии и дирекции» -->

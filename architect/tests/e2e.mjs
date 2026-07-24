@@ -1799,6 +1799,42 @@ ok(interpT.noTimeOk, 'честность: без времени рождения
 ok(interpT.cacheOk, 'ИИ-полировка: один вызов API, повторно — из кэша, с ruleIds и версией промпта');
 ok(interpT.uiOk, 'UI: «Кто вы по карте» рендерится на экране натальной карты');
 
+// ── Астрология: экран транзитов 3.2 (календарь, bi-wheel, карточки) ──
+const trUI = await page.evaluate(async () => {
+  await loadAstroEngine(); await loadAstroRules();
+  const R = window.ASTRO_RULES;
+  const giftCnt = ['Sun','Moon','Mercury','Venus','Mars','Jupiter','Saturn','Uranus','Neptune','Pluto'].filter(b => R.transitGift[b]).length;
+  const verbCnt = ['соединение','трин','секстиль','квадрат','оппозиция'].filter(a => R.transitVerb[a]).length;
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = [];
+  await runNatalChart();
+  goTo('astro'); asub('transits');
+  // Календарь: дата рождения → каждая планета в соединении сама с собой.
+  document.getElementById('astro-tr-date').value = '2000-01-01';
+  await runTransits();
+  await new Promise(r => setTimeout(r, 100));
+  const outTx = document.getElementById('astro-transits').textContent;
+  const skyHidden = document.getElementById('astro-sky').style.display === 'none';
+  const biWheel = document.querySelectorAll('#astro-tr-wheel .aw-transit').length;
+  const cardText = /Солнце → ваш Солнце/.test(outTx) && /включает вашу тему/.test(outTx);
+  const strongLead = /Особенно ощутимо/.test(outTx);
+  const ruleAudit = !!document.querySelector('#astro-transits [data-rule^="transit.Sun.соединение"]');
+  const disclaimer = /Не событие и не прогноз/.test(outTx);
+  // Сортировка по силе: первая карточка — минимальный орб.
+  const degs = [...document.querySelectorAll('#astro-transits [data-rule]')].map(d => parseFloat((d.textContent.match(/точность ([\d.]+)/) || [])[1]));
+  const sorted = degs.every((v, i) => i === 0 || v >= degs[i - 1]);
+  goTo('home');
+  DB.astroBirth = null; DB.astroCharts = []; DB.astroTexts = [];
+  return { giftCnt, verbCnt, skyHidden, biWheel, cardText, strongLead, ruleAudit, disclaimer, sorted };
+});
+ok(trUI.giftCnt === 10 && trUI.verbCnt === 5, 'транзитные тексты: 10 «даров» планет + 5 характеров контакта');
+ok(trUI.skyHidden, 'экран транзитов: «Небо сейчас» свёрнуто по умолчанию');
+ok(trUI.biWheel === 10, `bi-wheel: 10 транзитных планет снаружи кольца (${trUI.biWheel})`);
+ok(trUI.cardText && trUI.strongLead, 'карточки: человеческий текст (дар + контакт + тема), сильные помечены');
+ok(trUI.ruleAudit, 'аудит: карточка несёт transit rule id');
+ok(trUI.sorted, 'сортировка: аспекты по силе, наименьший орб первым');
+ok(trUI.disclaimer, 'дисклеймер «не событие и не прогноз» на месте');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
