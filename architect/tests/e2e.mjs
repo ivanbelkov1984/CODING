@@ -2006,6 +2006,47 @@ ok(synT.cardsOk && synT.ruleOk, 'синастрия: карточки межли
 ok(synT.discOk, 'синастрия: дисклеймер — не процент совместимости, данные только на устройстве');
 ok(synT.isoOk, 'синастрия: изоляция — не влияет на факторы риска');
 
+// ── Астрология: база правил приоритет 2 (аспекты личных + куспиды) ──
+const p2T = await page.evaluate(async () => {
+  await loadAstroEngine(); await loadAstroRules();
+  const R = window.ASTRO_RULES;
+  // 1) Полнота: 10 пар личных × 5 аспектов = 50 текстов; словари куспидов 12+12.
+  const pers = ['Sun','Moon','Mercury','Venus','Mars'];
+  const asps = ['соединение','трин','секстиль','квадрат','оппозиция'];
+  let cnt = 0;
+  for (let i = 0; i < 5; i++) for (let j = i + 1; j < 5; j++)
+    for (const a of asps) if (((R.aspectMeaning[pers[i] + '-' + pers[j]] || {})[a] || '').length > 30) cnt++;
+  const cuspOk = Object.keys(R.houseCuspSphere).length === 12 && Object.keys(R.houseCuspStyle).length === 12;
+  // 144 комбинации собираются и непусты.
+  let cuspCnt = 0;
+  for (let h = 1; h <= 12; h++) for (const s of ['Овен','Телец','Близнецы','Рак','Лев','Дева','Весы','Скорпион','Стрелец','Козерог','Водолей','Рыбы'])
+    if (houseCuspText(h, s) && houseCuspText(h, s).text.length > 20) cuspCnt++;
+  // 2) Порядок пары не важен (Moon,Sun → ключ Sun-Moon).
+  const rev = aspectMeaningText('Moon', 'Sun', 'секстиль');
+  const revOk = rev && rev.ruleId === 'aspectMeaning.Sun-Moon.секстиль';
+  // 3) Неличная пара → null (fallback на шаблон тем).
+  const outer = aspectMeaningText('Sun', 'Saturn', 'трин') === null;
+  // 4) UI: J2000 — таб аспектов показывает текст Луна-секстиль-Солнце, таб домов — тексты куспидов.
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = [];
+  await runNatalChart();
+  goTo('astro'); asub('natal');
+  antab('aspects');
+  const aspUI = !!document.querySelector('#astro-ntab-out [data-rule="aspectMeaning.Sun-Moon.секстиль"]');
+  antab('houses');
+  const houseUI = document.querySelectorAll('#astro-ntab-out [data-rule^="houseCusp."]').length === 12;
+  antab('planets');
+  goTo('home');
+  DB.astroBirth = null; DB.astroCharts = [];
+  return { cnt, cuspOk, cuspCnt, revOk, outer, aspUI, houseUI };
+});
+ok(p2T.cnt === 50, `аспекты личных: 50 текстов (10 пар × 5 мажоров), все содержательные (${p2T.cnt})`);
+ok(p2T.cuspOk && p2T.cuspCnt === 144, `куспиды: 12 сфер × 12 стилей → 144 текста (${p2T.cuspCnt})`);
+ok(p2T.revOk, 'аспекты личных: порядок пары не важен (Moon,Sun → Sun-Moon)');
+ok(p2T.outer, 'аспекты с внешними планетами → шаблон тем (fallback), не выдумка');
+ok(p2T.aspUI, 'таб «Аспекты»: текст Луна-секстиль-Солнце с rule id (golden J2000)');
+ok(p2T.houseUI, 'таб «Дома»: 12 текстов знаков на куспидах с rule id');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

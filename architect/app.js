@@ -3651,12 +3651,19 @@ function antab(t) {
     else if (c.housesMeta && c.housesMeta.cusps) {
       const names = { whole: 'Whole-sign', placidus: 'Плацидус', equal: 'Равнодомная', campanus: 'Кампанус', regiomontanus: 'Региомонтанус' };
       html = `<div class="f-lbl">Система: ${esc(names[c.housesMeta.system] || c.housesMeta.system)}</div>` +
-        Array.from({ length: 12 }, (_, i) => { const z = zodiacOf(c.housesMeta.cusps[i + 1]); return row(`<b>${i + 1}-й дом</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°`); }).join('');
+        Array.from({ length: 12 }, (_, i) => {
+          const z = zodiacOf(c.housesMeta.cusps[i + 1]);
+          const tx = houseCuspText(i + 1, z.sign);
+          return row(`<b>${i + 1}-й дом</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°${tx ? `<div style="color:var(--t3)" data-rule="${esc(tx.ruleId)}">${esc(tx.text)}</div>` : ''}`);
+        }).join('');
     } else html = '<div class="ai-sp-empty">Куспиды не сохранены в этой карте — пересчитай её в «Настройках расчёта».</div>';
   }
   if (t === 'aspects') {
-    html = (c.aspects || []).map(a => row(`<span style="color:${ASPECT_COLOR[a.name] || 'var(--t2)'}">●</span> ${esc(a.a)} ${esc(a.name)} ${esc(a.b)} (орб ${a.exact}°)`)).join('')
-      || '<div class="ai-sp-empty">Мажорных аспектов нет.</div>';
+    const bodyOf = nm => (c.planets.find(p => p.name === nm) || {}).body;
+    html = (c.aspects || []).map(a => {
+      const tx = aspectMeaningText(bodyOf(a.a), bodyOf(a.b), a.name);
+      return row(`<span style="color:${ASPECT_COLOR[a.name] || 'var(--t2)'}">●</span> ${esc(a.a)} ${esc(a.name)} ${esc(a.b)} (орб ${a.exact}°)${tx ? `<div style="color:var(--t3)" data-rule="${esc(tx.ruleId)}">${esc(tx.text)}</div>` : ''}`);
+    }).join('') || '<div class="ai-sp-empty">Мажорных аспектов нет.</div>';
   }
   if (t === 'points') {
     const P = c.points || {};
@@ -3694,6 +3701,23 @@ function loadAstroRules() {
   return _rulesLoad;
 }
 
+// Текст аспекта личных планет (приоритет 2). Порядок пары фиксирован.
+const PERSONAL_ORDER = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars'];
+function aspectMeaningText(aBody, bBody, aspect) {
+  const R = window.ASTRO_RULES; if (!R || !R.aspectMeaning) return null;
+  const ia = PERSONAL_ORDER.indexOf(aBody), ib = PERSONAL_ORDER.indexOf(bBody);
+  if (ia < 0 || ib < 0) return null;
+  const key = ia <= ib ? aBody + '-' + bBody : bBody + '-' + aBody;
+  const t = (R.aspectMeaning[key] || {})[aspect];
+  return t ? { text: t, ruleId: 'aspectMeaning.' + key + '.' + aspect } : null;
+}
+// Текст знака на куспиде дома (приоритет 2): сфера дома + стиль знака.
+function houseCuspText(houseN, sign) {
+  const R = window.ASTRO_RULES; if (!R || !R.houseCuspSphere) return null;
+  const sp = R.houseCuspSphere[houseN], st = R.houseCuspStyle[sign];
+  return (sp && st) ? { text: `${sp} ${st}.`, ruleId: `houseCusp.${houseN}.${sign}` } : null;
+}
+
 // «Кто вы по карте»: блоки по 3.1a. Возвращает { blocks, ruleIds, version }.
 function buildChartSummary(chart) {
   const R = window.ASTRO_RULES; if (!R) return null;
@@ -3723,17 +3747,25 @@ function buildChartSummary(chart) {
   const bodyByName = nm => (chart.planets.find(p => p.name === nm) || {}).body;
   const harm = byOrb(['трин', 'секстиль']);
   if (harm) {
-    const A = R.planetTheme[bodyByName(harm.a)], B = R.planetTheme[bodyByName(harm.b)];
-    if (A && B) add('Ваша сильная сторона',
-      `В вас легко дружат две стороны: ${A} — и ${B}. Одна естественно поддерживает другую, и на это можно опираться.`,
-      ['aspect.harmonious.' + harm.a + '-' + harm.b]);
+    const exact = aspectMeaningText(bodyByName(harm.a), bodyByName(harm.b), harm.name);
+    if (exact) add('Ваша сильная сторона', exact.text, [exact.ruleId]);
+    else {
+      const A = R.planetTheme[bodyByName(harm.a)], B = R.planetTheme[bodyByName(harm.b)];
+      if (A && B) add('Ваша сильная сторона',
+        `В вас легко дружат две стороны: ${A} — и ${B}. Одна естественно поддерживает другую, и на это можно опираться.`,
+        ['aspect.harmonious.' + harm.a + '-' + harm.b]);
+    }
   }
   const tense = byOrb(['квадрат', 'оппозиция']);
   if (tense) {
-    const A = R.planetTheme[bodyByName(tense.a)], B = R.planetTheme[bodyByName(tense.b)];
-    if (A && B) add('Ваш внутренний вызов',
-      `Иногда две стороны — ${A} и, с другой стороны, ${B} — тянут вас в разные направления. Это не недостаток, а зона роста: учась давать место обеим, вы становитесь целостнее.`,
-      ['aspect.tense.' + tense.a + '-' + tense.b]);
+    const exact = aspectMeaningText(bodyByName(tense.a), bodyByName(tense.b), tense.name);
+    if (exact) add('Ваш внутренний вызов', exact.text, [exact.ruleId]);
+    else {
+      const A = R.planetTheme[bodyByName(tense.a)], B = R.planetTheme[bodyByName(tense.b)];
+      if (A && B) add('Ваш внутренний вызов',
+        `Иногда две стороны — ${A} и, с другой стороны, ${B} — тянут вас в разные направления. Это не недостаток, а зона роста: учась давать место обеим, вы становитесь целостнее.`,
+        ['aspect.tense.' + tense.a + '-' + tense.b]);
+    }
   }
   return { blocks, ruleIds, version: R.version + '+summary-v1' };
 }
