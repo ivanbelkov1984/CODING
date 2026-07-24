@@ -65,6 +65,7 @@ const DEFAULT_DB = {
   measures: [],       // Health Organizer: измерения (вес/давление/пульс… — ручной ввод)
   astroBirth: null,   // Астрология: OriginalBirthEvidence (immutable; правки — коррекциями)
   astroCharts: [],    // Астрология: SymbolicAstrologyAnnotation — рассчитанные карты (versioned)
+  astroTexts: [],     // Астрология: кэш собранных текстов (ruleIds+promptVersion для аудита)
   spheres: [],        // пользовательские сферы жизни (тип трекера у каждой)
   sphereLogs: [],     // дневные записи по сферам: {sphereId, date, value, note}
   bots: [
@@ -3497,6 +3498,7 @@ function rNatalScreen() {
   wrap.innerHTML = renderChartWheel(last.chart, { size: 340 });
   if (info) info.innerHTML = '';
   antab(STATE.astroTab || 'planets');
+  rChartSummary();   // человеческое резюме — первым блоком экрана (3.1a)
 }
 
 function antab(t) {
@@ -3541,6 +3543,119 @@ function antab(t) {
       : '<div class="ai-sp-empty">Нет точных контактов с мидпоинтами (орб 1.5°).</div>';
   }
   out.innerHTML = html + '<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Символическое, не прогноз и не диагноз.</div>';
+}
+
+// ─── ИНТЕРПРЕТАЦИИ (Слой 1: база правил · Слой 2: сборка) ───────────
+// База правил — architect/astro_rules.js (собственные тексты, лениво).
+// Сборка детерминированная: только lookup по фактам карты + связки;
+// каждый блок несёт source_rule_id для аудита. ИИ-полировка — по кнопке,
+// строго без новых фактов, с кэшем (пересчёт при смене данных рождения).
+let _rulesLoad = null;
+function loadAstroRules() {
+  if (window.ASTRO_RULES) return Promise.resolve();
+  if (_rulesLoad) return _rulesLoad;
+  _rulesLoad = new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'astro_rules.js';
+    sc.onload = () => res();
+    sc.onerror = () => { _rulesLoad = null; rej(new Error('база интерпретаций не загрузилась')); };
+    document.head.appendChild(sc);
+  });
+  return _rulesLoad;
+}
+
+// «Кто вы по карте»: блоки по 3.1a. Возвращает { blocks, ruleIds, version }.
+function buildChartSummary(chart) {
+  const R = window.ASTRO_RULES; if (!R) return null;
+  const get = b => chart.planets.find(p => p.body === b);
+  const houseOf = b => chart.houses ? (chart.houses.find(x => x.body === b) || {}).house : null;
+  const blocks = [], ruleIds = [];
+  const add = (title, text, ids) => { if (text && text.trim()) { blocks.push({ title, text: text.trim(), ruleIds: ids }); ruleIds.push(...ids); } };
+  const sun = get('Sun'), moon = get('Moon');
+  // 1. Солнце: кто вы в основе (+дом, если известен).
+  let tx = R.planetInSign.Sun[sun.sign] || ''; let ids = ['planetInSign.Sun.' + sun.sign];
+  const sh = houseOf('Sun');
+  if (sh && R.planetInHouse.Sun[sh]) { tx += ' ' + R.planetInHouse.Sun[sh]; ids.push('planetInHouse.Sun.' + sh); }
+  add(`Ваше Солнце в знаке ${sun.sign}`, tx, ids);
+  // 2. Луна: как вы себя чувствуете внутри.
+  tx = R.planetInSign.Moon[moon.sign] || ''; ids = ['planetInSign.Moon.' + moon.sign];
+  const mh = houseOf('Moon');
+  if (mh && R.planetInHouse.Moon[mh]) { tx += ' ' + R.planetInHouse.Moon[mh]; ids.push('planetInHouse.Moon.' + mh); }
+  add('Как вы себя чувствуете внутри', tx, ids);
+  // 3. Как вас видят другие — только при известном времени (Asc).
+  if (chart.angles) {
+    const ascSign = chart.angles.asc.sign;
+    add('Как вас видят другие', R.ascInSign[ascSign] || '', ['ascInSign.' + ascSign]);
+  }
+  // 4–5. Сильная сторона и внутренний вызов — по самым точным аспектам.
+  const byOrb = kind => (chart.aspects || []).filter(a => kind.includes(a.name))
+    .sort((a, b) => parseFloat(a.exact) - parseFloat(b.exact))[0];
+  const bodyByName = nm => (chart.planets.find(p => p.name === nm) || {}).body;
+  const harm = byOrb(['трин', 'секстиль']);
+  if (harm) {
+    const A = R.planetTheme[bodyByName(harm.a)], B = R.planetTheme[bodyByName(harm.b)];
+    if (A && B) add('Ваша сильная сторона',
+      `В вас легко дружат две стороны: ${A} — и ${B}. Одна естественно поддерживает другую, и на это можно опираться.`,
+      ['aspect.harmonious.' + harm.a + '-' + harm.b]);
+  }
+  const tense = byOrb(['квадрат', 'оппозиция']);
+  if (tense) {
+    const A = R.planetTheme[bodyByName(tense.a)], B = R.planetTheme[bodyByName(tense.b)];
+    if (A && B) add('Ваш внутренний вызов',
+      `Иногда две стороны — ${A} и, с другой стороны, ${B} — тянут вас в разные направления. Это не недостаток, а зона роста: учась давать место обеим, вы становитесь целостнее.`,
+      ['aspect.tense.' + tense.a + '-' + tense.b]);
+  }
+  return { blocks, ruleIds, version: R.version + '+summary-v1' };
+}
+
+// Рендер резюме на экране натальной карты (первым, до колеса — по 3.1a).
+async function rChartSummary() {
+  const out = $('astro-summary'); if (!out) return;
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (!last) { out.innerHTML = ''; return; }
+  try { await loadAstroRules(); } catch (e) { out.innerHTML = ''; return; }
+  const sum = buildChartSummary(last.chart);
+  if (!sum || !sum.blocks.length) { out.innerHTML = ''; return; }
+  const key = ['summary', last.id, sum.version, 'astro-summary-v1'].join('|');
+  const cached = (DB.astroTexts || []).find(t => t && t.key === key);
+  const blockHtml = (b, i) => `<div class="si-row"${i > 1 ? ' data-more="1" style="display:none"' : ''}><div class="si-body">
+      <div class="si-text" data-rules="${esc(b.ruleIds.join(','))}"><b>${esc(b.title)}.</b> ${esc(b.text)}</div></div></div>`;
+  let html = '<div class="f-lbl">Кто вы по карте</div>';
+  if (cached) html += `<div class="si-row"><div class="si-body"><div class="si-text">${esc(cached.text)}</div></div></div>`;
+  else {
+    html += sum.blocks.map(blockHtml).join('');
+    if (sum.blocks.length > 2) html += `<button class="btn btn-s btn-full" onclick="this.parentElement.querySelectorAll('[data-more]').forEach(d=>d.style.display='block');this.remove()">Развернуть подробнее</button>`;
+    if (getAiKey()) html += `<button class="btn btn-s btn-full" onclick="aiPolishChartSummary()"><i data-lucide="sparkles"></i>Связный текст (ИИ)</button>`;
+  }
+  html += '<div class="be-note" style="color:var(--t3)">Символическое описание в западной традиции — не прогноз, не диагноз и не оценка личности.</div>';
+  out.innerHTML = html;
+}
+
+// Слой 2, ИИ-полировка: связать факты, ничего не добавляя. С кэшем.
+async function aiPolishChartSummary() {
+  const out = $('astro-summary');
+  const last = (DB.astroCharts || []).slice(-1)[0]; if (!last) return;
+  await loadAstroRules();
+  const sum = buildChartSummary(last.chart); if (!sum) return;
+  const key = ['summary', last.id, sum.version, 'astro-summary-v1'].join('|');
+  if ((DB.astroTexts || []).some(t => t && t.key === key)) { rChartSummary(); return; }
+  if (out) out.innerHTML = '<div class="ai-sp-empty">Собираю текст…</div>';
+  try {
+    const facts = sum.blocks.map(b => `- ${b.title}: ${b.text}`).join('\n');
+    const text = await callClaude({
+      task: 'other', maxTokens: 700,
+      system: 'Ты редактор текста в личном дневнике. Свяжи данные факты в тёплый, понятный текст на русском языке, 150–300 слов, обращение на «вы». СТРОГО: не добавляй ни одного нового астрологического утверждения — только переданные факты, их можно лишь связать и смягчить. Без специальных терминов и градусов. Тон описательный, не судьбоносный: без предсказаний, диагнозов и оценок. Закончи одной короткой фразой о том, что это символическое описание, а не прогноз.',
+      user: facts,
+    });
+    DB.astroTexts = DB.astroTexts || [];
+    DB.astroTexts.push({
+      id: Date.now(), key, text, ruleIds: sum.ruleIds, promptVersion: 'astro-summary-v1',
+      kType: 'symbolic_astrology_annotation', privacyClass: 'sensitive',
+      createdAt: nowISO(), sv: SCHEMA_VERSION, _u: Date.now(),
+    });
+    persist();
+  } catch (e) { toast(e && e.message ? e.message : 'Не удалось собрать текст', 'warn'); }
+  rChartSummary();
 }
 
 // Экран «Астероиды и точки»: астероиды, Лилит, Вертекс, Точка Судьбы, антисции.
