@@ -563,6 +563,33 @@
     </div>
   </div>
 </div>
+<div class="ov" id="ov-symptom" onclick="if(event.target===this)closeOv('ov-symptom')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Симптом</div>
+    <div class="be-note" style="margin:0 1rem .5rem">Наблюдение, не диагноз. Что чувствуешь и насколько выражено.</div>
+    <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.75rem">
+      <div><div class="f-lbl">Что беспокоит</div><input class="field" id="sym-name" placeholder="Например: головная боль"></div>
+      <div class="vf"><label>Выраженность (0–10)</label><div class="sl"><input type="range" id="sym-sev" min="0" max="10" value="5" oninput="document.getElementById('sym-sev-v').textContent=this.value"><span class="slv" id="sym-sev-v">5</span></div></div>
+      <div><div class="f-lbl">Заметка (необязательно)</div><input class="field" id="sym-note" placeholder="Контекст, длительность…"></div>
+      <button class="btn btn-p btn-full" onclick="saveSymptom()"><i data-lucide="check"></i>Записать</button>
+    </div>
+  </div>
+</div>
+<div class="ov" id="ov-measure" onclick="if(event.target===this)closeOv('ov-measure')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Измерение</div>
+    <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.75rem">
+      <div><div class="f-lbl">Показатель</div><input class="field" id="mea-name" placeholder="Например: давление, вес, пульс"></div>
+      <div style="display:flex;gap:.5rem">
+        <div style="flex:2"><div class="f-lbl">Значение</div><input class="field" id="mea-value" placeholder="Например: 120/80"></div>
+        <div style="flex:1"><div class="f-lbl">Ед. изм.</div><input class="field" id="mea-unit" placeholder="кг, уд/мин…"></div>
+      </div>
+      <button class="btn btn-p btn-full" onclick="saveMeasure()"><i data-lucide="check"></i>Записать</button>
+    </div>
+  </div>
+</div>
 <div class="ov" id="ov-med-add" onclick="if(event.target===this)closeOv('ov-med-add')">
   <div class="sheet">
     <div class="sh-pull"></div>

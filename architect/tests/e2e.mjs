@@ -1317,6 +1317,34 @@ ok(medsT.separate && medsT.disclaimer, 'здоровье: план ≠ факт 
 ok(medsT.ui, 'здоровье: секция «Лекарства и витамины» рендерится (имя + счётчик «сегодня: 1»)');
 await page.evaluate(() => { DB.meds = []; DB.medIntakes = []; goTo('home'); });
 
+// ── Health Organizer: симптомы + измерения ──
+const bodyT = await page.evaluate(() => {
+  goTo('health');
+  DB.symptoms = []; DB.measures = [];
+  openOv('ov-symptom');
+  document.getElementById('sym-name').value = 'головная боль';
+  document.getElementById('sym-sev').value = 6;
+  document.getElementById('sym-note').value = 'после обеда';
+  saveSymptom();
+  openOv('ov-measure');
+  document.getElementById('mea-name').value = 'давление';
+  document.getElementById('mea-value').value = '120/80';
+  saveMeasure();
+  const s = DB.symptoms[0] || {}, m = DB.measures[0] || {};
+  const active = localStorage.getItem('arch5_active');
+  const db = JSON.parse(localStorage.getItem('arch5_db_' + active) || '{}');
+  const txt = document.getElementById('health-out').textContent || '';
+  return {
+    symOk: s.kType === 'symptom_observation' && s.severity === 6 && s.privacyClass === 'sensitive',
+    meaOk: m.kType === 'measurement' && m.value === '120/80',
+    persisted: (db.symptoms || []).length === 1 && (db.measures || []).length === 1,
+    ui: /Дневник тела/.test(txt) && /головная боль/.test(txt) && /120\/80/.test(txt),
+  };
+});
+ok(bodyT.symOk && bodyT.meaOk && bodyT.persisted, 'здоровье: симптом (observation) и измерение (measurement) сохраняются с паспортом');
+ok(bodyT.ui, 'здоровье: «Дневник тела» рендерит симптомы и измерения');
+await page.evaluate(() => { DB.symptoms = []; DB.measures = []; goTo('home'); });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

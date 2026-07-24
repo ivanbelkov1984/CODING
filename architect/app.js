@@ -61,6 +61,8 @@ const DEFAULT_DB = {
   corrections: [],    // Evidence Kernel: append-only исправления записей (оригинал неизменен)
   meds: [],           // Health Organizer: ПЛАН приёма лекарств/витаминов (задан пользователем)
   medIntakes: [],     // Health Organizer: ФАКТ приёма (отдельный класс — план ≠ факт)
+  symptoms: [],       // Health Organizer: симптомы как отдельные события (наблюдение, не диагноз)
+  measures: [],       // Health Organizer: измерения (вес/давление/пульс… — ручной ввод)
   spheres: [],        // пользовательские сферы жизни (тип трекера у каждой)
   sphereLogs: [],     // дневные записи по сферам: {sphereId, date, value, note}
   bots: [
@@ -151,7 +153,7 @@ const bakKey = id => 'arch5_bak_' + id;
 function dbCount(db) {
   if (!db || typeof db !== 'object') return 0;
   let n = 0;
-  ['insights','checkins','moments','whys','corrections','meds','medIntakes','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings']
+  ['insights','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings']
     .forEach(c => { if (Array.isArray(db[c])) n += db[c].length; });
   return n;
 }
@@ -2550,6 +2552,53 @@ function medsSectionHTML() {
   return html;
 }
 
+// ─── HEALTH ORGANIZER: симптомы и измерения (наблюдение, не диагноз) ─
+function saveSymptom() {
+  const name = ($('sym-name') ? $('sym-name').value : '').trim();
+  if (!name) { toast('Опиши симптом', 'warn'); return; }
+  const sev = $('sym-sev') ? parseInt($('sym-sev').value, 10) : 5;
+  DB.symptoms.push({
+    id: Date.now(), kType: 'symptom_observation', privacyClass: 'sensitive',
+    name, severity: isFinite(sev) ? sev : 5, note: ($('sym-note') ? $('sym-note').value : '').trim(),
+    verif: 'user_confirmed', life: 'current',
+    createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+  });
+  ['sym-name','sym-note'].forEach(i => { if ($(i)) $(i).value = ''; });
+  closeOv('ov-symptom'); persist(); rHealth();
+  hptMed(); toast('Симптом записан', 'ok');
+}
+function saveMeasure() {
+  const name = ($('mea-name') ? $('mea-name').value : '').trim();
+  const value = ($('mea-value') ? $('mea-value').value : '').trim();
+  if (!name || !value) { toast('Нужны показатель и значение', 'warn'); return; }
+  DB.measures.push({
+    id: Date.now(), kType: 'measurement', privacyClass: 'sensitive',
+    name, value, unit: ($('mea-unit') ? $('mea-unit').value : '').trim(),
+    verif: 'user_confirmed', life: 'current',
+    createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+  });
+  ['mea-name','mea-value','mea-unit'].forEach(i => { if ($(i)) $(i).value = ''; });
+  closeOv('ov-measure'); persist(); rHealth();
+  hptMed(); toast('Измерение записано', 'ok');
+}
+function bodySectionHTML() {
+  const sym = projAll('symptoms').slice(-3).reverse();
+  const mea = projAll('measures').slice(-3).reverse();
+  let html = `<div class="sec-lbl">Дневник тела</div><div class="card mx mb">`;
+  const rows = [];
+  sym.forEach(s => rows.push({ at: s.createdAt, txt: `<b>${(s.day || '').slice(5)}</b> симптом: ${esc(s.name)} · ${s.severity}/10${s.note ? ' — ' + esc(s.note) : ''}` }));
+  mea.forEach(m => rows.push({ at: m.createdAt, txt: `<b>${(m.day || '').slice(5)}</b> ${esc(m.name)}: ${esc(m.value)}${m.unit ? ' ' + esc(m.unit) : ''}` }));
+  rows.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+  html += rows.length
+    ? rows.slice(0, 5).map(r => `<div class="si-row"><div class="si-body"><div class="si-text">${r.txt}</div></div></div>`).join('')
+    : `<div style="padding:1rem" class="ai-sp-empty">Записывай симптомы и измерения (вес, давление, пульс…) — соберётся честная картина для тебя и врача.</div>`;
+  html += `</div><div class="mx mb" style="display:flex;gap:.5rem;flex-wrap:wrap">
+    <button class="btn btn-s btn-sm" onclick="openOv('ov-symptom')"><i data-lucide="thermometer"></i>Симптом</button>
+    <button class="btn btn-s btn-sm" onclick="openOv('ov-measure')"><i data-lucide="ruler"></i>Измерение</button>
+  </div>`;
+  return html;
+}
+
 function rHealth() {
   const el = $('health-out'); if (!el) return;
   const hs = healthSpheres(), crav = DB.cravings || [];
@@ -2578,6 +2627,7 @@ function rHealth() {
     }).join('') + `</div>`;
   }
   html += medsSectionHTML();
+  html += bodySectionHTML();
   html += `<div class="sec-lbl">Опора</div>
     <div class="mx mb"><button class="btn btn-p btn-full" onclick="openCraving()"><i data-lucide="zap"></i>У меня тяга сейчас</button></div>
     <div class="mx mb"><button class="btn btn-s btn-full" onclick="openTech('')"><i data-lucide="life-buoy"></i>Приёмы под состояние</button></div>`;
@@ -4189,7 +4239,7 @@ function genRecoveryKey() {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','bots','digests','spheres','sphereLogs','chats','cravings'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','bots','digests','spheres','sphereLogs','chats','cravings'];
 function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
 function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
 const _ru = r => r._u || r.id || 0;   // «когда обновлено» с откатом на id (id = Date.now())
