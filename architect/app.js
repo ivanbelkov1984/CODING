@@ -67,6 +67,7 @@ const DEFAULT_DB = {
   astroCharts: [],    // Астрология: SymbolicAstrologyAnnotation — рассчитанные карты (versioned)
   astroTexts: [],     // Астрология: кэш собранных текстов (ruleIds+promptVersion для аудита)
   astroAiConsent: null, // Астрология, режим 2: согласие по категориям {diary,health,habits,acceptedAt,version}; отзыв в любой момент
+  astroPartners: [],  // Синастрия: сохранённые карты партнёров (label + birth + chart; sensitive, только локально)
   spheres: [],        // пользовательские сферы жизни (тип трекера у каждой)
   sphereLogs: [],     // дневные записи по сферам: {sphereId, date, value, note}
   bots: [
@@ -3522,6 +3523,7 @@ function asub(name) {
   if (name === 'jyo') rJyotish();
   if (name === 'parts') rPartsStars();
   if (name === 'points') rPointsScreen();
+  if (name === 'syn') rSynastry();
   if (name === 'setup') fillAstroForm();
 }
 
@@ -3904,6 +3906,87 @@ async function aiDeepAstroAnalysis() {
     persist();
   } catch (e) { toast(e && e.message ? e.message : 'Не удалось выполнить анализ', 'warn'); }
   rChartSummary();
+}
+
+// ─── СИНАСТРИЯ (3.6/4.5): межличностные аспекты двух карт ───────────
+// Данные партнёра — sensitive, только локально. Символическое описание
+// взаимодействия, не «совместимость в процентах» и не вердикт о паре.
+const SYNASTRY_ORB = 4;   // synastry-orbs-v1: мажорные аспекты, орб 4°
+function computeSynastry(chartA, chartB) {
+  const hits = [];
+  for (const a of chartA.planets) for (const b of chartB.planets) {
+    const sep = Math.abs(((a.lon - b.lon + 180) % 360 + 360) % 360 - 180);
+    for (const asp of ASTRO_ASPECTS) {
+      if (Math.abs(sep - asp.angle) <= SYNASTRY_ORB) {
+        hits.push({ a: a.name, aBody: a.body, b: b.name, bBody: b.body, aspect: asp.name, exact: Math.abs(sep - asp.angle).toFixed(1) });
+        break;
+      }
+    }
+  }
+  hits.sort((x, y) => parseFloat(x.exact) - parseFloat(y.exact));
+  return { hits, versions: { ...ASTRO_VERSIONS, synastryOrbPolicy: 'synastry-orbs-v1(4)' } };
+}
+function synastryHitText(h) {
+  const R = window.ASTRO_RULES; if (!R || !R.synastryVerb) return null;
+  const A = R.planetTheme[h.aBody], B = R.planetTheme[h.bBody], verb = R.synastryVerb[h.aspect];
+  if (!A || !B || !verb) return null;
+  return { text: `Ваша тема «${A}» и тема партнёра «${B}» ${verb}.`, ruleId: `synastry.${h.aBody}.${h.aspect}.${h.bBody}` };
+}
+function saveAstroPartner() {
+  const date = ($('sp-date') ? $('sp-date').value : '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast('Дата в формате ГГГГ-ММ-ДД', 'warn'); return; }
+  const timeKnown = $('sp-time-known') ? $('sp-time-known').classList.contains('on') : false;
+  const time = ($('sp-time') ? $('sp-time').value : '').trim();
+  if (timeKnown && !/^\d{2}:\d{2}$/.test(time)) { toast('Время в формате ЧЧ:ММ', 'warn'); return; }
+  const lat = parseFloat($('sp-lat') ? $('sp-lat').value : ''); const lon = parseFloat($('sp-lon') ? $('sp-lon').value : '');
+  const birth = {
+    date, time: timeKnown ? time : '', timeKnown,
+    utcOffset: parseFloat($('sp-utc') ? $('sp-utc').value : '0') || 0,
+    lat: isFinite(lat) ? lat : null, lon: isFinite(lon) ? lon : null,
+    houseSystem: (DB.astroBirth && DB.astroBirth.houseSystem) || 'whole',
+  };
+  loadAstroEngine().then(() => {
+    const chart = computeNatalChart(birth);
+    DB.astroPartners = DB.astroPartners || [];
+    DB.astroPartners.push({
+      id: Date.now(), label: (($('sp-label') && $('sp-label').value) || 'Партнёр').trim().slice(0, 40),
+      birth, chart, kType: 'symbolic_astrology_annotation', privacyClass: 'sensitive',
+      createdAt: nowISO(), sv: SCHEMA_VERSION, _u: Date.now(),
+    });
+    persist(); toast('Карта партнёра сохранена', 'ok');
+    rSynastry();
+  }).catch(() => toast('Движок не загрузился', 'warn'));
+}
+async function rSynastry() {
+  const out = $('astro-syn'); if (!out) return;
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  const sel = $('sp-select');
+  const partners = DB.astroPartners || [];
+  if (sel) {
+    const cur = sel.value;
+    sel.innerHTML = partners.map(p => `<option value="${p.id}">${esc(p.label)} (${esc(p.birth.date)})</option>`).join('');
+    if (cur && partners.some(p => String(p.id) === cur)) sel.value = cur;
+  }
+  if (!last || !DB.astroBirth) { out.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай свою натальную карту.</div>'; return; }
+  if (!partners.length) { out.innerHTML = '<div class="ai-sp-empty">Добавь карту партнёра выше — данные хранятся только на устройстве.</div>'; const w = $('astro-syn-wheel'); if (w) w.innerHTML = ''; return; }
+  try {
+    await loadAstroEngine();
+    try { await loadAstroRules(); } catch (e) {}
+    const partner = partners.find(p => String(p.id) === (sel && sel.value)) || partners[partners.length - 1];
+    const syn = computeSynastry(last.chart, partner.chart);
+    const wheelEl = $('astro-syn-wheel');
+    if (wheelEl) wheelEl.innerHTML = renderChartWheel(last.chart, { size: 340, static: true, transits: partner.chart.planets });
+    let html = `<div class="f-lbl">Вы (внутри) и ${esc(partner.label)} (снаружи) — межличностные аспекты</div>`;
+    if (syn.hits.length) {
+      html += syn.hits.slice(0, 14).map(h => {
+        const tx = synastryHitText(h);
+        return `<div class="si-row"><div class="si-body"><div class="si-text"><b>Ваш ${esc(h.a)} ↔ ${esc(h.b)} партнёра.</b> ${tx ? esc(tx.text) : esc(h.aspect)}</div>
+          <div class="si-text" style="color:var(--t4);font-size:.72rem"${tx ? ` data-rule="${esc(tx.ruleId)}"` : ''}>${esc(h.aspect)} · точность ${h.exact}°</div></div></div>`;
+      }).join('');
+    } else html += '<div class="si-text" style="color:var(--t3)">Точных мажорных аспектов между картами нет (орб 4°).</div>';
+    html += '<div class="be-note" style="color:var(--t3)">Символическое описание взаимодействия двух карт — не «процент совместимости», не вердикт о паре и не совет. Данные партнёра хранятся только на устройстве.</div>';
+    out.innerHTML = html;
+  } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
 }
 
 // Экран «Астероиды и точки»: астероиды, Лилит, Вертекс, Точка Судьбы, антисции.

@@ -284,7 +284,7 @@
     </div>
     <div class="sec-lbl">Совместимость</div>
     <div class="astro-grid">
-      <button class="astro-card wide soon" aria-disabled="true"><span class="ac-ico">💞</span>Синастрия (сравнить с другим)<span class="ac-badge">скоро</span></button>
+      <button class="astro-card wide" onclick="asub('syn')"><span class="ac-ico">💞</span>Синастрия (сравнить с другим)<span class="ac-sub">две карты, bi-wheel</span></button>
     </div>
     <div class="astro-grid" style="margin-top:.5rem">
       <button class="astro-card wide" onclick="asub('setup')"><span class="ac-ico">⚙️</span>Настройки расчёта<span class="ac-sub">данные рождения, система домов</span></button>
@@ -398,6 +398,34 @@
   <div class="asub" id="as-parts" style="display:none">
     <button class="as-back" onclick="asub('menu')">‹ Астрология</button>
     <div style="padding:0 1rem 1rem"><div id="astro-parts"></div></div>
+  </div>
+
+  <!-- Экран «Синастрия» (3.6: вторая карта + bi-wheel + межличностные аспекты) -->
+  <div class="asub" id="as-syn" style="display:none">
+    <button class="as-back" onclick="asub('menu')">‹ Астрология</button>
+    <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.6rem">
+      <div style="display:flex;gap:.5rem;align-items:flex-end">
+        <div style="flex:2"><div class="f-lbl">Сохранённые карты</div><select class="field" id="sp-select" onchange="rSynastry()"></select></div>
+        <button class="btn btn-s" style="flex:1" onclick="rSynastry()"><i data-lucide="heart"></i>Сравнить</button>
+      </div>
+      <div class="f-lbl" style="margin-top:.25rem">Добавить карту партнёра</div>
+      <div style="display:flex;gap:.5rem">
+        <div style="flex:1"><div class="f-lbl">Метка (имя)</div><input class="field" id="sp-label" placeholder="Партнёр"></div>
+        <div style="flex:1"><div class="f-lbl">Дата рождения</div><input class="field" id="sp-date" placeholder="1990-05-20"></div>
+      </div>
+      <div style="display:flex;gap:.5rem">
+        <div style="flex:1"><div class="f-lbl">Время</div><input class="field" id="sp-time" placeholder="12:00"></div>
+        <div style="flex:1"><div class="f-lbl">UTC-офсет</div><input class="field" id="sp-utc" placeholder="3"></div>
+      </div>
+      <div class="tog-row" style="border-bottom:none;padding:.15rem 0"><span class="tog-lbl">Время известно точно</span><div class="tog" id="sp-time-known" onclick="this.classList.toggle('on')" role="switch"></div></div>
+      <div style="display:flex;gap:.5rem">
+        <div style="flex:1"><div class="f-lbl">Широта</div><input class="field" id="sp-lat" placeholder="55.75"></div>
+        <div style="flex:1"><div class="f-lbl">Долгота</div><input class="field" id="sp-lon" placeholder="37.62"></div>
+      </div>
+      <button class="btn btn-p btn-full" onclick="saveAstroPartner()"><i data-lucide="user-plus"></i>Добавить и сравнить</button>
+      <div id="astro-syn-wheel"></div>
+      <div id="astro-syn"></div>
+    </div>
   </div>
 
   <!-- Экран «Настройки расчёта» (данные рождения) -->

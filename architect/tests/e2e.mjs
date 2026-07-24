@@ -1961,6 +1961,51 @@ ok(scr2T.cells === 12 && scr2T.lagna, 'ведическая: сетка South In
 ok(scr2T.dashaOk, 'ведическая: таб даш — текущая маха-даша с темой + полный цикл 120 лет');
 ok(scr2T.navGrid, 'ведическая: таб навамши — сетка D9 рендерится');
 
+// ── Астрология: синастрия 3.6 (две карты, bi-wheel, межличностные аспекты) ──
+const synT = await page.evaluate(async () => {
+  await loadAstroEngine(); await loadAstroRules();
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = []; DB.astroPartners = [];
+  await runNatalChart();
+  const my = DB.astroCharts[0].chart;
+  // 1) Golden: синастрия карты с самой собой = 10 соединений с орбом 0.
+  const self = computeSynastry(my, my);
+  const selfConj = self.hits.filter(h => h.a === h.b && h.aspect === 'соединение' && parseFloat(h.exact) < 0.05);
+  const selfOk = selfConj.length === 10 && /synastry-orbs-v1/.test(self.versions.synastryOrbPolicy);
+  // 2) Тексты: 5 глаголов, карточка собирается с rule id.
+  const verbs = ['соединение','трин','секстиль','квадрат','оппозиция'].filter(a => window.ASTRO_RULES.synastryVerb[a]).length;
+  const tx = synastryHitText({ aBody: 'Sun', bBody: 'Moon', a: 'Солнце', b: 'Луна', aspect: 'трин', exact: '1.0' });
+  const textOk = verbs === 5 && tx && /воля и самовыражение/.test(tx.text) && tx.ruleId === 'synastry.Sun.трин.Moon';
+  // 3) UI: добавить партнёра (синтетика) → select, bi-wheel, карточки, дисклеймер.
+  goTo('astro'); asub('syn');
+  document.getElementById('sp-label').value = 'Тест-партнёр';
+  document.getElementById('sp-date').value = '1992-11-03';
+  document.getElementById('sp-time-known').classList.remove('on');
+  document.getElementById('sp-utc').value = '0';
+  saveAstroPartner();
+  await new Promise(r => setTimeout(r, 400));
+  const saved = (DB.astroPartners || []).length === 1 && DB.astroPartners[0].privacyClass === 'sensitive';
+  const selOk = document.querySelectorAll('#sp-select option').length === 1;
+  const wheelOk = document.querySelectorAll('#astro-syn-wheel .aw-transit').length === 10;
+  const outTx = document.getElementById('astro-syn').textContent;
+  const cardsOk = /межличностные аспекты/.test(outTx) && /партнёра\./.test(outTx);
+  const discOk = /не «процент совместимости»/.test(outTx) && /только на устройстве/.test(outTx);
+  const ruleOk = !!document.querySelector('#astro-syn [data-rule^="synastry."]');
+  // 4) Изоляция: партнёрские данные не влияют на риски.
+  const risk = cravingRisk();
+  const isoOk = !risk.factors.some(f => /партн|синастр/i.test(f.why || ''));
+  goTo('home');
+  DB.astroBirth = null; DB.astroCharts = []; DB.astroPartners = [];
+  return { selfOk, textOk, saved, selOk, wheelOk, cardsOk, discOk, ruleOk, isoOk };
+});
+ok(synT.selfOk, 'синастрия golden: карта сама с собой = 10 соединений орб 0, версия орб-политики');
+ok(synT.textOk, 'синастрия: 5 глаголов контакта, текст с темами и rule id');
+ok(synT.saved && synT.selOk, 'синастрия: партнёр сохраняется (sensitive) и появляется в списке');
+ok(synT.wheelOk, 'синастрия: bi-wheel — вы внутри, 10 планет партнёра снаружи');
+ok(synT.cardsOk && synT.ruleOk, 'синастрия: карточки межличностных аспектов с текстом и аудитом');
+ok(synT.discOk, 'синастрия: дисклеймер — не процент совместимости, данные только на устройстве');
+ok(synT.isoOk, 'синастрия: изоляция — не влияет на факторы риска');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
