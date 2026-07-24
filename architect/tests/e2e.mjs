@@ -1909,6 +1909,58 @@ ok(aiModesT.deepOk, 'режим 2: deep-модель, отчёт сохранё�
 ok(aiModesT.noLeak, 'приватность: в теле API-запроса нет сырых текстов дневника/заметок');
 ok(aiModesT.quotaOk, 'лимит: после 5 глубоких анализов в день API не вызывается');
 
+// ── Астрология: экраны 3.3–3.5 (прогрессии/возвращения/ведическая) ──
+const scr2T = await page.evaluate(async () => {
+  await loadAstroEngine(); await loadAstroRules();
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = [];
+  await runNatalChart();
+  goTo('astro');
+  // 3.3: сегменты + возраст 30 лет → прогрессированное Солнце ≈ натал+29.6° (Водолей), тема в тексте.
+  asub('prog');
+  document.getElementById('astro-prog-age').value = '30';
+  STATE.progSeg = 'secondary';
+  await rPrognostics();
+  const progTx = document.getElementById('astro-prog').textContent;
+  const progWheel = document.querySelectorAll('#astro-prog-wheel .aw-transit').length;
+  const progOk = /возраст 30/.test(progTx) && /звучит тема \(Водолей\)/.test(progTx) && progWheel === 10;
+  STATE.progSeg = 'profection';
+  await rPrognostics();
+  const profTx = document.getElementById('astro-prog').textContent;
+  const profOk = /год 7-го дома|год \d+-го дома/.test(profTx) && /В фокусе года/.test(profTx);
+  // 3.4: соляр конкретного года — дата в пределах ±3 дней от ДР, колесо возврата, аспекты.
+  asub('ret');
+  document.getElementById('astro-ret-type').value = 'solar';
+  document.getElementById('astro-ret-period').value = '2026';
+  await rReturns();
+  const retTx = document.getElementById('astro-ret').textContent;
+  const retWheel = document.querySelectorAll('#astro-ret-wheel .aw-transit').length;
+  const retOk = /Соляр 2026: 2025-12-31|Соляр 2026: 2026-01-0/.test(retTx) && retWheel === 10 && /Ключевые аспекты к наталу/.test(retTx);
+  // 3.5: ведическая — сетка South Indian (12 знаков), навамша-таб, даша-таб с темой.
+  asub('jyo');
+  STATE.jyoTab = 'rashi';
+  await rJyotish();
+  const cells = document.querySelectorAll('#astro-jyo .jyo-cell:not(.jyo-empty)').length;
+  const lagna = /Лг/.test(document.getElementById('astro-jyo').textContent);
+  STATE.jyoTab = 'dasha';
+  await rJyotish();
+  const dashaTx = document.getElementById('astro-jyo').textContent;
+  const dashaOk = /Сейчас — маха-даша/.test(dashaTx) && /окрашенный темой/.test(dashaTx) && /Полный цикл Вимшоттари/.test(dashaTx);
+  STATE.jyoTab = 'navamsha';
+  await rJyotish();
+  const navGrid = document.querySelectorAll('#astro-jyo .jyo-cell:not(.jyo-empty)').length === 12;
+  STATE.jyoTab = 'rashi';
+  goTo('home');
+  DB.astroBirth = null; DB.astroCharts = [];
+  return { progOk, profOk, retOk, cells, lagna, dashaOk, navGrid };
+});
+ok(scr2T.progOk, 'экран прогрессий: возраст 30 → тема Водолея, bi-wheel 10 прогрессированных');
+ok(scr2T.profOk, 'экран профекций: дом года + «В фокусе года» с темой дома');
+ok(scr2T.retOk, 'экран возвращений: соляр 2026 у дня рождения, колесо + аспекты к наталу');
+ok(scr2T.cells === 12 && scr2T.lagna, 'ведическая: сетка South Indian — 12 знаков, лагна отмечена');
+ok(scr2T.dashaOk, 'ведическая: таб даш — текущая маха-даша с темой + полный цикл 120 лет');
+ok(scr2T.navGrid, 'ведическая: таб навамши — сетка D9 рендерится');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

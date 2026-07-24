@@ -1328,3 +1328,8 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .astro-tabs{display:flex;gap:var(--s2);overflow-x:auto;padding:var(--s3) var(--s4);scrollbar-width:none}
 .astro-tabs::-webkit-scrollbar{display:none}
 .aw-transit{fill:var(--accent)}
+.jyo-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;margin:.4rem 0 .6rem;background:var(--bd);border:1px solid var(--bd);border-radius:var(--r8,8px);overflow:hidden}
+.jyo-cell{background:var(--sf);min-height:3.4rem;padding:.25rem .35rem;display:flex;flex-direction:column;gap:.15rem}
+.jyo-cell.jyo-empty{background:transparent}
+.jyo-sign{font-size:.6rem;color:var(--t4);text-transform:uppercase;letter-spacing:.05em}
+.jyo-pl{font-size:.78rem;color:var(--t1);font-weight:560;line-height:1.35;word-break:break-word}
