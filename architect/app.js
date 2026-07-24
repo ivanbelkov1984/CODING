@@ -2677,6 +2677,29 @@ function computeNatalChart(birth) {
     houses = planets.map(p => ({ body: p.body, house: houseOfLon(p.lon, cusps) }));
     houses.system = hsys; houses.cusps = cusps;
   }
+  // ── 1.2: астероиды/Хирон (прибл., two-body JPL) + доп. точки ──
+  const asteroids = Object.keys(ASTEROID_ELEMENTS).map(k => {
+    const a = asteroidLongitude(k, t); const z = zodiacOf(a.lon);
+    return { body: k, name: ASTEROID_ELEMENTS[k].ru, lon: z.lon, sign: z.sign, deg: z.deg, approx: true };
+  });
+  const points = { lilith: zodiacOf(meanLilithLon(t)) };
+  if (angles) {
+    const sunP = planets.find(p => p.body === 'Sun'), moonP = planets.find(p => p.body === 'Moon');
+    // День/ночь: высота Солнца над горизонтом.
+    const gast2 = A.SiderealTime(t); const lst2 = (gast2 * 15 + birth.lon + 360) % 360;
+    const sunEq = A.Equator(A.Body.Sun, t, new A.Observer(birth.lat, birth.lon, 0), true, true);
+    const H = (lst2 - sunEq.ra * 15) * DEG;
+    const alt = Math.asin(Math.sin(birth.lat * DEG) * Math.sin(sunEq.dec * DEG) + Math.cos(birth.lat * DEG) * Math.cos(sunEq.dec * DEG) * Math.cos(H));
+    const isDay = alt > 0;
+    const pofLon = isDay ? norm360(angles.asc.lon + moonP.lon - sunP.lon) : norm360(angles.asc.lon + sunP.lon - moonP.lon);
+    points.fortune = zodiacOf(pofLon); points.fortune.isDay = isDay;
+    points.vertex = zodiacOf(vertexLon(lst2, 23.4392911, birth.lat));
+    points.antivertex = zodiacOf(norm360(points.vertex.lon + 180));
+    // Восточная точка: асцендент-формула при φ=0.
+    const epRad = Math.atan2(Math.cos(lst2 * DEG), -Math.sin(lst2 * DEG) * Math.cos(23.4392911 * DEG));
+    points.eastPoint = zodiacOf(norm360(epRad / DEG));
+  }
+  const antiscia = planets.map(p => ({ name: p.name, lon: antisciaLon(p.lon), sign: zodiacOf(antisciaLon(p.lon)).sign, deg: zodiacOf(antisciaLon(p.lon)).deg }));
   // Мажорные аспекты между планетами (версионированная orb policy v1).
   const aspects = [];
   for (let i = 0; i < planets.length; i++) for (let j = i + 1; j < planets.length; j++) {
@@ -2686,8 +2709,79 @@ function computeNatalChart(birth) {
       if (Math.abs(sep - asp.angle) <= asp.orb) { aspects.push({ a: planets[i].name, b: planets[j].name, name: asp.name, exact: Math.abs(sep - asp.angle).toFixed(1) }); break; }
     }
   }
-  return { planets, angles, houses, aspects, timeKnown: !!birth.timeKnown, versions: { ...ASTRO_VERSIONS, houses: (birth.houseSystem || 'whole') + '-v1' } };
+  return { planets, asteroids, points, antiscia, angles, houses, aspects, timeKnown: !!birth.timeKnown, versions: { ...ASTRO_VERSIONS, houses: (birth.houseSystem || 'whole') + '-v1', asteroids: 'jpl-sbdb-2body@JD2461200.5' } };
 }
+// ─── АСТЕРОИДЫ И ДОПОЛНИТЕЛЬНЫЕ ТОЧКИ (очередь 1.2) ─────────────────
+// Астероиды/Хирон: кеплеровские элементы JPL Small-Body Database
+// (ssd-api.jpl.nasa.gov, public domain), эпоха JD 2461200.5 TDB (2026-09-17),
+// получены 2026-07-24. Двухтелая задача БЕЗ пертурбаций: точность ~±0.1–0.5°
+// в пределах нескольких лет от эпохи (для символических целей достаточно;
+// в UI помечено «прибл.»). Лилит (mean) — формула Ж. Меёса («Astronomical
+// Algorithms», средний апогей = средний перигей + 180°). Точка Судьбы,
+// Восточная точка, антисции — открытая арифметика. Вертекс — численно:
+// корень пересечения эклиптики с первой вертикалью (западная ветвь).
+const AST_EPOCH_JD = 2461200.5;
+const ASTEROID_ELEMENTS = {
+  Chiron: { ru: 'Хирон',   a: 13.68426760850124, e: 0.3797656311453571, i: 6.930574468846328,  om: 209.2961258613147, w: 339.2878326589729, ma: 216.7198966018106 },
+  Ceres:  { ru: 'Церера',  a: 2.765552595034094, e: 0.07969229514816586, i: 10.58802780183462, om: 80.24862682043221, w: 73.29421453021587, ma: 274.4193463761342 },
+  Pallas: { ru: 'Паллада', a: 2.769559010737709, e: 0.2307000995648547,  i: 34.93279321851542, om: 172.8866193357694, w: 310.9699161652136, ma: 254.2496521742734 },
+  Juno:   { ru: 'Юнона',   a: 2.670989527103278, e: 0.2556999836681878,  i: 12.98659236598085, om: 169.8115953492418, w: 247.8950743075613, ma: 262.7322944883855 },
+  Vesta:  { ru: 'Веста',   a: 2.361365965127599, e: 0.09020374382834395, i: 7.143925545058711, om: 103.701293265032,  w: 151.4686478221564, ma: 81.19015607686903 },
+};
+const EPS_J2000 = 23.43928 * Math.PI / 180;
+// Гелиоцентрический вектор тела (эклиптика J2000) из кеплеровских элементов.
+function keplerHelioVector(el, jd) {
+  const D2 = Math.PI / 180;
+  const n = 0.9856076686 / Math.pow(el.a, 1.5);            // ср. движение, °/сут (гауссова k)
+  const M = ((el.ma + n * (jd - AST_EPOCH_JD)) % 360 + 360) % 360 * D2;
+  let E = M;                                                // уравнение Кеплера
+  for (let k = 0; k < 60; k++) E = E - (E - el.e * Math.sin(E) - M) / (1 - el.e * Math.cos(E));
+  const xv = el.a * (Math.cos(E) - el.e), yv = el.a * Math.sqrt(1 - el.e * el.e) * Math.sin(E);
+  const nu = Math.atan2(yv, xv), r = Math.sqrt(xv * xv + yv * yv);
+  const om = el.om * D2, w = el.w * D2, inc = el.i * D2, u = nu + w;
+  return {
+    x: r * (Math.cos(om) * Math.cos(u) - Math.sin(om) * Math.sin(u) * Math.cos(inc)),
+    y: r * (Math.sin(om) * Math.cos(u) + Math.cos(om) * Math.sin(u) * Math.cos(inc)),
+    z: r * (Math.sin(u) * Math.sin(inc)),
+    r, kepErr: Math.abs(E - el.e * Math.sin(E) - M),
+  };
+}
+// Геоцентрическая эклиптическая долгота (of date) астероида на момент t.
+function asteroidLongitude(key, t) {
+  const A = window.Astronomy;
+  const el = ASTEROID_ELEMENTS[key];
+  const jd = 2451545.0 + t.tt;
+  const h = keplerHelioVector(el, jd);
+  // эклиптика J2000 → экватор J2000 (поворот вокруг x на ε)
+  const eq = { x: h.x, y: h.y * Math.cos(EPS_J2000) - h.z * Math.sin(EPS_J2000), z: h.y * Math.sin(EPS_J2000) + h.z * Math.cos(EPS_J2000) };
+  const earth = A.HelioVector(A.Body.Earth, t);            // EQJ
+  const geo = new A.Vector(eq.x - earth.x, eq.y - earth.y, eq.z - earth.z, t);
+  return { lon: A.Ecliptic(geo).elon, r: h.r, kepErr: h.kepErr };
+}
+// Лилит (средний апогей Луны) — Меёс: ср. перигей + 180°. T — юл. столетия TT.
+function meanLilithLon(t) {
+  const T = t.tt / 36525;
+  const perigee = 83.3532465 + 4069.0137287 * T - 0.0103200 * T * T - T * T * T / 80053 + T * T * T * T / 18999000;
+  return norm360(perigee + 180);
+}
+// Вертекс: численно — западное пересечение эклиптики с первой вертикалью
+// (точка на prime vertical ⇔ скалярное произведение с вектором севера = 0).
+function vertexLon(ramcDeg, epsDeg, phiDeg) {
+  const th = ramcDeg * DEG, ph = phiDeg * DEG, eps = epsDeg * DEG;
+  const N = [-Math.sin(ph) * Math.cos(th), -Math.sin(ph) * Math.sin(th), Math.cos(ph)];
+  const Z = [Math.cos(ph) * Math.cos(th), Math.cos(ph) * Math.sin(th), Math.sin(ph)];
+  const E = [N[1] * Z[2] - N[2] * Z[1], N[2] * Z[0] - N[0] * Z[2], N[0] * Z[1] - N[1] * Z[0]];
+  const ecl = lam => [Math.cos(lam * DEG), Math.sin(lam * DEG) * Math.cos(eps), Math.sin(lam * DEG) * Math.sin(eps)];
+  const f = lam => { const e = ecl(lam); return e[0] * N[0] + e[1] * N[1] + e[2] * N[2]; };
+  const roots = [];
+  let prev = f(0);
+  for (let d = 1; d <= 360; d++) { const cur = f(d); if (prev * cur < 0) { let lo = d - 1, hi = d; for (let i = 0; i < 50; i++) { const m = (lo + hi) / 2; (f(lo) * f(m) <= 0) ? hi = m : lo = m; } roots.push(norm360((lo + hi) / 2)); } prev = cur; }
+  const west = roots.filter(r => { const e = ecl(r); return (e[0] * E[0] + e[1] * E[1] + e[2] * E[2]) < 0; });
+  return west.length ? west[0] : (roots[0] || 0);
+}
+// Антисция: зеркало относительно оси 0°Рака–0°Козерога.
+const antisciaLon = lon => norm360(180 - lon);
+
 // ─── СИСТЕМЫ ДОМОВ (очередь 1.1) ────────────────────────────────────
 // Формулы — открытая сферическая астрономия (public domain):
 //  · Equal — Asc + 30°·k; Whole-sign — знаковые границы от знака Asc.
@@ -2868,6 +2962,20 @@ function rAstroChart(chart) {
       <div class="si-row"><div class="si-body"><div class="si-text">Асцендент — ${esc(chart.angles.asc.sign)} ${chart.angles.asc.deg.toFixed(1)}° · MC — ${esc(chart.angles.mc.sign)} ${chart.angles.mc.deg.toFixed(1)}°</div></div></div>`;
   } else if (!chart.timeKnown) {
     html += `<div class="si-text" style="color:var(--t3);margin:.4rem 0">Время рождения не указано — асцендент и дома не рассчитываются (полдень не подставляем; позиции планет даны на дату, Луна может отличаться в пределах суток).</div>`;
+  }
+  if (chart.asteroids && chart.asteroids.length) {
+    html += '<div class="f-lbl" style="margin-top:.5rem">Астероиды и Хирон <span style="font-weight:500;color:var(--t3)">(прибл.)</span></div>' +
+      chart.asteroids.map(p => `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°</div></div></div>`).join('');
+  }
+  if (chart.points && chart.points.lilith) {
+    html += '<div class="f-lbl" style="margin-top:.5rem">Дополнительные точки</div>';
+    html += `<div class="si-row"><div class="si-body"><div class="si-text"><b>Лилит</b> (ср. апогей) — ${esc(chart.points.lilith.sign)} ${chart.points.lilith.deg.toFixed(1)}°</div></div></div>`;
+    if (chart.points.fortune) html += `<div class="si-row"><div class="si-body"><div class="si-text"><b>Точка Судьбы</b> (${chart.points.fortune.isDay ? 'дневная' : 'ночная'} формула) — ${esc(chart.points.fortune.sign)} ${chart.points.fortune.deg.toFixed(1)}°</div></div></div>`;
+    if (chart.points.vertex) html += `<div class="si-row"><div class="si-body"><div class="si-text"><b>Вертекс</b> — ${esc(chart.points.vertex.sign)} ${chart.points.vertex.deg.toFixed(1)}° · <b>Восточная точка</b> — ${esc(chart.points.eastPoint.sign)} ${chart.points.eastPoint.deg.toFixed(1)}°</div></div></div>`;
+  }
+  if (chart.antiscia && chart.antiscia.length) {
+    html += '<div class="f-lbl" style="margin-top:.5rem">Антисции <span style="font-weight:500;color:var(--t3)">(зеркало оси Рак–Козерог)</span></div>' +
+      `<div class="si-text" style="color:var(--t3);line-height:1.7">${chart.antiscia.map(a => `${esc(a.name)}: ${esc(a.sign)} ${a.deg.toFixed(1)}°`).join(' · ')}</div>`;
   }
   if (chart.aspects.length) {
     html += '<div class="f-lbl" style="margin-top:.5rem">Мажорные аспекты</div>' +
