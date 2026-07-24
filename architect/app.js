@@ -59,6 +59,8 @@ const DEFAULT_DB = {
   moments: [],        // Momentary State: быстрый двухосевой ввод «здесь и сейчас» (valence×activation)
   whys: [],           // метод «Зачем?»: симптом→функция→выгода→потребность→цена→альтернатива→действие
   corrections: [],    // Evidence Kernel: append-only исправления записей (оригинал неизменен)
+  meds: [],           // Health Organizer: ПЛАН приёма лекарств/витаминов (задан пользователем)
+  medIntakes: [],     // Health Organizer: ФАКТ приёма (отдельный класс — план ≠ факт)
   spheres: [],        // пользовательские сферы жизни (тип трекера у каждой)
   sphereLogs: [],     // дневные записи по сферам: {sphereId, date, value, note}
   bots: [
@@ -149,7 +151,7 @@ const bakKey = id => 'arch5_bak_' + id;
 function dbCount(db) {
   if (!db || typeof db !== 'object') return 0;
   let n = 0;
-  ['insights','checkins','moments','whys','corrections','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings']
+  ['insights','checkins','moments','whys','corrections','meds','medIntakes','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings']
     .forEach(c => { if (Array.isArray(db[c])) n += db[c].length; });
   return n;
 }
@@ -2489,6 +2491,65 @@ function toggleEnvFlag(key) {
   DB.env = DB.env || {}; DB.env[key] = !DB.env[key];
   persist(); rHealth(); hpt();
 }
+// ─── HEALTH ORGANIZER: лекарства/витамины — ПЛАН и ФАКТ раздельно ─
+// Personal Health Organizer (контракт product/12, контур 1): хранение и учёт
+// по плану, который задал САМ пользователь. Приложение НЕ проверяет дозы,
+// НЕ оценивает взаимодействия и НЕ даёт медицинских рекомендаций (регуляторный
+// карантин). План (medication_plan) и фактический приём (medication_intake) —
+// разные классы записей, чтобы «назначено» никогда не смешивалось с «принято».
+function saveMed() {
+  const name = ($('med-name') ? $('med-name').value : '').trim();
+  const dose = ($('med-dose') ? $('med-dose').value : '').trim();
+  if (!name) { toast('Введи название', 'warn'); return; }
+  DB.meds.push({
+    id: Date.now(), kType: 'medication_plan', privacyClass: 'sensitive',
+    name, dose, active: true,
+    verif: 'user_confirmed', life: 'current',
+    createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+  });
+  if ($('med-name')) $('med-name').value = ''; if ($('med-dose')) $('med-dose').value = '';
+  closeOv('ov-med-add'); persist(); rHealth();
+  hptMed(); toast('Добавлено в план', 'ok');
+}
+function logMedIntake(medId) {
+  const med = (DB.meds || []).find(m => m && m.id === medId); if (!med) return;
+  DB.medIntakes.push({
+    id: Date.now() + Math.floor(Math.random() * 1000), kType: 'medication_intake', privacyClass: 'sensitive',
+    medId, status: 'taken',
+    verif: 'user_confirmed', life: 'current',
+    at: nowISO(), createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+  });
+  persist(); rHealth();
+  hptMed(); toast(`${med.name}: приём отмечен`, 'ok');
+}
+function deleteMed(id) {
+  if (!confirm('Убрать из плана? История фактических приёмов сохранится.')) return;
+  delUndo('meds', id, () => rHealth(), 'Убрано из плана');
+}
+function medsSectionHTML() {
+  const meds = projAll('meds').filter(m => m && m.active !== false);
+  const today = todayKey();
+  const takenToday = medId => (DB.medIntakes || []).filter(i => i && i.medId === medId && i.day === today && i.status === 'taken').length;
+  let html = `<div class="sec-lbl">Лекарства и витамины</div><div class="card mx mb">`;
+  if (!meds.length) {
+    html += `<div style="padding:1rem" class="ai-sp-empty">Веди свой план приёма — лекарства, витамины, добавки. Отмечай факт приёма одним тапом.</div>`;
+  } else {
+    html += meds.map(m => {
+      const n = takenToday(m.id);
+      return `<div class="srow"><div class="sic" style="background:var(--green-l)"><span>💊</span></div>
+        <span class="sl2">${esc(m.name)}${m.dose ? `<div class="sv2" style="display:block">${esc(m.dose)}</div>` : ''}</span>
+        <span class="sv2">${n ? `сегодня: ${n} ✓` : ''}</span>
+        <button class="btn btn-s btn-xs" onclick="event.stopPropagation();logMedIntake(${m.id})">Принял</button>
+        <button class="prof-act" onclick="event.stopPropagation();deleteMed(${m.id})" aria-label="Убрать"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:14px;height:14px;color:var(--t3)"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>`;
+    }).join('');
+  }
+  html += `</div>
+    <div class="mx mb"><button class="btn btn-s btn-sm" onclick="openOv('ov-med-add')"><i data-lucide="plus"></i>Добавить в план</button></div>
+    <div class="be-note mx mb" style="color:var(--t3)">По плану, заданному тобой. Приложение не проверяет дозы и сочетания — это не медицинская рекомендация.</div>`;
+  return html;
+}
+
 function rHealth() {
   const el = $('health-out'); if (!el) return;
   const hs = healthSpheres(), crav = DB.cravings || [];
@@ -2516,6 +2577,7 @@ function rHealth() {
       return `<div class="srow" onclick="openSphereLog(${s.id})" role="button"><div class="sic" style="background:${s.color}22"><span>${esc(s.icon || '●')}</span></div><span class="sl2">${esc(s.name)}</span><span class="sv2">${st.consistency || 0}% за 30д</span></div>`;
     }).join('') + `</div>`;
   }
+  html += medsSectionHTML();
   html += `<div class="sec-lbl">Опора</div>
     <div class="mx mb"><button class="btn btn-p btn-full" onclick="openCraving()"><i data-lucide="zap"></i>У меня тяга сейчас</button></div>
     <div class="mx mb"><button class="btn btn-s btn-full" onclick="openTech('')"><i data-lucide="life-buoy"></i>Приёмы под состояние</button></div>`;
@@ -4127,7 +4189,7 @@ function genRecoveryKey() {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','bots','digests','spheres','sphereLogs','chats','cravings'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','bots','digests','spheres','sphereLogs','chats','cravings'];
 function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
 function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
 const _ru = r => r._u || r.id || 0;   // «когда обновлено» с откатом на id (id = Date.now())

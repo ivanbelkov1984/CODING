@@ -1289,6 +1289,34 @@ ok(kernel.weekUsesProj, 'ядро: сводка «За неделю» счита
 ok(kernel.backfilled && kernel.idempotent, 'ядро: backfill паспорта на старые записи идемпотентен');
 await page.evaluate(() => { DB.moments = []; DB.corrections = []; goTo('home'); });
 
+// ── Health Organizer: план лекарств + факт приёма (раздельные классы) ──
+const medsT = await page.evaluate(() => {
+  goTo('health');
+  DB.meds = []; DB.medIntakes = [];
+  openOv('ov-med-add');
+  document.getElementById('med-name').value = 'Витамин D';
+  document.getElementById('med-dose').value = '2000 МЕ · утром';
+  saveMed();
+  const plan = DB.meds[0] || {};
+  logMedIntake(plan.id);
+  const intake = DB.medIntakes[0] || {};
+  const active = localStorage.getItem('arch5_active');
+  const db = JSON.parse(localStorage.getItem('arch5_db_' + active) || '{}');
+  const healthTxt = document.getElementById('health-out').textContent || '';
+  return {
+    planSaved: plan.kType === 'medication_plan' && plan.name === 'Витамин D' && plan.privacyClass === 'sensitive',
+    intakeSaved: intake.kType === 'medication_intake' && intake.medId === plan.id && intake.status === 'taken',
+    persisted: (db.meds || []).length === 1 && (db.medIntakes || []).length === 1,
+    separate: plan.kType !== intake.kType,
+    ui: /Лекарства и витамины/.test(healthTxt) && /Витамин D/.test(healthTxt) && /сегодня: 1/.test(healthTxt),
+    disclaimer: /не медицинская рекомендация/i.test(healthTxt),
+  };
+});
+ok(medsT.planSaved && medsT.intakeSaved && medsT.persisted, 'здоровье: план (medication_plan) и факт (medication_intake) сохраняются раздельно');
+ok(medsT.separate && medsT.disclaimer, 'здоровье: план ≠ факт (разные классы) + дисклеймер «не рекомендация» виден');
+ok(medsT.ui, 'здоровье: секция «Лекарства и витамины» рендерится (имя + счётчик «сегодня: 1»)');
+await page.evaluate(() => { DB.meds = []; DB.medIntakes = []; goTo('home'); });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
