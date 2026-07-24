@@ -563,6 +563,21 @@
     </div>
   </div>
 </div>
+<div class="ov" id="ov-doc-report" onclick="if(event.target===this)closeOv('ov-doc-report')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Отчёт для врача</div>
+    <div class="be-note" style="margin:0 1rem .5rem">Факты за 30 дней без интерпретации. Покажи с экрана или отправь.</div>
+    <div style="padding:0 1rem 1rem">
+      <textarea class="field" id="doc-report-text" rows="12" readonly style="font-size:.8rem;line-height:1.45"></textarea>
+      <div style="height:.75rem"></div>
+      <div style="display:flex;gap:var(--s2)">
+        <button class="btn btn-s" style="flex:1" onclick="closeOv('ov-doc-report')">Закрыть</button>
+        <button class="btn btn-p" style="flex:1" onclick="shareDoctorReport()"><i data-lucide="share-2"></i>Поделиться</button>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="ov" id="ov-symptom" onclick="if(event.target===this)closeOv('ov-symptom')">
   <div class="sheet">
     <div class="sh-pull"></div>

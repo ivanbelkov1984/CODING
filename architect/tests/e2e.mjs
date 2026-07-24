@@ -1345,6 +1345,29 @@ ok(bodyT.symOk && bodyT.meaOk && bodyT.persisted, 'здоровье: симпт�
 ok(bodyT.ui, 'здоровье: «Дневник тела» рендерит симптомы и измерения');
 await page.evaluate(() => { DB.symptoms = []; DB.measures = []; goTo('home'); });
 
+// ── Health Organizer: «Отчёт врачу» ──
+const docT = await page.evaluate(() => {
+  goTo('health');
+  const iso = new Date().toISOString(), day = iso.slice(0, 10);
+  DB.meds = [{ id: 9401, kType: 'medication_plan', name: 'Витамин D', dose: '2000 МЕ', active: true, verif: 'user_confirmed', life: 'current', createdAt: iso, day, sv: 2, _u: Date.now() }];
+  DB.medIntakes = [{ id: 9402, kType: 'medication_intake', medId: 9401, status: 'taken', at: iso, verif: 'user_confirmed', life: 'current', createdAt: iso, day, sv: 2, _u: Date.now() }];
+  DB.symptoms = [{ id: 9403, kType: 'symptom_observation', name: 'головная боль', severity: 6, note: 'после обеда', verif: 'user_confirmed', life: 'current', createdAt: iso, day, sv: 2, _u: Date.now() }];
+  DB.measures = [{ id: 9404, kType: 'measurement', name: 'давление', value: '120/80', unit: '', verif: 'user_confirmed', life: 'current', createdAt: iso, day, sv: 2, _u: Date.now() }];
+  DB.corrections = [];
+  openDoctorReport();
+  const txt = document.getElementById('doc-report-text').value || '';
+  return {
+    open: document.getElementById('ov-doc-report').classList.contains('on'),
+    meds: /Витамин D — 2000 МЕ · принято за период: 1 раз/.test(txt),
+    sym: /головная боль: 1 раз, средняя выраженность 6\/10/.test(txt) && /после обеда/.test(txt),
+    mea: /давление: .*120\/80/.test(txt),
+    disclaimer: /Не является медицинским документом/.test(txt),
+  };
+});
+ok(docT.open && docT.meds && docT.sym && docT.mea, '«Отчёт врачу»: план+факт, симптомы, измерения — всё в сводке');
+ok(docT.disclaimer, '«Отчёт врачу»: явная пометка «не медицинский документ»');
+await page.evaluate(() => { DB.meds = []; DB.medIntakes = []; DB.symptoms = []; DB.measures = []; closeOv('ov-doc-report'); goTo('home'); });
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

@@ -2595,8 +2595,69 @@ function bodySectionHTML() {
   html += `</div><div class="mx mb" style="display:flex;gap:.5rem;flex-wrap:wrap">
     <button class="btn btn-s btn-sm" onclick="openOv('ov-symptom')"><i data-lucide="thermometer"></i>Симптом</button>
     <button class="btn btn-s btn-sm" onclick="openOv('ov-measure')"><i data-lucide="ruler"></i>Измерение</button>
+    <button class="btn btn-s btn-sm" onclick="openDoctorReport()"><i data-lucide="file-text"></i>Отчёт врачу</button>
   </div>`;
   return html;
+}
+
+// ─── HEALTH ORGANIZER: «Отчёт врачу» (детерминированная сводка) ─────
+// Собирает факты за период БЕЗ интерпретации: план и факт приёма, симптомы
+// (частота/выраженность), измерения со значениями. Явно помечен как личный
+// дневник пользователя, не медицинский документ.
+function buildDoctorReport(days = 30) {
+  const now = Date.now(), from = now - days * 864e5;
+  const inWin = r => r && (Date.parse(r.createdAt) || 0) >= from;
+  const fmtDay = r => (r.day || '').slice(5);
+  const L = [];
+  L.push(`ОТЧЁТ ДЛЯ ВРАЧА · за ${days} дн. (${new Date(from).toISOString().slice(0, 10)} — ${todayKey()})`);
+  L.push('');
+  const meds = projAll('meds').filter(m => m && m.active !== false);
+  if (meds.length) {
+    L.push('ЛЕКАРСТВА / ВИТАМИНЫ (план, заданный пациентом, и фактический приём):');
+    meds.forEach(m => {
+      const n = (DB.medIntakes || []).filter(i => i && i.medId === m.id && i.status === 'taken' && inWin(i)).length;
+      L.push(`• ${m.name}${m.dose ? ' — ' + m.dose : ''} · принято за период: ${n} раз`);
+    });
+    L.push('');
+  }
+  const sym = projAll('symptoms').filter(inWin);
+  if (sym.length) {
+    L.push('СИМПТОМЫ (самонаблюдение):');
+    const byName = {};
+    sym.forEach(s => { (byName[s.name] = byName[s.name] || []).push(s); });
+    Object.entries(byName).forEach(([name, arr]) => {
+      const avg = Math.round(arr.reduce((a, s) => a + (s.severity || 0), 0) / arr.length * 10) / 10;
+      const dates = arr.map(fmtDay).join(', ');
+      L.push(`• ${name}: ${arr.length} раз, средняя выраженность ${avg}/10 (даты: ${dates})`);
+      arr.forEach(s => { if (s.note) L.push(`   – ${fmtDay(s)}: ${s.note}`); });
+    });
+    L.push('');
+  }
+  const mea = projAll('measures').filter(inWin);
+  if (mea.length) {
+    L.push('ИЗМЕРЕНИЯ:');
+    const byName = {};
+    mea.forEach(m => { (byName[m.name] = byName[m.name] || []).push(m); });
+    Object.entries(byName).forEach(([name, arr]) => {
+      const vals = arr.slice(-10).map(m => `${fmtDay(m)}: ${m.value}${m.unit ? ' ' + m.unit : ''}`).join(' · ');
+      L.push(`• ${name}: ${vals}`);
+    });
+    L.push('');
+  }
+  if (!meds.length && !sym.length && !mea.length) L.push('За период нет записей плана, симптомов или измерений.');
+  L.push('—');
+  L.push('Составлено пациентом в личном дневнике «Архитектор». Не является медицинским документом или рекомендацией.');
+  return L.join('\n');
+}
+function openDoctorReport() {
+  const txt = buildDoctorReport(30);
+  const el = $('doc-report-text'); if (el) el.value = txt;
+  openOv('ov-doc-report');
+}
+function shareDoctorReport() {
+  const txt = ($('doc-report-text') && $('doc-report-text').value) || buildDoctorReport(30);
+  if (navigator.share) navigator.share({ title: 'Отчёт для врача', text: txt }).catch(() => {});
+  else { try { navigator.clipboard.writeText(txt); toast('Скопировано в буфер', 'ok'); } catch (e) { toast('Выдели и скопируй текст', 'warn'); } }
 }
 
 function rHealth() {
