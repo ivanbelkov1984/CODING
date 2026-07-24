@@ -1407,6 +1407,8 @@ const astroT = await page.evaluate(async () => {
     goldenMars: mars.sign === 'Водолей' && Math.abs(mars.deg - 27.96) < 0.05,
     hasAngles: !!chart.angles && !!chart.houses,
     versioned: ann.kType === 'symbolic_astrology_annotation' && /astronomy-engine@2\.1\.19/.test((chart.versions || {}).engine || ''),
+    // Известный аспект J2000: Луна 223.32° ↔ Солнце 280.37° = 57.05° → секстиль (60°±5)
+    goldenAspect: (chart.aspects || []).some(a => a.name === 'секстиль' && ((a.a === 'Луна' && a.b === 'Солнце') || (a.a === 'Солнце' && a.b === 'Луна'))),
     uiRendered: /Солнце — Козерог 10\.4°/.test(outTxt) && /Не прогноз, не диагноз/.test(outTxt),
     noTimeNoHouses: chartNoTime.angles === null && chartNoTime.houses === null,
     riskClean,
@@ -1416,10 +1418,28 @@ const astroT = await page.evaluate(async () => {
   return r;
 });
 ok(astroT.goldenSun && astroT.goldenMars, 'астрология: golden J2000 — Солнце Козерог ~280.37°, Марс Водолей ~27.96° (движок точен)');
+ok(astroT.goldenAspect, 'астрология: golden-аспект — Луна секстиль Солнце на J2000 (формула углового расстояния верна)');
 ok(astroT.hasAngles && astroT.versioned, 'астрология: Asc/дома при известном времени; аннотация версионирована (engine/ruleset)');
 ok(astroT.uiRendered, 'астрология: карта отрендерена + символический дисклеймер');
 ok(astroT.noTimeNoHouses, 'астрология: неизвестное время → без асцендента и домов (полдень не выдаётся за истину)');
 ok(astroT.riskClean, 'астрология: изоляция — астро-данные не участвуют в факторах риска');
+
+// ── Астрология: транзиты (golden — тот же момент = соединения орб 0) ──
+const transitT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  const birth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62 };
+  const natal = computeNatalChart(birth);
+  // Транзиты в ТОТ ЖЕ момент: каждая планета в соединении сама с собой (орб 0.0).
+  const tr = computeTransits(natal, new Date(Date.UTC(2000, 0, 1, 12, 0, 0)));
+  const selfConj = tr.hits.filter(h => h.transit === h.natal && h.aspect === 'соединение' && parseFloat(h.exact) < 0.1);
+  return {
+    bodies: tr.current.length === 10,
+    selfConjAll: selfConj.length === 10,
+    versioned: /transit-orbs-v1/.test(tr.versions.transitOrbPolicy || ''),
+  };
+});
+ok(transitT.bodies && transitT.selfConjAll, 'транзиты: golden — тот же момент даёт 10 соединений с орбом ~0 (движок согласован)');
+ok(transitT.versioned, 'транзиты: орб-политика версионирована');
 
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
