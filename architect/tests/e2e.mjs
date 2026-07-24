@@ -1544,6 +1544,49 @@ ok(midT.mpOk, 'мидпоинты: середина короткой дуги, �
 ok(midT.treeOk, 'дерево мидпоинтов: Марс = Солнце/Луна при синтетике 0°/90°/45.3°');
 ok(midT.harmOk, 'гармоники: точный трин → соединение в H3 (инвариант Аддея), 10°×3=30°');
 
+// ── Астрология оч.2: прогрессии, дирекции, возвращения — golden ──
+const progT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  const A = window.Astronomy;
+  const birth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62 };
+  const natal = computeNatalChart(birth);
+  const b0 = new Date(Date.UTC(2000, 0, 1, 12));
+  // 1) Прогрессия на возраст 0 = натал (инвариант).
+  const p0 = computeProgressions(birth, b0, 'secondary');
+  const zeroOk = p0.planets.every(p => { const n = natal.planets.find(x => x.body === p.body); return Math.abs(((p.lon - n.lon + 180) % 360 + 360) % 360 - 180) < 0.02; });
+  // 2) 30 лет: прогрессированное Солнце сдвинуто на ~29.6° (28–31 с учётом эксцентриситета).
+  const at30 = new Date(Date.UTC(2030, 0, 1, 12));
+  const dir = computeDirections(natal, birth, at30);
+  const arcOk = dir.solarArc > 28 && dir.solarArc < 31.5;
+  // 3) Найбод за 30 лет = 29.57° ± 0.02.
+  const naibodOk = Math.abs(dir.naibod - 0.985647 * dir.ageYears) < 1e-9 && Math.abs(dir.naibod - 29.57) < 0.15;
+  // 4) Профекции: возраст 0 → 1-й дом (знак Asc); 12 лет → снова 1-й.
+  const d0 = computeDirections(natal, birth, new Date(Date.UTC(2000, 5, 1)));
+  const d12 = computeDirections(natal, birth, new Date(Date.UTC(2012, 5, 1)));
+  const profOk = d0.profection.house === 1 && d0.profection.sign === natal.angles.asc.sign && d12.profection.house === 1;
+  // 5) Соляр: найденный момент — Солнце ровно в натальной долготе (±0.001°), в пределах ±3 дней от ДР.
+  const sunN = natal.planets.find(p => p.body === 'Sun').lon;
+  const solar = searchReturn('Sun', sunN, new Date(Date.UTC(2025, 11, 1)), 90);
+  const sunAt = solar ? A.SunPosition(A.MakeTime(solar)).elon : null;
+  const solarOk = solar && Math.abs(((sunAt - sunN + 180) % 360 + 360) % 360 - 180) < 0.001 && Math.abs((solar.getTime() - Date.UTC(2026, 0, 1, 12)) / 864e5) < 3;
+  // 6) Лунар: Луна в найденный момент = натальная (±0.01°).
+  const moonN = natal.planets.find(p => p.body === 'Moon').lon;
+  const lunar = searchReturn('Moon', moonN, new Date(Date.UTC(2026, 5, 1)), 30);
+  const moonAt = lunar ? A.EclipticGeoMoon(A.MakeTime(lunar)).lon : null;
+  const lunarOk = lunar && Math.abs(((moonAt - moonN + 180) % 360 + 360) % 360 - 180) < 0.01;
+  // 7) Третичные: сдвиг = ageDays/лунный месяц (за 27.321582 дней → +1 день) — Луна сдвинута на ~13°.
+  const tert = computeProgressions(birth, new Date(b0.getTime() + 27.321582 * 864e5), 'tertiary');
+  const moonT = tert.planets.find(p => p.body === 'Moon').lon;
+  const tertOk = Math.abs(((moonT - moonN + 180) % 360 + 360) % 360 - 180 - 13.18) < 1.5;
+  return { zeroOk, arcOk, naibodOk, profOk, solarOk, lunarOk, tertOk };
+});
+ok(progT.zeroOk, 'прогрессии: возраст 0 = натальная карта (инвариант)');
+ok(progT.arcOk && progT.naibodOk, 'дирекции: солнечная дуга 30 лет ≈ 29.6°, Найбод = 0.9856°/год точно');
+ok(progT.profOk, 'профекции: возраст 0 и 12 → 1-й дом (знак Asc), цикл 12 лет');
+ok(progT.solarOk, 'соляр: Солнце в момент возвращения = натальная долгота ±0.001°, дата ±3 дня от ДР');
+ok(progT.lunarOk, 'лунар: Луна в момент возвращения = натальная долгота ±0.01°');
+ok(progT.tertOk, 'третичные прогрессии: 1 лунный месяц жизни → сдвиг Луны ~13.2° (1 день)');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

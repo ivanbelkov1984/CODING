@@ -2782,7 +2782,130 @@ function vertexLon(ramcDeg, epsDeg, phiDeg) {
 // Антисция: зеркало относительно оси 0°Рака–0°Козерога.
 const antisciaLon = lon => norm360(180 - lon);
 
-// ─── МИДПОИНТЫ И ГАРМОНИКИ (очередь 1.3–1.4) ────────────────────────
+// ─── ПРОГНОСТИКА (очередь 2: прогрессии · дирекции · возвращения) ───
+// Все техники — открытые классические формулы (символический тайминг,
+// НЕ предсказание событий):
+//  · Вторичные прогрессии: день = год (положения на N-й день после рождения).
+//  · Третичные: 1 день = 1 тропический лунный месяц (27.321582 сут).
+//  · Solar Arc: все точки + дуга прогрессированного Солнца; Найбод: 0.9856°/год.
+//  · Профекции (эллинистика): Asc «шагает» на 30°/год, возраст mod 12.
+//  · Соляр/лунар: точный момент возвращения Солнца/Луны в натальную долготу
+//    (SearchSunLongitude движка / бисекция по Луне).
+const TROP_LUNAR_MONTH = 27.321582;   // тропический лунный месяц, сут (открытая константа)
+const NAIBOD_DEG_PER_YEAR = 0.985647; // дуга Найбода 59′08″/год
+const YEAR_DAYS = 365.2425;
+function birthUTCDate(birth) {
+  const timePart = birth.timeKnown ? birth.time : '12:00';
+  return new Date(Date.parse(birth.date + 'T' + timePart + ':00Z') - (birth.utcOffset || 0) * 3600e3);
+}
+function bodiesAt(t) {
+  const A = window.Astronomy;
+  return ASTRO_BODIES.map(b => {
+    let lon;
+    if (b === 'Sun') lon = A.SunPosition(t).elon;
+    else if (b === 'Moon') lon = A.EclipticGeoMoon(t).lon;
+    else lon = A.Ecliptic(A.GeoVector(A.Body[b], t, true)).elon;
+    const z = zodiacOf(lon);
+    return { body: b, name: ASTRO_RU[b], lon: z.lon, sign: z.sign, deg: z.deg };
+  });
+}
+// Прогрессии на момент at. kind: 'secondary' | 'tertiary'.
+function computeProgressions(birth, at, kind) {
+  const A = window.Astronomy;
+  const b0 = birthUTCDate(birth);
+  const ageDays = (at.getTime() - b0.getTime()) / 864e5;
+  const ageYears = ageDays / YEAR_DAYS;
+  const shiftDays = kind === 'tertiary' ? ageDays / TROP_LUNAR_MONTH : ageYears;
+  const tProg = A.MakeTime(new Date(b0.getTime() + shiftDays * 864e5));
+  const planets = bodiesAt(tProg);
+  return { kind, ageYears, planets };
+}
+// Solar Arc + Найбод + профекция года.
+function computeDirections(natalChart, birth, at) {
+  const prog = computeProgressions(birth, at, 'secondary');
+  const sunN = natalChart.planets.find(p => p.body === 'Sun').lon;
+  const sunP = prog.planets.find(p => p.body === 'Sun').lon;
+  const arc = norm360(sunP - sunN);
+  const naibod = norm360(prog.ageYears * NAIBOD_DEG_PER_YEAR);
+  const directed = natalChart.planets.map(p => { const L = norm360(p.lon + arc); const z = zodiacOf(L); return { name: p.name, lon: L, sign: z.sign, deg: z.deg }; });
+  let profection = null;
+  if (natalChart.angles) {
+    const age = Math.floor(prog.ageYears);
+    const profLon = norm360(natalChart.angles.asc.lon + (age % 12) * 30);
+    profection = { age, sign: zodiacOf(profLon).sign, house: (age % 12) + 1 };
+  }
+  return { ageYears: prog.ageYears, solarArc: arc, naibod, directed, profection };
+}
+// Возвращение тела в натальную долготу. Возвращает момент (Date) или null.
+function searchReturn(body, targetLon, startDate, windowDays) {
+  const A = window.Astronomy;
+  if (body === 'Sun') {
+    const t = A.SearchSunLongitude(targetLon, A.MakeTime(startDate), windowDays);
+    return t ? t.date : null;
+  }
+  const lonAt = d => body === 'Moon' ? A.EclipticGeoMoon(A.MakeTime(d)).lon : A.Ecliptic(A.GeoVector(A.Body[body], A.MakeTime(d), true)).elon;
+  const diff = d => ((lonAt(d) - targetLon + 540) % 360) - 180;   // знаковая разница
+  const stepH = body === 'Moon' ? 6 : 24 * 5;
+  let prev = diff(startDate);
+  for (let h = stepH; h <= windowDays * 24; h += stepH) {
+    const d = new Date(startDate.getTime() + h * 3600e3);
+    const cur = diff(d);
+    if (prev < 0 && cur >= 0) {   // восходящее пересечение (директное движение)
+      let lo = new Date(d.getTime() - stepH * 3600e3), hi = d;
+      for (let i = 0; i < 60; i++) { const mid = new Date((lo.getTime() + hi.getTime()) / 2); (diff(mid) < 0) ? lo = mid : hi = mid; }
+      return new Date((lo.getTime() + hi.getTime()) / 2);
+    }
+    prev = cur;
+  }
+  return null;
+}
+async function rPrognostics() {
+  const out = $('astro-prog'); if (!out) return;
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (!last || !DB.astroBirth) { out.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай натальную карту.</div>'; return; }
+  out.innerHTML = '<div class="ai-sp-empty">Считаю прогностику…</div>';
+  try {
+    await loadAstroEngine();
+    const now = new Date();
+    const sec = computeProgressions(DB.astroBirth, now, 'secondary');
+    const ter = computeProgressions(DB.astroBirth, now, 'tertiary');
+    const dir = computeDirections(last.chart, DB.astroBirth, now);
+    let html = `<div class="f-lbl" style="margin-top:.5rem">Вторичные прогрессии (возраст ${dir.ageYears.toFixed(1)})</div>` +
+      sec.planets.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+    html += `<div class="f-lbl" style="margin-top:.4rem">Третичные прогрессии</div>` +
+      ter.planets.slice(0, 3).map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+    html += `<div class="f-lbl" style="margin-top:.4rem">Дирекции</div>
+      <div class="si-text" style="color:var(--t3)">Солнечная дуга: ${dir.solarArc.toFixed(2)}° · Найбод: ${dir.naibod.toFixed(2)}°</div>` +
+      dir.directed.slice(0, 3).map(p => `<div class="si-text" style="color:var(--t3)">SA ${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+    if (dir.profection) html += `<div class="si-text" style="color:var(--t3)">Профекция года (возраст ${dir.profection.age}): ${dir.profection.house}-й дом · ${esc(dir.profection.sign)}</div>`;
+    html += '<div class="be-note" style="color:var(--t3)">Символический тайминг (день=год; Найбод; эллинистические профекции). Не событие и не прогноз.</div>';
+    out.innerHTML = html;
+  } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
+}
+async function rReturns() {
+  const out = $('astro-ret'); if (!out) return;
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (!last || !DB.astroBirth) { out.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай натальную карту.</div>'; return; }
+  out.innerHTML = '<div class="ai-sp-empty">Ищу возвращения…</div>';
+  try {
+    await loadAstroEngine();
+    const natal = last.chart;
+    const sunN = natal.planets.find(p => p.body === 'Sun').lon;
+    const moonN = natal.planets.find(p => p.body === 'Moon').lon;
+    const now = new Date();
+    const solar = searchReturn('Sun', sunN, new Date(now.getTime() - 370 * 864e5), 740);
+    const lunar = searchReturn('Moon', moonN, new Date(now.getTime() - 28 * 864e5), 30);
+    let html = '';
+    if (solar) {
+      const pl = bodiesAt(window.Astronomy.MakeTime(solar));
+      html += `<div class="f-lbl" style="margin-top:.5rem">Соляр (возвращение Солнца): ${solar.toISOString().slice(0, 16).replace('T', ' ')} UTC</div>` +
+        pl.slice(0, 5).map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+    }
+    if (lunar) html += `<div class="f-lbl" style="margin-top:.4rem">Лунар (возвращение Луны): ${lunar.toISOString().slice(0, 16).replace('T', ' ')} UTC</div>`;
+    html += '<div class="be-note" style="color:var(--t3)">Момент точного возвращения светила в натальную долготу. Символическая карта периода, не прогноз.</div>';
+    out.innerHTML = html || '<div class="ai-sp-empty">Возвращения не найдены в окне поиска.</div>';
+  } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
+}
 // Мидпоинты — классическая уранская астрология (Витте/Эбертин), формула
 // общеизвестна: середина КОРОТКОЙ дуги между двумя долготами. Дерево
 // мидпоинтов: какие натальные точки стоят в ЖЁСТКОМ аспекте (0/45/90/135/180°)
