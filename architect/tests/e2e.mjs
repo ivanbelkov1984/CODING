@@ -1835,6 +1835,80 @@ ok(trUI.ruleAudit, 'аудит: карточка несёт transit rule id');
 ok(trUI.sorted, 'сортировка: аспекты по силе, наименьший орб первым');
 ok(trUI.disclaimer, 'дисклеймер «не событие и не прогноз» на месте');
 
+// ── Астрология Часть 5: согласие, минимизация контекста, режимы ИИ ──
+const aiModesT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  // Синтетические данные (никаких реальных).
+  const iso = n => new Date(Date.now() - n * 864e5).toISOString();
+  const day = n => iso(n).slice(0, 10);
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = []; DB.astroTexts = [];
+  await runNatalChart();
+  DB.insights = [
+    { id: 1, tag: 'personal', body: 'СЕКРЕТНЫЙ ТЕКСТ ДНЕВНИКА', title: 'Имярек Фамильевич', createdAt: iso(2) },
+    { id: 2, tag: 'personal', body: 'ещё секрет', createdAt: iso(5) },
+    { id: 3, tag: 'vitality', body: 'секрет', createdAt: iso(50) },   // вне окна 30 дней
+  ];
+  DB.symptoms = [{ id: 1, name: 'головная боль', note: 'СЕКРЕТНАЯ ЗАМЕТКА', createdAt: iso(3) }];
+  DB.checkins = [{ date: day(1), sl: 8, cl: 7, mv: 6, st: 3 }, { date: day(2), sl: 6, cl: 5, mv: 4, st: 7 }];
+  // 1) Без согласия контекст содержит только карту.
+  const ctxNone = buildAstroAiContext({}, 30);
+  const noneOk = ctxNone.categories.length === 0 && !ctxNone.diary && !ctxNone.health && !!ctxNone.natal;
+  // 2) Минимизация: с согласием — теги/частоты/средние, но НИКОГДА сырые тексты и имена.
+  const ctx = buildAstroAiContext({ diary: true, health: true, habits: true }, 30);
+  const s = JSON.stringify(ctx);
+  const minimized = ctx.diary.insight_count === 2 && ctx.diary.tags.personal === 2 && !ctx.diary.tags.vitality
+    && ctx.health.symptom_freq['головная боль'] === 1 && ctx.health.checkin_avg['сон'] === 7
+    && !/СЕКРЕТ|секрет|Имярек|ЗАМЕТКА/.test(s);
+  // 3) Согласие: сохранение чекбоксов и отзыв.
+  document.getElementById('aic-diary').classList.add('on');
+  document.getElementById('aic-health').classList.remove('on');
+  document.getElementById('aic-habits').classList.remove('on');
+  saveAstroAiConsent();
+  const consentSaved = DB.astroAiConsent.diary === true && DB.astroAiConsent.health === false && DB.astroAiConsent.version === 'astro-consent-v1';
+  // Отзыв: выключаем категорию — она сразу исчезает из контекста.
+  document.getElementById('aic-diary').classList.remove('on');
+  saveAstroAiConsent();
+  const revoked = buildAstroAiContext(DB.astroAiConsent, 30).categories.length === 0;
+  // 4) Режим 2 с мок-API: использует deep-модель, сохраняет отчёт с категориями и версией промпта.
+  DB.astroAiConsent = { diary: true, health: false, habits: false, acceptedAt: new Date().toISOString(), version: 'astro-consent-v1' };
+  localStorage.removeItem('arch5_astro_deep_quota');
+  setAiKey('sk-test');
+  let modelUsed = null, sentBody = null;
+  const orig = window.fetch;
+  window.fetch = (u, o) => {
+    if (String(u).includes('anthropic')) {
+      try { const b = JSON.parse(o.body); modelUsed = b.model; sentBody = JSON.stringify(b); } catch (e) {}
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: 'Мягкий анализ. Это символическое описание, а не прогноз и не диагноз.' }], usage: { output_tokens: 50 } }) });
+    }
+    return orig(u, o);
+  };
+  await aiDeepAstroAnalysis();
+  const rec = (DB.astroTexts || []).find(t => t.mode === 'deep');
+  const deepOk = rec && rec.promptVersion === 'astro-deep-v1' && rec.categories.join() === 'diary' && /sonnet/.test(modelUsed || '');
+  const noLeak = sentBody && !/СЕКРЕТ|Имярек|ЗАМЕТКА/.test(sentBody);
+  // 5) Квота: после лимита — вежливый отказ без вызова API.
+  localStorage.setItem('arch5_astro_deep_quota', JSON.stringify({ day: new Date().toISOString().slice(0, 10), n: 5 }));
+  let calls2 = 0;
+  window.fetch = (u, o) => { if (String(u).includes('anthropic')) calls2++; return orig(u, o); };
+  DB.astroTexts = [];   // сброс кэша, чтобы квота была единственным барьером
+  await aiDeepAstroAnalysis();
+  const quotaOk = calls2 === 0;
+  window.fetch = orig;
+  goTo('home');
+  DB.astroBirth = null; DB.astroCharts = []; DB.astroTexts = []; DB.astroAiConsent = null;
+  DB.insights = []; DB.symptoms = []; DB.checkins = [];
+  localStorage.removeItem('arch5_astro_deep_quota');
+  return { noneOk, minimized, consentSaved, revoked, deepOk, noLeak, quotaOk };
+});
+ok(aiModesT.noneOk, 'режим 2: без согласия в контексте только карта (категории пусты)');
+ok(aiModesT.minimized, 'минимизация: теги/частоты/средние за окно, сырые тексты и имена НЕ передаются');
+ok(aiModesT.consentSaved, 'согласие: чекбоксы по категориям сохраняются с версией');
+ok(aiModesT.revoked, 'отзыв согласия: категория сразу исчезает из будущих запросов');
+ok(aiModesT.deepOk, 'режим 2: deep-модель, отчёт сохранён с категориями и версией промпта');
+ok(aiModesT.noLeak, 'приватность: в теле API-запроса нет сырых текстов дневника/заметок');
+ok(aiModesT.quotaOk, 'лимит: после 5 глубоких анализов в день API не вызывается');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
