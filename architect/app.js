@@ -2658,7 +2658,7 @@ function computeNatalChart(birth) {
     return { body: b, name: ASTRO_RU[b], lon: z.lon, sign: z.sign, deg: z.deg, retro: speed < 0 };
   });
   // Asc/MC + дома whole-sign: только при известном времени И координатах.
-  let angles = null, houses = null;
+  let angles = null, houses = null, housesMeta = null;
   if (birth.timeKnown && isFinite(birth.lat) && isFinite(birth.lon)) {
     const obs = new A.Observer(birth.lat, birth.lon, 0);
     const gast = A.SiderealTime(t);                       // Greenwich apparent sidereal time, часы
@@ -2676,6 +2676,7 @@ function computeNatalChart(birth) {
     const cusps = houseCusps(hsys, { asc: zodiacOf(asc).lon, mc: zodiacOf(mc).lon, ramc: lst, eps: 23.4392911, phi: birth.lat });
     houses = planets.map(p => ({ body: p.body, house: houseOfLon(p.lon, cusps) }));
     houses.system = hsys; houses.cusps = cusps;
+    housesMeta = { system: hsys, cusps };   // сериализуемо (свойства массива localStorage не переживают)
   }
   // ── 1.2: астероиды/Хирон (прибл., two-body JPL) + доп. точки ──
   const asteroids = Object.keys(ASTEROID_ELEMENTS).map(k => {
@@ -2709,7 +2710,7 @@ function computeNatalChart(birth) {
       if (Math.abs(sep - asp.angle) <= asp.orb) { aspects.push({ a: planets[i].name, b: planets[j].name, name: asp.name, exact: Math.abs(sep - asp.angle).toFixed(1) }); break; }
     }
   }
-  return { planets, asteroids, points, antiscia, angles, houses, aspects, timeKnown: !!birth.timeKnown, versions: { ...ASTRO_VERSIONS, houses: (birth.houseSystem || 'whole') + '-v1', asteroids: 'jpl-sbdb-2body@JD2461200.5' } };
+  return { planets, asteroids, points, antiscia, angles, houses, housesMeta, aspects, timeKnown: !!birth.timeKnown, versions: { ...ASTRO_VERSIONS, houses: (birth.houseSystem || 'whole') + '-v1', asteroids: 'jpl-sbdb-2body@JD2461200.5' } };
 }
 // ─── АСТЕРОИДЫ И ДОПОЛНИТЕЛЬНЫЕ ТОЧКИ (очередь 1.2) ─────────────────
 // Астероиды/Хирон: кеплеровские элементы JPL Small-Body Database
@@ -2957,6 +2958,74 @@ function ucchaBala(body, sidLon) {
   const dist = Math.abs(((sidLon - deb + 180) % 360 + 360) % 360 - 180);
   return Math.round(dist / 180 * 60 * 10) / 10;
 }
+// ─── АРАБСКИЕ ТОЧКИ И НЕПОДВИЖНЫЕ ЗВЁЗДЫ (очередь 4) ────────────────
+// Арабские точки — классические формулы из арабских трактатов (public domain
+// по возрасту). ИСТОРИЧЕСКАЯ техника: подаётся без драматизации, как
+// историко-технический слой, не предсказание. Неподвижные звёзды — эклиптические
+// долготы J2000 по открытым каталогам (Hipparcos) + прецессия 50.2888″/год.
+const FIXED_STARS = [ // эклиптические долготы J2000 (открытые каталоги)
+  { name: 'Альгол',      lon: 56.17 }, { name: 'Альциона',   lon: 59.98 },
+  { name: 'Альдебаран',  lon: 69.79 }, { name: 'Бетельгейзе', lon: 88.75 },
+  { name: 'Сириус',      lon: 104.08 }, { name: 'Регул',      lon: 149.83 },
+  { name: 'Спика',       lon: 203.83 }, { name: 'Антарес',    lon: 249.76 },
+  { name: 'Вега',        lon: 285.32 }, { name: 'Фомальгаут', lon: 333.87 },
+];
+const STAR_ORB = 1.0;
+function fixedStarLon(starJ2000Lon, t) { return norm360(starJ2000Lon + PRECESSION_DEG_PER_YEAR * (t.tt / 365.25)); }
+function computeFixedStarHits(chart, t) {
+  const hits = [];
+  for (const st of FIXED_STARS) {
+    const L = fixedStarLon(st.lon, t);
+    for (const p of chart.planets) {
+      const sep = Math.abs(((p.lon - L + 180) % 360 + 360) % 360 - 180);
+      if (sep <= STAR_ORB) hits.push({ star: st.name, planet: p.name, orb: sep.toFixed(2), starLon: L });
+    }
+    if (chart.angles) {
+      for (const [nm, lon] of [['Asc', chart.angles.asc.lon], ['MC', chart.angles.mc.lon]]) {
+        const sep = Math.abs(((lon - L + 180) % 360 + 360) % 360 - 180);
+        if (sep <= STAR_ORB) hits.push({ star: st.name, planet: nm, orb: sep.toFixed(2), starLon: L });
+      }
+    }
+  }
+  return hits.sort((a, b) => parseFloat(a.orb) - parseFloat(b.orb));
+}
+// Арабские точки (классика; формула day/night по высоте Солнца как у PoF).
+function computeArabicParts(chart) {
+  if (!chart.angles || !chart.points || !chart.points.fortune) return null;
+  const L = {}; chart.planets.forEach(p => L[p.body] = p.lon);
+  const asc = chart.angles.asc.lon, desc = norm360(asc + 180);
+  const isDay = chart.points.fortune.isDay;
+  const parts = [
+    { name: 'Точка Духа',   lon: isDay ? norm360(asc + L.Sun - L.Moon) : norm360(asc + L.Moon - L.Sun) },
+    { name: 'Точка Брака',  lon: norm360(asc + desc - L.Venus) },
+    { name: 'Точка Болезни (истор.)', lon: isDay ? norm360(asc + L.Mars - L.Saturn) : norm360(asc + L.Saturn - L.Mars) },
+  ];
+  const cusps = (chart.housesMeta && chart.housesMeta.cusps) || (chart.houses && chart.houses.cusps);
+  if (cusps) parts.push({ name: 'Точка Смерти (истор.)', lon: norm360(asc + cusps[8] - L.Moon) });
+  return parts.map(p => ({ ...p, sign: zodiacOf(p.lon).sign, deg: zodiacOf(p.lon).deg }));
+}
+async function rPartsStars() {
+  const out = $('astro-parts'); if (!out) return;
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (!last || !DB.astroBirth) { out.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай натальную карту.</div>'; return; }
+  try {
+    await loadAstroEngine();
+    const t = window.Astronomy.MakeTime(birthUTCDate(DB.astroBirth));
+    const parts = computeArabicParts(last.chart);
+    const stars = computeFixedStarHits(last.chart, t);
+    let html = '';
+    if (parts) {
+      html += '<div class="f-lbl" style="margin-top:.5rem">Арабские точки <span style="font-weight:500;color:var(--t3)">(историческая техника)</span></div>' +
+        parts.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+    } else html += '<div class="si-text" style="color:var(--t3)">Арабские точки требуют известного времени рождения.</div>';
+    html += '<div class="f-lbl" style="margin-top:.4rem">Неподвижные звёзды (соединения, орб 1°)</div>' +
+      (stars.length ? stars.map(s => `<div class="si-text" style="color:var(--t3)">${esc(s.planet)} ∪ ${esc(s.star)} (орб ${s.orb}°)</div>`).join('')
+        : '<div class="si-text" style="color:var(--t3)">Нет соединений с ключевыми звёздами в орбе 1°.</div>');
+    html += '<div class="be-note" style="color:var(--t3)">Историко-символический слой (классические трактаты; каталог Hipparcos + прецессия). Без драматизации: это не события и не диагнозы. Первичные дирекции и ректификация — research-preview, не реализованы.</div>';
+    out.innerHTML = html;
+  } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
+}
+
 async function rJyotish() {
   const out = $('astro-jyo'); if (!out) return;
   const last = (DB.astroCharts || []).slice(-1)[0];

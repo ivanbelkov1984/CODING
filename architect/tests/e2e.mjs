@@ -1618,6 +1618,52 @@ ok(jyoT.dashaOk, 'джйотиш: Вимшоттари = 120 лет; Луна в
 ok(jyoT.tithiOk, 'джйотиш: тити 1 (Пратипада) при 5°, Пурнима при 179°');
 ok(jyoT.uOk, 'джйотиш: уччабала Солнца — 60 в экзальтации (10° Овна), 0 в дебилитации');
 
+// ── Астрология оч.4: арабские точки + неподвижные звёзды — golden-проверки ──
+const q4T = await page.evaluate(async () => {
+  await loadAstroEngine();
+  const A = window.Astronomy;
+  // Синтетическая карта (никаких реальных данных): asc=100, известные долготы.
+  const mkChart = (isDay) => ({
+    planets: [
+      { body: 'Sun', name: 'Солнце', lon: 280 }, { body: 'Moon', name: 'Луна', lon: 50 },
+      { body: 'Venus', name: 'Венера', lon: 200 }, { body: 'Mars', name: 'Марс', lon: 10 },
+      { body: 'Saturn', name: 'Сатурн', lon: 310 },
+    ],
+    angles: { asc: { lon: 100 }, mc: { lon: 10 } },
+    points: { fortune: { isDay } },
+    housesMeta: { system: 'placidus', cusps: [0, 100, 130, 160, 190, 220, 250, 280, 310, 340, 10, 40, 70] },
+  });
+  const day = computeArabicParts(mkChart(true)), night = computeArabicParts(mkChart(false));
+  const get = (arr, nm) => arr.find(p => p.name.startsWith(nm)).lon;
+  // 1) Дневные формулы: Дух = asc+Sun−Moon = 330; Брак = asc+desc−Venus = 180;
+  //    Болезнь = asc+Mars−Saturn = 160; Смерть = asc+cusp8−Moon = 0.
+  const dayOk = Math.abs(get(day, 'Точка Духа') - 330) < 1e-9 && Math.abs(get(day, 'Точка Брака') - 180) < 1e-9 &&
+    Math.abs(get(day, 'Точка Болезни') - 160) < 1e-9 && Math.abs(get(day, 'Точка Смерти') - 0) < 1e-9;
+  // 2) Ночной реверс Духа: asc+Moon−Sun = 230; Брак от дня/ночи не зависит.
+  const nightOk = Math.abs(get(night, 'Точка Духа') - 230) < 1e-9 && Math.abs(get(night, 'Точка Брака') - 180) < 1e-9;
+  // 3) Инвариант: Дух + Фортуна ≡ 2·Asc (mod 360) при любом isDay (классика).
+  const spirit = get(day, 'Точка Духа'), fortune = (100 + 50 - 280 + 720) % 360; // дневная PoF
+  const mirrorOk = Math.abs(((spirit + fortune) % 360) - ((2 * 100) % 360)) < 1e-9;
+  // 4) Прецессия: Регул J2000 = 149.83° (Лев) → 2026 ≈ 150.20° — перешёл в Деву.
+  const t26 = A.MakeTime(new Date(Date.UTC(2026, 6, 24, 12)));
+  const reg = fixedStarLon(149.83, t26);
+  const regOk = Math.abs(reg - 150.20) < 0.02 && zodiacOf(reg).sign === 'Дева';
+  // 5) Соединения со звёздами: планета точно на Регуле-2026 → hit с орбом ~0; в 1.5° → нет hit'а.
+  const hitChart = { planets: [{ body: 'Sun', name: 'Солнце', lon: reg }], angles: null };
+  const missChart = { planets: [{ body: 'Sun', name: 'Солнце', lon: (reg + 1.5) % 360 }], angles: null };
+  const hits = computeFixedStarHits(hitChart, t26), misses = computeFixedStarHits(missChart, t26);
+  const hitOk = hits.length === 1 && hits[0].star === 'Регул' && parseFloat(hits[0].orb) < 0.01 && misses.length === 0;
+  // 6) Без углов/фортуны арабские точки не считаются (время неизвестно → честный null).
+  const nullOk = computeArabicParts({ planets: [], angles: null, points: {} }) === null;
+  return { dayOk, nightOk, mirrorOk, regOk, hitOk, nullOk };
+});
+ok(q4T.dayOk, 'арабские точки: дневные формулы точны (Дух 330°, Брак 180°, Болезнь 160°, Смерть 0°)');
+ok(q4T.nightOk, 'арабские точки: ночной реверс Духа (230°), Брак не зависит от дня/ночи');
+ok(q4T.mirrorOk, 'арабские точки: инвариант Дух + Фортуна = 2·Asc (mod 360)');
+ok(q4T.regOk, 'звёзды: Регул J2000 149.83° + прецессия → 2026 ≈ 150.20° (перешёл в Деву)');
+ok(q4T.hitOk, 'звёзды: соединение на точной долготе найдено (орб ~0), в 1.5° — нет (орб 1°)');
+ok(q4T.nullOk, 'арабские точки: без углов (время неизвестно) → null, полдень не подставляем');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
