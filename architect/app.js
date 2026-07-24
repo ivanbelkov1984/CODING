@@ -3285,19 +3285,51 @@ function computeTransits(natalChart, at) {
   }
   return { current, hits, versions: { ...ASTRO_VERSIONS, transitOrbPolicy: 'transit-orbs-v1(3)' }, at: (at || new Date()).toISOString() };
 }
+// Текстовая карточка транзитного аспекта (Слой 1: transitGift/Verb + темы).
+function transitHitText(h) {
+  const R = window.ASTRO_RULES; if (!R || !R.transitGift) return null;
+  const byRu = {}; Object.keys(ASTRO_RU).forEach(b => byRu[ASTRO_RU[b]] = b);
+  const trB = byRu[h.transit], naB = byRu[h.natal];
+  const gift = trB && R.transitGift[trB], verb = R.transitVerb[h.aspect], theme = naB && R.planetTheme[naB];
+  if (!gift || !verb || !theme) return null;
+  const strong = parseFloat(h.exact) < 1;
+  const g = strong ? gift.charAt(0).toLowerCase() + gift.slice(1) : gift;
+  return { text: `${strong ? 'Особенно ощутимо: ' : ''}${g} ${verb} «${theme}».`,
+    ruleId: `transit.${trB}.${h.aspect}.${naB}` };
+}
 async function runTransits() {
   const out = $('astro-transits'); if (out) out.innerHTML = '<div class="ai-sp-empty">Считаю транзиты…</div>';
   try {
     await loadAstroEngine();
+    try { await loadAstroRules(); } catch (e) {}   // тексты опциональны, расчёт важнее
+    // Календарь: любая дата, не только «сегодня» (полдень выбранного дня).
+    const di = $('astro-tr-date');
+    const dv = (di && di.value.trim()) || '';
+    let at = new Date();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dv)) at = new Date(dv + 'T12:00:00');
+    else if (di) di.value = todayKey();
+    const isToday = !dv || dv === todayKey();
     const last = (DB.astroCharts || []).slice(-1)[0];
-    const tr = computeTransits(last && last.chart, new Date());
-    let html = '<div class="f-lbl" style="margin-top:.5rem">Небо сейчас</div>' +
-      tr.current.map(p => `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°</div></div></div>`).join('');
-    if (tr.hits.length) {
-      html += '<div class="f-lbl" style="margin-top:.5rem">Аспекты к натальной карте</div>' +
-        tr.hits.slice(0, 10).map(h => `<div class="si-row"><div class="si-body"><div class="si-text">транзитный ${esc(h.transit)} ${esc(h.aspect)} натальный ${esc(h.natal)} (орб ${h.exact}°)</div></div></div>`).join('');
+    const tr = computeTransits(last && last.chart, at);
+    const wheelEl = $('astro-tr-wheel');
+    if (wheelEl) wheelEl.innerHTML = last ? renderChartWheel(last.chart, { size: 340, static: true, transits: tr.current }) : '';
+    // «Небо сейчас» — свёрнуто по умолчанию.
+    let html = `<button class="btn btn-s btn-full" onclick="const d=$('astro-sky');d.style.display=d.style.display==='none'?'block':'none'">Небо ${isToday ? 'сейчас' : 'на ' + esc(dv)} — показать/скрыть</button>` +
+      '<div id="astro-sky" style="display:none">' +
+      tr.current.map(p => `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°</div></div></div>`).join('') + '</div>';
+    // Активные аспекты: карточки с текстом, сортировка по силе (меньший орб первым).
+    const hits = [...tr.hits].sort((a, b) => parseFloat(a.exact) - parseFloat(b.exact));
+    if (hits.length) {
+      html += '<div class="f-lbl" style="margin-top:.5rem">Активные аспекты к вашей карте</div>' +
+        hits.slice(0, 12).map(h => {
+          const tx = transitHitText(h);
+          return `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(h.transit)} → ваш ${esc(h.natal)}.</b> ${tx ? esc(tx.text) : esc(h.aspect)}</div>
+            <div class="si-text" style="color:var(--t4);font-size:.72rem"${tx ? ` data-rule="${esc(tx.ruleId)}"` : ''}>${esc(h.aspect)} · точность ${h.exact}°</div></div></div>`;
+        }).join('');
     } else if (last) {
-      html += '<div class="si-text" style="color:var(--t3);margin:.4rem 0">Сейчас нет точных мажорных аспектов к натальной карте (орб 3°).</div>';
+      html += `<div class="si-text" style="color:var(--t3);margin:.4rem 0">${isToday ? 'Сейчас' : 'В этот день'} нет точных мажорных аспектов к натальной карте (в пределах 3°).</div>`;
+    } else {
+      html += '<div class="si-text" style="color:var(--t3);margin:.4rem 0">Рассчитай натальную карту, чтобы видеть аспекты к ней.</div>';
     }
     html += `<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Символический снимок момента в западной традиции. Не событие и не прогноз.</div>`;
     if (out) out.innerHTML = html;
@@ -3468,6 +3500,12 @@ function renderChartWheel(chart, o = {}) {
   if (chart.angles) {
     const [ax, ay] = xy(chart.angles.asc.lon, rZo + S * .022), [mx, my] = xy(chart.angles.mc.lon, rZo + S * .022);
     s += `<text x="${F(ax)}" y="${F(ay)}" class="aw-axlbl">Asc</text><text x="${F(mx)}" y="${F(my)}" class="aw-axlbl">MC</text>`;
+  }
+  // Bi-wheel: транзитные планеты снаружи зодиакального кольца (натал внутри).
+  if (o.transits) for (const p of o.transits) {
+    const [px, py] = xy(p.lon, rZo + S * .045);
+    s += line(p.lon, rZo, rZo + S * .016, 'aw-tick');
+    s += `<text x="${F(px)}" y="${F(py)}" class="aw-planet aw-transit">${PLANET_GLYPHS[p.body] || '•'}</text>`;
   }
   return s + '</svg>';
 }

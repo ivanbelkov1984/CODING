@@ -1327,3 +1327,4 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .aw-axlbl{fill:var(--t2);font-size:9px;text-anchor:middle;dominant-baseline:central;font-weight:600}
 .astro-tabs{display:flex;gap:var(--s2);overflow-x:auto;padding:var(--s3) var(--s4);scrollbar-width:none}
 .astro-tabs::-webkit-scrollbar{display:none}
+.aw-transit{fill:var(--accent)}
