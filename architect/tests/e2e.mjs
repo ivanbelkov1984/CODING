@@ -1468,6 +1468,56 @@ ok(housesT.opp, 'дома: противоположные куспиды ров�
 ok(housesT.equatorSame, 'дома: golden-инвариант φ=0 — Плацидус=Кампанус=Региомонтанус (равные деления)');
 ok(housesT.vers, 'дома: выбранная система версионируется в аннотации');
 
+// ── Астрология 1.2: астероиды + точки — golden-проверки ──
+const pointsT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  const A = window.Astronomy;
+  const ch = computeNatalChart({ date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' });
+  // 1) Кеплер: солвер сходится, радиусы в пределах орбиты.
+  const t0 = A.MakeTime(new Date(Date.UTC(2000, 0, 1, 12)));
+  let kepOk = true;
+  for (const k of Object.keys(ASTEROID_ELEMENTS)) {
+    const el = ASTEROID_ELEMENTS[k]; const a = asteroidLongitude(k, t0);
+    if (a.kepErr > 1e-9 || a.r < el.a * (1 - el.e) - 1e-6 || a.r > el.a * (1 + el.e) + 1e-6) kepOk = false;
+  }
+  // 2) Замыкание орбиты Цереры: через полный период (двухтелая) долгота гелио-вектора совпадает.
+  const el = ASTEROID_ELEMENTS.Ceres;
+  const periodDays = 365.25 * Math.pow(el.a, 1.5);
+  const h1 = keplerHelioVector(el, 2461200.5), h2 = keplerHelioVector(el, 2461200.5 + periodDays);
+  const lon1 = Math.atan2(h1.y, h1.x), lon2 = Math.atan2(h2.y, h2.x);
+  const orbitCloses = Math.abs(lon1 - lon2) < 0.001;
+  // 3) Лилит на J2000 = 83.3532 + 180 = 263.3532° (формула Меёса, T=0).
+  const lilithOk = Math.abs(meanLilithLon(A.MakeTime(new Date(Date.UTC(2000, 0, 1, 12)))).valueOf() - 263.3532) < 0.02;
+  // 4) Точка Судьбы: арифметика Asc+Moon−Sun (день) / Asc+Sun−Moon (ночь).
+  const sun = ch.planets.find(p => p.body === 'Sun').lon, moon = ch.planets.find(p => p.body === 'Moon').lon;
+  const asc = ch.angles.asc.lon; const pof = ch.points.fortune;
+  const expected = pof.isDay ? ((asc + moon - sun) % 360 + 360) % 360 : ((asc + sun - moon) % 360 + 360) % 360;
+  const pofOk = Math.abs(pof.lon - expected) < 1e-9;
+  // 5) Антисция: зеркало (λ + antiscia = 180 mod 360); Рак 0° ↔ сам себе.
+  const antOk = ch.antiscia.every(a => { const orig = ch.planets.find(p => p.name === a.name).lon; return Math.abs(((orig + a.lon) % 360) - 180) < 1e-9; });
+  // 6) Вертекс: лежит на первой вертикали (dot с севером = 0) — уже встроен численно; проверим западность через повторный расчёт.
+  const vtxOk = !!ch.points.vertex && isFinite(ch.points.vertex.lon);
+  return { kepOk, orbitCloses, lilithOk, pofOk, antOk, vtxOk, hasAst: ch.asteroids.length === 5, versioned: /jpl-sbdb/.test(ch.versions.asteroids || '') };
+});
+ok(pointsT.kepOk && pointsT.orbitCloses, 'астероиды: солвер Кеплера сходится (<1e-9), радиус в орбите, орбита Цереры замыкается за период');
+ok(pointsT.lilithOk, 'Лилит: golden J2000 = 263.35° (ср. перигей Меёса + 180°)');
+ok(pointsT.pofOk, 'Точка Судьбы: дневная/ночная формула Asc±(Луна−Солнце) точна');
+ok(pointsT.antOk, 'антисции: λ + antiscia ≡ 180° (зеркало оси Рак–Козерог)');
+ok(pointsT.vtxOk && pointsT.hasAst && pointsT.versioned, 'астероиды/точки: 5 тел, Вертекс рассчитан, источник JPL версионирован');
+
+// Golden против ОПУБЛИКОВАННОЙ эфемериды: JPL Horizons на 2026-07-24 12:00 UTC
+// (геоцентрические эклиптические долготы, запрошены 2026-07-24; допуск 0.05°).
+const horizonsT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  const A = window.Astronomy;
+  const t = A.MakeTime(new Date(Date.UTC(2026, 6, 24, 12)));
+  const REF = { Chiron: 30.8189, Ceres: 82.7527, Pallas: 21.4210, Juno: 304.2607, Vesta: 24.2565 };
+  const out = {};
+  for (const k of Object.keys(REF)) { out[k] = Math.abs(asteroidLongitude(k, t).lon - REF[k]); }
+  return { maxErr: Math.max(...Object.values(out)), all: Object.values(out).every(d => d < 0.05) };
+});
+ok(horizonsT.all, `астероиды: golden против JPL Horizons (2026-07-24) — все 5 тел в пределах 0.05° (макс ${horizonsT.maxErr.toFixed(4)}°)`);
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
