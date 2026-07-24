@@ -1222,6 +1222,32 @@ const week = await page.evaluate(() => {
 ok(week.hasWeek && week.hasAvg && week.hasWhy, '«За неделю»: детерминированная сводка (средние + разборы + выполнено)');
 await page.evaluate(() => { goTo('home'); });
 
+// ── Privacy-гейт: без фразы данные не уходят на сервер молча ──
+const psg = await page.evaluate(() => {
+  const origConfirm = window.confirm, origPass = localStorage.getItem('arch5_pass_' + localStorage.getItem('arch5_active'));
+  localStorage.removeItem('arch5_pass_' + localStorage.getItem('arch5_active'));
+  delete CFG.plainSyncConsent;
+  // 1) отказ в confirm → гейт блокирует
+  window.confirm = () => false;
+  const blocked = ensureSyncPrivacy(true) === false && !CFG.plainSyncConsent;
+  // 2) согласие → гейт пропускает и запоминает
+  window.confirm = () => true;
+  const allowed = ensureSyncPrivacy(true) === true && CFG.plainSyncConsent === true;
+  // 3) с фразой — пропускает без вопросов
+  delete CFG.plainSyncConsent;
+  localStorage.setItem('arch5_pass_' + localStorage.getItem('arch5_active'), 'testpass');
+  window.confirm = () => { throw new Error('confirm не должен вызываться при E2EE'); };
+  const e2ee = ensureSyncPrivacy(true) === true;
+  window.confirm = origConfirm;
+  if (origPass) localStorage.setItem('arch5_pass_' + localStorage.getItem('arch5_active'), origPass);
+  else localStorage.removeItem('arch5_pass_' + localStorage.getItem('arch5_active'));
+  delete CFG.plainSyncConsent;
+  return { blocked, allowed, e2ee };
+});
+ok(psg.blocked, 'privacy-гейт: без фразы и без согласия синк заблокирован');
+ok(psg.allowed, 'privacy-гейт: явное согласие пропускает и запоминается');
+ok(psg.e2ee, 'privacy-гейт: с парольной фразой (E2EE) вопросов нет');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

@@ -4188,6 +4188,9 @@ async function runSync({ manual = false } = {}) {
   // Защита от даунгрейда: после восстановления по ключу (recovery есть,
   // фразы ещё нет) НЕ пушим открытым текстом поверх шифрованного блока.
   if (getRecoveryKey() && !getPass()) { setSyncBadge('needpass'); if (manual) { toast('Задай новую парольную фразу после восстановления', 'warn'); openOv('ov-cfg'); } return; }
+  // Privacy-гейт: без парольной фразы данные ушли бы на сервер ОТКРЫТЫМ текстом.
+  // Не делаем этого молча: нужен либо E2EE (фраза), либо явное согласие один раз.
+  if (!ensureSyncPrivacy(manual)) return;
   _syncing = true; _dirty = false; setSyncBadge('syncing');
   try {
     if (!CFG.spaceKey) {
@@ -4243,6 +4246,18 @@ function setSyncBadge(state) {
 }
 
 // Ручной запуск (кнопка «Синхронизировать»).
+// Явное согласие на нешифрованный синк (один раз, хранится в CFG). Возвращает
+// true = можно продолжать (E2EE включён или согласие есть/только что дано).
+function ensureSyncPrivacy(manual) {
+  if (getPass() || CFG.plainSyncConsent) return true;
+  if (manual && confirm('Парольная фраза не задана — данные уйдут на сервер БЕЗ шифрования.\n\nРекомендуется: Отмена → задать фразу в Конфигурации (end-to-end шифрование).\n\nСинхронизировать без шифрования?')) {
+    CFG.plainSyncConsent = true; persistLocal();
+    return true;
+  }
+  setSyncBadge('needpass');
+  if (manual) { toast('Задай парольную фразу — тогда сервер видит только шифроблок', 'warn'); openOv('ov-cfg'); }
+  return false;
+}
 function doSync() { runSync({ manual: true }); }
 
 // Ручная загрузка с сервера (принудительная сверка со слиянием).
