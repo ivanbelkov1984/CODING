@@ -1384,6 +1384,43 @@ const remT = await page.evaluate(() => {
 });
 ok(remT.pendingShown && remT.clearedAfterTake, 'напоминание: показано пока приём не отмечен, исчезает после отметки');
 
+// ── Астрология: golden-расчёт + правило неизвестного времени + изоляция ──
+const astroT = await page.evaluate(async () => {
+  // Golden fixture: J2000 (2000-01-01 12:00 UTC, синтетические данные рождения).
+  DB.astroBirth = { kType: 'birth_evidence', privacyClass: 'sensitive', date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, place: 'тест', lat: 55.75, lon: 37.62, verif: 'user_confirmed', life: 'current', createdAt: new Date().toISOString(), sv: 2, _u: Date.now() };
+  DB.astroCharts = [];
+  goTo('settings'); openAstro();
+  await runNatalChart();
+  const ann = DB.astroCharts[0] || {};
+  const chart = ann.chart || {};
+  const sun = (chart.planets || []).find(p => p.body === 'Sun') || {};
+  const mars = (chart.planets || []).find(p => p.body === 'Mars') || {};
+  const outTxt = document.getElementById('astro-out').textContent || '';
+  // Правило неизвестного времени: без Asc/домов, полдень не выдаётся за истину.
+  DB.astroBirth = { ...DB.astroBirth, timeKnown: false, time: '' };
+  const chartNoTime = computeNatalChart(DB.astroBirth);
+  // Изоляция: заполненные астро-данные не появляются в факторах риска.
+  const risk = cravingRisk();
+  const riskClean = !risk.factors.some(f => /астро|зодиак|планет/i.test(f.why || ''));
+  const r = {
+    goldenSun: Math.abs(sun.lon - 280.37) < 0.05 && sun.sign === 'Козерог',
+    goldenMars: mars.sign === 'Водолей' && Math.abs(mars.deg - 27.96) < 0.05,
+    hasAngles: !!chart.angles && !!chart.houses,
+    versioned: ann.kType === 'symbolic_astrology_annotation' && /astronomy-engine@2\.1\.19/.test((chart.versions || {}).engine || ''),
+    uiRendered: /Солнце — Козерог 10\.4°/.test(outTxt) && /Не прогноз, не диагноз/.test(outTxt),
+    noTimeNoHouses: chartNoTime.angles === null && chartNoTime.houses === null,
+    riskClean,
+  };
+  DB.astroBirth = null; DB.astroCharts = [];
+  closeOv('ov-astro'); goTo('home');
+  return r;
+});
+ok(astroT.goldenSun && astroT.goldenMars, 'астрология: golden J2000 — Солнце Козерог ~280.37°, Марс Водолей ~27.96° (движок точен)');
+ok(astroT.hasAngles && astroT.versioned, 'астрология: Asc/дома при известном времени; аннотация версионирована (engine/ruleset)');
+ok(astroT.uiRendered, 'астрология: карта отрендерена + символический дисклеймер');
+ok(astroT.noTimeNoHouses, 'астрология: неизвестное время → без асцендента и домов (полдень не выдаётся за истину)');
+ok(astroT.riskClean, 'астрология: изоляция — астро-данные не участвуют в факторах риска');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

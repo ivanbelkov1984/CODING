@@ -63,6 +63,8 @@ const DEFAULT_DB = {
   medIntakes: [],     // Health Organizer: ФАКТ приёма (отдельный класс — план ≠ факт)
   symptoms: [],       // Health Organizer: симптомы как отдельные события (наблюдение, не диагноз)
   measures: [],       // Health Organizer: измерения (вес/давление/пульс… — ручной ввод)
+  astroBirth: null,   // Астрология: OriginalBirthEvidence (immutable; правки — коррекциями)
+  astroCharts: [],    // Астрология: SymbolicAstrologyAnnotation — рассчитанные карты (versioned)
   spheres: [],        // пользовательские сферы жизни (тип трекера у каждой)
   sphereLogs: [],     // дневные записи по сферам: {sphereId, date, value, note}
   bots: [
@@ -153,7 +155,7 @@ const bakKey = id => 'arch5_bak_' + id;
 function dbCount(db) {
   if (!db || typeof db !== 'object') return 0;
   let n = 0;
-  ['insights','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings']
+  ['insights','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings']
     .forEach(c => { if (Array.isArray(db[c])) n += db[c].length; });
   return n;
 }
@@ -2601,6 +2603,160 @@ function bodySectionHTML() {
   return html;
 }
 
+// ─── АСТРОЛОГИЯ (западная тропическая, MVP по Master Spec) ─────────
+// Изолированный СИМВОЛИЧЕСКИЙ домен, explicit opt-in. Расчёт — vendored
+// MIT-движок astronomy-engine (lazy-load; Swiss Ephemeris заблокирован до
+// лицензии — правило 18 Master Spec). Геоцентрические видимые эклиптические
+// долготы of date (tropical). Правила: неизвестное время рождения → БЕЗ
+// домов/Asc (полдень не подставляем); UTC-офсет вводится явно (без
+// угадывания по Intl); знак — полуоткрытый 30°-интервал по неокруглённому
+// значению; каждый расчёт хранит версии движка/правил/орбисов.
+// ИЗОЛЯЦИЯ: данные астрологии НЕ участвуют в cravingRisk, health, психологии,
+// readiness и прогнозах — только отдельно помеченный символический контекст.
+const ASTRO_VERSIONS = { engine: 'astronomy-engine@2.1.19', ruleset: 'western-tropical-v1', orbPolicy: 'orbs-v1(con8,opp8,tri7,sq7,sex5)', houses: 'whole-sign' };
+const ZODIAC = ['Овен','Телец','Близнецы','Рак','Лев','Дева','Весы','Скорпион','Стрелец','Козерог','Водолей','Рыбы'];
+const ASTRO_BODIES = ['Sun','Moon','Mercury','Venus','Mars','Jupiter','Saturn','Uranus','Neptune','Pluto'];
+const ASTRO_RU = { Sun:'Солнце', Moon:'Луна', Mercury:'Меркурий', Venus:'Венера', Mars:'Марс', Jupiter:'Юпитер', Saturn:'Сатурн', Uranus:'Уран', Neptune:'Нептун', Pluto:'Плутон' };
+const ASTRO_ASPECTS = [
+  { name: 'соединение', angle: 0, orb: 8 }, { name: 'оппозиция', angle: 180, orb: 8 },
+  { name: 'трин', angle: 120, orb: 7 }, { name: 'квадрат', angle: 90, orb: 7 }, { name: 'секстиль', angle: 60, orb: 5 },
+];
+function zodiacOf(lon) { const L = ((lon % 360) + 360) % 360; return { sign: ZODIAC[Math.floor(L / 30)], deg: L % 30, lon: L }; }
+// Ленивая загрузка движка (только при использовании астрологии — opt-in).
+let _astroLoad = null;
+function loadAstroEngine() {
+  if (window.Astronomy) return Promise.resolve();
+  if (_astroLoad) return _astroLoad;
+  _astroLoad = new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'astronomy.min.js';
+    sc.onload = () => res();
+    sc.onerror = () => { _astroLoad = null; rej(new Error('движок не загрузился')); };
+    document.head.appendChild(sc);
+  });
+  return _astroLoad;
+}
+// Расчёт натальной карты по birth evidence. Чистая функция от (birth, Astronomy).
+function computeNatalChart(birth) {
+  const A = window.Astronomy;
+  if (!A) throw new Error('движок не загружен');
+  // Явный UTC-офсет пользователя; неизвестное время → полдень НЕ подставляем,
+  // считаем только долготы планет на дату (суточная погрешность — честно видима).
+  const timePart = birth.timeKnown ? birth.time : '12:00';
+  const utc = new Date(Date.parse(birth.date + 'T' + timePart + ':00Z') - (birth.utcOffset || 0) * 3600e3);
+  const t = A.MakeTime(utc);
+  const planets = ASTRO_BODIES.map(b => {
+    let lon, speed;
+    if (b === 'Sun') { const s = A.SunPosition(t); lon = s.elon; speed = 1; }
+    else if (b === 'Moon') { lon = A.EclipticGeoMoon(t).lon; speed = 13; }
+    else {
+      lon = A.Ecliptic(A.GeoVector(A.Body[b], t, true)).elon;
+      const lon2 = A.Ecliptic(A.GeoVector(A.Body[b], A.MakeTime(new Date(utc.getTime() + 864e5)), true)).elon;
+      speed = ((lon2 - lon + 540) % 360) - 180;   // градусов/сутки, знак = директность
+    }
+    const z = zodiacOf(lon);
+    return { body: b, name: ASTRO_RU[b], lon: z.lon, sign: z.sign, deg: z.deg, retro: speed < 0 };
+  });
+  // Asc/MC + дома whole-sign: только при известном времени И координатах.
+  let angles = null, houses = null;
+  if (birth.timeKnown && isFinite(birth.lat) && isFinite(birth.lon)) {
+    const obs = new A.Observer(birth.lat, birth.lon, 0);
+    const gast = A.SiderealTime(t);                       // Greenwich apparent sidereal time, часы
+    const lst = (gast * 15 + birth.lon + 360) % 360;      // местное звёздное время, градусы
+    const eps = 23.4392911 * Math.PI / 180;               // наклон эклиптики (достаточно для MVP)
+    const ramc = lst * Math.PI / 180;
+    const mcLon = ((Math.atan2(Math.tan(ramc), Math.cos(eps)) * 180 / Math.PI) + 360) % 360;
+    const mc = (Math.abs(((mcLon - lst + 540) % 360) - 180) < 90) ? (mcLon + 180) % 360 : mcLon;
+    const phi = birth.lat * Math.PI / 180;
+    const ascRad = Math.atan2(Math.cos(ramc), -(Math.sin(ramc) * Math.cos(eps) + Math.tan(phi) * Math.sin(eps)));
+    const asc = ((ascRad * 180 / Math.PI) + 360) % 360;
+    angles = { asc: zodiacOf(asc), mc: zodiacOf(mc) };
+    const ascSignIdx = Math.floor(zodiacOf(asc).lon / 30);
+    houses = planets.map(p => ({ body: p.body, house: ((Math.floor(p.lon / 30) - ascSignIdx + 12) % 12) + 1 }));
+  }
+  // Мажорные аспекты между планетами (версионированная orb policy v1).
+  const aspects = [];
+  for (let i = 0; i < planets.length; i++) for (let j = i + 1; j < planets.length; j++) {
+    const d = Math.abs(((planets[i].lon - planets[j].lon + 540) % 360) - 180);
+    const sep = 180 - d;   // угловое расстояние 0..180
+    for (const asp of ASTRO_ASPECTS) {
+      if (Math.abs(sep - asp.angle) <= asp.orb) { aspects.push({ a: planets[i].name, b: planets[j].name, name: asp.name, exact: Math.abs(sep - asp.angle).toFixed(1) }); break; }
+    }
+  }
+  return { planets, angles, houses, aspects, timeKnown: !!birth.timeKnown, versions: { ...ASTRO_VERSIONS } };
+}
+function saveAstroBirth() {
+  const date = ($('ab-date') ? $('ab-date').value : '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast('Дата в формате ГГГГ-ММ-ДД', 'warn'); return; }
+  const timeKnown = $('ab-time-known') ? $('ab-time-known').classList.contains('on') : false;
+  const time = ($('ab-time') ? $('ab-time').value : '').trim();
+  if (timeKnown && !/^\d{2}:\d{2}$/.test(time)) { toast('Время в формате ЧЧ:ММ', 'warn'); return; }
+  const utcOffset = parseFloat($('ab-utc') ? $('ab-utc').value : '0') || 0;
+  const lat = parseFloat($('ab-lat') ? $('ab-lat').value : ''); const lon = parseFloat($('ab-lon') ? $('ab-lon').value : '');
+  DB.astroBirth = {
+    kType: 'birth_evidence', privacyClass: 'sensitive',
+    date, time: timeKnown ? time : '', timeKnown, utcOffset,
+    place: ($('ab-place') ? $('ab-place').value : '').trim(),
+    lat: isFinite(lat) ? lat : null, lon: isFinite(lon) ? lon : null,
+    verif: 'user_confirmed', life: 'current', createdAt: nowISO(), sv: SCHEMA_VERSION, _u: Date.now(),
+  };
+  persist(); toast('Данные рождения сохранены', 'ok');
+  runNatalChart();
+}
+async function runNatalChart() {
+  const b = DB.astroBirth;
+  if (!b) { toast('Сначала заполни данные рождения', 'warn'); return; }
+  const out = $('astro-out'); if (out) out.innerHTML = '<div class="ai-sp-empty">Считаю карту…</div>';
+  try {
+    await loadAstroEngine();
+    const chart = computeNatalChart(b);
+    DB.astroCharts.push({
+      id: Date.now(), kType: 'symbolic_astrology_annotation', privacyClass: 'sensitive',
+      chart, verif: 'user_confirmed', life: 'current',
+      createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+    });
+    persist(); rAstroChart(chart);
+  } catch (e) {
+    if (out) out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать (нет сети для загрузки движка?). Попробуй ещё раз.</div>';
+  }
+}
+function rAstroChart(chart) {
+  const out = $('astro-out'); if (!out) return;
+  if (!chart) { const last = (DB.astroCharts || []).slice(-1)[0]; chart = last && last.chart; }
+  if (!chart) { out.innerHTML = ''; return; }
+  let html = '<div class="f-lbl" style="margin-top:.5rem">Планеты в знаках</div>';
+  html += chart.planets.map(p => {
+    const h = chart.houses ? (chart.houses.find(x => x.body === p.body) || {}).house : null;
+    return `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°${p.retro ? ' ℞' : ''}${h ? ` · ${h}-й дом` : ''}</div></div></div>`;
+  }).join('');
+  if (chart.angles) {
+    html += `<div class="f-lbl" style="margin-top:.5rem">Углы</div>
+      <div class="si-row"><div class="si-body"><div class="si-text">Асцендент — ${esc(chart.angles.asc.sign)} ${chart.angles.asc.deg.toFixed(1)}° · MC — ${esc(chart.angles.mc.sign)} ${chart.angles.mc.deg.toFixed(1)}°</div></div></div>`;
+  } else if (!chart.timeKnown) {
+    html += `<div class="si-text" style="color:var(--t3);margin:.4rem 0">Время рождения не указано — асцендент и дома не рассчитываются (полдень не подставляем; позиции планет даны на дату, Луна может отличаться в пределах суток).</div>`;
+  }
+  if (chart.aspects.length) {
+    html += '<div class="f-lbl" style="margin-top:.5rem">Мажорные аспекты</div>' +
+      chart.aspects.slice(0, 12).map(a => `<div class="si-row"><div class="si-body"><div class="si-text">${esc(a.a)} ${esc(a.name)} ${esc(a.b)} (орб ${a.exact}°)</div></div></div>`).join('');
+  }
+  html += `<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Символическая интерпретация в западной тропической традиции. Не прогноз, не диагноз, не влияет на остальные разделы. ${esc(chart.versions.engine)} · ${esc(chart.versions.ruleset)}</div>`;
+  out.innerHTML = html;
+}
+function openAstro() {
+  const b = DB.astroBirth;
+  if (b) {
+    if ($('ab-date')) $('ab-date').value = b.date || '';
+    if ($('ab-time')) $('ab-time').value = b.time || '';
+    const tk = $('ab-time-known'); if (tk) tk.classList.toggle('on', !!b.timeKnown);
+    if ($('ab-utc')) $('ab-utc').value = String(b.utcOffset || 0);
+    if ($('ab-place')) $('ab-place').value = b.place || '';
+    if ($('ab-lat')) $('ab-lat').value = b.lat == null ? '' : String(b.lat);
+    if ($('ab-lon')) $('ab-lon').value = b.lon == null ? '' : String(b.lon);
+  }
+  openOv('ov-astro');
+  rAstroChart();
+}
+
 // Мягкое напоминание на «Сегодня»: по каким активным планам сегодня ещё не
 // отмечен приём. Только по плану, заданному пользователем; не медицина.
 function rMedReminder() {
@@ -4315,7 +4471,7 @@ function genRecoveryKey() {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','bots','digests','spheres','sphereLogs','chats','cravings'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','bots','digests','spheres','sphereLogs','chats','cravings'];
 function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
 function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
 const _ru = r => r._u || r.id || 0;   // «когда обновлено» с откатом на id (id = Date.now())

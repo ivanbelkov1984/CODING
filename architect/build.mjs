@@ -17,7 +17,8 @@ import { createHash } from 'crypto';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 // lucide.js — самохостинг иконок (без внешнего CDN); копируется рядом с HTML.
-const STATIC = ['lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2', 'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon-180.png'];
+// astronomy.min.js — vendored MIT-движок астрорасчётов (lazy-load, только при opt-in).
+const STATIC = ['lucide.js', 'astronomy.min.js', 'inter-latin.woff2', 'inter-cyrillic.woff2', 'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon-180.png'];
 // ESM-модули зашифрованного backup — копируются рядом с HTML в dist/backup/,
 // грузятся приложением по HTTP (без CDN, без Node-рантайма). index.html делает
 // import('./backup/backup-boot.mjs'); sw.js кэширует их в app shell.
@@ -32,7 +33,7 @@ async function copyBackup(outDir) {
 // новую версию кэша. Гармонично с уже работающим механизмом sw.js.
 async function contentVersion() {
   const h = createHash('sha256');
-  for (const f of ['index.html', 'styles.css', 'app.js', 'sw.js', 'lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) h.update(await readFile(join(DIR, f)));
+  for (const f of ['index.html', 'styles.css', 'app.js', 'sw.js', 'lucide.js', 'astronomy.min.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) h.update(await readFile(join(DIR, f)));
   // Изменение любого backup-модуля тоже должно давать новую версию кэша.
   for (const f of BACKUP_MODULES) h.update(await readFile(join(DIR, 'backup', f)));
   return 'v' + h.digest('hex').slice(0, 10);
@@ -61,7 +62,7 @@ async function main() {
     await writeFile(out, await buildCombined());
     // рядом с HTML — для локальных ссылок (иконки + шрифт) + ESM-модули backup,
     // чтобы combined-артефакт реально грузил backup по HTTP (не только собирался).
-    for (const f of ['lucide.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) await copyFile(join(DIR, f), join(dirname(out), f));
+    for (const f of ['lucide.js', 'astronomy.min.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) await copyFile(join(DIR, f), join(dirname(out), f));
     await copyBackup(dirname(out));
     console.log('combined →', out);
     return;
