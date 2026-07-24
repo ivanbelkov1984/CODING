@@ -1180,18 +1180,23 @@ const followup = await page.evaluate(() => {
   DB.whys = [{ id: 8881, symptom: 'проверочный симптом', action: 'сделать шаг',
     kType: 'process_reflection', verif: 'user_confirmed', life: 'current',
     createdAt: new Date().toISOString(), day: new Date().toISOString().slice(0, 10), sv: 2, _u: Date.now() }];
+  DB.corrections = [];
   rWhys();
   openWhy(8881);
   const hasFollowup = /ты сделал это/i.test(document.getElementById('why-det-body').textContent || '');
   markWhyAction(true);
   const active = localStorage.getItem('arch5_active');
   const db = JSON.parse(localStorage.getItem('arch5_db_' + active) || '{}');
-  const rec = (db.whys || []).find(w => w && w.id === 8881) || {};
+  // Через ядро: оригинал в db.whys НЕ мутирован, отметка живёт в коррекции.
+  const raw = (db.whys || []).find(w => w && w.id === 8881) || {};
+  const corr = (db.corrections || []).find(c => c && c.coll === 'whys' && c.targetId === 8881) || {};
+  const projected = proj('whys', DB.whys.find(w => w.id === 8881));
   const listMark = /✓/.test(document.getElementById('h-whys').textContent || '');
-  return { hasFollowup, done: rec.actionDone === true, checked: !!rec.checkedAt, listMark };
+  return { hasFollowup, origUntouched: raw.actionDone === undefined, corrSaved: corr.patch && corr.patch.actionDone === true, projDone: projected.actionDone === true, listMark };
 });
 ok(followup.hasFollowup, '«Зачем?» проверка: раздел «ты сделал это?» показан при наличии действия');
-ok(followup.done && followup.checked && followup.listMark, '«Зачем?» проверка: действие отмечено сделанным (сохранено + ✓ в списке)');
+ok(followup.origUntouched && followup.corrSaved, 'ядро: оригинал разбора не мутирован — отметка сохранена как append-only коррекция');
+ok(followup.projDone && followup.listMark, 'ядро: проекция применяет коррекцию (✓ в списке через projected-значение)');
 await page.evaluate(() => { goTo('home'); });
 
 // ── История состояний (моменты + разборы одним списком) ──
@@ -1247,6 +1252,42 @@ const psg = await page.evaluate(() => {
 ok(psg.blocked, 'privacy-гейт: без фразы и без согласия синк заблокирован');
 ok(psg.allowed, 'privacy-гейт: явное согласие пропускает и запоминается');
 ok(psg.e2ee, 'privacy-гейт: с парольной фразой (E2EE) вопросов нет');
+
+// ── Evidence Kernel: коррекции момента + проекция + backfill ──
+const kernel = await page.evaluate(() => {
+  const iso = new Date().toISOString(), day = iso.slice(0, 10);
+  DB.moments = [{ id: 9301, valence: 20, activation: 20, kType: 'self_report', verif: 'unverified', life: 'current', createdAt: iso, day, sv: 2, _u: Date.now() }];
+  DB.whys = []; DB.corrections = [];
+  STATE.momDetId = 9301;
+  // Исправление через prompt → correction
+  const origPrompt = window.prompt; let call = 0;
+  window.prompt = () => (++call === 1 ? '90' : '70');
+  correctMoment();
+  window.prompt = origPrompt;
+  const raw = DB.moments[0];
+  const p = proj('moments', raw);
+  rWeekSummary();
+  const weekTxt = document.getElementById('h-week').textContent || '';
+  // Backfill идемпотентен: старая запись без verif получает паспорт, повторный прогон без изменений
+  DB.insights.push({ id: 9302, title: 'старая', body: 'x', createdAt: iso, day, sv: 2, _u: Date.now() });
+  migrateRecords();
+  const after1 = JSON.stringify(DB.insights.find(i => i.id === 9302));
+  migrateRecords();
+  const after2 = JSON.stringify(DB.insights.find(i => i.id === 9302));
+  const bf = DB.insights.find(i => i.id === 9302);
+  DB.insights = DB.insights.filter(i => i.id !== 9302);
+  return {
+    origIntact: raw.valence === 20 && raw.activation === 20,
+    projApplied: p.valence === 90 && p.activation === 70 && p._corrected === 1,
+    weekUsesProj: /приятность 90%/.test(weekTxt) && /энергия 70%/.test(weekTxt),
+    backfilled: bf.verif === 'unverified' && bf.life === 'current',
+    idempotent: after1 === after2,
+  };
+});
+ok(kernel.origIntact && kernel.projApplied, 'ядро: исправление момента не мутирует оригинал, проекция даёт новые значения');
+ok(kernel.weekUsesProj, 'ядро: сводка «За неделю» считает по исправленным (projected) значениям');
+ok(kernel.backfilled && kernel.idempotent, 'ядро: backfill паспорта на старые записи идемпотентен');
+await page.evaluate(() => { DB.moments = []; DB.corrections = []; goTo('home'); });
 
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);

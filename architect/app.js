@@ -58,6 +58,7 @@ const DEFAULT_DB = {
   checkins: [],
   moments: [],        // Momentary State: быстрый двухосевой ввод «здесь и сейчас» (valence×activation)
   whys: [],           // метод «Зачем?»: симптом→функция→выгода→потребность→цена→альтернатива→действие
+  corrections: [],    // Evidence Kernel: append-only исправления записей (оригинал неизменен)
   spheres: [],        // пользовательские сферы жизни (тип трекера у каждой)
   sphereLogs: [],     // дневные записи по сферам: {sphereId, date, value, note}
   bots: [
@@ -148,7 +149,7 @@ const bakKey = id => 'arch5_bak_' + id;
 function dbCount(db) {
   if (!db || typeof db !== 'object') return 0;
   let n = 0;
-  ['insights','checkins','moments','whys','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings']
+  ['insights','checkins','moments','whys','corrections','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings']
     .forEach(c => { if (Array.isArray(db[c])) n += db[c].length; });
   return n;
 }
@@ -259,6 +260,9 @@ function migrateRecords() {
         r.sv = SCHEMA_VERSION;
         changed = true;
       }
+      // Evidence Kernel: backfill «паспорта данных» (идемпотентно, без потерь).
+      // Старые записи без пометки читаются как непроверенные и действующие.
+      if (r && typeof r === 'object' && !r.verif) { r.verif = 'unverified'; r.life = r.life || 'current'; changed = true; }
     });
   });
   // Заголовки, начинавшиеся с вопроса-промпта, переименовываем в суть ответа
@@ -1974,6 +1978,37 @@ function saveCI() {
   try { rVector(); } catch (e) {}
 }
 
+// ─── EVIDENCE KERNEL (ядро «паспорта данных») ────────────────────
+// Правило ядра: оригинал записи неизменен (immutable). Исправление — это
+// отдельное append-only событие в DB.corrections; «текущее принятое» значение
+// вычисляется проекцией при чтении (оригинал ⊕ коррекции по порядку времени).
+// Так исправления не теряют историю, синкаются как обычные записи и не могут
+// молча подменить факт.
+function addCorrection(coll, targetId, patch, reason) {
+  if (!coll || targetId == null || !patch || typeof patch !== 'object') return null;
+  const c = {
+    id: Date.now() + Math.floor(Math.random() * 1000),
+    kType: 'correction', coll, targetId, patch: { ...patch }, reason: reason || '',
+    createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+  };
+  if (!Array.isArray(DB.corrections)) DB.corrections = [];
+  DB.corrections.push(c);
+  persist();
+  return c;
+}
+// Проекция записи: оригинал + все её коррекции (по времени). Оригинал не мутируется.
+function proj(coll, rec) {
+  if (!rec || rec.id == null) return rec;
+  const cs = (DB.corrections || []).filter(c => c && c.coll === coll && c.targetId === rec.id);
+  if (!cs.length) return rec;
+  cs.sort((a, b) => (Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0));
+  const out = { ...rec };
+  cs.forEach(c => Object.assign(out, c.patch));
+  out._corrected = cs.length;
+  return out;
+}
+const projAll = (coll) => (DB[coll] || []).map(r => proj(coll, r));
+
 // ─── MOMENTARY STATE ─────────────────────────────────────────────
 // Быстрый двухосевой ввод состояния «здесь и сейчас»: приятность (valence)
 // × энергия (activation), опц. эмоция и заметка. Отдельный от дневного
@@ -2019,7 +2054,7 @@ function saveMoment() {
 function momentLabel(v) { return v >= 75 ? 'высокая' : v >= 50 ? 'средняя' : v >= 25 ? 'ниже средней' : 'низкая'; }
 // Просмотр сохранённого «Момента» (полностью) + удаление.
 function openMoment(id) {
-  const m = (DB.moments || []).find(x => x && x.id === id); if (!m) return;
+  const m = projAll('moments').find(x => x && x.id === id); if (!m) return;
   STATE.momDetId = id;
   const t = new Date(m.createdAt);
   const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
@@ -2030,7 +2065,15 @@ function openMoment(id) {
   if (m.emo) rows.push(['Эмоция', m.emo]);
   if (m.note) rows.push(['Заметка', m.note]);
   const body = $('mom-det-body');
-  if (body) body.innerHTML = rows.map(([lbl, v]) => `<div style="margin-bottom:.6rem"><div class="f-lbl">${lbl}</div><div class="si-text">${esc(v)}</div></div>`).join('');
+  if (body) {
+    let html = rows.map(([lbl, v]) => `<div style="margin-bottom:.6rem"><div class="f-lbl">${lbl}</div><div class="si-text">${esc(v)}</div></div>`).join('');
+    // Паспорт данных: показать, что запись исправлялась (оригинал сохранён).
+    if (m._corrected) {
+      const orig = (DB.moments || []).find(x => x && x.id === id) || {};
+      html += `<div class="si-text" style="color:var(--t3);font-size:.85em">исправлено (${m._corrected}) · оригинал: приятность ${Math.round(orig.valence || 0)}, энергия ${Math.round(orig.activation || 0)}</div>`;
+    }
+    body.innerHTML = html;
+  }
   const dt = $('mom-det-date'); if (dt) dt.textContent = (m.day || '') + ' · ' + hh;
   openOv('ov-moment-det');
 }
@@ -2044,7 +2087,7 @@ function deleteMomentDet() {
 // Только описание наблюдаемого окна (DescriptiveState), без прогноза.
 function rMomentTrend() {
   const el = $('h-moment-trend'); if (!el) return;
-  const moments = DB.moments || [];
+  const moments = projAll('moments');
   const dayKey = ms => new Date(ms).toISOString().slice(0, 10);
   const now = Date.now();
   const days = []; for (let i = 13; i >= 0; i--) days.push(dayKey(now - i * 864e5));
@@ -2077,7 +2120,7 @@ function rMomentTrend() {
 function rHomeMoments() {
   const el = $('h-moments'); if (!el) return;
   const today = todayKey();
-  const list = (DB.moments || []).filter(m => m && m.day === today).slice(-5).reverse();
+  const list = projAll('moments').filter(m => m && m.day === today).slice(-5).reverse();
   if (!list.length) { el.innerHTML = ''; return; }
   el.innerHTML = '<div class="sec-lbl">Моменты сегодня</div><div class="card mx mb">' +
     list.map(m => {
@@ -2111,7 +2154,7 @@ function saveWhy() {
 }
 function rWhys() {
   const el = $('h-whys'); if (!el) return;
-  const list = (DB.whys || []).slice(-3).reverse();
+  const list = projAll('whys').slice(-3).reverse();
   if (!list.length) { el.innerHTML = ''; return; }
   el.innerHTML = '<div class="sec-lbl">Разборы «Зачем?»</div><div class="card mx mb">' +
     list.map(w => {
@@ -2125,7 +2168,7 @@ function rWhys() {
 // Просмотр сохранённого разбора «Зачем?» (полная цепочка) + удаление.
 const WHY_LABELS = { symptom:'Симптом', function:'Функция', gain:'Вторичная выгода', need:'Потребность', cost:'Цена', alternative:'Альтернатива', action:'Действие' };
 function openWhy(id) {
-  const w = (DB.whys || []).find(x => x && x.id === id); if (!w) return;
+  const w = projAll('whys').find(x => x && x.id === id); if (!w) return;
   STATE.whyDetId = id;
   const rows = WHY_FIELDS.map(k => [WHY_LABELS[k], w[k]]).filter(([, v]) => v && String(v).trim());
   const body = $('why-det-body');
@@ -2154,7 +2197,7 @@ function rWeekSummary() {
   const el = $('h-week'); if (!el) return;
   const now = Date.now(), wk = 7 * 864e5;
   const recent = arr => (arr || []).filter(x => x && (now - (Date.parse(x.createdAt) || 0)) <= wk);
-  const mo = recent(DB.moments), wh = recent(DB.whys);
+  const mo = recent(projAll('moments')), wh = recent(projAll('whys'));
   if (!mo.length && !wh.length) { el.innerHTML = ''; return; }
   const avg = (a, k) => a.length ? Math.round(a.reduce((s, x) => s + (x[k] || 0), 0) / a.length) : 0;
   const done = wh.filter(w => w.actionDone === true).length;
@@ -2168,8 +2211,8 @@ function rWeekSummary() {
 function rHistory() {
   const el = $('history-list'); if (!el) return;
   const items = [];
-  (DB.moments || []).forEach(m => { if (m && m.id) items.push({ t: 'moment', at: Date.parse(m.createdAt) || 0, rec: m }); });
-  (DB.whys || []).forEach(w => { if (w && w.id) items.push({ t: 'why', at: Date.parse(w.createdAt) || 0, rec: w }); });
+  projAll('moments').forEach(m => { if (m && m.id) items.push({ t: 'moment', at: Date.parse(m.createdAt) || 0, rec: m }); });
+  projAll('whys').forEach(w => { if (w && w.id) items.push({ t: 'why', at: Date.parse(w.createdAt) || 0, rec: w }); });
   items.sort((a, b) => b.at - a.at);
   if (!items.length) { el.innerHTML = '<div class="bk-empty" style="padding:1rem">Здесь появятся твои моменты и разборы «Зачем?».</div>'; return; }
   el.innerHTML = items.slice(0, 200).map(it => {
@@ -2187,11 +2230,26 @@ function rHistory() {
 function markWhyAction(done) {
   const id = STATE.whyDetId;
   const w = (DB.whys || []).find(x => x && x.id === id); if (!w) return;
-  w.actionDone = done;
-  w.checkedAt = (done == null) ? '' : nowISO();
-  w._u = Date.now();
-  persist(); openWhy(id); try { rWhys(); } catch (e) {}
+  // Через ядро: оригинал разбора неизменен, отметка — append-only коррекция.
+  addCorrection('whys', id, { actionDone: done, checkedAt: (done == null) ? '' : nowISO() }, 'проверка результата');
+  openWhy(id); try { rWhys(); } catch (e) {}
   if (done != null) { hptMed(); toast(done ? 'Отмечено: сделано' : 'Отмечено', 'ok'); }
+}
+// Исправление момента через ядро: оригинал неизменен, правка — коррекция.
+function correctMoment() {
+  const id = STATE.momDetId; if (id == null) return;
+  const cur = projAll('moments').find(x => x && x.id === id); if (!cur) return;
+  const val = prompt('Приятность (0–100):', String(Math.round(cur.valence)));
+  if (val == null) return;
+  const act = prompt('Энергия (0–100):', String(Math.round(cur.activation)));
+  if (act == null) return;
+  const v = Math.max(0, Math.min(100, parseInt(val, 10)));
+  const a = Math.max(0, Math.min(100, parseInt(act, 10)));
+  if (!isFinite(v) || !isFinite(a)) { toast('Нужны числа 0–100', 'warn'); return; }
+  addCorrection('moments', id, { valence: v, activation: a }, 'исправление пользователем');
+  openMoment(id);
+  try { rHomeMoments(); rMomentTrend(); rWeekSummary(); } catch (e) {}
+  toast('Исправлено (оригинал сохранён в истории)', 'ok');
 }
 function deleteWhyDet() {
   const id = STATE.whyDetId; if (id == null) return;
@@ -4069,7 +4127,7 @@ function genRecoveryKey() {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','bots','digests','spheres','sphereLogs','chats','cravings'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','bots','digests','spheres','sphereLogs','chats','cravings'];
 function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
 function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
 const _ru = r => r._u || r.id || 0;   // «когда обновлено» с откатом на id (id = Date.now())
