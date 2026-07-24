@@ -320,16 +320,38 @@
     </div>
   </div>
 
-  <!-- Экран «Прогрессии и дирекции» -->
+  <!-- Экран «Прогрессии и дирекции» (3.3: сегменты + возраст + bi-wheel) -->
   <div class="asub" id="as-prog" style="display:none">
     <button class="as-back" onclick="asub('menu')">‹ Астрология</button>
-    <div style="padding:0 1rem 1rem"><div id="astro-prog"></div></div>
+    <div style="padding:0 1rem 1rem">
+      <div class="astro-tabs" id="astro-ptabs" style="padding:0 0 .5rem">
+        <button class="snpill on" data-ps="secondary" onclick="psub('secondary')">Вторичные</button>
+        <button class="snpill" data-ps="solararc" onclick="psub('solararc')">Солнечная дуга</button>
+        <button class="snpill" data-ps="profection" onclick="psub('profection')">Профекции</button>
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:flex-end;margin-bottom:.5rem">
+        <div style="flex:1"><div class="f-lbl">Возраст (лет)</div><input class="field" id="astro-prog-age" placeholder="текущий"></div>
+        <button class="btn btn-s" style="flex:1" onclick="rPrognostics()"><i data-lucide="fast-forward"></i>Рассчитать</button>
+      </div>
+      <div id="astro-prog-wheel"></div>
+      <div id="astro-prog"></div>
+    </div>
   </div>
 
-  <!-- Экран «Возвращения» -->
+  <!-- Экран «Возвращения» (3.4: тип + период + колесо + аспекты к наталу) -->
   <div class="asub" id="as-ret" style="display:none">
     <button class="as-back" onclick="asub('menu')">‹ Астрология</button>
-    <div style="padding:0 1rem 1rem"><div id="astro-ret"></div></div>
+    <div style="padding:0 1rem 1rem">
+      <div style="display:flex;gap:.5rem;align-items:flex-end;margin-bottom:.5rem">
+        <div style="flex:1"><div class="f-lbl">Тип</div><select class="field" id="astro-ret-type" onchange="rReturns()">
+          <option value="solar">Соляр (год)</option><option value="lunar">Лунар (месяц)</option>
+        </select></div>
+        <div style="flex:1"><div class="f-lbl" id="astro-ret-plbl">Год</div><input class="field" id="astro-ret-period" placeholder="текущий"></div>
+        <button class="btn btn-s" style="flex:1" onclick="rReturns()"><i data-lucide="rotate-cw"></i>Найти</button>
+      </div>
+      <div id="astro-ret-wheel"></div>
+      <div id="astro-ret"></div>
+    </div>
   </div>
 
   <!-- Экран «Астероиды и точки» -->
@@ -351,16 +373,22 @@
     </div>
   </div>
 
-  <!-- Экран «Ведическая карта» -->
+  <!-- Экран «Ведическая карта» (3.5: сетка South Indian + табы) -->
   <div class="asub" id="as-jyo" style="display:none">
     <button class="as-back" onclick="asub('menu')">‹ Астрология</button>
     <div style="padding:0 1rem 1rem">
-      <div style="display:flex;gap:.5rem;align-items:flex-end;margin-bottom:.75rem">
+      <div style="display:flex;gap:.5rem;align-items:flex-end;margin-bottom:.5rem">
         <div style="flex:1"><div class="f-lbl">Айанамша</div><select class="field" id="astro-aya" onchange="rJyotish()">
           <option value="lahiri">Лахири</option><option value="raman">Раман</option>
           <option value="kp">Кришнамурти</option><option value="fagan">Фаган-Брэдли</option>
           <option value="yukteshwar">Юктешвар</option>
         </select></div>
+      </div>
+      <div class="astro-tabs" id="astro-jtabs" style="padding:0 0 .5rem">
+        <button class="snpill on" data-jt="rashi" onclick="jtab('rashi')">Раши D1</button>
+        <button class="snpill" data-jt="navamsha" onclick="jtab('navamsha')">Навамша D9</button>
+        <button class="snpill" data-jt="dasha" onclick="jtab('dasha')">Даши</button>
+        <button class="snpill" data-jt="panchanga" onclick="jtab('panchanga')">Панчанга</button>
       </div>
       <div id="astro-jyo"></div>
     </div>

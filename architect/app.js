@@ -3030,6 +3030,22 @@ async function rPartsStars() {
   } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
 }
 
+// Сетка South Indian: фиксированные позиции знаков (по часовой от Овна).
+// North Indian стиль — отложен (задокументировано в README).
+const SOUTH_GRID = [['Рыбы', 'Овен', 'Телец', 'Близнецы'], ['Водолей', null, null, 'Рак'], ['Козерог', null, null, 'Лев'], ['Стрелец', 'Скорпион', 'Весы', 'Дева']];
+const JYO_ABBR = { Sun: 'Сл', Moon: 'Лн', Mercury: 'Ме', Venus: 'Ве', Mars: 'Ма', Jupiter: 'Юп', Saturn: 'Са', Uranus: 'Ур', Neptune: 'Не', Pluto: 'Пл' };
+const DASHA_THEMES = { 'Кету': 'отпускание и глубинный опыт', 'Венера': 'отношения и чувство ценного', 'Солнце': 'ясность и самовыражение', 'Луна': 'чувства и забота', 'Марс': 'энергия и решимость', 'Раху': 'новизна и сильные желания', 'Юпитер': 'рост и смысл', 'Сатурн': 'структура и зрелость', 'Меркурий': 'учёба и связи' };
+function jyoGrid(placed) {   // placed: { 'Овен': ['Сл','Лн'], … }
+  return '<div class="jyo-grid">' + SOUTH_GRID.map(row => row.map(sign => {
+    if (!sign) return '<div class="jyo-cell jyo-empty"></div>';
+    const items = placed[sign] || [];
+    return `<div class="jyo-cell"><div class="jyo-sign">${esc(sign.slice(0, 3))}</div><div class="jyo-pl">${items.map(esc).join(' ')}</div></div>`;
+  }).join('')).join('') + '</div>';
+}
+function jtab(t) { STATE.jyoTab = t;
+  document.querySelectorAll('#astro-jtabs .snpill').forEach(p => p.classList.toggle('on', p.dataset.jt === t));
+  rJyotish();
+}
 async function rJyotish() {
   const out = $('astro-jyo'); if (!out) return;
   const last = (DB.astroCharts || []).slice(-1)[0];
@@ -3046,23 +3062,52 @@ async function rJyotish() {
     const rahu = norm360(meanRahuLon(t) - aya), ketu = norm360(rahu + 180);
     const moon = sid.find(p => p.body === 'Moon'), sun = sid.find(p => p.body === 'Sun');
     const dasha = vimshottariDasha(moon.lon, b0, new Date());
-    const pan = panchanga(sun.lon, moon.lon, new Date(b0.getTime() + (DB.astroBirth.utcOffset || 0) * 3600e3));
-    const yogas = jyotishYogas(sid);
-    let html = `<div class="f-lbl" style="margin-top:.5rem">Сидерические позиции (${esc(AYANAMSHAS[ayaKey].ru)}, айанамша ${aya.toFixed(2)}°)</div>` +
-      sid.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°${(ucchaBala(p.body, p.lon) != null) ? ' · уччабала ' + ucchaBala(p.body, p.lon) : ''}</div>`).join('') +
-      `<div class="si-text" style="color:var(--t3)">Раху (ср.): ${esc(RASHI[Math.floor(rahu / 30)])} ${(rahu % 30).toFixed(1)}° · Кету: ${esc(RASHI[Math.floor(ketu / 30)])} ${(ketu % 30).toFixed(1)}°</div>`;
-    html += `<div class="f-lbl" style="margin-top:.4rem">Накшатра Луны</div><div class="si-text">${esc(dasha.nakshatra)}, пада ${dasha.pada}</div>`;
-    html += `<div class="f-lbl" style="margin-top:.4rem">Панчанга рождения</div><div class="si-text" style="color:var(--t3)">Тити: ${esc(pan.tithiName)} (${pan.paksha}, №${pan.tithi}) · Вара: ${esc(pan.vara)} · Йога: №${pan.yoga} · Карана: ${esc(pan.karana)}</div>`;
-    const d9 = ['Sun', 'Moon'].map(b => { const p = sid.find(x => x.body === b); return `${esc(p.name)}: ${esc(RASHI[vargaSign(9, p.lon)])}`; }).join(' · ');
-    const d10 = ['Sun', 'Moon'].map(b => { const p = sid.find(x => x.body === b); return `${esc(p.name)}: ${esc(RASHI[vargaSign(10, p.lon)])}`; }).join(' · ');
-    html += `<div class="f-lbl" style="margin-top:.4rem">Варги</div><div class="si-text" style="color:var(--t3)">D9 (навамша): ${d9}</div><div class="si-text" style="color:var(--t3)">D10 (дашамша): ${d10}</div>`;
-    if (dasha.current) html += `<div class="f-lbl" style="margin-top:.4rem">Вимшоттари-даша</div><div class="si-text">Маха: <b>${esc(dasha.current.lord)}</b> (до ${dasha.current.to.toISOString().slice(0, 10)})${dasha.antar ? ` · Антар: ${esc(dasha.antar.lord)} (до ${dasha.antar.to.toISOString().slice(0, 10)})` : ''}</div>`;
-    if (yogas.length) html += `<div class="f-lbl" style="margin-top:.4rem">Йоги</div>` + yogas.map(y => `<div class="si-text" style="color:var(--t3)">${esc(y)}</div>`).join('');
-    html += '<div class="be-note" style="color:var(--t3)">Джйотиш — сидерическая традиция. Символическое; не прогноз и не диагноз. Айанамша — линейная аппроксимация (±минуты дуги); вара без коррекции на восход; D16–D60 и полная Шадбала — отложены.</div>';
+    const tab = STATE.jyoTab || 'rashi';
+    let html = '';
+    if (tab === 'rashi') {
+      // Сетка индексируется западными именами знаков (SOUTH_GRID) — кладём по индексу.
+      const placed = {};
+      const put = (idx, abbr, first) => { const k = ZODIAC[idx]; placed[k] = placed[k] || []; first ? placed[k].unshift(abbr) : placed[k].push(abbr); };
+      sid.forEach(p => put(Math.floor(p.lon / 30), JYO_ABBR[p.body] || p.name[0]));
+      put(Math.floor(rahu / 30), 'Ра'); put(Math.floor(ketu / 30), 'Ке');
+      if (last.chart.angles) put(Math.floor(norm360(last.chart.angles.asc.lon - aya) / 30), 'Лг', true);
+      html = `<div class="f-lbl">Раши D1 · South Indian (${esc(AYANAMSHAS[ayaKey].ru)}, айанамша ${aya.toFixed(2)}°)</div>` + jyoGrid(placed) +
+        sid.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°${(ucchaBala(p.body, p.lon) != null) ? ' · уччабала ' + ucchaBala(p.body, p.lon) : ''}</div>`).join('') +
+        `<div class="si-text" style="color:var(--t3)">Раху (ср.): ${esc(RASHI[Math.floor(rahu / 30)])} ${(rahu % 30).toFixed(1)}° · Кету: ${esc(RASHI[Math.floor(ketu / 30)])} ${(ketu % 30).toFixed(1)}°</div>` +
+        `<div class="si-text" style="margin-top:.3rem">Накшатра Луны: <b>${esc(dasha.nakshatra)}</b>, пада ${dasha.pada}</div>`;
+    }
+    if (tab === 'navamsha') {
+      const placed = {};
+      sid.forEach(p => { const s = ZODIAC[vargaSign(9, p.lon)]; (placed[s] = placed[s] || []).push(JYO_ABBR[p.body] || p.name[0]); });
+      html = '<div class="f-lbl">Навамша D9 · South Indian</div>' + jyoGrid(placed) +
+        `<div class="si-text" style="color:var(--t3)">D10 (дашамша): ` + ['Sun', 'Moon'].map(b => { const p = sid.find(x => x.body === b); return `${esc(p.name)} — ${esc(RASHI[vargaSign(10, p.lon)])}`; }).join(' · ') + '</div>' +
+        '<div class="si-text" style="color:var(--t3)">Также считаются: D7, D12 (D16–D60 отложены).</div>';
+    }
+    if (tab === 'dasha') {
+      if (dasha.current) {
+        const theme = DASHA_THEMES[dasha.current.lord];
+        html = `<div class="si-row"><div class="si-body"><div class="si-text"><b>Сейчас — маха-даша ${esc(dasha.current.lord)}</b> (до ${dasha.current.to.toISOString().slice(0, 10)})${theme ? `: большой период, окрашенный темой «${esc(theme)}»` : ''}.${dasha.antar ? ` Внутри — антардаша ${esc(dasha.antar.lord)} (до ${dasha.antar.to.toISOString().slice(0, 10)}).` : ''}</div></div></div>`;
+      }
+      html += '<div class="f-lbl" style="margin-top:.4rem">Полный цикл Вимшоттари (120 лет)</div>' +
+        dasha.seq.map(d => `<div class="si-text" style="color:${d === dasha.current ? 'var(--t1)' : 'var(--t3)'}">${esc(d.lord)}: ${d.from.toISOString().slice(0, 10)} — ${d.to.toISOString().slice(0, 10)}</div>`).join('');
+    }
+    if (tab === 'panchanga') {
+      const pan = panchanga(sun.lon, moon.lon, new Date(b0.getTime() + (DB.astroBirth.utcOffset || 0) * 3600e3));
+      const yogas = jyotishYogas(sid);
+      html = `<div class="f-lbl">Панчанга рождения</div><div class="si-text" style="color:var(--t3)">Тити: ${esc(pan.tithiName)} (${pan.paksha}, №${pan.tithi}) · Вара: ${esc(pan.vara)} · Йога: №${pan.yoga} · Карана: ${esc(pan.karana)}</div>`;
+      if (yogas.length) html += '<div class="f-lbl" style="margin-top:.4rem">Йоги</div>' + yogas.map(y => `<div class="si-text" style="color:var(--t3)">${esc(y)}</div>`).join('');
+    }
+    html += '<div class="be-note" style="color:var(--t3)">Джйотиш — сидерическая традиция. Символическое; не прогноз и не диагноз. Айанамша — линейная аппроксимация (±минуты дуги); вара без коррекции на восход; North Indian стиль, D16–D60 и полная Шадбала — отложены.</div>';
     out.innerHTML = html;
   } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
 }
 
+// Темы домов (для профекций и текстов; краткие, без предписаний).
+const HOUSE_THEMES = { 1: 'личность и начинания', 2: 'ресурсы и самоценность', 3: 'общение и учёба', 4: 'дом и корни', 5: 'творчество и радость', 6: 'уклад и мастерство', 7: 'партнёрство', 8: 'глубокие перемены', 9: 'смысл и горизонты', 10: 'призвание', 11: 'друзья и планы', 12: 'внутренний мир' };
+function psub(seg) { STATE.progSeg = seg;
+  document.querySelectorAll('#astro-ptabs .snpill').forEach(p => p.classList.toggle('on', p.dataset.ps === seg));
+  rPrognostics();
+}
 async function rPrognostics() {
   const out = $('astro-prog'); if (!out) return;
   const last = (DB.astroCharts || []).slice(-1)[0];
@@ -3070,18 +3115,40 @@ async function rPrognostics() {
   out.innerHTML = '<div class="ai-sp-empty">Считаю прогностику…</div>';
   try {
     await loadAstroEngine();
-    const now = new Date();
-    const sec = computeProgressions(DB.astroBirth, now, 'secondary');
-    const ter = computeProgressions(DB.astroBirth, now, 'tertiary');
-    const dir = computeDirections(last.chart, DB.astroBirth, now);
-    let html = `<div class="f-lbl" style="margin-top:.5rem">Вторичные прогрессии (возраст ${dir.ageYears.toFixed(1)})</div>` +
-      sec.planets.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
-    html += `<div class="f-lbl" style="margin-top:.4rem">Третичные прогрессии</div>` +
-      ter.planets.slice(0, 3).map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
-    html += `<div class="f-lbl" style="margin-top:.4rem">Дирекции</div>
-      <div class="si-text" style="color:var(--t3)">Солнечная дуга: ${dir.solarArc.toFixed(2)}° · Найбод: ${dir.naibod.toFixed(2)}°</div>` +
-      dir.directed.slice(0, 3).map(p => `<div class="si-text" style="color:var(--t3)">SA ${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
-    if (dir.profection) html += `<div class="si-text" style="color:var(--t3)">Профекция года (возраст ${dir.profection.age}): ${dir.profection.house}-й дом · ${esc(dir.profection.sign)}</div>`;
+    try { await loadAstroRules(); } catch (e) {}
+    const seg = STATE.progSeg || 'secondary';
+    // Возраст на момент расчёта: поле (лет) или текущий.
+    const ageIn = parseFloat($('astro-prog-age') && $('astro-prog-age').value);
+    const b0 = birthUTCDate(DB.astroBirth);
+    const at = isFinite(ageIn) && ageIn >= 0 ? new Date(b0.getTime() + ageIn * YEAR_DAYS * 864e5) : new Date();
+    const dir = computeDirections(last.chart, DB.astroBirth, at);
+    const wheelEl = $('astro-prog-wheel');
+    const R = window.ASTRO_RULES;
+    let html = '';
+    if (seg === 'secondary') {
+      const sec = computeProgressions(DB.astroBirth, at, 'secondary');
+      const ter = computeProgressions(DB.astroBirth, at, 'tertiary');
+      if (wheelEl) wheelEl.innerHTML = renderChartWheel(last.chart, { size: 340, static: true, transits: sec.planets });
+      html = `<div class="f-lbl">Вторичные прогрессии (возраст ${dir.ageYears.toFixed(1)}; снаружи колеса)</div>` +
+        sec.planets.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+      const ps = sec.planets.find(p => p.body === 'Sun');
+      if (R && ps && R.planetInSign.Sun[ps.sign]) html += `<div class="si-row" style="margin-top:.4rem"><div class="si-body"><div class="si-text"><b>Сейчас по символическому таймингу звучит тема (${esc(ps.sign)}):</b> ${esc(R.planetInSign.Sun[ps.sign])}</div></div></div>`;
+      html += `<div class="f-lbl" style="margin-top:.4rem">Третичные (1 день = 1 лунный месяц)</div>` +
+        ter.planets.slice(0, 3).map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+    }
+    if (seg === 'solararc') {
+      if (wheelEl) wheelEl.innerHTML = renderChartWheel(last.chart, { size: 340, static: true, transits: dir.directed });
+      html = `<div class="f-lbl">Солнечная дуга (возраст ${dir.ageYears.toFixed(1)}; снаружи колеса)</div>
+        <div class="si-text" style="color:var(--t3)">Дуга: ${dir.solarArc.toFixed(2)}° · Найбод: ${dir.naibod.toFixed(2)}°</div>` +
+        dir.directed.map(p => `<div class="si-text" style="color:var(--t3)">SA ${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+    }
+    if (seg === 'profection') {
+      if (wheelEl) wheelEl.innerHTML = '';
+      if (dir.profection) {
+        html = `<div class="f-lbl">Годовые профекции</div>
+          <div class="si-row"><div class="si-body"><div class="si-text"><b>Возраст ${dir.profection.age}: год ${dir.profection.house}-го дома (${esc(dir.profection.sign)}).</b> В фокусе года — ${esc(HOUSE_THEMES[dir.profection.house] || '')}. Хозяин года ведётся по знаку ${esc(dir.profection.sign)}.</div></div></div>`;
+      } else html = '<div class="ai-sp-empty">Профекции требуют известного времени рождения (нужен Асцендент).</div>';
+    }
     html += '<div class="be-note" style="color:var(--t3)">Символический тайминг (день=год; Найбод; эллинистические профекции). Не событие и не прогноз.</div>';
     out.innerHTML = html;
   } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
@@ -3090,24 +3157,43 @@ async function rReturns() {
   const out = $('astro-ret'); if (!out) return;
   const last = (DB.astroCharts || []).slice(-1)[0];
   if (!last || !DB.astroBirth) { out.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай натальную карту.</div>'; return; }
-  out.innerHTML = '<div class="ai-sp-empty">Ищу возвращения…</div>';
+  out.innerHTML = '<div class="ai-sp-empty">Ищу возвращение…</div>';
   try {
     await loadAstroEngine();
+    try { await loadAstroRules(); } catch (e) {}
     const natal = last.chart;
+    const type = ($('astro-ret-type') && $('astro-ret-type').value) || 'solar';
+    const plbl = $('astro-ret-plbl'); if (plbl) plbl.textContent = type === 'solar' ? 'Год' : 'Дата (ГГГГ-ММ-ДД)';
+    const period = ($('astro-ret-period') && $('astro-ret-period').value.trim()) || '';
     const sunN = natal.planets.find(p => p.body === 'Sun').lon;
     const moonN = natal.planets.find(p => p.body === 'Moon').lon;
-    const now = new Date();
-    const solar = searchReturn('Sun', sunN, new Date(now.getTime() - 370 * 864e5), 740);
-    const lunar = searchReturn('Moon', moonN, new Date(now.getTime() - 28 * 864e5), 30);
-    let html = '';
-    if (solar) {
-      const pl = bodiesAt(window.Astronomy.MakeTime(solar));
-      html += `<div class="f-lbl" style="margin-top:.5rem">Соляр (возвращение Солнца): ${solar.toISOString().slice(0, 16).replace('T', ' ')} UTC</div>` +
-        pl.slice(0, 5).map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+    let ret = null, title = '';
+    if (type === 'solar') {
+      // Год: соляр ищется вокруг дня рождения выбранного года.
+      const y = /^\d{4}$/.test(period) ? parseInt(period, 10) : new Date().getFullYear();
+      const [, bm, bd] = (DB.astroBirth.date || '2000-01-01').split('-').map(Number);
+      ret = searchReturn('Sun', sunN, new Date(Date.UTC(y, bm - 1, bd - 10)), 30);   // отрицательный день корректно уходит в прошлый месяц
+      title = `Соляр ${y}`;
+    } else {
+      const near = /^\d{4}-\d{2}-\d{2}$/.test(period) ? new Date(period + 'T00:00:00Z') : new Date();
+      ret = searchReturn('Moon', moonN, new Date(near.getTime() - 15 * 864e5), 30);
+      title = 'Лунар';
     }
-    if (lunar) html += `<div class="f-lbl" style="margin-top:.4rem">Лунар (возвращение Луны): ${lunar.toISOString().slice(0, 16).replace('T', ' ')} UTC</div>`;
-    html += '<div class="be-note" style="color:var(--t3)">Момент точного возвращения светила в натальную долготу. Символическая карта периода, не прогноз.</div>';
-    out.innerHTML = html || '<div class="ai-sp-empty">Возвращения не найдены в окне поиска.</div>';
+    const wheelEl = $('astro-ret-wheel');
+    if (!ret) { if (wheelEl) wheelEl.innerHTML = ''; out.innerHTML = '<div class="ai-sp-empty">Возвращение не найдено в окне поиска.</div>'; return; }
+    const pl = bodiesAt(window.Astronomy.MakeTime(ret));
+    if (wheelEl) wheelEl.innerHTML = renderChartWheel(natal, { size: 340, static: true, transits: pl });
+    let html = `<div class="f-lbl">${esc(title)}: ${ret.toISOString().slice(0, 16).replace('T', ' ')} UTC</div>` +
+      pl.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+    // Ключевые аспекты карты возврата к наталу (карточки, по силе).
+    const tr = computeTransits(natal, ret);
+    const hits = [...tr.hits].sort((a, b) => parseFloat(a.exact) - parseFloat(b.exact)).slice(0, 6);
+    if (hits.length) html += '<div class="f-lbl" style="margin-top:.4rem">Ключевые аспекты к наталу</div>' +
+      hits.map(h => { const tx = transitHitText(h);
+        return `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(h.transit)} → ваш ${esc(h.natal)}.</b> ${tx ? esc(tx.text) : esc(h.aspect)}</div>
+          <div class="si-text" style="color:var(--t4);font-size:.72rem">${esc(h.aspect)} · точность ${h.exact}°</div></div></div>`; }).join('');
+    html += '<div class="be-note" style="color:var(--t3)">Момент точного возвращения светила в натальную долготу — символическая карта периода, не прогноз.</div>';
+    out.innerHTML = html;
   } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
 }
 // Мидпоинты — классическая уранская астрология (Витте/Эбертин), формула
@@ -3332,12 +3418,15 @@ async function runTransits() {
     } else {
       html += '<div class="si-text" style="color:var(--t3);margin:.4rem 0">Рассчитай натальную карту, чтобы видеть аспекты к ней.</div>';
     }
+    if (last && getAiKey()) html += `<button class="btn btn-s btn-full" onclick="aiDeepFromTransits()">🔮 Глубокий анализ (с учётом моих данных)</button>`;
     html += `<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Символический снимок момента в западной традиции. Не событие и не прогноз.</div>`;
     if (out) out.innerHTML = html;
   } catch (e) {
     if (out) out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать. Попробуй ещё раз.</div>';
   }
 }
+// Режим 2 с экрана транзитов: результат показывается на экране карты.
+async function aiDeepFromTransits() { await aiDeepAstroAnalysis(); asub('natal'); }
 function saveAstroBirth() {
   const date = ($('ab-date') ? $('ab-date').value : '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast('Дата в формате ГГГГ-ММ-ДД', 'warn'); return; }
@@ -3665,7 +3754,8 @@ async function rChartSummary() {
   else {
     html += sum.blocks.map(blockHtml).join('');
     if (sum.blocks.length > 2) html += `<button class="btn btn-s btn-full" onclick="this.parentElement.querySelectorAll('[data-more]').forEach(d=>d.style.display='block');this.remove()">Развернуть подробнее</button>`;
-    if (getAiKey()) html += `<button class="btn btn-s btn-full" onclick="aiPolishChartSummary()">⚡ Быстрый разбор (ИИ)</button>`;
+    if (getAiKey()) html += `<button class="btn btn-s btn-full" onclick="aiPolishChartSummary()">⚡ Быстрый разбор (ИИ)</button>
+      <button class="btn btn-s btn-full" onclick="aiDeepAstroAnalysis()">🔮 Глубокий анализ (с учётом моих данных)</button>`;
   }
   if (deepCached) html += `<div class="f-lbl" style="margin-top:.5rem">Глубокий анализ <span style="font-weight:500;color:var(--t3)">(категории: ${esc((deepCached.categories || []).join(', ') || 'только карта')})</span></div>
     <div class="si-row"><div class="si-body"><div class="si-text">${esc(deepCached.text)}</div></div></div>`;
@@ -3725,6 +3815,8 @@ function buildAstroAiContext(consent, windowDays = 30) {
       asc: last.chart.angles ? last.chart.angles.asc.sign : null,
       aspects: (last.chart.aspects || []).slice(0, 8).map(a => `${a.a} ${a.name} ${a.b}`),
     };
+    // Текущие транзиты к наталу (эфемеридные данные, не личные).
+    try { const tr = computeTransits(last.chart, new Date()); ctx.transits_today = tr.hits.slice(0, 5).map(h => `транзитный ${h.transit} ${h.aspect} натальный ${h.natal}`); } catch (e) {}
   }
   if (c.diary) {
     ctx.categories.push('diary');
@@ -3790,6 +3882,7 @@ async function aiDeepAstroAnalysis() {
   if (!c || !c.acceptedAt) { openAstroAiConsent(); return; }
   const q = astroDeepQuota();
   if (q.n >= ASTRO_DEEP_DAILY_LIMIT) { toast(`Лимит глубокого анализа на сегодня (${ASTRO_DEEP_DAILY_LIMIT}) исчерпан`, 'warn'); return; }
+  try { await loadAstroEngine(); } catch (e) {}   // для транзитов в контексте
   const ctx = buildAstroAiContext(c, 30);
   const key = ['deep', last.id, ctx.categories.join('+') || 'none', 'astro-deep-v1'].join('|');
   const cached = (DB.astroTexts || []).find(t => t && t.key === key);
