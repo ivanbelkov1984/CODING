@@ -563,6 +563,18 @@
     </div>
   </div>
 </div>
+<div class="ov" id="ov-med-add" onclick="if(event.target===this)closeOv('ov-med-add')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Добавить в план</div>
+    <div class="be-note" style="margin:0 1rem .5rem">Лекарство, витамин или добавка — как назначено тебе или как ты решил принимать. Это твой учёт, не рекомендация.</div>
+    <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.75rem">
+      <div><div class="f-lbl">Название</div><input class="field" id="med-name" placeholder="Например: Витамин D"></div>
+      <div><div class="f-lbl">Доза и график (свободный текст)</div><input class="field" id="med-dose" placeholder="Например: 2000 МЕ · утром после еды"></div>
+      <button class="btn btn-p btn-full" onclick="saveMed()"><i data-lucide="check"></i>Добавить</button>
+    </div>
+  </div>
+</div>
 <div class="ov" id="ov-history" onclick="if(event.target===this)closeOv('ov-history')">
   <div class="sheet">
     <div class="sh-pull"></div>
