@@ -1389,7 +1389,7 @@ const astroT = await page.evaluate(async () => {
   // Golden fixture: J2000 (2000-01-01 12:00 UTC, синтетические данные рождения).
   DB.astroBirth = { kType: 'birth_evidence', privacyClass: 'sensitive', date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, place: 'тест', lat: 55.75, lon: 37.62, verif: 'user_confirmed', life: 'current', createdAt: new Date().toISOString(), sv: 2, _u: Date.now() };
   DB.astroCharts = [];
-  goTo('settings'); openAstro();
+  openAstro(); asub('setup');
   await runNatalChart();
   const ann = DB.astroCharts[0] || {};
   const chart = ann.chart || {};
@@ -1414,7 +1414,7 @@ const astroT = await page.evaluate(async () => {
     riskClean,
   };
   DB.astroBirth = null; DB.astroCharts = [];
-  closeOv('ov-astro'); goTo('home');
+  goTo('home');
   return r;
 });
 ok(astroT.goldenSun && astroT.goldenMars, 'астрология: golden J2000 — Солнце Козерог ~280.37°, Марс Водолей ~27.96° (движок точен)');
@@ -1663,6 +1663,78 @@ ok(q4T.mirrorOk, 'арабские точки: инвариант Дух + Фо�
 ok(q4T.regOk, 'звёзды: Регул J2000 149.83° + прецессия → 2026 ≈ 150.20° (перешёл в Деву)');
 ok(q4T.hitOk, 'звёзды: соединение на точной долготе найдено (орб ~0), в 1.5° — нет (орб 1°)');
 ok(q4T.nullOk, 'арабские точки: без углов (время неизвестно) → null, полдень не подставляем');
+
+// ── Астрология: MC — квадрант-корректность (регрессия к 180°-флипу) ──
+// Найдено визуализацией колеса: старая формула atan2(tan…) с ручным флипом
+// давала MC, смещённый ровно на 180° (в Льве вместо Водолея на J2000/Москва).
+const mcT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  // 1) Численный golden: J2000 12:00 UT, Москва → RAMC≈318.1°, MC≈315.6° (Водолей),
+  //    Asc≈87.7° (Близнецы). Выведено из tan λ = tan α / cos ε (открытая формула).
+  const c = computeNatalChart({ date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' });
+  const mcGolden = Math.abs(c.angles.mc.lon - 315.62) < 0.3 && c.angles.mc.sign === 'Водолей';
+  const ascGolden = Math.abs(c.angles.asc.lon - 87.7) < 0.5 && c.angles.asc.sign === 'Близнецы';
+  // 2) Инвариант горизонта: MC всегда на 0..180° зодиакально ПЕРЕД Asc
+  //    (верхний меридиан) — во всех квадрантах RAMC и на разных широтах.
+  let horizonOk = true;
+  for (const hh of ['00:00', '06:00', '12:00', '18:00']) {
+    for (const lat of [55.75, -33.9, 0.1]) {
+      const ch = computeNatalChart({ date: '2000-01-01', time: hh, timeKnown: true, utcOffset: 0, lat, lon: 37.62, houseSystem: 'whole' });
+      const d = ((ch.angles.asc.lon - ch.angles.mc.lon) % 360 + 360) % 360;
+      if (!(d > 0 && d < 180)) horizonOk = false;
+    }
+  }
+  // 3) Дома при исправленном MC: куспиды растут по ходу зодиака от Asc (порядок не ломается).
+  const cusps = c.housesMeta.cusps;
+  let orderOk = true, acc = 0;
+  for (let k = 1; k <= 12; k++) { const nx = cusps[k === 12 ? 1 : k + 1]; acc += ((nx - cusps[k]) % 360 + 360) % 360; }
+  orderOk = Math.abs(acc - 360) < 0.01;
+  return { mcGolden, ascGolden, horizonOk, orderOk, mc: c.angles.mc.lon.toFixed(2), asc: c.angles.asc.lon.toFixed(2) };
+});
+ok(mcT.mcGolden, `MC golden J2000/Москва: Водолей ~315.6° (получено ${mcT.mc}°) — 180°-флип исправлен`);
+ok(mcT.ascGolden, `Asc golden J2000/Москва: Близнецы ~87.7° (получено ${mcT.asc}°)`);
+ok(mcT.horizonOk, 'инвариант: MC на 0–180° перед Asc во всех квадрантах RAMC и широтах');
+ok(mcT.orderOk, 'дома: 12 куспидов образуют полный круг 360° в правильном порядке');
+
+// ── Астрология: раздел навигации, меню-карточки, SVG-колесо (UI) ──
+const astroUI = await page.evaluate(async () => {
+  DB.astroBirth = null; DB.astroCharts = [];
+  goTo('astro');
+  const pgOn = document.querySelector('#pg-astro.on') !== null;
+  const navOn = !!document.querySelector('.navlink[data-tab="astro"]');
+  const cards = document.querySelectorAll('#as-menu .astro-card').length;
+  const empty = /Введите дату и время рождения/.test(document.getElementById('astro-hero').textContent);
+  // Данные рождения (синтетика J2000) → карта → превью и колесо.
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  await runNatalChart();
+  rAstroHome();
+  const preview = document.querySelectorAll('#astro-hero svg').length === 1;
+  asub('natal');
+  const glyphs = document.querySelectorAll('#astro-wheel .aw-planet').length;
+  const signs = document.querySelectorAll('#astro-wheel .aw-sign').length;
+  const houseLines = document.querySelectorAll('#astro-wheel .aw-house').length;
+  const aspLines = document.querySelectorAll('#astro-wheel .aw-asp').length;
+  antab('houses');
+  const housesTab = /Плацидус/.test(document.getElementById('astro-ntab-out').textContent);
+  antab('planets');
+  const planetsTab = /Солнце/.test(document.getElementById('astro-ntab-out').textContent) && /Асцендент/.test(document.getElementById('astro-ntab-out').textContent);
+  astroPlanetTap('Sun');
+  const tap = /Козерог/.test(document.getElementById('astro-planet-info').textContent);
+  asub('points');
+  const pointsScreen = /Хирон|Церера/.test(document.getElementById('astro-points-out').textContent);
+  asub('menu'); goTo('home');
+  DB.astroBirth = null; DB.astroCharts = [];
+  return { pgOn, navOn, cards, empty, preview, glyphs, signs, houseLines, aspLines, housesTab, planetsTab, tap, pointsScreen };
+});
+ok(astroUI.pgOn && astroUI.navOn, 'астро-раздел: свой пункт главной навигации, страница открывается');
+ok(astroUI.cards >= 10, `астро-меню: сетка карточек-экранов (${astroUI.cards})`);
+ok(astroUI.empty, 'пустое состояние: приглашение ввести данные рождения вместо пустых разделов');
+ok(astroUI.preview, 'превью мини-колеса на главном экране раздела (тап → полная карта)');
+ok(astroUI.glyphs === 10 && astroUI.signs === 12, `SVG-колесо: 10 планет + 12 знаков (${astroUI.glyphs}/${astroUI.signs})`);
+ok(astroUI.houseLines === 12 && astroUI.aspLines >= 1, `SVG-колесо: 12 куспидов домов + линии аспектов (${astroUI.houseLines}/${astroUI.aspLines})`);
+ok(astroUI.housesTab && astroUI.planetsTab, 'табы натальной карты: Планеты (с Asc/MC) и Дома (Плацидус, куспиды)');
+ok(astroUI.tap, 'тап по планете на колесе: карточка деталей (Солнце — Козерог)');
+ok(astroUI.pointsScreen, 'экран «Астероиды и точки» рендерится');
 
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);

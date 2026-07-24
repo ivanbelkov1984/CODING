@@ -483,7 +483,7 @@ function updateDomainLabel() {
 }
 
 // ─── НАВИГАЦИЯ ───────────────────────────────────────────────────
-const TITLES = {home:'Сегодня', insights:'Инсайты', book:CFG.domainLabel||'Книга', vit:'Сферы', sys:'Итоги', map:'Разум', health:'Здоровье', settings:'Настройки'};
+const TITLES = {home:'Сегодня', insights:'Инсайты', book:CFG.domainLabel||'Книга', vit:'Сферы', sys:'Итоги', map:'Разум', health:'Здоровье', astro:'Астрология', settings:'Настройки'};
 function goTo(tab, el) {
   document.querySelectorAll('.pg').forEach(p => p.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
@@ -500,6 +500,7 @@ function goTo(tab, el) {
   if (tab==='sys') { rLivingMap('livingmap-out'); rDig(); rReview(30); }
   if (tab==='map') rIns();
   if (tab==='health') rHealth();
+  if (tab==='astro') asub('menu');
   if (tab==='settings') { rProfileRow(); checkApiStatus(); rPushStatus(); const kc=$('keys-cnt'); if (kc) kc.textContent = KEY_SERVICES.filter(s=>getAiKeyFor(s.p)).length + ' из ' + KEY_SERVICES.length; }
 }
 function msub(tab, el) {
@@ -2665,8 +2666,9 @@ function computeNatalChart(birth) {
     const lst = (gast * 15 + birth.lon + 360) % 360;      // местное звёздное время, градусы
     const eps = 23.4392911 * Math.PI / 180;               // наклон эклиптики (достаточно для MVP)
     const ramc = lst * Math.PI / 180;
-    const mcLon = ((Math.atan2(Math.tan(ramc), Math.cos(eps)) * 180 / Math.PI) + 360) % 360;
-    const mc = (Math.abs(((mcLon - lst + 540) % 360) - 180) < 90) ? (mcLon + 180) % 360 : mcLon;
+    // MC: λ = atan2(sin RAMC, cos RAMC · cos ε) — квадрант получается корректно
+    // сам (прежний вариант atan2(tan…) с ручным флипом давал MC, смещённый на 180°).
+    const mc = ((Math.atan2(Math.sin(ramc), Math.cos(ramc) * Math.cos(eps)) * 180 / Math.PI) + 360) % 360;
     const phi = birth.lat * Math.PI / 180;
     const ascRad = Math.atan2(Math.cos(ramc), -(Math.sin(ramc) * Math.cos(eps) + Math.tan(phi) * Math.sin(eps)));
     const asc = ((ascRad * 180 / Math.PI) + 360) % 360;
@@ -3374,7 +3376,197 @@ function rAstroChart(chart) {
   html += `<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Символическая интерпретация в западной тропической традиции. Не прогноз, не диагноз, не влияет на остальные разделы. ${esc(chart.versions.engine)} · ${esc(chart.versions.ruleset)}</div>`;
   out.innerHTML = html;
 }
-function openAstro() {
+// ─── АСТРОЛОГИЯ: РАЗДЕЛ НАВИГАЦИИ, МЕНЮ-КАРТОЧКИ И КОЛЕСО КАРТЫ ─────
+// Самостоятельный пункт навигации (не в Настройках): меню выбора экранов,
+// SVG-колесо гороскопа, табы деталей. Расчёты не меняются — только подача.
+const SIGN_GLYPHS = ['♈','♉','♊','♋','♌','♍','♎','♏','♐','♑','♒','♓'];
+const PLANET_GLYPHS = { Sun:'☉', Moon:'☽', Mercury:'☿', Venus:'♀', Mars:'♂', Jupiter:'♃', Saturn:'♄', Uranus:'♅', Neptune:'♆', Pluto:'♇' };
+const ASPECT_COLOR = { 'соединение':'var(--t3)', 'оппозиция':'var(--red)', 'квадрат':'var(--red)', 'трин':'var(--green)', 'секстиль':'var(--accent)' };
+
+function openAstro() { goTo('astro'); }
+
+// Переключение под-экранов раздела (as-menu, as-natal, as-transits, …).
+function asub(name) {
+  document.querySelectorAll('#pg-astro .asub').forEach(d => d.style.display = 'none');
+  const t = $('as-' + name); if (t) t.style.display = 'block';
+  if (typeof hpt === 'function') hpt();
+  if (name === 'menu') rAstroHome();
+  if (name === 'natal') rNatalScreen();
+  if (name === 'transits') runTransits();
+  if (name === 'prog') rPrognostics();
+  if (name === 'ret') rReturns();
+  if (name === 'mid') rMidpoints();
+  if (name === 'jyo') rJyotish();
+  if (name === 'parts') rPartsStars();
+  if (name === 'points') rPointsScreen();
+  if (name === 'setup') fillAstroForm();
+}
+
+// Главный экран раздела: превью-колесо (или пустое состояние) + сетка карточек.
+function rAstroHome() {
+  const hero = $('astro-hero'); if (!hero) return;
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (!DB.astroBirth) {
+    hero.innerHTML = `<div class="card mx mb tap" style="padding:1.1rem;cursor:pointer" onclick="asub('setup')" role="button">
+      <div class="si-text" style="font-weight:600">✦ Введите дату и время рождения</div>
+      <div class="si-text" style="color:var(--t3);margin-top:.25rem">…чтобы построить натальную карту. Расчёт локальный — данные не покидают устройство.</div></div>`;
+    return;
+  }
+  if (last) {
+    hero.innerHTML = `<div class="astro-preview" onclick="asub('natal')" role="button" aria-label="Открыть натальную карту">${renderChartWheel(last.chart, { size: 240, static: true })}
+      <div class="si-text" style="text-align:center;color:var(--t3)">Тап — полная карта</div></div>`;
+  } else {
+    hero.innerHTML = `<div class="card mx mb tap" style="padding:1.1rem;cursor:pointer" onclick="asub('setup')" role="button">
+      <div class="si-text">Данные рождения сохранены — рассчитай карту в «Настройках расчёта».</div></div>`;
+  }
+}
+
+// SVG-колесо гороскопа. Классическая ориентация: Асцендент слева, зодиак
+// против часовой стрелки; без известного времени — 0° Овна слева.
+function renderChartWheel(chart, o = {}) {
+  const S = o.size || 340, cx = S / 2, cy = S / 2;
+  const rot = chart.angles ? chart.angles.asc.lon : 0;
+  const xy = (lon, r) => { const a = (180 + (lon - rot)) * Math.PI / 180; return [cx + r * Math.cos(a), cy - r * Math.sin(a)]; };
+  const F = n => n.toFixed(1);
+  const line = (lon, r1, r2, cls, stroke) => { const [x1, y1] = xy(lon, r1), [x2, y2] = xy(lon, r2);
+    return `<line x1="${F(x1)}" y1="${F(y1)}" x2="${F(x2)}" y2="${F(y2)}" class="${cls}"${stroke ? ` stroke="${stroke}"` : ''}/>`; };
+  const rZo = S * .47, rZi = S * .385, rPl = S * .315, rHub = S * .245, rNum = S * .195;
+  const pad = S * .05;   // поля, чтобы метки Asc/MC у внешнего кольца не обрезались
+  let s = `<svg viewBox="${F(-pad)} ${F(-pad)} ${F(S + 2 * pad)} ${F(S + 2 * pad)}" class="astro-wheel-svg" role="img" aria-label="Колесо натальной карты">`;
+  s += `<circle cx="${cx}" cy="${cy}" r="${F(rZo)}" class="aw-ring"/><circle cx="${cx}" cy="${cy}" r="${F(rZi)}" class="aw-ring"/><circle cx="${cx}" cy="${cy}" r="${F(rHub)}" class="aw-ring aw-thin"/>`;
+  for (let k = 0; k < 12; k++) {
+    s += line(k * 30, rZi, rZo, 'aw-sect');
+    const [gx, gy] = xy(k * 30 + 15, (rZo + rZi) / 2);
+    s += `<text x="${F(gx)}" y="${F(gy)}" class="aw-sign">${SIGN_GLYPHS[k]}</text>`;
+  }
+  const cusps = (chart.housesMeta && chart.housesMeta.cusps) || null;
+  if (cusps) for (let k = 1; k <= 12; k++) {
+    s += line(cusps[k], rHub, rZi, 'aw-house' + (k === 1 || k === 10 ? ' aw-axis' : ''));
+    const next = cusps[k === 12 ? 1 : k + 1];
+    const mid = norm360(cusps[k] + norm360(next - cusps[k]) / 2);
+    const [hx, hy] = xy(mid, rNum);
+    s += `<text x="${F(hx)}" y="${F(hy)}" class="aw-hnum">${k}</text>`;
+  }
+  const lonOf = {}; chart.planets.forEach(p => lonOf[p.name] = p.lon);
+  for (const a of (chart.aspects || [])) {
+    if (!(a.a in lonOf) || !(a.b in lonOf)) continue;
+    const [x1, y1] = xy(lonOf[a.a], rHub), [x2, y2] = xy(lonOf[a.b], rHub);
+    s += `<line x1="${F(x1)}" y1="${F(y1)}" x2="${F(x2)}" y2="${F(y2)}" class="aw-asp" stroke="${ASPECT_COLOR[a.name] || 'var(--t4)'}"/>`;
+  }
+  // Планеты: при скучивании (< 8°) чередуем радиус, чтобы глифы не слипались.
+  const sorted = [...chart.planets].sort((a, b) => a.lon - b.lon);
+  let prevLon = -999, flip = false;
+  for (const p of sorted) {
+    const near = prevLon > -999 && Math.abs(((p.lon - prevLon + 180) % 360 + 360) % 360 - 180) < 8;
+    flip = near ? !flip : false;
+    prevLon = p.lon;
+    const [px, py] = xy(p.lon, flip ? rPl - S * .052 : rPl);
+    s += line(p.lon, rZi, rZi - S * .014, 'aw-tick');
+    s += `<text x="${F(px)}" y="${F(py)}" class="aw-planet${p.retro ? ' aw-retro' : ''}"${o.static ? '' : ` onclick="astroPlanetTap('${p.body}')"`}>${PLANET_GLYPHS[p.body] || '•'}</text>`;
+  }
+  if (chart.angles) {
+    const [ax, ay] = xy(chart.angles.asc.lon, rZo + S * .022), [mx, my] = xy(chart.angles.mc.lon, rZo + S * .022);
+    s += `<text x="${F(ax)}" y="${F(ay)}" class="aw-axlbl">Asc</text><text x="${F(mx)}" y="${F(my)}" class="aw-axlbl">MC</text>`;
+  }
+  return s + '</svg>';
+}
+
+// Тап по планете на колесе → карточка деталей под колесом.
+function astroPlanetTap(body) {
+  const last = (DB.astroCharts || []).slice(-1)[0]; if (!last) return;
+  const p = last.chart.planets.find(x => x.body === body); if (!p) return;
+  const h = last.chart.houses ? (last.chart.houses.find(x => x.body === body) || {}).house : null;
+  const asp = (last.chart.aspects || []).filter(a => a.a === p.name || a.b === p.name);
+  const el = $('astro-planet-info'); if (!el) return;
+  el.innerHTML = `<div class="card mx" style="padding:.7rem 1rem;margin-top:.5rem">
+    <div class="si-text"><b>${PLANET_GLYPHS[body] || ''} ${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°${p.retro ? ' ℞ (ретро)' : ''}${h ? ` · ${h}-й дом` : ''}</div>
+    ${asp.slice(0, 6).map(a => `<div class="si-text" style="color:var(--t3)">${esc(a.a)} ${esc(a.name)} ${esc(a.b)} (орб ${a.exact}°)</div>`).join('')}
+  </div>`;
+}
+
+// Экран «Натальная карта»: колесо + табы [Планеты][Дома][Аспекты][Точки][Мидпоинты].
+function rNatalScreen() {
+  const wrap = $('astro-wheel'); if (!wrap) return;
+  const info = $('astro-planet-info'), out = $('astro-ntab-out');
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (!last) {
+    wrap.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай карту в «Настройках расчёта».</div>';
+    if (info) info.innerHTML = ''; if (out) out.innerHTML = '';
+    return;
+  }
+  wrap.innerHTML = renderChartWheel(last.chart, { size: 340 });
+  if (info) info.innerHTML = '';
+  antab(STATE.astroTab || 'planets');
+}
+
+function antab(t) {
+  STATE.astroTab = t;
+  document.querySelectorAll('#astro-ntabs .snpill').forEach(p => p.classList.toggle('on', p.dataset.at === t));
+  const out = $('astro-ntab-out'); if (!out) return;
+  const last = (DB.astroCharts || []).slice(-1)[0]; if (!last) { out.innerHTML = ''; return; }
+  const c = last.chart;
+  const row = txt => `<div class="si-row"><div class="si-body"><div class="si-text">${txt}</div></div></div>`;
+  let html = '';
+  if (t === 'planets') {
+    html = c.planets.map(p => {
+      const h = c.houses ? (c.houses.find(x => x.body === p.body) || {}).house : null;
+      return row(`<b>${PLANET_GLYPHS[p.body] || ''} ${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°${p.retro ? ' ℞' : ''}${h ? ` · ${h}-й дом` : ''}`);
+    }).join('');
+    if (c.angles) html += row(`<b>Асцендент</b> — ${esc(c.angles.asc.sign)} ${c.angles.asc.deg.toFixed(1)}°`) + row(`<b>MC</b> — ${esc(c.angles.mc.sign)} ${c.angles.mc.deg.toFixed(1)}°`);
+  }
+  if (t === 'houses') {
+    if (!c.angles) html = '<div class="ai-sp-empty">Дома считаются только при известном времени рождения.</div>';
+    else if (c.housesMeta && c.housesMeta.cusps) {
+      const names = { whole: 'Whole-sign', placidus: 'Плацидус', equal: 'Равнодомная', campanus: 'Кампанус', regiomontanus: 'Региомонтанус' };
+      html = `<div class="f-lbl">Система: ${esc(names[c.housesMeta.system] || c.housesMeta.system)}</div>` +
+        Array.from({ length: 12 }, (_, i) => { const z = zodiacOf(c.housesMeta.cusps[i + 1]); return row(`<b>${i + 1}-й дом</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°`); }).join('');
+    } else html = '<div class="ai-sp-empty">Куспиды не сохранены в этой карте — пересчитай её в «Настройках расчёта».</div>';
+  }
+  if (t === 'aspects') {
+    html = (c.aspects || []).map(a => row(`<span style="color:${ASPECT_COLOR[a.name] || 'var(--t2)'}">●</span> ${esc(a.a)} ${esc(a.name)} ${esc(a.b)} (орб ${a.exact}°)`)).join('')
+      || '<div class="ai-sp-empty">Мажорных аспектов нет.</div>';
+  }
+  if (t === 'points') {
+    const P = c.points || {};
+    const pr = (nm, z, extra) => z ? row(`<b>${nm}</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°${extra || ''}`) : '';
+    html = pr('Точка Судьбы', P.fortune, P.fortune && (P.fortune.isDay ? ' (дневная)' : ' (ночная)')) + pr('Лилит (ср.)', P.lilith)
+      + pr('Вертекс', P.vertex) + pr('Антивертекс', P.antivertex) + pr('Восточная точка', P.eastPoint);
+    if ((c.asteroids || []).length) html += `<div class="f-lbl" style="margin-top:.4rem">Астероиды (прибл.)</div>`
+      + c.asteroids.map(a => row(`<b>${esc(a.name)}</b> — ${esc(a.sign)} ${a.deg.toFixed(1)}°`)).join('');
+    if (!html) html = '<div class="ai-sp-empty">Точки требуют известного времени рождения.</div>';
+  }
+  if (t === 'mid') {
+    const tree = computeMidpointTree(c).slice(0, 14);
+    html = tree.length ? tree.map(x => row(`<b>${esc(x.point)}</b> = ${esc(x.pair)} (${x.angle}°, орб ${x.orb}°)`)).join('')
+      : '<div class="ai-sp-empty">Нет точных контактов с мидпоинтами (орб 1.5°).</div>';
+  }
+  out.innerHTML = html + '<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Символическое, не прогноз и не диагноз.</div>';
+}
+
+// Экран «Астероиды и точки»: астероиды, Лилит, Вертекс, Точка Судьбы, антисции.
+function rPointsScreen() {
+  const out = $('astro-points-out'); if (!out) return;
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (!last) { out.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай карту в «Настройках расчёта».</div>'; return; }
+  const c = last.chart, P = c.points || {};
+  const row = txt => `<div class="si-row"><div class="si-body"><div class="si-text">${txt}</div></div></div>`;
+  const pr = (nm, z, extra) => z ? row(`<b>${nm}</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°${extra || ''}`) : '';
+  let html = '';
+  if ((c.asteroids || []).length) html += '<div class="f-lbl">Астероиды и Хирон (прибл.)</div>'
+    + c.asteroids.map(a => row(`<b>${esc(a.name)}</b> — ${esc(a.sign)} ${a.deg.toFixed(1)}°`)).join('');
+  html += '<div class="f-lbl" style="margin-top:.4rem">Точки</div>'
+    + pr('Лилит (ср. апогей)', P.lilith)
+    + pr('Точка Судьбы', P.fortune, P.fortune && (P.fortune.isDay ? ' (дневная формула)' : ' (ночная формула)'))
+    + pr('Вертекс', P.vertex) + pr('Антивертекс', P.antivertex) + pr('Восточная точка', P.eastPoint);
+  if (!P.fortune) html += '<div class="si-text" style="color:var(--t3)">Вертекс и Точка Судьбы требуют известного времени рождения.</div>';
+  if ((c.antiscia || []).length) html += '<div class="f-lbl" style="margin-top:.4rem">Антисции</div>'
+    + c.antiscia.map(a => row(`${esc(a.name)} → ${esc(a.sign)} ${a.deg.toFixed(1)}°`)).join('');
+  html += '<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Символическое, не прогноз и не диагноз. Астероиды — двухтелое приближение (JPL).</div>';
+  out.innerHTML = html;
+}
+
+// Экран «Настройки расчёта»: заполняем форму сохранёнными данными рождения.
+function fillAstroForm() {
   const b = DB.astroBirth;
   if (b) {
     if ($('ab-date')) $('ab-date').value = b.date || '';
@@ -3386,7 +3578,6 @@ function openAstro() {
     if ($('ab-lon')) $('ab-lon').value = b.lon == null ? '' : String(b.lon);
     if ($('ab-houses')) $('ab-houses').value = b.houseSystem || 'whole';
   }
-  openOv('ov-astro');
   rAstroChart();
 }
 
