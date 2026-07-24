@@ -1297,3 +1297,33 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .be-status.be-work{color:var(--t2)}
 .be-warn{display:flex;gap:var(--s2);align-items:flex-start;font-size:var(--tx2);color:var(--orange);background:var(--orange-l);border:1px solid var(--orange);border-radius:var(--r8,8px);padding:var(--s2) var(--s3);line-height:1.45;margin:var(--s2) 0}
 .be-confirm2{border:1px solid var(--red);border-radius:var(--r8,8px);padding:var(--s3);margin-top:var(--s3)}
+
+/* ── Астрология: раздел, меню-карточки, колесо ─────────────────── */
+.astro-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--s3);padding:0 var(--s4)}
+.astro-card{display:flex;flex-direction:column;align-items:flex-start;gap:var(--s1);padding:var(--s4);background:var(--sf);border:1px solid var(--bd);border-radius:var(--r20);cursor:pointer;text-align:left;color:var(--t1);font-size:var(--tx4);font-weight:560;line-height:1.3;-webkit-tap-highlight-color:transparent;transition:transform var(--dur1,.15s) ease}
+.astro-card:active{transform:scale(.97)}
+.astro-card .ac-ico{font-size:1.3rem;line-height:1}
+.astro-card .ac-sub{font-size:var(--tx2);color:var(--t3);font-weight:500}
+.astro-card.wide{grid-column:1/-1;flex-direction:row;align-items:center;gap:var(--s3)}
+.astro-card.wide .ac-sub{margin-left:auto;text-align:right}
+.astro-card.soon{opacity:.55;cursor:default}
+.astro-card .ac-badge{margin-left:auto;font-size:var(--tx2);color:var(--t3);border:1px solid var(--bd);border-radius:var(--rF);padding:.1rem .5rem;font-weight:500}
+.as-back{display:inline-flex;align-items:center;gap:.3rem;margin:var(--s2) var(--s4);padding:.35rem 0;background:none;border:none;color:var(--accent);font-size:var(--tx3);font-weight:560;cursor:pointer}
+.astro-wheel-wrap{padding:0 var(--s4)}
+.astro-wheel-svg{width:100%;height:auto;display:block;margin:0 auto;max-width:420px}
+.astro-preview{padding:var(--s3) var(--s4) 0;cursor:pointer}
+.astro-preview svg{max-width:250px}
+.aw-ring{fill:none;stroke:var(--bd2);stroke-width:1.2}
+.aw-thin{stroke:var(--bd)}
+.aw-sect{stroke:var(--bd);stroke-width:1}
+.aw-sign{fill:var(--t3);font-size:13px;text-anchor:middle;dominant-baseline:central}
+.aw-house{stroke:var(--bd);stroke-width:1}
+.aw-axis{stroke:var(--t3);stroke-width:1.6}
+.aw-hnum{fill:var(--t4);font-size:9px;text-anchor:middle;dominant-baseline:central}
+.aw-planet{fill:var(--t1);font-size:15px;text-anchor:middle;dominant-baseline:central;cursor:pointer}
+.aw-retro{fill:var(--orange)}
+.aw-tick{stroke:var(--t3);stroke-width:1.4}
+.aw-asp{stroke-width:1;opacity:.55}
+.aw-axlbl{fill:var(--t2);font-size:9px;text-anchor:middle;dominant-baseline:central;font-weight:600}
+.astro-tabs{display:flex;gap:var(--s2);overflow-x:auto;padding:var(--s3) var(--s4);scrollbar-width:none}
+.astro-tabs::-webkit-scrollbar{display:none}
