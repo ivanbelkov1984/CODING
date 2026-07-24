@@ -66,6 +66,7 @@ const DEFAULT_DB = {
   astroBirth: null,   // Астрология: OriginalBirthEvidence (immutable; правки — коррекциями)
   astroCharts: [],    // Астрология: SymbolicAstrologyAnnotation — рассчитанные карты (versioned)
   astroTexts: [],     // Астрология: кэш собранных текстов (ruleIds+promptVersion для аудита)
+  astroAiConsent: null, // Астрология, режим 2: согласие по категориям {diary,health,habits,acceptedAt,version}; отзыв в любой момент
   spheres: [],        // пользовательские сферы жизни (тип трекера у каждой)
   sphereLogs: [],     // дневные записи по сферам: {sphereId, date, value, note}
   bots: [
@@ -3656,6 +3657,7 @@ async function rChartSummary() {
   if (!sum || !sum.blocks.length) { out.innerHTML = ''; return; }
   const key = ['summary', last.id, sum.version, 'astro-summary-v1'].join('|');
   const cached = (DB.astroTexts || []).find(t => t && t.key === key);
+  const deepCached = (DB.astroTexts || []).filter(t => t && t.mode === 'deep' && String(t.key || '').includes('|' + last.id + '|')).slice(-1)[0];
   const blockHtml = (b, i) => `<div class="si-row"${i > 1 ? ' data-more="1" style="display:none"' : ''}><div class="si-body">
       <div class="si-text" data-rules="${esc(b.ruleIds.join(','))}"><b>${esc(b.title)}.</b> ${esc(b.text)}</div></div></div>`;
   let html = '<div class="f-lbl">Кто вы по карте</div>';
@@ -3663,8 +3665,10 @@ async function rChartSummary() {
   else {
     html += sum.blocks.map(blockHtml).join('');
     if (sum.blocks.length > 2) html += `<button class="btn btn-s btn-full" onclick="this.parentElement.querySelectorAll('[data-more]').forEach(d=>d.style.display='block');this.remove()">Развернуть подробнее</button>`;
-    if (getAiKey()) html += `<button class="btn btn-s btn-full" onclick="aiPolishChartSummary()"><i data-lucide="sparkles"></i>Связный текст (ИИ)</button>`;
+    if (getAiKey()) html += `<button class="btn btn-s btn-full" onclick="aiPolishChartSummary()">⚡ Быстрый разбор (ИИ)</button>`;
   }
+  if (deepCached) html += `<div class="f-lbl" style="margin-top:.5rem">Глубокий анализ <span style="font-weight:500;color:var(--t3)">(категории: ${esc((deepCached.categories || []).join(', ') || 'только карта')})</span></div>
+    <div class="si-row"><div class="si-body"><div class="si-text">${esc(deepCached.text)}</div></div></div>`;
   html += '<div class="be-note" style="color:var(--t3)">Символическое описание в западной традиции — не прогноз, не диагноз и не оценка личности.</div>';
   out.innerHTML = html;
 }
@@ -3681,7 +3685,7 @@ async function aiPolishChartSummary() {
   try {
     const facts = sum.blocks.map(b => `- ${b.title}: ${b.text}`).join('\n');
     const text = await callClaude({
-      task: 'other', maxTokens: 700,
+      task: 'other', maxTokens: 700, model: ASTRO_AI_MODELS.fast,   // режим 1: быстрый разбор
       system: 'Ты редактор текста в личном дневнике. Свяжи данные факты в тёплый, понятный текст на русском языке, 150–300 слов, обращение на «вы». СТРОГО: не добавляй ни одного нового астрологического утверждения — только переданные факты, их можно лишь связать и смягчить. Без специальных терминов и градусов. Тон описательный, не судьбоносный: без предсказаний, диагнозов и оценок. Закончи одной короткой фразой о том, что это символическое описание, а не прогноз.',
       user: facts,
     });
@@ -3693,6 +3697,119 @@ async function aiPolishChartSummary() {
     });
     persist();
   } catch (e) { toast(e && e.message ? e.message : 'Не удалось собрать текст', 'warn'); }
+  rChartSummary();
+}
+
+// ─── ДВА РЕЖИМА ИИ-СИНТЕЗА (Часть 5) ────────────────────────────────
+// Режим 1 «⚡ Быстрый разбор»: только факты карты, модель побыстрее.
+// Режим 2 «🔮 Глубокий анализ»: + разрешённый МИНИМИЗИРОВАННЫЙ срез данных
+// (теги/агрегаты за окно 14–30 дней, БЕЗ сырых текстов и идентификаторов),
+// строго после явного согласия по категориям; согласие отзывается в любой
+// момент. Лимит запросов режима 2 в день. Каждый отчёт сохраняется с меткой
+// использованных категорий и версией промпта (аудит).
+const ASTRO_AI_MODELS = { fast: 'claude-haiku-4-5-20251001', deep: 'claude-sonnet-5' };
+const ASTRO_DEEP_DAILY_LIMIT = 5;
+
+// Минимизация: из дневника — только теги и количества; из здоровья — только
+// названия симптомов с частотой и средние чек-ин осей; из привычек — только
+// название сферы и процент выполнения. Никаких текстов записей, доз, имён.
+function buildAstroAiContext(consent, windowDays = 30) {
+  const c = consent || DB.astroAiConsent || {};
+  const from = Date.now() - windowDays * 864e5;
+  const inWin = r => r && (Date.parse(r.createdAt || r.date || 0) || 0) >= from;
+  const ctx = { window_days: windowDays, categories: [] };
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (last) {
+    ctx.natal = {
+      planets: last.chart.planets.map(p => `${p.name}: ${p.sign}${p.retro ? ' (ретро)' : ''}`),
+      asc: last.chart.angles ? last.chart.angles.asc.sign : null,
+      aspects: (last.chart.aspects || []).slice(0, 8).map(a => `${a.a} ${a.name} ${a.b}`),
+    };
+  }
+  if (c.diary) {
+    ctx.categories.push('diary');
+    const ins = (DB.insights || []).filter(inWin);
+    const tags = {};
+    ins.forEach(i => { if (i.tag) tags[i.tag] = (tags[i.tag] || 0) + 1; });
+    ctx.diary = { insight_count: ins.length, tags, dream_count: (DB.dreams || []).filter(inWin).length };
+  }
+  if (c.health) {
+    ctx.categories.push('health');
+    const sym = {};
+    (DB.symptoms || []).filter(inWin).forEach(s => { if (s.name) sym[s.name] = (sym[s.name] || 0) + 1; });
+    const cis = (DB.checkins || []).filter(x => x && (x.date || '') >= new Date(from).toISOString().slice(0, 10));
+    const avg = k => cis.length ? +(cis.reduce((s, x) => s + (+x[k] || 0), 0) / cis.length).toFixed(1) : null;
+    ctx.health = { symptom_freq: sym, checkin_avg: { сон: avg('sl'), ясность: avg('cl'), движение: avg('mv'), стресс: avg('st') }, checkin_count: cis.length };
+  }
+  if (c.habits) {
+    ctx.categories.push('habits');
+    ctx.habits = (DB.spheres || []).slice(0, 8).map(sp => {
+      const logs = (DB.sphereLogs || []).filter(l => l && l.sphereId === sp.id && (l.date || '') >= new Date(from).toISOString().slice(0, 10));
+      return { name: sp.name, type: sp.type, entries: logs.length };
+    });
+    ctx.habits_cravings = (DB.cravings || []).filter(inWin).length;
+  }
+  return ctx;
+}
+
+// Согласие режима 2: сохранение/отзыв (чекбоксы), версия текста согласия.
+function saveAstroAiConsent() {
+  const g = id => { const el = $(id); return !!(el && el.classList.contains('on')); };
+  DB.astroAiConsent = {
+    diary: g('aic-diary'), health: g('aic-health'), habits: g('aic-habits'),
+    acceptedAt: nowISO(), version: 'astro-consent-v1', sv: SCHEMA_VERSION, _u: Date.now(),
+  };
+  persist(); toast('Настройки согласия сохранены', 'ok');
+  closeOv('ov-astro-consent');
+}
+function openAstroAiConsent() {
+  const c = DB.astroAiConsent || {};
+  for (const [id, on] of [['aic-diary', c.diary], ['aic-health', c.health], ['aic-habits', c.habits]]) {
+    const el = $(id); if (el) el.classList.toggle('on', !!on);
+  }
+  openOv('ov-astro-consent');
+}
+
+// Лимит запросов режима 2 в день (локальный счётчик).
+function astroDeepQuota() {
+  let q = {}; try { q = JSON.parse(localStorage.getItem('arch5_astro_deep_quota') || '{}'); } catch (e) {}
+  if (q.day !== todayKey()) q = { day: todayKey(), n: 0 };
+  return q;
+}
+function astroDeepQuotaBump() {
+  const q = astroDeepQuota(); q.n++;
+  try { localStorage.setItem('arch5_astro_deep_quota', JSON.stringify(q)); } catch (e) {}
+}
+
+// Режим 2: глубокий анализ (вызывается только из UI после согласия).
+async function aiDeepAstroAnalysis() {
+  const out = $('astro-summary');
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (!last) { toast('Сначала рассчитай натальную карту', 'warn'); return; }
+  const c = DB.astroAiConsent;
+  if (!c || !c.acceptedAt) { openAstroAiConsent(); return; }
+  const q = astroDeepQuota();
+  if (q.n >= ASTRO_DEEP_DAILY_LIMIT) { toast(`Лимит глубокого анализа на сегодня (${ASTRO_DEEP_DAILY_LIMIT}) исчерпан`, 'warn'); return; }
+  const ctx = buildAstroAiContext(c, 30);
+  const key = ['deep', last.id, ctx.categories.join('+') || 'none', 'astro-deep-v1'].join('|');
+  const cached = (DB.astroTexts || []).find(t => t && t.key === key);
+  if (cached) { rChartSummary(); toast('Показан сохранённый анализ (данные не менялись)', 'ok'); return; }
+  if (out) out.innerHTML = '<div class="ai-sp-empty">Глубокий анализ…</div>';
+  try {
+    const text = await callClaude({
+      task: 'other', model: ASTRO_AI_MODELS.deep, maxTokens: 900,
+      system: 'Ты — бережный аналитик личного дневника. Тебе даны символические астрологические факты и МИНИМИЗИРОВАННЫЕ агрегаты записей пользователя (только теги/частоты, без текстов). СТРОГО: используй только предоставленные факты; никакой причинности — только «может быть связано с», никогда «вызвано»; никаких диагнозов, предсказаний и оценок личности. Свяжи наблюдения мягко, дай 1–2 конкретные бытовые рекомендации (отдых, разговор, планирование — не медицина). 200–350 слов, русский, на «вы», без астрологических терминов и градусов. Обязательно закончи фразой: «Это символическое описание, а не прогноз и не диагноз».',
+      user: JSON.stringify(ctx),
+    });
+    astroDeepQuotaBump();
+    DB.astroTexts = DB.astroTexts || [];
+    DB.astroTexts.push({
+      id: Date.now(), key, text, mode: 'deep', categories: ctx.categories, windowDays: 30,
+      promptVersion: 'astro-deep-v1', kType: 'symbolic_astrology_annotation', privacyClass: 'sensitive',
+      createdAt: nowISO(), sv: SCHEMA_VERSION, _u: Date.now(),
+    });
+    persist();
+  } catch (e) { toast(e && e.message ? e.message : 'Не удалось выполнить анализ', 'warn'); }
   rChartSummary();
 }
 

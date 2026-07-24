@@ -708,6 +708,20 @@
     </div>
   </div>
 </div>
+<div class="ov" id="ov-astro-consent" onclick="if(event.target===this)closeOv('ov-astro-consent')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Глубокий анализ · согласие</div>
+    <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.4rem">
+      <div class="be-note">Режим «Глубокий анализ» может учитывать выбранные категории твоих данных. Передаются только <b>минимизированные агрегаты</b> (теги, частоты, средние за 30 дней) — <b>никогда</b> тексты записей, дозы или имена. Данные обрабатываются через API с политикой нулевого удержания (ZDR) — провайдер не хранит их после ответа. Согласие можно отозвать здесь в любой момент — категория сразу перестаёт использоваться.</div>
+      <div class="tog-row"><span class="tog-lbl">Дневник (теги и количества записей)</span><div class="tog" id="aic-diary" onclick="this.classList.toggle('on')" role="switch"></div></div>
+      <div class="tog-row"><span class="tog-lbl">Здоровье (частоты симптомов, средние чек-ина)</span><div class="tog" id="aic-health" onclick="this.classList.toggle('on')" role="switch"></div></div>
+      <div class="tog-row" style="border-bottom:none"><span class="tog-lbl">Привычки (сферы и счётчики)</span><div class="tog" id="aic-habits" onclick="this.classList.toggle('on')" role="switch"></div></div>
+      <div class="be-note" style="color:var(--t3)">Можно не включать ничего — анализ тогда строится только на карте. Лимит: 5 глубоких анализов в день.</div>
+      <button class="btn btn-p btn-full" onclick="saveAstroAiConsent()"><i data-lucide="check"></i>Сохранить выбор</button>
+    </div>
+  </div>
+</div>
 <div class="ov" id="ov-doc-report" onclick="if(event.target===this)closeOv('ov-doc-report')">
   <div class="sheet">
     <div class="sh-pull"></div>
