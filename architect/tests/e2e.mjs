@@ -1441,6 +1441,33 @@ const transitT = await page.evaluate(async () => {
 ok(transitT.bodies && transitT.selfConjAll, 'транзиты: golden — тот же момент даёт 10 соединений с орбом ~0 (движок согласован)');
 ok(transitT.versioned, 'транзиты: орб-политика версионирована');
 
+// ── Астрология 1.1: системы домов — математические golden-инварианты ──
+const housesT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  const sep180 = (a, b) => Math.abs(((a - b + 180) % 360 + 360) % 360 - 180);
+  const close = (a, b, tol) => sep180(a, b) <= tol;
+  const mk = hs => computeNatalChart({ date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: hs });
+  const quadrant = ['placidus', 'campanus', 'regiomontanus'];
+  let cusp1Asc = true, cusp10Mc = true, opp = true;
+  for (const hs of quadrant.concat(['equal'])) {
+    const ch = mk(hs); const c = ch.houses.cusps;
+    if (!close(c[1], ch.angles.asc.lon, 0.01)) cusp1Asc = false;
+    if (quadrant.includes(hs) && !close(c[10], ch.angles.mc.lon, 0.01)) cusp10Mc = false;
+    for (let k = 1; k <= 6; k++) if (Math.abs(sep180(c[k], c[k + 6]) - 180) > 0.01) opp = false;
+  }
+  // На экваторе (φ=0, AD=0) все квадрантные системы обязаны совпасть.
+  const eq = quadrant.map(hs => computeNatalChart({ date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 0, lon: 0, houseSystem: hs }).houses.cusps);
+  let equatorSame = true;
+  for (let k = 1; k <= 12; k++) { if (!close(eq[0][k], eq[1][k], 0.1) || !close(eq[0][k], eq[2][k], 0.1)) equatorSame = false; }
+  // Выбор системы попадает в аннотацию версий.
+  const vers = mk('placidus').versions.houses === 'placidus-v1';
+  return { cusp1Asc, cusp10Mc, opp, equatorSame, vers };
+});
+ok(housesT.cusp1Asc && housesT.cusp10Mc, 'дома: куспид 1 = Asc, куспид 10 = MC (квадрантные системы, ±0.01°)');
+ok(housesT.opp, 'дома: противоположные куспиды ровно в оппозиции (все системы)');
+ok(housesT.equatorSame, 'дома: golden-инвариант φ=0 — Плацидус=Кампанус=Региомонтанус (равные деления)');
+ok(housesT.vers, 'дома: выбранная система версионируется в аннотации');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

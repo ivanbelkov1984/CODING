@@ -2671,8 +2671,11 @@ function computeNatalChart(birth) {
     const ascRad = Math.atan2(Math.cos(ramc), -(Math.sin(ramc) * Math.cos(eps) + Math.tan(phi) * Math.sin(eps)));
     const asc = ((ascRad * 180 / Math.PI) + 360) % 360;
     angles = { asc: zodiacOf(asc), mc: zodiacOf(mc) };
-    const ascSignIdx = Math.floor(zodiacOf(asc).lon / 30);
-    houses = planets.map(p => ({ body: p.body, house: ((Math.floor(p.lon / 30) - ascSignIdx + 12) % 12) + 1 }));
+    // Система домов — выбор пользователя (по умолчанию whole-sign).
+    const hsys = birth.houseSystem || 'whole';
+    const cusps = houseCusps(hsys, { asc: zodiacOf(asc).lon, mc: zodiacOf(mc).lon, ramc: lst, eps: 23.4392911, phi: birth.lat });
+    houses = planets.map(p => ({ body: p.body, house: houseOfLon(p.lon, cusps) }));
+    houses.system = hsys; houses.cusps = cusps;
   }
   // Мажорные аспекты между планетами (версионированная orb policy v1).
   const aspects = [];
@@ -2683,8 +2686,92 @@ function computeNatalChart(birth) {
       if (Math.abs(sep - asp.angle) <= asp.orb) { aspects.push({ a: planets[i].name, b: planets[j].name, name: asp.name, exact: Math.abs(sep - asp.angle).toFixed(1) }); break; }
     }
   }
-  return { planets, angles, houses, aspects, timeKnown: !!birth.timeKnown, versions: { ...ASTRO_VERSIONS } };
+  return { planets, angles, houses, aspects, timeKnown: !!birth.timeKnown, versions: { ...ASTRO_VERSIONS, houses: (birth.houseSystem || 'whole') + '-v1' } };
 }
+// ─── СИСТЕМЫ ДОМОВ (очередь 1.1) ────────────────────────────────────
+// Формулы — открытая сферическая астрономия (public domain):
+//  · Equal — Asc + 30°·k; Whole-sign — знаковые границы от знака Asc.
+//  · Placidus — классическая итерация полудуговых долей через ascensional
+//    difference (AD = asin(tan φ · tan δ)).
+//  · Campanus — деление первой вертикали на 30°-сектора; куспид = пересечение
+//    эклиптики с большим кругом через северную точку горизонта (численно).
+//  · Regiomontanus — то же, но делится небесный экватор.
+//  Инварианты (golden): куспид 1 = Asc; куспид 10 = MC (квадрантные);
+//  противоположные куспиды отличаются на 180°; при φ=0 все квадрантные
+//  системы совпадают (AD=0 → равные деления экватора).
+//  Koch НЕ реализован сознательно: открытой формулы с достаточной
+//  уверенностью нет — отложен, вместо тихой неточности (см. README).
+const DEG = Math.PI / 180;
+const norm360 = x => ((x % 360) + 360) % 360;
+// Точка эклиптики (β=0) с данной RA → эклиптическая долгота.
+function raToEclLon(ra, eps) { return norm360(Math.atan2(Math.sin(ra * DEG), Math.cos(ra * DEG) * Math.cos(eps * DEG)) / DEG); }
+function placidusCusp(fr, nocturnal, ramc, eps, phi) {
+  let RA = ramc + (nocturnal ? 180 - fr * 90 : fr * 90);
+  for (let i = 0; i < 40; i++) {
+    const lam = raToEclLon(RA, eps);
+    const dec = Math.asin(Math.sin(eps * DEG) * Math.sin(lam * DEG));
+    const x = Math.max(-1, Math.min(1, Math.tan(phi * DEG) * Math.tan(dec)));
+    const AD = Math.asin(x) / DEG;
+    RA = nocturnal ? ramc + 180 - fr * (90 - AD) : ramc + fr * (90 + AD);
+  }
+  return raToEclLon(RA, eps);
+}
+// Численное пересечение эклиптики с кругом дома (Campanus/Regiomontanus).
+// Базис горизонта в экваториальных координатах: Z (зенит), N (север), E=N×Z.
+function circleCusp(system, k, ramc, eps, phi) {
+  const th = ramc * DEG, ph = phi * DEG;
+  const Z = [Math.cos(ph) * Math.cos(th), Math.cos(ph) * Math.sin(th), Math.sin(ph)];
+  const N = [-Math.sin(ph) * Math.cos(th), -Math.sin(ph) * Math.sin(th), Math.cos(ph)];
+  const E = [N[1] * Z[2] - N[2] * Z[1], N[2] * Z[0] - N[0] * Z[2], N[0] * Z[1] - N[1] * Z[0]];
+  const a = (k - 1) * 30 * DEG;   // домовый угол вниз от восточной точки
+  let p;
+  if (system === 'campanus') p = [Math.cos(a) * E[0] - Math.sin(a) * Z[0], Math.cos(a) * E[1] - Math.sin(a) * Z[1], Math.cos(a) * E[2] - Math.sin(a) * Z[2]];
+  else { const ra = th + Math.PI / 2 + a; p = [Math.cos(ra), Math.sin(ra), 0]; }   // regiomontanus: деление экватора
+  const w = [N[1] * p[2] - N[2] * p[1], N[2] * p[0] - N[0] * p[2], N[0] * p[1] - N[1] * p[0]];
+  const ecl = lam => [Math.cos(lam * DEG), Math.sin(lam * DEG) * Math.cos(eps * DEG), Math.sin(lam * DEG) * Math.sin(eps * DEG)];
+  const f = lam => { const e = ecl(lam); return w[0] * e[0] + w[1] * e[1] + w[2] * e[2]; };
+  const dotp = lam => { const e = ecl(lam); return e[0] * p[0] + e[1] * p[1] + e[2] * p[2]; };
+  const roots = [];
+  let prev = f(0);
+  for (let d = 1; d <= 360; d++) {
+    const cur = f(d);
+    if (prev === 0 || prev * cur < 0) {
+      let lo = d - 1, hi = d;
+      for (let i = 0; i < 50; i++) { const mid = (lo + hi) / 2; (f(lo) * f(mid) <= 0) ? hi = mid : lo = mid; }
+      roots.push(norm360((lo + hi) / 2));
+    }
+    prev = cur;
+  }
+  const good = roots.filter(r => dotp(r) > 0);
+  return good.length ? good[0] : (roots[0] || 0);
+}
+// 12 куспидов для системы. ctx: { asc, mc, ramc, eps, phi } в градусах.
+function houseCusps(system, ctx) {
+  const c = new Array(13).fill(0);
+  if (system === 'whole') { const s = Math.floor(ctx.asc / 30) * 30; for (let k = 1; k <= 12; k++) c[k] = norm360(s + (k - 1) * 30); return c; }
+  if (system === 'equal') { for (let k = 1; k <= 12; k++) c[k] = norm360(ctx.asc + (k - 1) * 30); return c; }
+  c[1] = ctx.asc; c[10] = ctx.mc; c[4] = norm360(ctx.mc + 180); c[7] = norm360(ctx.asc + 180);
+  if (system === 'placidus') {
+    c[11] = placidusCusp(1 / 3, false, ctx.ramc, ctx.eps, ctx.phi);
+    c[12] = placidusCusp(2 / 3, false, ctx.ramc, ctx.eps, ctx.phi);
+    c[2]  = placidusCusp(2 / 3, true,  ctx.ramc, ctx.eps, ctx.phi);
+    c[3]  = placidusCusp(1 / 3, true,  ctx.ramc, ctx.eps, ctx.phi);
+  } else {   // campanus | regiomontanus
+    for (const k of [11, 12, 2, 3]) c[k] = circleCusp(system, k, ctx.ramc, ctx.eps, ctx.phi);
+  }
+  c[5] = norm360(c[11] + 180); c[6] = norm360(c[12] + 180); c[8] = norm360(c[2] + 180); c[9] = norm360(c[3] + 180);
+  return c;
+}
+// Дом планеты по куспидам: k, если долгота лежит в [cusp_k, cusp_{k+1}) по ходу.
+function houseOfLon(lon, cusps) {
+  for (let k = 1; k <= 12; k++) {
+    const a = cusps[k], b = cusps[k === 12 ? 1 : k + 1];
+    const span = norm360(b - a), off = norm360(lon - a);
+    if (off < span || span === 0) return k;
+  }
+  return 12;
+}
+
 // Транзиты: положения планет на момент времени + аспекты транзит→натал.
 // Орб-политика транзитов (уже натальной) версионирована отдельно.
 const TRANSIT_ORB = 3; // transit-orbs-v1: все мажорные аспекты, орб 3°
@@ -2743,6 +2830,7 @@ function saveAstroBirth() {
     kType: 'birth_evidence', privacyClass: 'sensitive',
     date, time: timeKnown ? time : '', timeKnown, utcOffset,
     place: ($('ab-place') ? $('ab-place').value : '').trim(),
+    houseSystem: ($('ab-houses') ? $('ab-houses').value : 'whole') || 'whole',
     lat: isFinite(lat) ? lat : null, lon: isFinite(lon) ? lon : null,
     verif: 'user_confirmed', life: 'current', createdAt: nowISO(), sv: SCHEMA_VERSION, _u: Date.now(),
   };
@@ -2798,6 +2886,7 @@ function openAstro() {
     if ($('ab-place')) $('ab-place').value = b.place || '';
     if ($('ab-lat')) $('ab-lat').value = b.lat == null ? '' : String(b.lat);
     if ($('ab-lon')) $('ab-lon').value = b.lon == null ? '' : String(b.lon);
+    if ($('ab-houses')) $('ab-houses').value = b.houseSystem || 'whole';
   }
   openOv('ov-astro');
   rAstroChart();
