@@ -1736,6 +1736,69 @@ ok(astroUI.housesTab && astroUI.planetsTab, 'табы натальной кар�
 ok(astroUI.tap, 'тап по планете на колесе: карточка деталей (Солнце — Козерог)');
 ok(astroUI.pointsScreen, 'экран «Астероиды и точки» рендерится');
 
+// ── Астрология: база интерпретаций + сборка «Кто вы по карте» (Часть 4) ──
+const interpT = await page.evaluate(async () => {
+  await loadAstroRules();
+  const R = window.ASTRO_RULES;
+  // 1) Полнота базы: 10×12 знаков + 10×12 домов + 12 Asc + 10 тем, все непустые.
+  const bodies = ['Sun','Moon','Mercury','Venus','Mars','Jupiter','Saturn','Uranus','Neptune','Pluto'];
+  const signs = ['Овен','Телец','Близнецы','Рак','Лев','Дева','Весы','Скорпион','Стрелец','Козерог','Водолей','Рыбы'];
+  let signCnt = 0, houseCnt = 0;
+  for (const b of bodies) {
+    for (const s of signs) if ((R.planetInSign[b] || {})[s] && R.planetInSign[b][s].length > 20) signCnt++;
+    for (let h = 1; h <= 12; h++) if ((R.planetInHouse[b] || {})[h] && R.planetInHouse[b][h].length > 20) houseCnt++;
+  }
+  const ascCnt = signs.filter(s => R.ascInSign[s] && R.ascInSign[s].length > 20).length;
+  const themeCnt = bodies.filter(b => R.planetTheme[b]).length;
+  // 2) Сборка резюме на golden-карте J2000 (синтетика): блоки по 3.1a.
+  await loadAstroEngine();
+  const chart = computeNatalChart({ date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' });
+  const sum = buildChartSummary(chart);
+  const titles = sum.blocks.map(b => b.title).join('|');
+  const sunBlock = /Ваше Солнце в знаке Козерог/.test(titles);
+  const moonBlock = /Как вы себя чувствуете внутри/.test(titles);
+  const ascBlock = /Как вас видят другие/.test(titles);
+  const growthBlocks = /Ваша сильная сторона/.test(titles) && /Ваш внутренний вызов/.test(titles);
+  // 3) Аудит: каждый блок несёт source_rule_id; солнечный — точный id.
+  const audited = sum.blocks.every(b => b.ruleIds && b.ruleIds.length > 0);
+  const sunRule = sum.ruleIds.includes('planetInSign.Sun.Козерог');
+  // 4) Без жаргона: в собранном тексте нет градусов и терминов аспектов.
+  const all = sum.blocks.map(b => b.title + ' ' + b.text).join(' ');
+  const noJargon = !/°|квадрат|оппозици|трин\b|секстил|орб/i.test(all);
+  // 5) Честность времени: без времени рождения нет блока «Как вас видят» (нет Asc).
+  const noTime = buildChartSummary(computeNatalChart({ date: '2000-01-01', timeKnown: false, utcOffset: 0 }));
+  const noTimeOk = !noTime.blocks.some(b => b.title === 'Как вас видят другие');
+  // 6) Кэш ИИ-текста: с ключом и мок-API текст собирается один раз, повторно — из кэша.
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = []; DB.astroTexts = [];
+  await runNatalChart();
+  setAiKey('sk-test');
+  let calls = 0;
+  const orig = window.fetch;
+  window.fetch = (u, o) => String(u).includes('anthropic')
+    ? (calls++, Promise.resolve({ ok: true, json: () => Promise.resolve({ content: [{ type: 'text', text: 'Тёплый связный текст о вас. Это символическое описание, а не прогноз.' }], usage: { output_tokens: 42 } }) }))
+    : orig(u, o);
+  await aiPolishChartSummary();
+  await aiPolishChartSummary();
+  window.fetch = orig;
+  const cacheOk = calls === 1 && DB.astroTexts.length === 1 && DB.astroTexts[0].ruleIds.length > 0 && DB.astroTexts[0].promptVersion === 'astro-summary-v1';
+  // 7) UI: на экране натальной карты резюме рендерится первым блоком.
+  goTo('astro'); asub('natal');
+  await new Promise(r => setTimeout(r, 150));
+  const uiOk = /Кто вы по карте/.test(document.getElementById('astro-summary').textContent);
+  goTo('home');
+  DB.astroBirth = null; DB.astroCharts = []; DB.astroTexts = [];
+  return { signCnt, houseCnt, ascCnt, themeCnt, sunBlock, moonBlock, ascBlock, growthBlocks, audited, sunRule, noJargon, noTimeOk, cacheOk, uiOk };
+});
+ok(interpT.signCnt === 120 && interpT.houseCnt === 120, `база правил: 120 планета-в-знаке + 120 планета-в-доме (${interpT.signCnt}/${interpT.houseCnt})`);
+ok(interpT.ascCnt === 12 && interpT.themeCnt === 10, 'база правил: 12 текстов Асцендента + 10 тем планет');
+ok(interpT.sunBlock && interpT.moonBlock && interpT.ascBlock && interpT.growthBlocks, 'резюме 3.1a: Солнце, Луна, «как видят», сильная сторона, вызов');
+ok(interpT.audited && interpT.sunRule, 'аудит: каждый блок несёт source_rule_id (planetInSign.Sun.Козерог)');
+ok(interpT.noJargon, 'без жаргона: в резюме нет градусов и терминов аспектов');
+ok(interpT.noTimeOk, 'честность: без времени рождения нет блока про Асцендент');
+ok(interpT.cacheOk, 'ИИ-полировка: один вызов API, повторно — из кэша, с ruleIds и версией промпта');
+ok(interpT.uiOk, 'UI: «Кто вы по карте» рендерится на экране натальной карты');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

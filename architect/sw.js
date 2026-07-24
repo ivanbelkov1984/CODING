@@ -6,7 +6,7 @@
 //  Версия кэша меняется при каждой сборке (__BUILD__), старые чистятся.
 // ═══════════════════════════════════════════════════════════════
 const V = 'arch-__BUILD__';
-const SHELL = ['./', './index.html', './lucide.js', './astronomy.min.js', './inter-latin.woff2', './inter-cyrillic.woff2', './manifest.json', './icon-192.png', './icon-512.png',
+const SHELL = ['./', './index.html', './lucide.js', './astronomy.min.js', './astro_rules.js', './inter-latin.woff2', './inter-cyrillic.woff2', './manifest.json', './icon-192.png', './icon-512.png',
   // ESM-модули зашифрованного backup — в app shell, чтобы UI работал офлайн
   // (dynamic import из index.html резолвится из кэша). Пути относительны scope
   // (/CODING/architect/). Сами backup-ФАЙЛЫ пользователя (blob-скачивание) не
