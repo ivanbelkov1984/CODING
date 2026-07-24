@@ -2677,13 +2677,59 @@ function computeNatalChart(birth) {
   // Мажорные аспекты между планетами (версионированная orb policy v1).
   const aspects = [];
   for (let i = 0; i < planets.length; i++) for (let j = i + 1; j < planets.length; j++) {
-    const d = Math.abs(((planets[i].lon - planets[j].lon + 540) % 360) - 180);
-    const sep = 180 - d;   // угловое расстояние 0..180
+    // Угловое расстояние 0..180 (с учётом перехода через 0°/360°).
+    const sep = Math.abs(((planets[i].lon - planets[j].lon + 180) % 360 + 360) % 360 - 180);
     for (const asp of ASTRO_ASPECTS) {
       if (Math.abs(sep - asp.angle) <= asp.orb) { aspects.push({ a: planets[i].name, b: planets[j].name, name: asp.name, exact: Math.abs(sep - asp.angle).toFixed(1) }); break; }
     }
   }
   return { planets, angles, houses, aspects, timeKnown: !!birth.timeKnown, versions: { ...ASTRO_VERSIONS } };
+}
+// Транзиты: положения планет на момент времени + аспекты транзит→натал.
+// Орб-политика транзитов (уже натальной) версионирована отдельно.
+const TRANSIT_ORB = 3; // transit-orbs-v1: все мажорные аспекты, орб 3°
+function computeTransits(natalChart, at) {
+  const A = window.Astronomy;
+  if (!A) throw new Error('движок не загружен');
+  const t = A.MakeTime(at || new Date());
+  const current = ASTRO_BODIES.map(b => {
+    let lon;
+    if (b === 'Sun') lon = A.SunPosition(t).elon;
+    else if (b === 'Moon') lon = A.EclipticGeoMoon(t).lon;
+    else lon = A.Ecliptic(A.GeoVector(A.Body[b], t, true)).elon;
+    const z = zodiacOf(lon);
+    return { body: b, name: ASTRO_RU[b], lon: z.lon, sign: z.sign, deg: z.deg };
+  });
+  const hits = [];
+  if (natalChart && natalChart.planets) {
+    for (const tr of current) for (const na of natalChart.planets) {
+      const sep = Math.abs(((tr.lon - na.lon + 180) % 360 + 360) % 360 - 180);
+      for (const asp of ASTRO_ASPECTS) {
+        if (Math.abs(sep - asp.angle) <= TRANSIT_ORB) { hits.push({ transit: tr.name, aspect: asp.name, natal: na.name, exact: Math.abs(sep - asp.angle).toFixed(1) }); break; }
+      }
+    }
+  }
+  return { current, hits, versions: { ...ASTRO_VERSIONS, transitOrbPolicy: 'transit-orbs-v1(3)' }, at: (at || new Date()).toISOString() };
+}
+async function runTransits() {
+  const out = $('astro-transits'); if (out) out.innerHTML = '<div class="ai-sp-empty">Считаю транзиты…</div>';
+  try {
+    await loadAstroEngine();
+    const last = (DB.astroCharts || []).slice(-1)[0];
+    const tr = computeTransits(last && last.chart, new Date());
+    let html = '<div class="f-lbl" style="margin-top:.5rem">Небо сейчас</div>' +
+      tr.current.map(p => `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°</div></div></div>`).join('');
+    if (tr.hits.length) {
+      html += '<div class="f-lbl" style="margin-top:.5rem">Аспекты к натальной карте</div>' +
+        tr.hits.slice(0, 10).map(h => `<div class="si-row"><div class="si-body"><div class="si-text">транзитный ${esc(h.transit)} ${esc(h.aspect)} натальный ${esc(h.natal)} (орб ${h.exact}°)</div></div></div>`).join('');
+    } else if (last) {
+      html += '<div class="si-text" style="color:var(--t3);margin:.4rem 0">Сейчас нет точных мажорных аспектов к натальной карте (орб 3°).</div>';
+    }
+    html += `<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Символический снимок момента в западной традиции. Не событие и не прогноз.</div>`;
+    if (out) out.innerHTML = html;
+  } catch (e) {
+    if (out) out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать. Попробуй ещё раз.</div>';
+  }
 }
 function saveAstroBirth() {
   const date = ($('ab-date') ? $('ab-date').value : '').trim();
