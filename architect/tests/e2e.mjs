@@ -2453,6 +2453,37 @@ ok(polarT.warnShown && polarT.warnHiddenWhole && polarT.warnHiddenLat, 'поля
 ok(polarT.compactOk, 'настройки: вместо технического дампа — понятная карточка «Карта рассчитана» с кнопкой и пометкой об откате');
 ok(polarT.tabExplains, 'таб «Дома»: причина отката объяснена человеческим языком');
 
+// ── Астрология: видимая тапаемость + шапки-пояснения (СРОЧНАЯ ПРОВЕРКА владельца) ──
+const affT = await page.evaluate(async () => {
+  await loadAstroEngine(); try { await loadAstroRules(); } catch (e) {}
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = [];
+  await runNatalChart();
+  goTo('astro'); asub('points');   // экран «Астероиды и точки»
+  const ptsEl = document.getElementById('astro-points-out');
+  const preIntro = /необязательный слой карты/.test(ptsEl.textContent);
+  const prePts = /Расчётные точки — не небесные тела/.test(ptsEl.textContent);
+  const preAnt = /зеркальное отражение/.test(ptsEl.textContent) && /оси солнцестояний/.test(ptsEl.textContent);
+  // Видимый индикатор тапаемости: CSS дорисовывает «›» каждому [data-rule].
+  const tappable = Array.from(ptsEl.querySelectorAll('[data-rule]'));
+  const marker = tappable.length >= 10 && tappable.every(el => getComputedStyle(el, '::after').content.includes('›'));
+  // Антисции — отдельные кликабельные строки (не сплошной абзац): 10 тапов.
+  const antTap = tappable.filter(el => (el.getAttribute('data-rule') || '').startsWith('antiscia.')).length === 10;
+  // Преамбула над табами натальной карты: куда смотреть новичку.
+  asub('natal');
+  await new Promise(r => setTimeout(r, 350));
+  const natalTx = document.getElementById('as-natal').textContent;
+  const preTabs = /начните с блока «Кто вы по карте»/.test(natalTx) && /технические детали/i.test(natalTx);
+  antab('points');
+  const tabPre = /необязательный слой/.test(document.getElementById('astro-ntab-out').textContent);
+  goTo('home'); DB.astroBirth = null; DB.astroCharts = [];
+  return { preIntro, prePts, preAnt, marker, antTap, preTabs, tabPre, nTappable: tappable.length };
+});
+ok(affT.marker, `видимая тапаемость: каждый элемент с расшифровкой помечен «›» через CSS (${affT.nTappable} элементов)`);
+ok(affT.antTap, 'антисции: 10 отдельных кликабельных строк с текстами (не сплошной абзац)');
+ok(affT.preIntro && affT.prePts && affT.preAnt, 'шапки-пояснения: интро экрана точек, «Расчётные точки», «Антисции» — простым языком до тапа');
+ok(affT.preTabs && affT.tabPre, 'преамбула над табами: новичка отправляют к «Кто вы по карте», значок › объяснён');
+
 // ── Астрология: полный портрет карты (интро, Asc/MC, синтез-слой) ──
 const portT = await page.evaluate(async () => {
   await loadAstroEngine(); await loadAstroRules();
