@@ -2401,6 +2401,58 @@ ok(kochT.oppOk && kochT.circleOk, 'Кох: противоположные кус
 ok(kochT.eqOk, 'Кох: на экваторе совпадает с Плацидусом/Кампанусом/Региомонтанусом (±0.1°)');
 ok(kochT.differs, 'Кох: на широте Москвы отличается от Плацидуса (реально другая система)');
 
+// ── Астрология: полный портрет карты (интро, Asc/MC, синтез-слой) ──
+const portT = await page.evaluate(async () => {
+  await loadAstroEngine(); await loadAstroRules();
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = [];
+  await runNatalChart();
+  goTo('astro'); asub('natal');
+  await new Promise(r => setTimeout(r, 400));
+  // Пробел 3: вводный текст видим в начале экрана.
+  const natal = document.getElementById('as-natal');
+  const intro = /разговор о возможностях, а не как приговор/.test(natal.textContent);
+  // Порядок блоков: интро → summary → persona → portrait → колесо.
+  const html = natal.innerHTML;
+  const orderOk = html.indexOf('разговор о возможностях') < html.indexOf('astro-summary')
+    && html.indexOf('astro-summary') < html.indexOf('astro-persona')
+    && html.indexOf('astro-persona') < html.indexOf('astro-portrait')
+    && html.indexOf('astro-portrait') < html.indexOf('astro-wheel');
+  // Пробел 1: блоки Asc и MC с краткими текстами и тапами.
+  const personaTx = document.getElementById('astro-persona').textContent;
+  const maskOk = /Ваша маска для мира/.test(personaTx) && /Близнецы/.test(personaTx);
+  const mcOk = /Ваше призвание/.test(personaTx) && /Водолей/.test(personaTx);
+  const mcTap = !!document.querySelector('#astro-persona [data-rule="mcInSign.Водолей"]');
+  const ascTap = !!document.querySelector('#astro-persona [data-rule="ascInSign.Близнецы"]');
+  // Пробел 2: golden синтеза для J2000 — вода в дефиците (1), фиксированных 5,
+  // стеллиум в Водолее (Марс, Уран, Нептун).
+  const b = computeChartBalance(DB.astroCharts[0].chart);
+  const elOk = b.elements['вода'] === 1 && b.elements['земля'] === 3 && b.elements['огонь'] === 3 && b.elements['воздух'] === 3;
+  const quOk = b.qualities['фиксированный'] === 5;
+  const lineWater = b.lines.some(l => l.k === 'вода_мало');
+  const lineFixed = b.lines.some(l => l.k === 'фиксированный_много');
+  const stell = b.stelliums.some(s => /Стеллиум в знаке Водолей/.test(s.t) && /Марс/.test(s.t) && /Уран/.test(s.t) && /Нептун/.test(s.t));
+  const portraitTx = document.getElementById('astro-portrait').textContent;
+  const uiOk = /Общий портрет вашей карты/.test(portraitTx) && /Воды мало/.test(portraitTx) && /Стеллиум в знаке Водолей/.test(portraitTx);
+  // Честность: без времени — persona пуста, портрет без полушарий.
+  DB.astroBirth = { date: '2000-01-01', timeKnown: false, utcOffset: 0 };
+  DB.astroCharts = [];
+  await runNatalChart();
+  await rPersona(); await rPortrait();
+  const noTime = document.getElementById('astro-persona').innerHTML === ''
+    && /при известном времени/.test(document.getElementById('astro-portrait').textContent);
+  goTo('home');
+  DB.astroBirth = null; DB.astroCharts = [];
+  return { intro, orderOk, maskOk, mcOk, mcTap, ascTap, elOk, quOk, lineWater, lineFixed, stell, uiOk, noTime };
+});
+ok(portT.intro && portT.orderOk, 'портрет: вводный текст о потенциале первым, порядок блоков по ТЗ');
+ok(portT.maskOk && portT.ascTap, 'портрет: «Ваша маска для мира» (Asc) с кратким текстом и тапом');
+ok(portT.mcOk && portT.mcTap, 'портрет: «Ваше призвание» (MC) с кратким текстом и тапом');
+ok(portT.elOk && portT.quOk, 'синтез golden J2000: стихии 3/3/3/1 (вода дефицит), фиксированных 5');
+ok(portT.lineWater && portT.lineFixed, 'синтез: тексты «воды мало» и «фиксированного много» выбраны верно');
+ok(portT.stell && portT.uiOk, 'синтез: стеллиум Водолея (Марс+Уран+Нептун) найден и показан');
+ok(portT.noTime, 'честность: без времени рождения — без Asc/MC-блоков и полушарий');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
