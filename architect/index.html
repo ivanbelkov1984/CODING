@@ -459,23 +459,29 @@
         <div style="flex:1"><div class="f-lbl">Дата рождения</div><input class="field" id="ab-date" placeholder="1984-06-15"></div>
         <div style="flex:1"><div class="f-lbl">Время (местное)</div><input class="field" id="ab-time" placeholder="14:30"></div>
       </div>
-      <div class="tog-row" style="border-bottom:none;padding:.15rem 0"><span class="tog-lbl">Время известно точно</span><div class="tog" id="ab-time-known" onclick="this.classList.toggle('on')" role="switch"></div></div>
+      <div class="tog-row" style="border-bottom:none;padding:.15rem 0"><span class="tog-lbl">Время известно точно</span><div class="tog" id="ab-time-known" onclick="this.classList.toggle('on');updateHouseAssist()" role="switch"></div></div>
       <div style="display:flex;gap:.5rem">
         <div style="flex:1"><div class="f-lbl">UTC-офсет места</div><input class="field" id="ab-utc" placeholder="напр. 3 или 5.5"></div>
         <div style="flex:2"><div class="f-lbl">Место (название)</div><input class="field" id="ab-place" placeholder="город"></div>
       </div>
       <div style="display:flex;gap:.5rem">
-        <div style="flex:1"><div class="f-lbl">Широта</div><input class="field" id="ab-lat" placeholder="55.75" oninput="updatePolarWarn()"></div>
+        <div style="flex:1"><div class="f-lbl">Широта</div><input class="field" id="ab-lat" placeholder="55.75" oninput="updateHouseAssist()"></div>
         <div style="flex:1"><div class="f-lbl">Долгота</div><input class="field" id="ab-lon" placeholder="37.62"></div>
       </div>
-      <div><div class="f-lbl">Система домов</div><select class="field" id="ab-houses" onchange="updatePolarWarn()">
-        <option value="whole">Whole-sign (знаковые)</option>
-        <option value="placidus">Плацидус</option>
-        <option value="koch">Кох</option>
-        <option value="equal">Равнодомная (Equal)</option>
-        <option value="campanus">Кампанус</option>
-        <option value="regiomontanus">Региомонтанус</option>
-      </select></div>
+      <div><div class="f-lbl">Система домов</div>
+        <div class="be-note" style="color:var(--t3);margin:.05rem 0 .3rem">Если не уверены — оставьте вариант по умолчанию: он подобран автоматически под ваши данные рождения.</div>
+        <select class="field" id="ab-houses" onchange="houseSelChanged()">
+          <option value="placidus">Плацидус</option>
+          <option value="whole">Whole-sign (знаковые)</option>
+          <option value="equal">Равнодомная (Equal)</option>
+          <optgroup label="Другие системы (для специалистов)">
+            <option value="koch">Кох</option>
+            <option value="campanus">Кампанус</option>
+            <option value="regiomontanus">Региомонтанус</option>
+          </optgroup>
+        </select>
+        <div id="ab-houses-desc" class="be-note" style="color:var(--t3);margin-top:.3rem;line-height:1.5"></div>
+      </div>
       <div id="ab-polar-warn" class="be-note" style="display:none;color:var(--orange,#c60);line-height:1.5"></div>
       <div class="be-note" style="color:var(--t3)">UTC-офсет укажи сам для исторической точности (летнее время/реформы поясов не угадываются автоматически). Без точного времени карта считается без асцендента и домов.</div>
       <div class="tog-row" style="border-bottom:none;padding:.15rem 0"><span class="tog-lbl">Астероиды и звёзды на колесе</span><div class="tog" id="astro-extras-tog" onclick="toggleWheelExtras()" role="switch"></div></div>
