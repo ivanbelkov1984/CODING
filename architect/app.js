@@ -4568,20 +4568,69 @@ function fillAstroForm() {
     if ($('ab-lon')) $('ab-lon').value = b.lon == null ? '' : String(b.lon);
     if ($('ab-houses')) $('ab-houses').value = b.houseSystem || 'whole';
   }
-  updatePolarWarn();
+  // Сохранённый выбор пользователя уважаем (авто-дефолт только для новой формы).
+  _houseManual = !!b;
+  updateHouseAssist();
   rAstroChart();
 }
 
-// Полярное предупреждение (ПРОВЕРКА владельца): выше ~66° квадрантные системы
-// искажаются, выше ~66.6° могут не иметь решения. Показываем до расчёта.
+// ─── СИСТЕМА ДОМОВ: УМНЫЙ ДЕФОЛТ, ПОДПИСИ, ПОЛЯРНАЯ ЗАЩИТА ─────────
+// Стандарт топовых приложений (задача владельца): дефолт подбирается
+// автоматически по данным рождения, каждый вариант объяснён одной строкой,
+// нерабочая на полярной широте система перехватывается ПРИ выборе.
 const QUADRANT_HOUSE_RU = { placidus: 'Плацидус', koch: 'Кох', campanus: 'Кампанус', regiomontanus: 'Региомонтанус' };
+const HOUSE_SYSTEM_DESC = {
+  placidus: 'Самая распространённая современная система — большинство сайтов и приложений используют её по умолчанию.',
+  whole: 'Каждый знак — отдельный дом целиком. Простая древняя система, любима традиционными астрологами; надёжна на любых широтах.',
+  equal: 'Дома ровно по 30°, отсчёт от вашего восходящего градуса. Простая и устойчивая на любых широтах.',
+  koch: 'Похожа на Плацидус, другая математика деления. Популярна в немецкой школе астрологии.',
+  campanus: 'Историческая система, используется реже — для тех, кто следует этой традиции.',
+  regiomontanus: 'Историческая система, используется реже — для тех, кто следует этой традиции.',
+};
+// Правило дефолта (по образцу Astro Library): время неизвестно → Whole-sign;
+// широта ≥ 59° → Whole-sign (устойчива к полярной геометрии); иначе Плацидус.
+function smartHouseDefault(lat, timeKnown) {
+  if (!timeKnown) return 'whole';
+  if (isFinite(lat) && Math.abs(lat) >= 59) return 'whole';
+  return 'placidus';
+}
+let _houseManual = false;   // пользователь трогал селектор сам → авто-дефолт не вмешивается
+let _polarAck = '';         // «всё равно использовать»: не повторять то же предупреждение
+function houseSelChanged() { _houseManual = true; _polarAck = ''; updateHouseAssist(); }
+function updateHouseAssist() {
+  const sel = $('ab-houses'); if (!sel) return;
+  const lat = parseFloat($('ab-lat') ? $('ab-lat').value : '');
+  const tk = $('ab-time-known') ? $('ab-time-known').classList.contains('on') : false;
+  if (!_houseManual) {
+    const def = smartHouseDefault(lat, tk);
+    if (sel.value !== def) { sel.value = def; _polarAck = ''; }
+  }
+  const d = $('ab-houses-desc');
+  if (d) d.textContent = (HOUSE_SYSTEM_DESC[sel.value] || '') + (_houseManual ? '' : ' Подобрана автоматически — можно изменить.');
+  updatePolarWarn();
+}
+// Защита при выборе (не пост-фактум): предупреждение с кнопками выбора.
 function updatePolarWarn() {
   const el = $('ab-polar-warn'); if (!el) return;
   const lat = Math.abs(parseFloat($('ab-lat') ? $('ab-lat').value : ''));
   const hs = $('ab-houses') ? $('ab-houses').value : 'whole';
-  const bad = isFinite(lat) && lat > 66 && !!QUADRANT_HOUSE_RU[hs];
+  const bad = isFinite(lat) && lat > 66 && !!QUADRANT_HOUSE_RU[hs] && _polarAck !== hs;
   el.style.display = bad ? 'block' : 'none';
-  if (bad) el.textContent = `⚠️ Широта ${lat.toFixed(1)}° — у Полярного круга. Система «${QUADRANT_HOUSE_RU[hs]}» на такой широте может давать неточный результат (сильно растянутые дома), а выше ~66.6° — вовсе не иметь решения: тогда дома автоматически посчитаются по Whole-sign с пометкой. Рекомендуем Whole-sign или Равнодомную.`;
+  if (bad) el.innerHTML = `⚠️ На этой широте (${lat.toFixed(1)}°) система «${QUADRANT_HOUSE_RU[hs]}» может давать неточный результат из-за особенностей движения Солнца в приполярных регионах. Рекомендуем Whole-sign или Равнодомную. Выше ~66.6° дома при необходимости автоматически посчитаются по Whole-sign с пометкой.
+    <div style="display:flex;flex-direction:column;gap:.4rem;margin-top:.5rem">
+      <button class="btn btn-s btn-full" onclick="polarPickSafe()">Выбрать рекомендованную (Whole-sign)</button>
+      <button class="btn btn-s btn-full" onclick="polarKeepRisky()">Всё равно использовать «${QUADRANT_HOUSE_RU[hs]}»</button>
+    </div>`;
+}
+function polarPickSafe() {
+  const sel = $('ab-houses'); if (sel) sel.value = 'whole';
+  _houseManual = true; _polarAck = '';
+  updateHouseAssist();
+  toast('Выбрана Whole-sign — надёжна на этой широте', 'ok');
+}
+function polarKeepRisky() {
+  const sel = $('ab-houses'); if (sel) _polarAck = sel.value;
+  updatePolarWarn();
 }
 
 // ─── РЕКТИФИКАЦИЯ: ЭКРАН (анкета событий → диапазон → результат) ─────

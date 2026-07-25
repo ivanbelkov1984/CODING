@@ -2484,6 +2484,51 @@ ok(affT.antTap, 'антисции: 10 отдельных кликабельны�
 ok(affT.preIntro && affT.prePts && affT.preAnt, 'шапки-пояснения: интро экрана точек, «Расчётные точки», «Антисции» — простым языком до тапа');
 ok(affT.preTabs && affT.tabPre, 'преамбула над табами: новичка отправляют к «Кто вы по карте», значок › объяснён');
 
+// ── Астрология: умный дефолт системы домов + защита при выборе (задача владельца) ──
+const hsT = await page.evaluate(async () => {
+  // Юнит: правило дефолта (образец Astro Library).
+  const d1 = smartHouseDefault(55.75, true) === 'placidus';
+  const d2 = smartHouseDefault(66.41, true) === 'whole';
+  const d3 = smartHouseDefault(59, true) === 'whole';
+  const d4 = smartHouseDefault(55.75, false) === 'whole';
+  // Форма: авто-подбор на кейсе владельца (66.41°, время известно).
+  DB.astroBirth = null; DB.astroCharts = [];
+  goTo('astro'); asub('setup');   // пустая форма → авто-режим
+  const latEl = document.getElementById('ab-lat'), sel = document.getElementById('ab-houses');
+  document.getElementById('ab-time-known').classList.add('on');
+  latEl.value = '66.41'; updateHouseAssist();
+  const autoPolar = sel.value === 'whole' && /Подобрана автоматически/.test(document.getElementById('ab-houses-desc').textContent);
+  latEl.value = '55.75'; updateHouseAssist();
+  const autoNormal = sel.value === 'placidus';
+  // Ручной выбор Коха на 66.41° → предупреждение с кнопками ПРИ выборе.
+  latEl.value = '66.41'; updateHouseAssist();
+  sel.value = 'koch'; houseSelChanged();
+  const warn = document.getElementById('ab-polar-warn');
+  const warned = warn.style.display !== 'none' && /приполярных регионах/.test(warn.textContent)
+    && /Выбрать рекомендованную/.test(warn.textContent) && /Всё равно использовать/.test(warn.textContent);
+  polarPickSafe();
+  const picked = sel.value === 'whole' && warn.style.display === 'none';
+  sel.value = 'placidus'; houseSelChanged();
+  polarKeepRisky();
+  const kept = sel.value === 'placidus' && warn.style.display === 'none';
+  // Подписи у всех вариантов; редкие системы — в группе «для специалистов»; общая подсказка.
+  const descAll = ['placidus', 'whole', 'equal', 'koch', 'campanus', 'regiomontanus'].every(k => (HOUSE_SYSTEM_DESC[k] || '').length > 20);
+  const grouped = !!sel.querySelector('optgroup[label*="для специалистов"] option[value="koch"]');
+  const hint = /оставьте вариант по умолчанию/.test(document.getElementById('as-setup').textContent);
+  // Авто-дефолт НЕ переписывает сохранённый пользователем выбор.
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 66.41, lon: 112.25, houseSystem: 'koch' };
+  fillAstroForm();
+  const savedKept = sel.value === 'koch';
+  goTo('home'); DB.astroBirth = null; DB.astroCharts = [];
+  return { d1, d2, d3, d4, autoPolar, autoNormal, warned, picked, kept, descAll, grouped, hint, savedKept };
+});
+ok(hsT.d1 && hsT.d2 && hsT.d3 && hsT.d4, 'умный дефолт: Плацидус до 59°, Whole-sign от 59° и без времени');
+ok(hsT.autoPolar && hsT.autoNormal, 'форма: на 66.41° авто-подбор Whole-sign с подписью, на 55.75° — Плацидус');
+ok(hsT.warned, 'защита при выборе: Кох на 66.41° → предупреждение с кнопками сразу, не после расчёта');
+ok(hsT.picked && hsT.kept, 'кнопки: «Выбрать рекомендованную» → Whole-sign; «Всё равно использовать» уважает выбор');
+ok(hsT.descAll && hsT.grouped && hsT.hint, 'подписи у всех 6 систем, редкие — в группе «для специалистов», общая подсказка есть');
+ok(hsT.savedKept, 'авто-дефолт не переписывает сохранённый выбор пользователя');
+
 // ── Астрология: полный портрет карты (интро, Asc/MC, синтез-слой) ──
 const portT = await page.evaluate(async () => {
   await loadAstroEngine(); await loadAstroRules();
