@@ -4587,6 +4587,111 @@ function synastryHitText(h) {
   if (!A || !B || !verb) return null;
   return { text: `Ваша тема «${A}» и тема партнёра «${B}» ${verb}.`, ruleId: `synastry.${h.aBody}.${h.aspect}.${h.bBody}` };
 }
+
+// ─── СИНАСТРИЯ v2: «сюжет по разделам» вместо каталога аспектов ─────
+// Пайплайн (задача владельца): сигналы → вес (личные > личные↔соц. >
+// прочие > поколенческие) → смысловые разделы → повествование из
+// семантического слоя пар (ASTRO_RULES.synPair: наблюдение → смысл →
+// быт) → синтез «В целом». Поколенческие пары — фон эпохи, свёрнуты.
+const SYN_PERSONAL = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars'];
+const SYN_SOCIAL = ['Jupiter', 'Saturn'];
+const SYN_GEN = ['Uranus', 'Neptune', 'Pluto'];
+const SYN_HARD = ['квадрат', 'оппозиция'];
+function synPriority(a, b) {
+  const pa = SYN_PERSONAL.includes(a), pb = SYN_PERSONAL.includes(b);
+  if (pa && pb) return 3;
+  if ((pa && SYN_SOCIAL.includes(b)) || (pb && SYN_SOCIAL.includes(a))) return 2;
+  if (SYN_GEN.includes(a) && SYN_GEN.includes(b)) return 0;   // фон эпохи, не динамика пары
+  return 1;
+}
+function synPairKey(a, b) {
+  return ASTRO_BODIES.indexOf(a) <= ASTRO_BODIES.indexOf(b) ? a + '-' + b : b + '-' + a;
+}
+// Семантическая разметка одного аспекта: приоритет, тон, вес, раздел.
+function synSignal(h) {
+  const prio = synPriority(h.aBody, h.bBody);
+  const tone = SYN_HARD.includes(h.aspect) ? 'tense' : 'harm';
+  const key = synPairKey(h.aBody, h.bBody);
+  let score = prio * 10 + (SYNASTRY_ORB - parseFloat(h.exact));
+  if (key === 'Venus-Mars') score += 4;          // танец между приёмом и действием
+  if (key === 'Sun-Moon') score += 3;
+  if (key === 'Sun-Venus' || key === 'Moon-Venus') score += 1;
+  const CHEM = ['Sun', 'Moon', 'Venus', 'Mars'];
+  let section;
+  if (prio === 0) section = 'era';
+  else if (h.aBody === 'Mercury' || h.bBody === 'Mercury') section = 'talk';
+  else if (prio === 3 && CHEM.includes(h.aBody) && CHEM.includes(h.bBody)) section = 'chem';
+  else section = tone === 'tense' ? 'growth' : 'support';
+  return { ...h, prio, tone, score, key, section };
+}
+const SYN_SECTIONS = [
+  ['chem', 'Притяжение и близость'],
+  ['talk', 'Как вы общаетесь и думаете вместе'],
+  ['growth', 'Точки напряжения и роста'],
+  ['support', 'Что усиливает друг друга'],
+];
+const SYN_DOM_RU = { chem: 'притяжение и близость', talk: 'общение и обмен мыслями', growth: 'живое напряжение, которое заставляет обоих расти', support: 'взаимная поддержка' };
+function synNarrativeHtml(hits, partnerLabel) {
+  const R = window.ASTRO_RULES || {};
+  const sig = hits.map(synSignal).sort((a, b) => b.score - a.score);
+  const era = sig.filter(s => s.section === 'era');
+  const main = sig.filter(s => s.section !== 'era');
+  const sect = { chem: [], talk: [], growth: [], support: [] };
+  main.forEach(s => sect[s.section].push(s));
+  const pairText = s => (R.synPair && R.synPair[s.key] && R.synPair[s.key][s.tone]) || null;
+  // Мини-строка сигнала: без шаблонной рамки; тап — полный текст пары.
+  const chip = s => `<div class="si-text" style="color:var(--t4);font-size:.72rem"${ruleAttr(`synastry.${s.aBody}.${s.aspect}.${s.bBody}`, `${s.a} и ${s.b}: ${s.aspect}`)}>${esc(s.a)} ${esc(s.aspect)} ${esc(s.b)} · ${s.exact}°</div>`;
+  const secScore = k => sect[k].reduce((x, s) => x + s.score, 0);
+  const domSec = SYN_SECTIONS.map(([k]) => k).sort((a, b) => secScore(b) - secScore(a))[0];
+  const tense = main.filter(s => s.tone === 'tense').length, harm = main.length - tense;
+  let html = '';
+  if (main.length) {
+    // Вход: общий характер связи (1 абзац).
+    const OPEN = {
+      chem: `Первое, что заметно между вами: живое притяжение — сильнее всего здесь связаны чувства и желание.`,
+      talk: `Ось этой пары — разговор: сильнее всего ваши карты связаны через мышление и слова.`,
+      growth: `Эта связь — не про тихую гавань: самые сильные контакты между картами напряжённые, и именно они дают паре энергию.`,
+      support: `Основа этой связи — опора: самые сильные контакты между картами гармоничные.`,
+    };
+    const balance = harm > tense ? 'Опоры здесь больше, чем трения.' : tense > harm ? 'Трение заметнее опоры — скучно не будет.' : 'Опора и трение здесь в равновесии.';
+    html += `<div class="si-text" style="line-height:1.6;margin:.4rem 0 .2rem">${esc(OPEN[domSec] || '')} ${esc(balance)} <span style="color:var(--t4);font-size:.72rem">(гармоничных контактов ${harm}, напряжённых ${tense})</span></div>`;
+    // Разделы: абзац-повествование из 1–2 текстов пар + строки сигналов.
+    for (const [k, title] of SYN_SECTIONS) {
+      const list = sect[k]; if (!list.length) continue;
+      const top = list.slice(0, 4);
+      // Абзац собираем из сильнейших сигналов С текстом пары (по всему
+      // разделу): если в топе только пары без заготовки, ищем глубже.
+      const paras = []; const used = new Set();
+      for (const s of list) {
+        if (used.has(s.key + s.tone)) continue;
+        const t = pairText(s);
+        if (t) { paras.push(t); used.add(s.key + s.tone); }
+        if (paras.length >= 2) break;
+      }
+      html += `<div class="f-lbl" style="margin-top:.6rem">${title}</div>`;
+      if (paras.length) html += `<div class="si-text" style="line-height:1.6">${paras.map(esc).join(' ')}</div>`;
+      html += `<div style="margin-top:.25rem">${top.map(chip).join('')}</div>`;
+    }
+    // Синтез «В целом»: доминанта → на чём держится → главный вызов → честная кода.
+    const first = t => t ? t.split('. ')[0] + '.' : '';
+    const bestHarm = main.find(s => s.tone === 'harm' && pairText(s));
+    const bestTense = main.find(s => s.tone === 'tense' && pairText(s));
+    let syn = `В этой паре доминирует ${SYN_DOM_RU[domSec]}. `;
+    if (bestHarm) syn += `Держится связь прежде всего на контакте «${bestHarm.a} — ${bestHarm.b}». ${first(pairText(bestHarm))} `;
+    if (bestTense) syn += `Главный вызов — «${bestTense.a} — ${bestTense.b}». ${first(pairText(bestTense))} `;
+    syn += 'Ни один из этих контактов не приговор: карта описывает динамику, а не итог. Что вы сделаете с этим притяжением и этим трением — решаете вы двое, и именно это, а не градусы, определяет судьбу пары.';
+    html += `<div class="f-lbl" style="margin-top:.7rem">В целом</div><div class="si-text" style="line-height:1.6">${esc(syn)}</div>`;
+  }
+  // Фон эпохи: поколенческие пары — свёрнуты (это не динамика ЭТОЙ пары).
+  if (era.length) {
+    html += `<button class="btn btn-s btn-full" style="margin-top:.6rem" onclick="const d=$('syn-era');d.style.display=d.style.display==='none'?'block':'none'">Фон эпохи (${era.length}) — показать/скрыть</button>
+      <div id="syn-era" style="display:none">
+        <div class="si-text" style="color:var(--t3);line-height:1.5;margin:.3rem 0">Контакты медленных планет (Уран, Нептун, Плутон) между собой — общий фон поколения, а не личная динамика вашей пары: они почти одинаковы у всех ровесников.</div>
+        ${era.map(chip).join('')}
+      </div>`;
+  }
+  return html;
+}
 function saveAstroPartner() {
   const date = ($('sp-date') ? $('sp-date').value : '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast('Дата в формате ГГГГ-ММ-ДД', 'warn'); return; }
@@ -4633,13 +4738,9 @@ async function rSynastry() {
     if (wheelEl) wheelEl.innerHTML = renderChartWheel(last.chart, { size: 340, static: true, transits: partner.chart.planets });
     let html = `<div class="f-lbl">Вы (внутри) и ${esc(partner.label)} (снаружи) — межличностные аспекты</div>`;
     if (syn.hits.length) {
-      html += syn.hits.slice(0, 14).map(h => {
-        const tx = synastryHitText(h);
-        return `<div class="si-row"><div class="si-body"><div class="si-text"><b>Ваш ${esc(h.a)} ↔ ${esc(h.b)} партнёра.</b> ${tx ? esc(tx.text) : esc(h.aspect)}</div>
-          <div class="si-text" style="color:var(--t4);font-size:.72rem"${tx ? ` data-rule="${esc(tx.ruleId)}"` : ''}>${esc(h.aspect)} · точность ${h.exact}°</div></div></div>`;
-      }).join('');
+      html += synNarrativeHtml(syn.hits, partner.label);
     } else html += '<div class="si-text" style="color:var(--t3)">Точных мажорных аспектов между картами нет (орб 4°).</div>';
-    html += '<div class="be-note" style="color:var(--t3)">Символическое описание взаимодействия двух карт — не «процент совместимости», не вердикт о паре и не совет. Данные партнёра хранятся только на устройстве.</div>';
+    html += '<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Символическое описание взаимодействия двух карт — не «процент совместимости», не вердикт о паре и не совет. Тап по строке со значком › — развёрнутый текст. Данные партнёра хранятся только на устройстве.</div>';
     out.innerHTML = html;
   } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
 }
