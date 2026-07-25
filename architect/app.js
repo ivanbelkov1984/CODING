@@ -3626,6 +3626,7 @@ function astroPlanetTap(body) {
   el.innerHTML = `<div class="card mx" style="padding:.7rem 1rem;margin-top:.5rem">
     <div class="si-text"><b>${PLANET_GLYPHS[body] || ''} ${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°${p.retro ? ' ℞ (ретро)' : ''}${h ? ` · ${h}-й дом` : ''}</div>
     ${asp.slice(0, 6).map(a => `<div class="si-text" style="color:var(--t3)">${esc(a.a)} ${esc(a.name)} ${esc(a.b)} (орб ${a.exact}°)</div>`).join('')}
+    <div class="si-text" style="color:var(--accent);font-size:.78rem;cursor:pointer" data-rule="planetInSign.${body}.${esc(p.sign)}" data-rule-title="${esc(p.name)} в знаке ${esc(p.sign)}">Подробнее →</div>
   </div>`;
 }
 
@@ -3714,6 +3715,58 @@ function loadAstroRules() {
   });
   return _rulesLoad;
 }
+
+// ─── ПОЛНАЯ БАЗА РАЗВЁРНУТЫХ ТЕКСТОВ (1861, grounded-v2) ───────────
+// 4 файла по экранам, лениво: natal / transit / synastry / jyotish.
+// Каждый текст — литературное оформление проверенных фактов (см.
+// tools/astro_ground_truth.json); открывается по тапу «Подробнее».
+const ASTRO_TEXTS_PARTS = {
+  natal: ['planetInSign', 'planetInHouse', 'ascInSign', 'houseCusp', 'aspectMeaning', 'pointInSign'],
+  transit: ['transit'], synastry: ['synastry'],
+  jyotish: ['grahaInRashi', 'nakshatraMoon', 'mahadasha'],
+};
+const _astroTextsLoad = {};
+function loadAstroTexts(part) {
+  const g = 'ASTRO_TEXTS_' + part.toUpperCase();
+  if (window[g]) return Promise.resolve();
+  if (_astroTextsLoad[part]) return _astroTextsLoad[part];
+  _astroTextsLoad[part] = new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = `astro_texts_${part}.js`;
+    sc.onload = () => res();
+    sc.onerror = () => { _astroTextsLoad[part] = null; rej(new Error('тексты не загрузились')); };
+    document.head.appendChild(sc);
+  });
+  return _astroTextsLoad[part];
+}
+function astroTextPart(ruleId) {
+  const prefix = String(ruleId).split('.')[0];
+  for (const [part, prefixes] of Object.entries(ASTRO_TEXTS_PARTS)) if (prefixes.includes(prefix)) return part;
+  return null;
+}
+// Полный текст по rule id → модал (title = человекочитаемая метка).
+async function astroFullText(ruleId, title) {
+  const part = astroTextPart(ruleId); if (!part) return;
+  const body = $('astro-text-body'), ttl = $('astro-text-title');
+  if (ttl) ttl.textContent = title || 'Подробнее';
+  if (body) body.innerHTML = '<div class="ai-sp-empty">Загружаю…</div>';
+  openOv('ov-astro-text');
+  try {
+    await loadAstroTexts(part);
+    const txt = (window['ASTRO_TEXTS_' + part.toUpperCase()] || {})[ruleId];
+    if (body) body.innerHTML = txt
+      ? esc(txt).split('\n').filter(s => s.trim()).map(p => `<p class="si-text" style="margin:.45rem 0">${p}</p>`).join('')
+        + '<div class="be-note" style="color:var(--t3)">Символическое описание, не прогноз и не диагноз.</div>'
+      : '<div class="ai-sp-empty">Для этой комбинации развёрнутого текста нет.</div>';
+  } catch (e) { if (body) body.innerHTML = '<div class="ai-sp-empty">Не удалось загрузить тексты.</div>'; }
+}
+// Тап по любому элементу с data-rule в астро-разделе открывает полный текст.
+document.addEventListener('click', e => {
+  const el = e.target.closest && e.target.closest('#pg-astro [data-rule], #pg-astro [data-rules], #ov-astro-wheel [data-rule]');
+  if (!el) return;
+  const rule = (el.dataset.rule || (el.dataset.rules || '').split(',')[0] || '').trim();
+  if (rule && astroTextPart(rule)) astroFullText(rule, el.dataset.ruleTitle || 'Подробнее');
+});
 
 // Текст аспекта личных планет (приоритет 2). Порядок пары фиксирован.
 const PERSONAL_ORDER = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars'];

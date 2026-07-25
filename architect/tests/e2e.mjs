@@ -2117,6 +2117,49 @@ ok(fwT.glyphs === 10 && fwT.houses === 12 && fwT.interactive, 'полноэкр�
 ok(fwT.infoInOverlay && fwT.closed, 'полноэкранное колесо: тап по планете — детали в оверлее, закрытие работает');
 ok(fwT.infoOnScreen, 'экран карты: тап по планете после закрытия оверлея работает как раньше');
 
+// ── Астрология: полная база развёрнутых текстов (grounded-v2) ──
+const fullT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = [];
+  await runNatalChart();
+  // 1) Ленивая загрузка natal-части: 717 текстов, ключевые категории на месте.
+  await loadAstroTexts('natal');
+  const N = window.ASTRO_TEXTS_NATAL;
+  const cnt = Object.keys(N).length;
+  const catOk = !!N['planetInSign.Sun.Козерог'] && !!N['planetInHouse.Moon.6'] && !!N['ascInSign.Рак']
+    && !!N['houseCusp.10.Водолей'] && !!N['aspectMeaning.Sun-Moon.секстиль'] && !!N['pointInSign.Ceres.Лев'];
+  const longOk = N['planetInSign.Sun.Козерог'].length > 500;
+  // 2) Маршрутизация rule id → файл-часть.
+  const routeOk = astroTextPart('transit.Sun.трин.Moon') === 'transit' && astroTextPart('grahaInRashi.Shani.Дхану') === 'jyotish'
+    && astroTextPart('synastry.Mars.квадрат.Venus') === 'synastry' && astroTextPart('unknown.x') === null;
+  // 3) Тап «Подробнее» в карточке планеты открывает модал с полным текстом.
+  goTo('astro'); asub('natal');
+  astroPlanetTap('Sun');
+  document.querySelector('#astro-planet-info [data-rule]').click();
+  await new Promise(r => setTimeout(r, 300));
+  const ovOn = !!document.querySelector('#ov-astro-text.on');
+  const bodyTx = document.getElementById('astro-text-body').textContent;
+  const modalOk = bodyTx.length > 400 && /не прогноз и не диагноз/.test(bodyTx);
+  const titleOk = /Солнце в знаке Козерог/.test(document.getElementById('astro-text-title').textContent);
+  closeOv('ov-astro-text');
+  // 4) Тап по строке резюме (data-rules) тоже открывает полный текст.
+  await new Promise(r => setTimeout(r, 200));
+  const sumEl = document.querySelector('#astro-summary [data-rules]');
+  if (sumEl) sumEl.click();
+  await new Promise(r => setTimeout(r, 250));
+  const sumModal = !!document.querySelector('#ov-astro-text.on');
+  closeOv('ov-astro-text');
+  goTo('home');
+  DB.astroBirth = null; DB.astroCharts = [];
+  return { cnt, catOk, longOk, routeOk, ovOn, modalOk, titleOk, sumModal };
+});
+ok(fullT.cnt === 717 && fullT.catOk, `полная база: natal-часть 717 текстов, все 6 категорий (${fullT.cnt})`);
+ok(fullT.longOk, 'полная база: развёрнутый текст (>500 символов) для golden-позиции');
+ok(fullT.routeOk, 'полная база: маршрутизация rule id → файл (transit/jyotish/synastry, unknown → null)');
+ok(fullT.ovOn && fullT.modalOk && fullT.titleOk, 'модал «Подробнее»: полный текст + заголовок + дисклеймер');
+ok(fullT.sumModal, 'резюме «Кто вы по карте»: тап по блоку открывает развёрнутый текст');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
