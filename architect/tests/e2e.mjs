@@ -2228,7 +2228,7 @@ const p2uiT = await page.evaluate(async () => {
   const catOk = !!E['star.Regulus'] && !!E['arabicPart.Spirit'] && !!E['antivertexInSign.Овен']
     && !!E['eastPointInSign.Рыбы'] && !!E['progSunInSign.Водолей'] && !!E['harmonic.5']
     && !!E['profectionYear.7'] && !!E['midpointPair.Sun-Moon']
-    && !!E['tithi.15'] && !!E['vara.1'] && !!E['yoga.27'] && !!E['karana.Вишти'] && !!E['antiscia.Sun'];
+    && !!E['tithi.15'] && !!E['vara.1'] && !!E['yoga.27'] && !!E['karana.Вишти'] && !!E['antiscia.Sun'] && !!E['mcInSign.Водолей'];
   // 2) Покрытие: новые префиксы валидируются, мусор — нет.
   const hasOk = astroHasText('star.Regulus') && astroHasText('harmonic.5') && astroHasText('midpointPair.Sun-Moon')
     && !astroHasText('star.Unknown') && !astroHasText('harmonic.64') && !astroHasText('midpointPair.Sun-Foo');
@@ -2268,7 +2268,7 @@ const p2uiT = await page.evaluate(async () => {
   DB.astroBirth = null; DB.astroCharts = [];
   return { cnt, catOk, hasOk, starTaps, arabicTaps, starText, midTaps, harmTap, progTap, profTap, avTap, epTap };
 });
-ok(p2uiT.cnt === 203 && p2uiT.catOk, `P2+P3: extra-файл 203 текста, все 13 категорий (${p2uiT.cnt})`);
+ok(p2uiT.cnt === 215 && p2uiT.catOk, `P2+P3: extra-файл 215 текстов, все 14 категорий (${p2uiT.cnt})`);
 ok(p2uiT.hasOk, 'P2: правило покрытия знает новые префиксы и отвергает мусор');
 ok(p2uiT.starTaps >= 10 && p2uiT.arabicTaps >= 2, `P2: каталог звёзд (${p2uiT.starTaps}) и арабские точки (${p2uiT.arabicTaps}) с тапами`);
 ok(p2uiT.starText, 'P2: тап по Регулу открывает развёрнутый текст');
