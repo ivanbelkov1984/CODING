@@ -18,7 +18,7 @@ import { createHash } from 'crypto';
 const DIR = dirname(fileURLToPath(import.meta.url));
 // lucide.js — самохостинг иконок (без внешнего CDN); копируется рядом с HTML.
 // astronomy.min.js — vendored MIT-движок астрорасчётов (lazy-load, только при opt-in).
-const STATIC = ['lucide.js', 'astronomy.min.js', 'astro_rules.js', 'inter-latin.woff2', 'inter-cyrillic.woff2', 'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon-180.png'];
+const STATIC = ['lucide.js', 'astronomy.min.js', 'astro_rules.js', 'astro_texts_natal.js', 'astro_texts_transit.js', 'astro_texts_synastry.js', 'astro_texts_jyotish.js', 'inter-latin.woff2', 'inter-cyrillic.woff2', 'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon-180.png'];
 // ESM-модули зашифрованного backup — копируются рядом с HTML в dist/backup/,
 // грузятся приложением по HTTP (без CDN, без Node-рантайма). index.html делает
 // import('./backup/backup-boot.mjs'); sw.js кэширует их в app shell.
@@ -62,7 +62,7 @@ async function main() {
     await writeFile(out, await buildCombined());
     // рядом с HTML — для локальных ссылок (иконки + шрифт) + ESM-модули backup,
     // чтобы combined-артефакт реально грузил backup по HTTP (не только собирался).
-    for (const f of ['lucide.js', 'astronomy.min.js', 'astro_rules.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) await copyFile(join(DIR, f), join(dirname(out), f));
+    for (const f of ['lucide.js', 'astronomy.min.js', 'astro_rules.js', 'astro_texts_natal.js', 'astro_texts_transit.js', 'astro_texts_synastry.js', 'astro_texts_jyotish.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) await copyFile(join(DIR, f), join(dirname(out), f));
     await copyBackup(dirname(out));
     console.log('combined →', out);
     return;

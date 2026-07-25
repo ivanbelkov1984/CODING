@@ -1,48 +1,26 @@
 {
- "planetInSign.Sun.Близнецы": [
-  "чужая стихия «огонь» (истина: воздух)"
- ],
- "planetInSign.Venus.Скорпион": [
-  "чужая стихия «воздух» (истина: вода)"
- ],
- "planetInSign.Jupiter.Водолей": [
-  "чужая стихия «земля» (истина: воздух)"
- ],
- "planetInSign.Uranus.Стрелец": [
+ "planetInSign.Mercury.Стрелец": [
   "чужая стихия «воздух» (истина: огонь)"
  ],
- "houseCusp.4.Стрелец": [
+ "planetInSign.Mars.Стрелец": [
   "чужая стихия «воздух» (истина: огонь)"
  ],
- "houseCusp.5.Рак": [
+ "planetInSign.Uranus.Рак": [
   "чужая стихия «воздух» (истина: вода)"
  ],
- "houseCusp.7.Рак": [
+ "houseCusp.1.Скорпион": [
   "чужая стихия «воздух» (истина: вода)"
  ],
- "houseCusp.7.Скорпион": [
-  "чужая стихия «воздух» (истина: вода)"
- ],
- "houseCusp.7.Стрелец": [
-  "чужая стихия «земля» (истина: огонь)",
+ "houseCusp.1.Стрелец": [
   "чужая стихия «воздух» (истина: огонь)"
  ],
- "houseCusp.8.Стрелец": [
-  "чужая стихия «воздух» (истина: огонь)"
- ],
- "houseCusp.11.Дева": [
-  "чужая стихия «воздух» (истина: земля)"
- ],
- "houseCusp.11.Водолей": [
-  "чужая стихия «земля» (истина: воздух)"
- ],
- "aspectMeaning.Sun-Moon.оппозиция": [
+ "aspectMeaning.Sun-Moon.секстиль": [
   "жаргон/градусы"
  ],
  "aspectMeaning.Sun-Mercury.оппозиция": [
   "жаргон/градусы"
  ],
- "aspectMeaning.Sun-Venus.оппозиция": [
+ "aspectMeaning.Sun-Venus.секстиль": [
   "жаргон/градусы"
  ],
  "aspectMeaning.Sun-Mars.оппозиция": [
@@ -51,31 +29,19 @@
  "aspectMeaning.Sun-Jupiter.оппозиция": [
   "жаргон/градусы"
  ],
- "aspectMeaning.Sun-Saturn.секстиль": [
-  "жаргон/градусы"
- ],
  "aspectMeaning.Sun-Saturn.оппозиция": [
   "жаргон/градусы"
  ],
- "aspectMeaning.Sun-Uranus.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Sun-Neptune.оппозиция": [
+ "aspectMeaning.Sun-Neptune.секстиль": [
   "жаргон/градусы"
  ],
  "aspectMeaning.Sun-Pluto.оппозиция": [
   "жаргон/градусы"
  ],
- "aspectMeaning.Moon-Mercury.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Moon-Jupiter.оппозиция": [
+ "aspectMeaning.Moon-Saturn.оппозиция": [
   "жаргон/градусы"
  ],
  "aspectMeaning.Moon-Uranus.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Moon-Neptune.оппозиция": [
   "жаргон/градусы"
  ],
  "aspectMeaning.Moon-Pluto.секстиль": [
@@ -84,10 +50,10 @@
  "aspectMeaning.Moon-Pluto.оппозиция": [
   "жаргон/градусы"
  ],
- "aspectMeaning.Mercury-Jupiter.оппозиция": [
+ "aspectMeaning.Mercury-Venus.оппозиция": [
   "жаргон/градусы"
  ],
- "aspectMeaning.Mercury-Uranus.оппозиция": [
+ "aspectMeaning.Mercury-Mars.секстиль": [
   "жаргон/градусы"
  ],
  "aspectMeaning.Mercury-Neptune.оппозиция": [
@@ -96,125 +62,41 @@
  "aspectMeaning.Mercury-Pluto.оппозиция": [
   "жаргон/градусы"
  ],
- "aspectMeaning.Venus-Mars.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Venus-Jupiter.секстиль": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Venus-Jupiter.оппозиция": [
+ "aspectMeaning.Venus-Saturn.секстиль": [
   "жаргон/градусы"
  ],
  "aspectMeaning.Venus-Saturn.оппозиция": [
   "жаргон/градусы"
  ],
- "aspectMeaning.Venus-Uranus.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Venus-Neptune.секстиль": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Venus-Neptune.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Venus-Pluto.оппозиция": [
-  "жаргон/градусы"
- ],
  "aspectMeaning.Mars-Jupiter.оппозиция": [
   "жаргон/градусы"
  ],
- "aspectMeaning.Mars-Saturn.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Mars-Uranus.трин": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Mars-Uranus.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Mars-Neptune.трин": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Mars-Neptune.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Mars-Pluto.секстиль": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Mars-Pluto.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Jupiter-Saturn.трин": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Jupiter-Saturn.оппозиция": [
+ "aspectMeaning.Mars-Neptune.секстиль": [
   "жаргон/градусы"
  ],
  "aspectMeaning.Jupiter-Uranus.оппозиция": [
   "жаргон/градусы"
  ],
- "aspectMeaning.Jupiter-Neptune.оппозиция": [
+ "transit.Sun.оппозиция.Uranus": [
   "жаргон/градусы"
  ],
- "aspectMeaning.Jupiter-Pluto.оппозиция": [
+ "transit.Moon.оппозиция.Neptune": [
   "жаргон/градусы"
  ],
- "aspectMeaning.Saturn-Uranus.секстиль": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Saturn-Uranus.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Saturn-Neptune.секстиль": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Saturn-Neptune.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Saturn-Pluto.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Uranus-Neptune.секстиль": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Uranus-Neptune.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Uranus-Pluto.трин": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Uranus-Pluto.секстиль": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Uranus-Pluto.оппозиция": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Neptune-Pluto.секстиль": [
-  "жаргон/градусы"
- ],
- "aspectMeaning.Neptune-Pluto.оппозиция": [
-  "жаргон/градусы"
- ],
- "pointInSign.Ceres.Скорпион": [
-  "чужая стихия «воздух» (истина: вода)"
- ],
- "pointInSign.Ceres.Стрелец": [
+ "pointInSign.Chiron.Стрелец": [
   "чужая стихия «воздух» (истина: огонь)"
  ],
- "pointInSign.Pallas.Овен": [
-  "чужая стихия «воздух» (истина: огонь)"
+ "pointInSign.Ceres.Водолей": [
+  "чужая стихия «земля» (истина: воздух)"
  ],
- "pointInSign.Juno.Стрелец": [
-  "чужая стихия «воздух» (истина: огонь)"
- ],
- "pointInSign.Vesta.Близнецы": [
-  "чужая стихия «огонь» (истина: воздух)"
- ],
- "pointInSign.Vesta.Дева": [
-  "чужая стихия «огонь» (истина: земля)"
+ "pointInSign.Vesta.Рак": [
+  "чужая стихия «огонь» (истина: вода)"
  ],
  "pointInSign.Vesta.Весы": [
   "чужая стихия «огонь» (истина: воздух)"
+ ],
+ "pointInSign.Vesta.Скорпион": [
+  "чужая стихия «огонь» (истина: вода)"
  ],
  "pointInSign.Vesta.Козерог": [
   "чужая стихия «огонь» (истина: земля)"
@@ -222,40 +104,79 @@
  "pointInSign.Vesta.Водолей": [
   "чужая стихия «огонь» (истина: воздух)"
  ],
- "grahaInRashi.Chandra.Мина": [
-  "чужая стихия «земля» (истина: вода)"
- ],
- "grahaInRashi.Mangala.Дхану": [
+ "pointInSign.Lilith.Стрелец": [
   "чужая стихия «воздух» (истина: огонь)"
  ],
- "grahaInRashi.Mangala.Кумбха": [
-  "чужая стихия «огонь» (истина: воздух)"
- ],
- "grahaInRashi.Shukra.Вришчика": [
-  "чужая стихия «воздух» (истина: вода)"
- ],
- "grahaInRashi.Shani.Тула": [
-  "чужая стихия «огонь» (истина: воздух)"
- ],
- "grahaInRashi.Shani.Мина": [
-  "чужая стихия «земля» (истина: вода)"
- ],
- "grahaInRashi.Ketu.Дхану": [
+ "pointInSign.Fortune.Лев": [
   "чужая стихия «земля» (истина: огонь)"
  ],
- "synastry.Sun.трин.Mars": [
+ "grahaInRashi.Budha.Вришчика": [
+  "чужая стихия «воздух» (истина: вода)"
+ ],
+ "grahaInRashi.Rahu.Дхану": [
+  "чужая стихия «воздух» (истина: огонь)"
+ ],
+ "synastry.Sun.оппозиция.Sun": [
   "жаргон/градусы"
  ],
- "synastry.Venus.секстиль.Moon": [
+ "synastry.Sun.оппозиция.Saturn": [
   "жаргон/градусы"
  ],
- "synastry.Jupiter.секстиль.Jupiter": [
+ "synastry.Jupiter.оппозиция.Sun": [
+  "жаргон/градусы"
+ ],
+ "synastry.Jupiter.оппозиция.Pluto": [
+  "жаргон/градусы"
+ ],
+ "synastry.Saturn.оппозиция.Sun": [
   "жаргон/градусы"
  ],
  "synastry.Saturn.оппозиция.Saturn": [
   "жаргон/градусы"
  ],
- "synastry.Pluto.оппозиция.Pluto": [
+ "synastry.Saturn.оппозиция.Pluto": [
+  "жаргон/градусы"
+ ],
+ "synastry.Pluto.оппозиция.Saturn": [
+  "жаргон/градусы"
+ ],
+ "aspectMeaning.Mercury-Jupiter.оппозиция": [
+  "жаргон/градусы"
+ ],
+ "aspectMeaning.Venus-Mars.секстиль": [
+  "жаргон/градусы"
+ ],
+ "aspectMeaning.Venus-Neptune.секстиль": [
+  "жаргон/градусы"
+ ],
+ "aspectMeaning.Mars-Neptune.оппозиция": [
+  "жаргон/градусы"
+ ],
+ "aspectMeaning.Saturn-Neptune.оппозиция": [
+  "жаргон/градусы"
+ ],
+ "transit.Venus.оппозиция.Uranus": [
+  "жаргон/градусы"
+ ],
+ "pointInSign.Vesta.Телец": [
+  "чужая стихия «огонь» (истина: земля)"
+ ],
+ "pointInSign.Vesta.Близнецы": [
+  "чужая стихия «огонь» (истина: воздух)"
+ ],
+ "pointInSign.Vesta.Рыбы": [
+  "чужая стихия «огонь» (истина: вода)"
+ ],
+ "grahaInRashi.Surya.Дхану": [
+  "чужая стихия «земля» (истина: огонь)"
+ ],
+ "synastry.Sun.оппозиция.Moon": [
+  "жаргон/градусы"
+ ],
+ "synastry.Jupiter.оппозиция.Mercury": [
+  "жаргон/градусы"
+ ],
+ "synastry.Saturn.оппозиция.Moon": [
   "жаргон/градусы"
  ]
 }
