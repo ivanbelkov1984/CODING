@@ -1333,3 +1333,4 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .jyo-cell.jyo-empty{background:transparent}
 .jyo-sign{font-size:.6rem;color:var(--t4);text-transform:uppercase;letter-spacing:.05em}
 .jyo-pl{font-size:.78rem;color:var(--t1);font-weight:560;line-height:1.35;word-break:break-word}
+#astro-wheel-full .astro-wheel-svg{max-width:none;width:100%}

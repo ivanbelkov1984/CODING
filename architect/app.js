@@ -3540,8 +3540,8 @@ function rAstroHome() {
     return;
   }
   if (last) {
-    hero.innerHTML = `<div class="astro-preview" onclick="asub('natal')" role="button" aria-label="Открыть натальную карту">${renderChartWheel(last.chart, { size: 240, static: true })}
-      <div class="si-text" style="text-align:center;color:var(--t3)">Тап — полная карта</div></div>`;
+    hero.innerHTML = `<div class="astro-preview" onclick="openFullWheel()" role="button" aria-label="Открыть колесо на весь экран">${renderChartWheel(last.chart, { size: 240, static: true })}
+      <div class="si-text" style="text-align:center;color:var(--t3)">Тап — колесо на весь экран</div></div>`;
   } else {
     hero.innerHTML = `<div class="card mx mb tap" style="padding:1.1rem;cursor:pointer" onclick="asub('setup')" role="button">
       <div class="si-text">Данные рождения сохранены — рассчитай карту в «Настройках расчёта».</div></div>`;
@@ -3604,13 +3604,25 @@ function renderChartWheel(chart, o = {}) {
   return s + '</svg>';
 }
 
-// Тап по планете на колесе → карточка деталей под колесом.
+// Полноэкранное колесо: оверлей во всю высоту, только колесо + детали планет.
+function openFullWheel() {
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (!last) { toast('Сначала рассчитай натальную карту', 'warn'); return; }
+  const el = $('astro-wheel-full');
+  if (el) el.innerHTML = renderChartWheel(last.chart, { size: 340 });
+  const info = $('astro-wheel-full-info');
+  if (info) info.innerHTML = '<div class="si-text" style="color:var(--t3);text-align:center">Тап по планете — детали</div>';
+  openOv('ov-astro-wheel');
+}
+// Тап по планете на колесе → карточка деталей (в полноэкранном режиме —
+// внутрь оверлея, иначе под колесом на экране карты).
 function astroPlanetTap(body) {
   const last = (DB.astroCharts || []).slice(-1)[0]; if (!last) return;
   const p = last.chart.planets.find(x => x.body === body); if (!p) return;
   const h = last.chart.houses ? (last.chart.houses.find(x => x.body === body) || {}).house : null;
   const asp = (last.chart.aspects || []).filter(a => a.a === p.name || a.b === p.name);
-  const el = $('astro-planet-info'); if (!el) return;
+  const fullOpen = document.querySelector('#ov-astro-wheel.on');
+  const el = (fullOpen && $('astro-wheel-full-info')) || $('astro-planet-info'); if (!el) return;
   el.innerHTML = `<div class="card mx" style="padding:.7rem 1rem;margin-top:.5rem">
     <div class="si-text"><b>${PLANET_GLYPHS[body] || ''} ${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°${p.retro ? ' ℞ (ретро)' : ''}${h ? ` · ${h}-й дом` : ''}</div>
     ${asp.slice(0, 6).map(a => `<div class="si-text" style="color:var(--t3)">${esc(a.a)} ${esc(a.name)} ${esc(a.b)} (орб ${a.exact}°)</div>`).join('')}

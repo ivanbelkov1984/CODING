@@ -2085,6 +2085,38 @@ ok(dailyT.cardOk, '«Транзит дня»: карточка с самым т�
 ok(dailyT.cacheOk && dailyT.fromCache, '«Транзит дня»: кэш на день, повторный рендер без пересчёта');
 ok(dailyT.togOn, '«Транзит дня»: тумблер в разделе отражает состояние');
 
+// ── Астрология: полноэкранное колесо (оверлей, тап по планете) ──
+const fwT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = [];
+  await runNatalChart();
+  goTo('astro'); rAstroHome();
+  // 1) Превью на главном экране раздела теперь открывает полноэкранное колесо.
+  const previewHook = /openFullWheel/.test(document.getElementById('astro-hero').innerHTML);
+  openFullWheel();
+  const ovOn = !!document.querySelector('#ov-astro-wheel.on');
+  const glyphs = document.querySelectorAll('#astro-wheel-full .aw-planet').length;
+  const houses = document.querySelectorAll('#astro-wheel-full .aw-house').length;
+  const interactive = /astroPlanetTap/.test(document.getElementById('astro-wheel-full').innerHTML);
+  // 2) Тап по планете в полноэкранном режиме пишет детали в оверлей.
+  astroPlanetTap('Sun');
+  const infoInOverlay = /Козерог/.test(document.getElementById('astro-wheel-full-info').textContent);
+  closeOv('ov-astro-wheel');
+  const closed = !document.querySelector('#ov-astro-wheel.on');
+  // 3) Вне оверлея тап пишет как раньше — на экран карты.
+  asub('natal');
+  astroPlanetTap('Moon');
+  const infoOnScreen = /Скорпион/.test(document.getElementById('astro-planet-info').textContent);
+  goTo('home');
+  DB.astroBirth = null; DB.astroCharts = [];
+  return { previewHook, ovOn, glyphs, houses, interactive, infoInOverlay, closed, infoOnScreen };
+});
+ok(fwT.previewHook && fwT.ovOn, 'полноэкранное колесо: тап по превью открывает оверлей');
+ok(fwT.glyphs === 10 && fwT.houses === 12 && fwT.interactive, 'полноэкранное колесо: 10 планет, 12 секторов домов, интерактивно');
+ok(fwT.infoInOverlay && fwT.closed, 'полноэкранное колесо: тап по планете — детали в оверлее, закрытие работает');
+ok(fwT.infoOnScreen, 'экран карты: тап по планете после закрытия оверлея работает как раньше');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

@@ -298,7 +298,9 @@
   <div class="asub" id="as-natal" style="display:none">
     <button class="as-back" onclick="asub('menu')">‹ Астрология</button>
     <div style="padding:0 1rem" id="astro-summary"></div>
-    <div class="astro-wheel-wrap"><div id="astro-wheel"></div><div id="astro-planet-info"></div></div>
+    <div class="astro-wheel-wrap"><div id="astro-wheel"></div>
+      <button class="btn btn-s btn-full" onclick="openFullWheel()"><i data-lucide="maximize-2"></i>Колесо на весь экран</button>
+      <div id="astro-planet-info"></div></div>
     <div class="astro-tabs" id="astro-ntabs">
       <button class="snpill" data-at="planets" onclick="antab('planets')">Планеты</button>
       <button class="snpill" data-at="houses" onclick="antab('houses')">Дома</button>
@@ -763,6 +765,16 @@
       <div><div class="f-lbl">Альтернатива — как ещё закрыть нужду?</div><textarea class="field" id="why-alternative" rows="2"></textarea></div>
       <div><div class="f-lbl">Действие — что выбираешь сейчас?</div><textarea class="field" id="why-action" rows="2"></textarea></div>
       <button class="btn btn-p btn-full" onclick="saveWhy()"><i data-lucide="check"></i>Сохранить разбор</button>
+    </div>
+  </div>
+</div>
+<div class="ov" id="ov-astro-wheel" onclick="if(event.target===this)closeOv('ov-astro-wheel')">
+  <div class="sheet" style="max-height:97vh">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Натальная карта <button class="ib" style="float:right" onclick="closeOv('ov-astro-wheel')" aria-label="Закрыть"><i data-lucide="x"></i></button></div>
+    <div style="padding:0 .35rem 1rem">
+      <div id="astro-wheel-full"></div>
+      <div id="astro-wheel-full-info" style="padding:0 .65rem"></div>
     </div>
   </div>
 </div>
