@@ -12,7 +12,10 @@
   python3 astro_texts_batch.py sample <rules.json> — ШАГ 5: 15 случайных примеров
 
 Требует: переменную окружения OPENAI_API_KEY (для submit/poll).
-Только stdlib — никаких зависимостей. Batch-режим = 50% скидка и без
+Только stdlib — никаких зависимостей.
+ВНИМАНИЕ: канонический генератор промптов теперь backend/astro_batch.js
+(заземлённые промпты grounded-v2 по таблице истинности); этот скрипт —
+резервный путь и исторический v1. Факт-чек: astro_factcheck.py. Batch-режим = 50% скидка и без
 rate-limit-гонок. source каждого текста: "gpt5.4_batch_v1".
 """
 import json, os, random, re, sys, time, urllib.request
