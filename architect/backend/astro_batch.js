@@ -22,36 +22,116 @@ const NAKSHATRAS = ['Ашвини','Бхарани','Криттика','Рохи
 const DASHA_LORDS = ['Кету','Венера','Солнце','Луна','Марс','Раху','Юпитер','Сатурн','Меркурий'];
 const HOUSES_RU = ['1-й дом (личность, начало)','2-й дом (ресурсы, самоценность)','3-й дом (общение, учёба)','4-й дом (дом, корни)','5-й дом (творчество, радость)','6-й дом (уклад, мастерство)','7-й дом (партнёрство)','8-й дом (глубокие перемены)','9-й дом (смысл, горизонты)','10-й дом (призвание)','11-й дом (друзья, будущее)','12-й дом (внутренний мир)'];
 
+// ── ШАГ 0: таблица истинности (зеркало tools/astro_ground_truth.json) ──
+// Только проверяемые факты классики; GPT их ТОЛЬКО оформляет литературно.
+const GT_SIGNS = {
+  'Овен':     { ruler: ['Марс'],             element: 'огонь',  quality: 'кардинальный',  kw: 'инициатива, смелость, прямота, импульс' },
+  'Телец':    { ruler: ['Венера'],           element: 'земля',  quality: 'фиксированный', kw: 'устойчивость, терпение, чувственность, практичность' },
+  'Близнецы': { ruler: ['Меркурий'],         element: 'воздух', quality: 'мутабельный',   kw: 'любопытство, общение, гибкость, обмен идеями' },
+  'Рак':      { ruler: ['Луна'],             element: 'вода',   quality: 'кардинальный',  kw: 'забота, чувствительность, дом, память' },
+  'Лев':      { ruler: ['Солнце'],           element: 'огонь',  quality: 'фиксированный', kw: 'творчество, достоинство, щедрость, самовыражение' },
+  'Дева':     { ruler: ['Меркурий'],         element: 'земля',  quality: 'мутабельный',   kw: 'точность, анализ, служение, польза' },
+  'Весы':     { ruler: ['Венера'],           element: 'воздух', quality: 'кардинальный',  kw: 'гармония, партнёрство, справедливость, вкус' },
+  'Скорпион': { ruler: ['Плутон', 'Марс'],   element: 'вода',   quality: 'фиксированный', kw: 'глубина, интенсивность, трансформация, воля' },
+  'Стрелец':  { ruler: ['Юпитер'],           element: 'огонь',  quality: 'мутабельный',   kw: 'смысл, свобода, оптимизм, дальние горизонты' },
+  'Козерог':  { ruler: ['Сатурн'],           element: 'земля',  quality: 'кардинальный',  kw: 'цель, дисциплина, ответственность, структура' },
+  'Водолей':  { ruler: ['Уран', 'Сатурн'],   element: 'воздух', quality: 'фиксированный', kw: 'независимость, новизна, дружба, будущее' },
+  'Рыбы':     { ruler: ['Нептун', 'Юпитер'], element: 'вода',   quality: 'мутабельный',   kw: 'сочувствие, воображение, интуиция, растворение границ' },
+};
+const GT_PLANETS = {
+  'Солнце': 'ядро личности и жизненная сила (воля, самовыражение, идентичность)',
+  'Луна': 'эмоциональная природа и потребности (чувства, безопасность, привычки, отклик)',
+  'Меркурий': 'мышление и обмен информацией (ум, речь, обучение, связи)',
+  'Венера': 'любовь и чувство ценного (привязанность, красота, ценности, притяжение)',
+  'Марс': 'энергия действия и напор (действие, желание, решимость, защита своего)',
+  'Юпитер': 'рост и расширение возможностей (вера, оптимизм, смысл)',
+  'Сатурн': 'структура, границы и зрелость (дисциплина, ответственность, опыт)',
+  'Уран': 'свобода и внезапное обновление (независимость, новаторство, своеобразие)',
+  'Нептун': 'воображение и тонкая чувствительность (мечты, идеалы, сострадание)',
+  'Плутон': 'глубинная трансформация (глубина, перерождение, внутренняя сила)',
+};
+const GT_ASPECTS = {
+  'соединение': 'природа: нейтральное слияние — энергии действуют как одна, усиливая друг друга',
+  'трин': 'природа: гармония-поток — лёгкое естественное взаимодействие без усилий',
+  'секстиль': 'природа: гармония-возможность — мягкая поддержка, раскрывающаяся при небольшом усилии',
+  'квадрат': 'природа: напряжение-действие — трение, которое побуждает решать и расти',
+  'оппозиция': 'природа: напряжение-баланс — противостояние полюсов, требующее равновесия',
+};
+const GT_HOUSES = ['личность, внешнее «я», начало', 'ресурсы, самоценность, владение', 'общение, учёба, ближний круг',
+  'дом, семья, корни', 'творчество, радость, самовыражение', 'повседневный уклад, работа, мастерство',
+  'партнёрство, союзы', 'глубокие перемены, совместные ресурсы', 'смысл, убеждения, дальние горизонты',
+  'призвание, репутация, вершина', 'друзья, единомышленники, будущее', 'внутренний мир, уединение, незримое'];
+const GT_POINTS = {
+  Chiron: 'чувствительное место и путь бережного исцеления', Ceres: 'забота, питание, взращивание',
+  Pallas: 'стратегия, распознавание закономерностей, мудрое решение', Juno: 'устойчивый союз, верность, договорённости в паре',
+  Vesta: 'сосредоточенность, преданность делу, внутренний огонь', Lilith: 'вытесненное, дикая природа, непокорность',
+  Fortune: 'область естественной лёгкости и удачи', Vertex: 'значимые встречи и поворотные пересечения',
+};
+const GT_GRAHAS = {
+  Surya: 'душа, достоинство, ясность', Chandra: 'ум, чувства, восприимчивость', Mangala: 'энергия, решимость, защита',
+  Budha: 'интеллект, речь, обмен', Guru: 'мудрость, рост, благословение', Shukra: 'любовь, красота, наслаждение',
+  Shani: 'дисциплина, терпение, урок', Rahu: 'сильное желание, новизна, усиление', Ketu: 'отпускание, прошлый опыт, глубинное знание',
+};
+const NAK_LORDS = ['Кету', 'Венера', 'Солнце', 'Луна', 'Марс', 'Раху', 'Юпитер', 'Сатурн', 'Меркурий'];
+const DASHA_YEARS = { 'Кету': 7, 'Венера': 20, 'Солнце': 6, 'Луна': 10, 'Марс': 7, 'Раху': 18, 'Юпитер': 16, 'Сатурн': 19, 'Меркурий': 17 };
+
+const signFacts = (s, vedic) => {
+  const g = GT_SIGNS[s];
+  const ruler = vedic ? g.ruler[g.ruler.length - 1] : g.ruler.join(' (совр.) / ') + (g.ruler.length > 1 ? ' (традиц.)' : '');
+  return `знак ${s}: стихия ${g.element}, качество ${g.quality}, управитель ${ruler}; ключевые слова: ${g.kw}`;
+};
+
+export const PROMPT_VERSION = 'grounded-v2';
 const SYSTEM = 'Ты профессиональный астролог с 20-летним опытом и хороший литературный редактор. '
+  + 'Твоя задача — ЛИТЕРАТУРНО ОФОРМИТЬ переданные проверенные факты, ничего не добавляя от себя. '
   + 'Пишешь на живом связном русском языке без астрологического жаргона (никаких терминов «квадрат», «орб», градусов и номеров домов в тексте). '
+  + 'СТРОГО ЗАПРЕЩЕНО добавлять астрологические факты, которых нет в задании: других управителей, стихии, числа, дома, аспекты. '
   + 'Тон описательный, не судьбоносный: никаких предсказаний событий, диагнозов и оценок личности; обращение на «вы». '
   + 'Это символическое описание для личного дневника, не прогноз.';
-const TEMPLATE = e => `Напиши развёрнутую интерпретацию: ${e}. Объём 180–220 слов. `
-  + 'Структура (без подзаголовков, связным текстом): суть механики; проявления в жизни с конкретными примерами; сильная сторона; зона роста (мягкая формулировка).';
+const TEMPLATE = (entity, facts) => `Литературно оформи проверенные факты в связный текст. СУЩНОСТЬ: ${entity}. `
+  + `ПРОВЕРЕННЫЕ ФАКТЫ: ${facts}. Объём 180–220 слов. `
+  + 'Структура (без подзаголовков, связным текстом): суть механики; проявления в жизни с конкретными примерами; сильная сторона; зона роста (мягкая формулировка). '
+  + 'Используй только эти факты.';
 
+// Реестр с ЗАЗЕМЛЁННЫМИ фактами: [id, сущность, факты-для-оформления].
 export function registry() {
   const out = [];
-  for (const [pb, pr] of PLANETS) for (const s of SIGNS) out.push([`planetInSign.${pb}.${s}`, `${pr} в знаке ${s} (натальная карта)`]);
-  for (const [pb, pr] of PLANETS) HOUSES_RU.forEach((h, i) => out.push([`planetInHouse.${pb}.${i + 1}`, `${pr} в ${h} натальной карты`]));
-  for (const s of SIGNS) out.push([`ascInSign.${s}`, `Асцендент в знаке ${s} (как человека видят при встрече)`]);
-  HOUSES_RU.forEach((h, i) => { for (const s of SIGNS) out.push([`houseCusp.${i + 1}.${s}`, `${h}, начинающийся в знаке ${s}`]); });
+  const P = pr => `планета ${pr} — ${GT_PLANETS[pr]}`;
+  for (const [pb, pr] of PLANETS) for (const s of SIGNS)
+    out.push([`planetInSign.${pb}.${s}`, `${pr} в знаке ${s} (натальная карта)`, `${P(pr)}; ${signFacts(s)}`]);
+  for (const [pb, pr] of PLANETS) GT_HOUSES.forEach((h, i) =>
+    out.push([`planetInHouse.${pb}.${i + 1}`, `${pr} в ${i + 1}-м доме натальной карты`, `${P(pr)}; сфера дома: ${h}`]));
+  for (const s of SIGNS)
+    out.push([`ascInSign.${s}`, `Асцендент в знаке ${s}`, `Асцендент — то, как человека видят при первой встрече, его внешняя манера; ${signFacts(s)}`]);
+  GT_HOUSES.forEach((h, i) => { for (const s of SIGNS)
+    out.push([`houseCusp.${i + 1}.${s}`, `${i + 1}-й дом, начинающийся в знаке ${s}`, `сфера дома: ${h}; ${signFacts(s)}`]); });
   for (let i = 0; i < PLANETS.length; i++) for (let j = i + 1; j < PLANETS.length; j++) for (const a of ASPECTS)
-    out.push([`aspectMeaning.${PLANETS[i][0]}-${PLANETS[j][0]}.${a}`, `натальный аспект «${a}» между ${PLANETS[i][1]} и ${PLANETS[j][1]}`]);
+    out.push([`aspectMeaning.${PLANETS[i][0]}-${PLANETS[j][0]}.${a}`, `натальный аспект «${a}» между ${PLANETS[i][1]} и ${PLANETS[j][1]}`,
+      `${P(PLANETS[i][1])}; ${P(PLANETS[j][1])}; аспект «${a}» — ${GT_ASPECTS[a]}`]);
   for (const [tb, tr] of PLANETS) for (const [nb, nr] of PLANETS) for (const a of ASPECTS)
-    out.push([`transit.${tb}.${a}.${nb}`, `транзитный ${tr} в аспекте «${a}» к натальному ${nr} (временное влияние периода)`]);
-  for (const [qb, qr] of POINTS) for (const s of SIGNS) out.push([`pointInSign.${qb}.${s}`, `${qr} в знаке ${s} (натальная карта)`]);
-  for (const [gb, gr] of GRAHAS) for (const r of RASHI) out.push([`grahaInRashi.${gb}.${r.split(' ')[0]}`, `${gr} в знаке ${r} (ведическая карта, сидерический зодиак)`]);
-  for (const n of NAKSHATRAS) out.push([`nakshatraMoon.${n}`, `Луна в накшатре ${n} (ведическая традиция)`]);
-  for (const d of DASHA_LORDS) out.push([`mahadasha.${d}`, `период маха-даша ${d} (Вимшоттари, ведическая традиция)`]);
+    out.push([`transit.${tb}.${a}.${nb}`, `транзитный ${tr} в аспекте «${a}» к натальному ${nr}`,
+      `транзит — ВРЕМЕННОЕ влияние текущего периода, не черта характера; транзитная ${P(tr)}; натальная ${P(nr)}; аспект «${a}» — ${GT_ASPECTS[a]}`]);
+  for (const [qb, qr] of POINTS) for (const s of SIGNS)
+    out.push([`pointInSign.${qb}.${s}`, `${qr} в знаке ${s} (натальная карта)`, `${qr}: ${GT_POINTS[qb]}; ${signFacts(s)}`]);
+  for (const [gb, gr] of GRAHAS) for (const r of RASHI)
+    out.push([`grahaInRashi.${gb}.${r.split(' ')[0]}`, `${gr} в знаке ${r} (ведическая карта)`,
+      `ведическая традиция, сидерический зодиак; граха ${gr}: ${GT_GRAHAS[gb]}; ${signFacts(r.replace(/^[^(]*\(/, '').replace(')', ''), true)}`]);
+  NAKSHATRAS.forEach((n, i) =>
+    out.push([`nakshatraMoon.${n}`, `Луна в накшатре ${n}`,
+      `ведическая традиция; Луна — ум и чувства; накшатра ${n} (№${i + 1} из 27), правитель по циклу Вимшоттари — ${NAK_LORDS[i % 9]}; других фактов о накшатре не добавляй`]));
+  for (const d of DASHA_LORDS)
+    out.push([`mahadasha.${d}`, `период маха-даша ${d}`,
+      `ведическая система Вимшоттари; большой период планеты ${d} длительностью ${DASHA_YEARS[d]} лет; архетип: ${GT_PLANETS[d] || GT_GRAHAS[d === 'Раху' ? 'Rahu' : 'Ketu'] || ''}`]);
   for (const [ab, ar] of PLANETS) for (const [bb, br] of PLANETS) for (const a of ASPECTS)
-    out.push([`synastry.${ab}.${a}.${bb}`, `синастрический аспект «${a}»: ${ar} человека к ${br} партнёра (взаимодействие в паре)`]);
+    out.push([`synastry.${ab}.${a}.${bb}`, `синастрия: ${ar} человека к ${br} партнёра, аспект «${a}»`,
+      `взаимодействие двух людей; у человека ${P(ar)}; у партнёра ${P(br)}; аспект «${a}» — ${GT_ASPECTS[a]}`]);
   return out;
 }
 
 function jsonl(model) {
-  return registry().map(([id, entity]) => JSON.stringify({
+  return registry().map(([id, entity, facts]) => JSON.stringify({
     custom_id: id, method: 'POST', url: '/v1/chat/completions',
-    body: { model, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: TEMPLATE(entity) }], max_completion_tokens: 900 },
+    body: { model, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: TEMPLATE(entity, facts) }], max_completion_tokens: 900 },
   })).join('\n');
 }
 
@@ -78,11 +158,13 @@ async function oa(path, opts = {}) {
 export default function mountAstroBatch(app, pool) {
   const ready = pool.query(`CREATE TABLE IF NOT EXISTS astro_batches (
     id SERIAL PRIMARY KEY, batch_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'created',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now())`).catch(e => console.error('astro_batches schema:', e.message));
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now())`)
+    .then(() => pool.query("ALTER TABLE astro_batches ADD COLUMN IF NOT EXISTS prompt_version TEXT NOT NULL DEFAULT 'v1'"))
+    .catch(e => console.error('astro_batches schema:', e.message));
 
   // Диагностика: есть ли ключ на сервере (сам ключ не раскрывается).
   app.get('/api/astro-batch/health', (_req, res) => {
-    res.json({ keyPresent: !!process.env.OPENAI_API_KEY, model: MODEL, combos: registry().length });
+    res.json({ keyPresent: !!process.env.OPENAI_API_KEY, model: MODEL, combos: registry().length, promptVersion: PROMPT_VERSION });
   });
 
   // Запуск: фиксированный реестр, не чаще 1 раза в 24 ч, один активный батч.
@@ -90,9 +172,11 @@ export default function mountAstroBatch(app, pool) {
     try {
       await ready;
       const last = (await pool.query('SELECT * FROM astro_batches ORDER BY id DESC LIMIT 1')).rows[0];
-      if (last && Date.now() - new Date(last.created_at).getTime() < 24 * 3600e3) {
-        // Перезапуск разрешён, только если прошлый батч закончился без результата
-        // (все запросы отклонены / failed) — иначе держим лимит 1/24ч.
+      // Новая версия промптов = новая генерация (осознанное изменение кода).
+      const sameVersion = last && last.prompt_version === PROMPT_VERSION;
+      if (last && sameVersion && Date.now() - new Date(last.created_at).getTime() < 24 * 3600e3) {
+        // Перезапуск той же версии разрешён, только если прошлый батч закончился
+        // без результата (все запросы отклонены / failed) — иначе лимит 1/24ч.
         let dead = last.status === 'failed';
         if (!dead) {
           try {
@@ -113,8 +197,8 @@ export default function mountAstroBatch(app, pool) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input_file_id: up.id, endpoint: '/v1/chat/completions', completion_window: '24h' }),
       })).json();
-      await pool.query('INSERT INTO astro_batches (batch_id, status) VALUES ($1, $2)', [batch.id, batch.status || 'created']);
-      res.json({ batch_id: batch.id, status: batch.status, requests: registry().length, model });
+      await pool.query('INSERT INTO astro_batches (batch_id, status, prompt_version) VALUES ($1, $2, $3)', [batch.id, batch.status || 'created', PROMPT_VERSION]);
+      res.json({ batch_id: batch.id, status: batch.status, requests: registry().length, model, promptVersion: PROMPT_VERSION });
     } catch (e) {
       res.status(e.noKey ? 503 : 500).json({ error: e.message });
     }
