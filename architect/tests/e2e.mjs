@@ -2747,6 +2747,50 @@ ok(ctxT.midOk, 'контекст: мидпоинты и гармоники — �
 ok(ctxT.rashiOk && ctxT.dashaOk && ctxT.panOk, 'контекст: джйотиш — айанамша объяснена, даши с интро и свёрнутым циклом, панчанга с интро');
 ok(ctxT.trOk && ctxT.partsOk, 'контекст: транзиты и исторический слой — интро на месте');
 
+// ── Астрология: единый narrative-движок (очередь 3) ──
+const narT = await page.evaluate(async () => {
+  await loadAstroEngine(); await loadAstroRules();
+  // Юнит движка: баланс, доминанта, сильнейшие сигналы.
+  const st = narrativeStats([
+    { tone: 'harm', strength: 3 }, { tone: 'tense', strength: 2 }, { tone: 'tense', strength: 1 },
+  ]);
+  const statsOk = st.n === 3 && st.harm === 1 && st.tense === 2 && st.dom === 'tense'
+    && st.top.strength === 3 && st.topTense.strength === 2;
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'whole' };
+  DB.astroCharts = []; await runNatalChart();
+  goTo('astro');
+  // Транзиты на 2026-01-01: транзитное Солнце у натального (соединение
+  // гарантировано у дня рождения) → narrative-вход присутствует.
+  asub('transits');
+  document.getElementById('astro-tr-date').value = '2026-01-01';
+  await runTransits();
+  const trTx = document.getElementById('astro-transits').textContent;
+  const trNar = /(День|Этот день) (поддерживает|с характером|смешанный)/.test(trTx) && /Самый точный контакт/.test(trTx);
+  // Соляр: Солнце соединяется с натальным по определению → «Тон года».
+  asub('ret');
+  document.getElementById('astro-ret-type').value = 'solar';
+  document.getElementById('astro-ret-period').value = '2026';
+  await rReturns();
+  const rTx = document.getElementById('astro-ret').textContent;
+  const retNar = /Тон года — (поддерживающий|рабочий|смешанный)/.test(rTx);
+  // Джйотиш: «ядро» — лагна, Луна с накшатрой, текущая даша одним абзацем.
+  asub('jyo'); STATE.jyoTab = 'rashi'; await rJyotish();
+  const jyoTx = document.getElementById('astro-jyo').textContent;
+  const jyoNar = /Ядро вашей ведической карты/.test(jyoTx) && /восходит/.test(jyoTx)
+    && /в накшатре/.test(jyoTx) && /большой период/.test(jyoTx);
+  // Гармоника: пояснение к соединениям (если они есть — H5 для J2000 даёт).
+  asub('mid'); rHarmonic();
+  const harmTx = document.getElementById('astro-harm').textContent;
+  const harmNar = !/Соединения в гармонике/.test(harmTx) || /работают как один узел/.test(harmTx);
+  STATE.jyoTab = 'rashi'; goTo('home'); DB.astroBirth = null; DB.astroCharts = [];
+  return { statsOk, trNar, retNar, jyoNar, harmNar };
+});
+ok(narT.statsOk, 'narrative-движок: баланс/доминанта/сильнейшие сигналы считаются верно');
+ok(narT.trNar, 'narrative: транзиты открываются выводом «что главное сейчас» с сильнейшим контактом');
+ok(narT.retNar, 'narrative: соляр открывается «тоном года» из баланса аспектов возврата');
+ok(narT.jyoNar, 'narrative: ведическая карта — «ядро» (лагна + Луна/накшатра + текущая даша) одним абзацем');
+ok(narT.harmNar, 'narrative: соединения в гармонике объяснены («работают как один узел»)');
+
 // ── Астрология: полный портрет карты (интро, Asc/MC, синтез-слой) ──
 const portT = await page.evaluate(async () => {
   await loadAstroEngine(); await loadAstroRules();

@@ -3367,7 +3367,11 @@ async function rJyotish() {
       if (last.chart.angles) put(Math.floor(norm360(last.chart.angles.asc.lon - aya) / 30), 'Лг', true);
       const rashiSk = L => rashiSkOf(Math.floor(L / 30));
       const lagnaIdx = last.chart.angles ? Math.floor(norm360(last.chart.angles.asc.lon - aya) / 30) : null;
+      // Narrative-ядро: три главных факта ведической карты одним абзацем.
+      const dTheme = dasha.current && DASHA_THEMES[dasha.current.lord];
+      const core = `Ядро вашей ведической карты: ${lagnaIdx != null ? `восходит ${RASHI[lagnaIdx]}; ` : ''}Луна — ум по джйотиш — в ${moon.sign}, в накшатре ${dasha.nakshatra} (пада ${dasha.pada})${dasha.current ? `; сейчас идёт большой период ${dasha.current.lord}${dTheme ? ` с темой «${dTheme}»` : ''} (до ${dasha.current.to.toISOString().slice(0, 10)})` : ''}. Остальное ниже — детали к этой основе.`;
       html = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.4rem">Ведическая карта считается по сидерическому зодиаку — со сдвигом на айанамшу (~24°). Поэтому знаки здесь могут отличаться от западной карты: это не ошибка, а другая система отсчёта.</div>`
+        + `<div class="si-text" style="line-height:1.6;margin-bottom:.4rem">${esc(core)}</div>`
         + `<div class="f-lbl">Раши D1 (${esc(AYANAMSHAS[ayaKey].ru)}, айанамша ${aya.toFixed(2)}°)</div>` + jyoChartHtml(placed, lagnaIdx) + legendNote +
         sid.map(p => `<div class="si-text" style="color:var(--t3)"${ruleAttr(G_KEY[p.body] ? `grahaInRashi.${G_KEY[p.body]}.${rashiSk(p.lon)}` : '', `${p.name} в знаке ${p.sign}`)}>${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°${(ucchaBala(p.body, p.lon) != null) ? ' · уччабала ' + ucchaBala(p.body, p.lon) : ''}${G_KEY[p.body] ? ' <span style="color:var(--accent);font-size:.72rem">подробнее</span>' : ''}</div>`).join('') +
         `<div class="si-text" style="color:var(--t3)"${ruleAttr(`grahaInRashi.Rahu.${rashiSk(rahu)}`, 'Раху в знаке')}>Раху (ср.): ${esc(RASHI[Math.floor(rahu / 30)])} ${(rahu % 30).toFixed(1)}° <span style="color:var(--accent);font-size:.72rem">подробнее</span></div>` +
@@ -3549,6 +3553,18 @@ async function rReturns() {
     // Ключевые аспекты карты возврата к наталу (карточки, по силе).
     const tr = computeTransits(natal, ret);
     const hits = [...tr.hits].sort((a, b) => parseFloat(a.exact) - parseFloat(b.exact)).slice(0, 6);
+    if (hits.length) {
+      // Narrative-вход: тон периода из баланса аспектов возврата к наталу.
+      const st = narrativeStats(hits.map(h => ({ tone: aspTone(h.aspect), strength: TRANSIT_ORB - parseFloat(h.exact), h })));
+      const period = type === 'solar' ? 'года' : 'месяца';
+      const DOM_R = {
+        harm: `Тон ${period} — поддерживающий: карта возврата больше помогает вашим натальным темам, чем спорит с ними.`,
+        tense: `Тон ${period} — рабочий: карта возврата больше испытывает ваши натальные темы, чем поддакивает им. Это энергия, а не приговор.`,
+        mixed: `Тон ${period} — смешанный: поддержка и трение в карте возврата примерно поровну.`,
+      };
+      const bestTx = st.topHarm && transitHitText(st.topHarm.h);
+      html += `<div class="si-text" style="line-height:1.6;margin-top:.4rem">${esc(DOM_R[st.dom])}${bestTx ? ` Главная опора: ${esc(st.topHarm.h.transit)} к вашему ${esc(st.topHarm.h.natal)} — ${esc(bestTx.text)}` : ''}</div>`;
+    }
     if (hits.length) html += '<div class="f-lbl" style="margin-top:.4rem">Ключевые аспекты к наталу</div>' +
       hits.map(h => { const tx = transitHitText(h);
         return `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(h.transit)} → ваш ${esc(h.natal)}.</b> ${tx ? esc(tx.text) : esc(h.aspect)}</div>
@@ -3629,7 +3645,9 @@ function rHarmonic() {
   out.innerHTML = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin:.4rem 0">Гармоническая карта — та же карта, «умноженная» на число N: она проявляет скрытые резонансы между планетами, невидимые в обычных аспектах. Смысл конкретной гармоники — по тапу на заголовок.</div>`
     + `<div class="f-lbl" style="margin-top:.2rem"${ruleAttr(`harmonic.${n}`, `Гармоника H${n}`)}>Гармоника H${n}${astroHasText(`harmonic.${n}`) ? ' <span style="color:var(--accent);font-size:.72rem;text-transform:none">подробнее</span>' : ''}</div>` +
     h.planets.map(p => `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°</div></div></div>`).join('') +
-    (h.conj.length ? '<div class="f-lbl" style="margin-top:.4rem">Соединения в гармонике</div>' + h.conj.map(c => `<div class="si-text" style="color:var(--t3)">${esc(c.a)} ∪ ${esc(c.b)} (орб ${c.orb}°)</div>`).join('') : '') +
+    (h.conj.length ? '<div class="f-lbl" style="margin-top:.4rem">Соединения в гармонике</div>'
+      + '<div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.2rem">Планеты, «сплавленные» на этой частоте: в гармонике они стоят вплотную и работают как один узел, даже если в обычной карте далеко друг от друга.</div>'
+      + h.conj.map(c => `<div class="si-text" style="color:var(--t3)">${esc(c.a)} ∪ ${esc(c.b)} (орб ${c.orb}°)</div>`).join('') : '') +
     '<div class="be-note" style="color:var(--t3)">Техника Дж. Аддея: долгота × N. Символическое.</div>';
 }
 
@@ -3810,6 +3828,15 @@ async function runTransits() {
     // Активные аспекты: карточки с текстом, сортировка по силе (меньший орб первым).
     const hits = [...tr.hits].sort((a, b) => parseFloat(a.exact) - parseFloat(b.exact));
     if (hits.length) {
+      // Narrative-вход: сначала «что здесь главное», потом карточки.
+      const st = narrativeStats(hits.map(h => ({ tone: aspTone(h.aspect), strength: TRANSIT_ORB - parseFloat(h.exact), h })));
+      const DOM_TR = {
+        harm: `${isToday ? 'День' : 'Этот день'} поддерживает: небо сейчас больше помогает вашим темам, чем испытывает их.`,
+        tense: `${isToday ? 'День' : 'Этот день'} с характером: небо сейчас больше испытывает ваши темы, чем гладит по шерсти.`,
+        mixed: `${isToday ? 'День' : 'Этот день'} смешанный: поддержка и трение примерно поровну.`,
+      };
+      const topTx = transitHitText(st.top.h);
+      html += `<div class="si-text" style="line-height:1.6;margin-top:.5rem">${esc(DOM_TR[st.dom])}${topTx ? ` Самый точный контакт — ${esc(st.top.h.transit)} к вашему ${esc(st.top.h.natal)}: ${esc(topTx.text)}` : ''}</div>`;
       html += '<div class="f-lbl" style="margin-top:.5rem">Активные аспекты к вашей карте</div>' +
         hits.slice(0, 12).map(h => {
           const tx = transitHitText(h);
@@ -4632,6 +4659,25 @@ function synastryHitText(h) {
 // прочие > поколенческие) → смысловые разделы → повествование из
 // семантического слоя пар (ASTRO_RULES.synPair: наблюдение → смысл →
 // быт) → синтез «В целом». Поколенческие пары — фон эпохи, свёрнуты.
+// ─── ЕДИНЫЙ NARRATIVE-ДВИЖОК (очередь 3) ────────────────────────────
+// Общий приём всех астро-экранов: список сигналов с тоном и силой сначала
+// классифицируется (баланс, доминанта, сильнейшие), и только потом текст —
+// формулировки у каждого экрана свои, скелет один (как в синастрии v2).
+const HARM_ASPECTS = ['трин', 'секстиль', 'соединение'];
+const aspTone = name => HARM_ASPECTS.includes(name) ? 'harm' : 'tense';
+function narrativeStats(signals) {
+  const harm = signals.filter(s => s.tone === 'harm').length;
+  const tense = signals.length - harm;
+  const by = arr => [...arr].sort((a, b) => b.strength - a.strength)[0] || null;
+  return {
+    n: signals.length, harm, tense,
+    dom: tense > harm ? 'tense' : harm > tense ? 'harm' : 'mixed',
+    top: by(signals),
+    topHarm: by(signals.filter(s => s.tone === 'harm')),
+    topTense: by(signals.filter(s => s.tone === 'tense')),
+  };
+}
+
 const SYN_PERSONAL = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars'];
 const SYN_SOCIAL = ['Jupiter', 'Saturn'];
 const SYN_GEN = ['Uranus', 'Neptune', 'Pluto'];
