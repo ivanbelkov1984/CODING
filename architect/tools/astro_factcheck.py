@@ -31,7 +31,7 @@ def sign_of(rule_id):
     p = rule_id.split(".")
     if p[0] in ("planetInSign", "pointInSign", "houseCusp") and p[-1] in SIGNS:
         return p[-1]
-    if p[0] == "ascInSign" and p[1] in SIGNS:
+    if p[0] in ("ascInSign", "antivertexInSign", "eastPointInSign", "progSunInSign") and p[1] in SIGNS:
         return p[1]
     if p[0] == "grahaInRashi":
         return RASHI2SIGN.get(p[-1])
