@@ -51,7 +51,7 @@ export function registry() {
 function jsonl(model) {
   return registry().map(([id, entity]) => JSON.stringify({
     custom_id: id, method: 'POST', url: '/v1/chat/completions',
-    body: { model, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: TEMPLATE(entity) }], max_tokens: 700, temperature: 0.8 },
+    body: { model, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: TEMPLATE(entity) }], max_completion_tokens: 900 },
   })).join('\n');
 }
 
