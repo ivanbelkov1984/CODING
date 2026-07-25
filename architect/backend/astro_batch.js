@@ -128,8 +128,8 @@ export function registry() {
   return out;
 }
 
-function jsonl(model) {
-  return registry().map(([id, entity, facts]) => JSON.stringify({
+function jsonl(model, combos) {
+  return (combos || registry()).map(([id, entity, facts]) => JSON.stringify({
     custom_id: id, method: 'POST', url: '/v1/chat/completions',
     body: { model, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: TEMPLATE(entity, facts) }], max_completion_tokens: 900 },
   })).join('\n');
@@ -168,27 +168,53 @@ export default function mountAstroBatch(app, pool) {
   });
 
   // Запуск: фиксированный реестр, не чаще 1 раза в 24 ч, один активный батч.
-  app.post('/api/astro-batch/run', async (_req, res) => {
+  // Готовые custom_id по ВСЕМ завершённым батчам текущей версии промптов.
+  async function collectDoneIds() {
+    const rows = (await pool.query('SELECT * FROM astro_batches WHERE prompt_version=$1 ORDER BY id', [PROMPT_VERSION])).rows;
+    const done = new Set();
+    for (const row of rows) {
+      try {
+        const b = await (await oa(`/batches/${row.batch_id}`)).json();
+        if (b.status === 'completed' && b.output_file_id) {
+          const txt = await (await oa(`/files/${b.output_file_id}/content`)).text();
+          for (const line of txt.split('\n')) {
+            if (!line.trim()) continue;
+            try {
+              const rec = JSON.parse(line);
+              if (rec.response && rec.response.status_code === 200) done.add(rec.custom_id);
+            } catch (e) { /* пропуск битой строки */ }
+          }
+        }
+      } catch (e) { /* батч недоступен — пропускаем */ }
+    }
+    return done;
+  }
+
+  // Запуск. ?resume=1 — дозапуск ТОЛЬКО недостающих комбинаций (после
+  // пополнения баланса не платим заново за готовые).
+  app.post('/api/astro-batch/run', async (req, res) => {
     try {
       await ready;
+      const resume = req.query.resume === '1';
       const last = (await pool.query('SELECT * FROM astro_batches ORDER BY id DESC LIMIT 1')).rows[0];
-      // Новая версия промптов = новая генерация (осознанное изменение кода).
       const sameVersion = last && last.prompt_version === PROMPT_VERSION;
-      if (last && sameVersion && Date.now() - new Date(last.created_at).getTime() < 24 * 3600e3) {
-        // Перезапуск той же версии разрешён, только если прошлый батч закончился
-        // без результата (все запросы отклонены / failed) — иначе лимит 1/24ч.
-        let dead = last.status === 'failed';
-        if (!dead) {
-          try {
-            const b = await (await oa(`/batches/${last.batch_id}`)).json();
-            const rc = b.request_counts || {};
-            dead = ['failed', 'cancelled', 'expired'].includes(b.status) || (b.status === 'completed' && !b.output_file_id && rc.completed === 0);
-          } catch (e) { /* статус не получить — считаем живым */ }
-        }
-        if (!dead) return res.status(409).json({ error: 'Батч уже запускался за последние 24 часа', batch_id: last.batch_id, status: last.status });
+      let lastState = null;
+      if (last) { try { lastState = await (await oa(`/batches/${last.batch_id}`)).json(); } catch (e) {} }
+      const terminal = !lastState || ['completed', 'failed', 'cancelled', 'expired'].includes(lastState.status);
+      if (!terminal) return res.status(409).json({ error: `Предыдущий батч ещё выполняется (${lastState.status})`, batch_id: last.batch_id });
+      let combos = registry();
+      if (resume) {
+        const done = await collectDoneIds();
+        combos = combos.filter(([id]) => !done.has(id));
+        if (!combos.length) return res.status(409).json({ error: 'Дозапускать нечего — все комбинации уже готовы', done: done.size });
+      } else if (last && sameVersion && Date.now() - new Date(last.created_at).getTime() < 24 * 3600e3) {
+        // Полный перезапуск той же версии — только если прошлый закончился пусто.
+        const rc = (lastState && lastState.request_counts) || {};
+        const dead = !lastState || ['failed', 'cancelled', 'expired'].includes(lastState.status) || (lastState.status === 'completed' && !lastState.output_file_id && !rc.completed);
+        if (!dead) return res.status(409).json({ error: 'Полный батч уже запускался за 24 часа; для дозапуска недостающих используй ?resume=1', batch_id: last.batch_id, status: lastState.status });
       }
       const model = await pickModel();
-      const content = jsonl(model);
+      const content = jsonl(model, combos);
       const fd = new FormData();
       fd.append('purpose', 'batch');
       fd.append('file', new Blob([content], { type: 'application/jsonl' }), 'astro_batch.jsonl');
@@ -198,10 +224,36 @@ export default function mountAstroBatch(app, pool) {
         body: JSON.stringify({ input_file_id: up.id, endpoint: '/v1/chat/completions', completion_window: '24h' }),
       })).json();
       await pool.query('INSERT INTO astro_batches (batch_id, status, prompt_version) VALUES ($1, $2, $3)', [batch.id, batch.status || 'created', PROMPT_VERSION]);
-      res.json({ batch_id: batch.id, status: batch.status, requests: registry().length, model, promptVersion: PROMPT_VERSION });
+      res.json({ batch_id: batch.id, status: batch.status, requests: combos.length, resume, model, promptVersion: PROMPT_VERSION });
     } catch (e) {
       res.status(e.noKey ? 503 : 500).json({ error: e.message });
     }
+  });
+
+  // Объединённый результат всех завершённых батчей текущей версии (jsonl).
+  app.get('/api/astro-batch/result-all', async (_req, res) => {
+    try {
+      await ready;
+      const rows = (await pool.query('SELECT * FROM astro_batches WHERE prompt_version=$1 ORDER BY id', [PROMPT_VERSION])).rows;
+      if (!rows.length) return res.status(404).json({ error: 'Батчей этой версии не было' });
+      const seen = new Set(); const out = [];
+      for (const row of rows) {
+        try {
+          const b = await (await oa(`/batches/${row.batch_id}`)).json();
+          if (b.status !== 'completed' || !b.output_file_id) continue;
+          const txt = await (await oa(`/files/${b.output_file_id}/content`)).text();
+          for (const line of txt.split('\n')) {
+            if (!line.trim()) continue;
+            try {
+              const rec = JSON.parse(line);
+              if (rec.response && rec.response.status_code === 200 && !seen.has(rec.custom_id)) { seen.add(rec.custom_id); out.push(line); }
+            } catch (e) { /* пропуск */ }
+          }
+        } catch (e) { /* пропуск батча */ }
+      }
+      res.setHeader('Content-Type', 'application/jsonl; charset=utf-8');
+      res.send(out.join('\n'));
+    } catch (e) { res.status(e.noKey ? 503 : 500).json({ error: e.message }); }
   });
 
   // Статус последнего батча (форвард из OpenAI + обновление в БД).
