@@ -3373,12 +3373,31 @@ function circleCusp(system, k, ramc, eps, phi) {
   return good.length ? good[0] : (roots[0] || 0);
 }
 // 12 куспидов для системы. ctx: { asc, mc, ramc, eps, phi } в градусах.
+// Асцендент из RAMC (та же формула, что в расчёте карты; всё в градусах).
+function ascFromRamc(ramcDeg, epsDeg, phiDeg) {
+  const r = ramcDeg * DEG, e = epsDeg * DEG, p = phiDeg * DEG;
+  return norm360(Math.atan2(Math.cos(r), -(Math.sin(r) * Math.cos(e) + Math.tan(p) * Math.sin(e))) / DEG);
+}
 function houseCusps(system, ctx) {
   const c = new Array(13).fill(0);
   if (system === 'whole') { const s = Math.floor(ctx.asc / 30) * 30; for (let k = 1; k <= 12; k++) c[k] = norm360(s + (k - 1) * 30); return c; }
   if (system === 'equal') { for (let k = 1; k <= 12; k++) c[k] = norm360(ctx.asc + (k - 1) * 30); return c; }
   c[1] = ctx.asc; c[10] = ctx.mc; c[4] = norm360(ctx.mc + 180); c[7] = norm360(ctx.asc + 180);
-  if (system === 'placidus') {
+  if (system === 'koch') {
+    // Кох (Birthplace): трисекция ВРЕМЕНИ от восхода градуса MC до его
+    // кульминации; куспиды 11/12 — асценденты этих моментов (ниже
+    // горизонта — ночная полудуга вперёд). Самотест формулы:
+    // Asc(RAMC − SDA_MC) = MC (закреплён в e2e).
+    const dec = Math.asin(Math.sin(ctx.eps * DEG) * Math.sin(ctx.mc * DEG));
+    const AD = Math.asin(Math.max(-1, Math.min(1, Math.tan(ctx.phi * DEG) * Math.tan(dec)))) / DEG;
+    // Интервал «MC взошёл → кульминировал» = SDA_MC; симметричный интервал
+    // «сейчас → восход IC» — тоже SDA_MC (Asc(RAMC+SDA)=IC, закреплено в e2e).
+    const SDA = 90 + AD;
+    c[11] = ascFromRamc(ctx.ramc - 2 * SDA / 3, ctx.eps, ctx.phi);
+    c[12] = ascFromRamc(ctx.ramc - SDA / 3, ctx.eps, ctx.phi);
+    c[2]  = ascFromRamc(ctx.ramc + SDA / 3, ctx.eps, ctx.phi);
+    c[3]  = ascFromRamc(ctx.ramc + 2 * SDA / 3, ctx.eps, ctx.phi);
+  } else if (system === 'placidus') {
     c[11] = placidusCusp(1 / 3, false, ctx.ramc, ctx.eps, ctx.phi);
     c[12] = placidusCusp(2 / 3, false, ctx.ramc, ctx.eps, ctx.phi);
     c[2]  = placidusCusp(2 / 3, true,  ctx.ramc, ctx.eps, ctx.phi);

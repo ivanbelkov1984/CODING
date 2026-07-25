@@ -2360,6 +2360,47 @@ ok(niT.navNorth, 'North Indian: навамша D9 рендерится в сев
 ok(niT.southBack, 'переключение стилей: South возвращается');
 ok(niT.fallback, 'без времени рождения North честно падает в South с пояснением');
 
+// ── Астрология: дома Коха (из отложенного, формула подтверждена) ──
+const kochT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  const mkCtx = (birth) => {
+    const c = computeNatalChart(birth);
+    return { chart: c, cusps: c.housesMeta && c.housesMeta.cusps };
+  };
+  const birth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'koch' };
+  const { chart, cusps } = mkCtx(birth);
+  // 1) Самотест формулы: Asc(RAMC − SDA_MC) = MC (фундаментальное свойство Коха).
+  const A = window.Astronomy;
+  const t = A.MakeTime(new Date(Date.UTC(2000, 0, 1, 12)));
+  const lst = (A.SiderealTime(t) * 15 + 37.62 + 360) % 360;
+  const eps = 23.4392911, phi = 55.75, DEGr = Math.PI / 180;
+  const dec = Math.asin(Math.sin(eps * DEGr) * Math.sin(chart.angles.mc.lon * DEGr));
+  const SDA = 90 + Math.asin(Math.tan(phi * DEGr) * Math.tan(dec)) / DEGr;
+  const backAsc = ascFromRamc(lst - SDA, eps, phi);
+  const fwdAsc = ascFromRamc(lst + SDA, eps, phi);
+  const ic = (chart.angles.mc.lon + 180) % 360;
+  const selfOk = Math.abs(((backAsc - chart.angles.mc.lon + 180) % 360 + 360) % 360 - 180) < 0.05
+    && Math.abs(((fwdAsc - ic + 180) % 360 + 360) % 360 - 180) < 0.05;
+  // 2) Каркас: куспиды 1/10 = Asc/MC; противоположные через 180°; полный круг.
+  const oppOk = [1, 2, 3, 4, 5, 6].every(k => Math.abs(((cusps[k] + 180 - cusps[k + 6] + 180) % 360 + 360) % 360 - 180) < 0.01);
+  let acc = 0; for (let k = 1; k <= 12; k++) acc += ((cusps[k === 12 ? 1 : k + 1] - cusps[k]) % 360 + 360) % 360;
+  const circleOk = Math.abs(acc - 360) < 0.01;
+  // 3) На экваторе все квадрантные системы совпадают (Кох включительно).
+  const eq = {};
+  for (const hs of ['koch', 'placidus', 'campanus', 'regiomontanus'])
+    eq[hs] = mkCtx({ ...birth, lat: 0.001, houseSystem: hs }).cusps;
+  const eqOk = [11, 12, 2, 3].every(k => ['placidus', 'campanus', 'regiomontanus']
+    .every(hs => Math.abs(((eq.koch[k] - eq[hs][k] + 180) % 360 + 360) % 360 - 180) < 0.1));
+  // 4) Кох ≠ Плацидус на высокой широте (система действительно другая).
+  const pl = mkCtx({ ...birth, houseSystem: 'placidus' }).cusps;
+  const differs = [11, 12, 2, 3].some(k => Math.abs(((cusps[k] - pl[k] + 180) % 360 + 360) % 360 - 180) > 0.2);
+  return { selfOk, oppOk, circleOk, eqOk, differs };
+});
+ok(kochT.selfOk, 'Кох: самотест формулы — Asc(RAMC−SDA)=MC и Asc(RAMC+SDA)=IC (±0.05°)');
+ok(kochT.oppOk && kochT.circleOk, 'Кох: противоположные куспиды 180°, полный круг 360°');
+ok(kochT.eqOk, 'Кох: на экваторе совпадает с Плацидусом/Кампанусом/Региомонтанусом (±0.1°)');
+ok(kochT.differs, 'Кох: на широте Москвы отличается от Плацидуса (реально другая система)');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
