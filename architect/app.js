@@ -3954,6 +3954,7 @@ function antab(t) {
       + c.asteroids.map(a => rowA(`<b>${esc(a.name)}</b> — ${esc(a.sign)} ${a.deg.toFixed(1)}°`,
         ruleAttr(`pointInSign.${a.body}.${a.sign}`, `${a.name} в знаке ${a.sign}`))).join('');
     if (!html) html = '<div class="ai-sp-empty">Точки требуют известного времени рождения.</div>';
+    else html = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.4rem">Малые тела и расчётные точки — тонкие штрихи к портрету (необязательный слой). Тап по строке со значком › — понятное пояснение.</div>` + html;
   }
   if (t === 'mid') {
     const tree = computeMidpointTree(c).slice(0, 14);
@@ -4530,11 +4531,14 @@ function rPointsScreen() {
   const pr = (nm, z, extra, key) => z ? row(`<b>${nm}</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°${extra || ''}`,
     key ? ruleAttr(`pointInSign.${key}.${z.sign}`, `${nm} в знаке ${z.sign}`) : '') : '';
   const prX = (nm, z, prefix) => z ? row(`<b>${nm}</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°`, ruleAttr(`${prefix}.${z.sign}`, `${nm} в знаке ${z.sign}`)) : '';
-  let html = '';
+  // Шапки-пояснения (фидбек владельца): 1–2 предложения простым языком ДО
+  // списка, чтобы человек понимал контекст прежде, чем решит тапнуть.
+  let html = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.5rem">Это дополнительный, необязательный слой карты: малые тела и расчётные точки — тонкие штрихи к портрету, каждая отвечает за свою узкую тему. Тап по строке со значком › открывает понятное пояснение.</div>`;
   if ((c.asteroids || []).length) html += '<div class="f-lbl">Астероиды и Хирон (прибл.)</div>'
     + c.asteroids.map(a => row(`<b>${esc(a.name)}</b> — ${esc(a.sign)} ${a.deg.toFixed(1)}°`,
       ruleAttr(`pointInSign.${a.body}.${a.sign}`, `${a.name} в знаке ${a.sign}`))).join('');
   html += '<div class="f-lbl" style="margin-top:.4rem">Точки</div>'
+    + `<div class="si-text" style="color:var(--t3);line-height:1.5;margin:.1rem 0 .3rem">Расчётные точки — не небесные тела, а чувствительные места карты: Лилит — теневая тема, Точка Судьбы — где легче везёт, Вертекс — судьбоносные встречи.</div>`
     + pr('Лилит (ср. апогей)', P.lilith, '', 'Lilith')
     + pr('Точка Судьбы', P.fortune, P.fortune && (P.fortune.isDay ? ' (дневная формула)' : ' (ночная формула)'), 'Fortune')
     + pr('Вертекс', P.vertex, '', 'Vertex') + prX('Антивертекс', P.antivertex, 'antivertexInSign') + prX('Восточная точка', P.eastPoint, 'eastPointInSign');
@@ -4542,6 +4546,7 @@ function rPointsScreen() {
   if ((c.antiscia || []).length) {
     const byRu = {}; Object.keys(ASTRO_RU).forEach(b => byRu[ASTRO_RU[b]] = b);
     html += '<div class="f-lbl" style="margin-top:.4rem">Антисции</div>'
+      + `<div class="si-text" style="color:var(--t3);line-height:1.5;margin:.1rem 0 .3rem">Антисция — «зеркальное отражение» планеты относительно оси солнцестояний (0° Рака — 0° Козерога). Историческая техника: считалось, что планета негласно действует и из зеркальной точки. Слой для любопытных, читать карту без него можно.</div>`
       + c.antiscia.map(a => row(`${esc(a.name)} → ${esc(a.sign)} ${a.deg.toFixed(1)}°`,
         ruleAttr(byRu[a.name] ? 'antiscia.' + byRu[a.name] : '', `Антисция: ${a.name}`))).join('');
   }
