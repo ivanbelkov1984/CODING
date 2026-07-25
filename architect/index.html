@@ -464,10 +464,10 @@
         <div style="flex:2"><div class="f-lbl">Место (название)</div><input class="field" id="ab-place" placeholder="город"></div>
       </div>
       <div style="display:flex;gap:.5rem">
-        <div style="flex:1"><div class="f-lbl">Широта</div><input class="field" id="ab-lat" placeholder="55.75"></div>
+        <div style="flex:1"><div class="f-lbl">Широта</div><input class="field" id="ab-lat" placeholder="55.75" oninput="updatePolarWarn()"></div>
         <div style="flex:1"><div class="f-lbl">Долгота</div><input class="field" id="ab-lon" placeholder="37.62"></div>
       </div>
-      <div><div class="f-lbl">Система домов</div><select class="field" id="ab-houses">
+      <div><div class="f-lbl">Система домов</div><select class="field" id="ab-houses" onchange="updatePolarWarn()">
         <option value="whole">Whole-sign (знаковые)</option>
         <option value="placidus">Плацидус</option>
         <option value="koch">Кох</option>
@@ -475,6 +475,7 @@
         <option value="campanus">Кампанус</option>
         <option value="regiomontanus">Региомонтанус</option>
       </select></div>
+      <div id="ab-polar-warn" class="be-note" style="display:none;color:var(--orange,#c60);line-height:1.5"></div>
       <div class="be-note" style="color:var(--t3)">UTC-офсет укажи сам для исторической точности (летнее время/реформы поясов не угадываются автоматически). Без точного времени карта считается без асцендента и домов.</div>
       <div class="tog-row" style="border-bottom:none;padding:.15rem 0"><span class="tog-lbl">Астероиды и звёзды на колесе</span><div class="tog" id="astro-extras-tog" onclick="toggleWheelExtras()" role="switch"></div></div>
       <button class="btn btn-p btn-full" onclick="saveAstroBirth()"><i data-lucide="sparkles"></i>Сохранить и рассчитать</button>

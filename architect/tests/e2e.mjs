@@ -2404,6 +2404,55 @@ ok(kochT.oppOk && kochT.circleOk, 'Кох: противоположные кус
 ok(kochT.eqOk, 'Кох: на экваторе совпадает с Плацидусом/Кампанусом/Региомонтанусом (±0.1°)');
 ok(kochT.differs, 'Кох: на широте Москвы отличается от Плацидуса (реально другая система)');
 
+// ── Астрология: полярные широты — страж квадрантных систем (ПРОВЕРКА владельца) ──
+const polarT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  const mk = (lat, hs, time) => computeNatalChart({ date: '1990-04-15', time, timeKnown: true, utcOffset: 8, lat, lon: 112.25, houseSystem: hs });
+  // 1) 66.41° (широта со скрина): решение ещё существует — считаем без отката.
+  const c1 = mk(66.41, 'placidus', '06:00');
+  const ok66 = c1.housesMeta.system === 'placidus' && !c1.housesMeta.fallbackFrom && cuspsSane(c1.housesMeta.cusps);
+  // 2) 70° при «плохом» звёздном времени: срыв порядка куспидов → честный
+  // автоматический откат на Whole-sign с пометкой fallbackFrom.
+  const c2 = mk(70, 'koch', '06:00');
+  const fb = c2.housesMeta.system === 'whole' && c2.housesMeta.fallbackFrom === 'koch' && cuspsSane(c2.housesMeta.cusps);
+  // 3) Whole-sign и Равнодомная там же работают всегда (безопасные системы).
+  const c3 = mk(70, 'equal', '06:00');
+  const safeOk = cuspsSane(c3.housesMeta.cusps) && c3.housesMeta.system === 'equal' && !c3.housesMeta.fallbackFrom;
+  // 4) Регрессия: на обычной широте ничего не изменилось.
+  const c4 = mk(55.75, 'placidus', '06:00');
+  const normalOk = c4.housesMeta.system === 'placidus' && !c4.housesMeta.fallbackFrom;
+  // 5) Живое предупреждение в настройках — до расчёта.
+  goTo('astro'); asub('setup');
+  document.getElementById('ab-lat').value = '66.41';
+  document.getElementById('ab-houses').value = 'placidus';
+  updatePolarWarn();
+  const warnEl = document.getElementById('ab-polar-warn');
+  const warnShown = warnEl.style.display !== 'none' && /Рекомендуем Whole-sign или Равнодомную/.test(warnEl.textContent) && /66\.4/.test(warnEl.textContent);
+  document.getElementById('ab-houses').value = 'whole'; updatePolarWarn();
+  const warnHiddenWhole = warnEl.style.display === 'none';
+  document.getElementById('ab-houses').value = 'koch';
+  document.getElementById('ab-lat').value = '55.75'; updatePolarWarn();
+  const warnHiddenLat = warnEl.style.display === 'none';
+  // 6) Полный цикл на 70°: компактная карточка в настройках сообщает об
+  // откате, таб «Дома» объясняет причину; технического дампа больше нет.
+  DB.astroBirth = { date: '1990-04-15', time: '06:00', timeKnown: true, utcOffset: 8, lat: 70, lon: 112.25, houseSystem: 'koch' };
+  DB.astroCharts = [];
+  await runNatalChart();
+  const settingsTxt = document.getElementById('astro-out').textContent;
+  const compactOk = /Карта рассчитана/.test(settingsTxt) && !/Антисции/.test(settingsTxt) && /Whole-sign/.test(settingsTxt);
+  asub('natal'); antab('houses');
+  const housesTxt = document.getElementById('astro-ntab-out').textContent;
+  const tabExplains = /не имеет корректного решения/.test(housesTxt) && /Whole-sign/.test(housesTxt) && /Кох/.test(housesTxt);
+  goTo('home'); DB.astroBirth = null; DB.astroCharts = [];
+  return { ok66, fb, safeOk, normalOk, warnShown, warnHiddenWhole, warnHiddenLat, compactOk, tabExplains };
+});
+ok(polarT.ok66, 'полярный страж: 66.41° (скрин владельца) — Плацидус ещё имеет решение, отката нет');
+ok(polarT.fb, 'полярный страж: 70°/06:00 Кох срывается → честный откат на Whole-sign с пометкой');
+ok(polarT.safeOk && polarT.normalOk, 'полярный страж: Whole/Equal безопасны на 70°; обычные широты — без изменений');
+ok(polarT.warnShown && polarT.warnHiddenWhole && polarT.warnHiddenLat, 'полярный страж: живое предупреждение в настройках (>66° + квадрантная система), гаснет для Whole/обычных широт');
+ok(polarT.compactOk, 'настройки: вместо технического дампа — понятная карточка «Карта рассчитана» с кнопкой и пометкой об откате');
+ok(polarT.tabExplains, 'таб «Дома»: причина отката объяснена человеческим языком');
+
 // ── Астрология: полный портрет карты (интро, Asc/MC, синтез-слой) ──
 const portT = await page.evaluate(async () => {
   await loadAstroEngine(); await loadAstroRules();
