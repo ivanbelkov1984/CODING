@@ -1929,7 +1929,7 @@ const scr2T = await page.evaluate(async () => {
   await rPrognostics();
   const progTx = document.getElementById('astro-prog').textContent;
   const progWheel = document.querySelectorAll('#astro-prog-wheel .aw-transit').length;
-  const progOk = /возраст 30/.test(progTx) && /звучит тема \(Водолей\)/.test(progTx) && progWheel === 10;
+  const progOk = /возраст 30/.test(progTx) && /Большая тема этих лет \(Водолей\)/.test(progTx) && progWheel === 10;
   STATE.progSeg = 'profection';
   await rPrognostics();
   const profTx = document.getElementById('astro-prog').textContent;
@@ -2697,6 +2697,55 @@ ok(synNT.noFrame && synNT.cliche, 'синастрия v2: рамка «Ваш X 
 ok(synNT.eraHidden && synNT.genOnlyEra, 'синастрия v2: поколенческие пары — только в свёрнутом «Фоне эпохи»');
 ok(synNT.synthesis, `синастрия v2: синтез «В целом» (${synNT.synWords} слов), без процентов, с честной кодой`);
 ok(synNT.taps && synNT.deterministic, 'синастрия v2: тапы на полные тексты сохранены, рендер детерминирован');
+
+// ── Астрология: контекстный проход — шапки-пояснения и свёрнутая техника везде ──
+const ctxT = await page.evaluate(async () => {
+  await loadAstroEngine(); await loadAstroRules();
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'whole' };
+  DB.astroCharts = []; await runNatalChart();
+  goTo('astro');
+  // Прогрессии: интро + «эмоциональный сезон» Луны + позиции свёрнуты.
+  asub('prog'); document.getElementById('astro-prog-age').value = '30';
+  STATE.progSeg = 'secondary'; await rPrognostics();
+  const pTx = document.getElementById('astro-prog').textContent;
+  const secOk = /внутренний календарь/.test(pTx) && /Эмоциональный сезон/.test(pTx)
+    && document.getElementById('prog-tech').style.display === 'none';
+  // Дирекции: интро + контакты с текстами аспектов ИЛИ честное «спокойный участок».
+  STATE.progSeg = 'solararc'; await rPrognostics();
+  const saTx = document.getElementById('astro-prog').textContent;
+  const saOk = /сдвигается примерно на 1°/.test(saTx) && (/Активные дирекции/.test(saTx) || /спокойный участок/.test(saTx))
+    && document.getElementById('sa-tech').style.display === 'none';
+  // Возвращения: «карта года», позиции свёрнуты, аспекты к наталу на месте.
+  asub('ret'); document.getElementById('astro-ret-type').value = 'solar';
+  document.getElementById('astro-ret-period').value = '2026'; await rReturns();
+  const rTx = document.getElementById('astro-ret').textContent;
+  const retOk = /карта года/.test(rTx) && document.getElementById('ret-tech').style.display === 'none' && /Ключевые аспекты/.test(rTx);
+  // Мидпоинты и гармоника: интро простым языком.
+  asub('mid'); rMidpoints(); rHarmonic();
+  const midTx = document.getElementById('astro-mid').textContent + document.getElementById('astro-harm').textContent;
+  const midOk = /точка ровно посередине/.test(midTx) && /«умноженная» на число N/.test(midTx);
+  // Джйотиш: раши (почему знаки другие), даши (интро + полный цикл свёрнут), панчанга.
+  asub('jyo'); STATE.jyoTab = 'rashi'; await rJyotish();
+  const rashiOk = /сидерическому зодиаку/.test(document.getElementById('astro-jyo').textContent);
+  STATE.jyoTab = 'dasha'; await rJyotish();
+  const dashaOk = /ведический календарь больших периодов/.test(document.getElementById('astro-jyo').textContent)
+    && document.getElementById('dasha-full').style.display === 'none';
+  STATE.jyoTab = 'panchanga'; await rJyotish();
+  const panOk = /пять характеристик момента рождения/.test(document.getElementById('astro-jyo').textContent);
+  // Транзиты и исторический слой: интро.
+  asub('transits'); await runTransits();
+  const trOk = /фон дня, не событие/.test(document.getElementById('astro-transits').textContent);
+  asub('parts'); await rPartsStars();
+  const partsOk = /Исторический слой карты/.test(document.getElementById('astro-parts').textContent);
+  STATE.jyoTab = 'rashi'; goTo('home'); DB.astroBirth = null; DB.astroCharts = [];
+  return { secOk, saOk, retOk, midOk, rashiOk, dashaOk, panOk, trOk, partsOk };
+});
+ok(ctxT.secOk, 'контекст: прогрессии — «внутренний календарь», эмоциональный сезон Луны, позиции свёрнуты');
+ok(ctxT.saOk, 'контекст: дирекции — интро + активные контакты (или честное «спокойный участок»), позиции свёрнуты');
+ok(ctxT.retOk, 'контекст: возвращения — «карта года», позиции свёрнуты, аспекты к наталу на месте');
+ok(ctxT.midOk, 'контекст: мидпоинты и гармоники — интро простым языком');
+ok(ctxT.rashiOk && ctxT.dashaOk && ctxT.panOk, 'контекст: джйотиш — айанамша объяснена, даши с интро и свёрнутым циклом, панчанга с интро');
+ok(ctxT.trOk && ctxT.partsOk, 'контекст: транзиты и исторический слой — интро на месте');
 
 // ── Астрология: полный портрет карты (интро, Asc/MC, синтез-слой) ──
 const portT = await page.evaluate(async () => {
