@@ -127,7 +127,7 @@ def cmd_generate(path="batch_input.jsonl"):
                     "model": MODEL,
                     "messages": [{"role": "system", "content": SYSTEM},
                                  {"role": "user", "content": TEMPLATE.format(entity=entity)}],
-                    "max_tokens": 700, "temperature": 0.8,
+                    "max_completion_tokens": 900,
                 },
             }
             f.write(json.dumps(req, ensure_ascii=False) + "\n")
