@@ -1994,7 +1994,7 @@ const synT = await page.evaluate(async () => {
   const selOk = document.querySelectorAll('#sp-select option').length === 1;
   const wheelOk = document.querySelectorAll('#astro-syn-wheel .aw-transit').length === 10;
   const outTx = document.getElementById('astro-syn').textContent;
-  const cardsOk = /межличностные аспекты/.test(outTx) && /партнёра\./.test(outTx);
+  const cardsOk = /межличностные аспекты/.test(outTx) && /В целом/.test(outTx);
   const discOk = /не «процент совместимости»/.test(outTx) && /только на устройстве/.test(outTx);
   const ruleOk = !!document.querySelector('#astro-syn [data-rule^="synastry."]');
   // 4) Изоляция: партнёрские данные не влияют на риски.
@@ -2638,6 +2638,65 @@ ok(recT.allDeleted, '«Мои записи»: каждый тип удаляет
 ok(recT.undone, '«Мои записи»: удаление можно отменить (undo возвращает запись и снимает надгробие)');
 ok(recT.oqGone && recT.birthRow && recT.birthGone, '«Мои записи»: открытые вопросы и данные рождения удаляются с подтверждением');
 ok(recT.mergeKills && recT.birthMerge, 'синк: надгробие партнёра действует при слиянии; удаление данных рождения переживает merge');
+
+// ── Синастрия v2: сюжет по разделам вместо каталога аспектов (задача владельца) ──
+const synNT = await page.evaluate(async () => {
+  await loadAstroEngine(); await loadAstroRules();
+  const R = window.ASTRO_RULES;
+  // 1) Семантический слой: 25 пар × 2 тона, все тексты непустые и без рамки.
+  const keys = Object.keys(R.synPair || {});
+  const pairsOk = keys.length === 25 && keys.every(k => (R.synPair[k].harm || '').length > 60 && (R.synPair[k].tense || '').length > 60);
+  // 2) Скоринг: личные > личные↔социальные > прочие > поколенческие (скрыть).
+  const prioOk = synPriority('Venus', 'Mars') === 3 && synPriority('Sun', 'Saturn') === 2
+    && synPriority('Uranus', 'Pluto') === 0 && synPriority('Sun', 'Pluto') === 1 && synPriority('Jupiter', 'Saturn') === 1;
+  // 3) Golden-прогон: партнёр «Виолетта» = та же карта J2000 (детерминированно).
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'whole' };
+  DB.astroCharts = []; DB.astroPartners = [];
+  await runNatalChart();
+  const my = DB.astroCharts[0].chart;
+  DB.astroPartners.push({ id: 777, label: 'Виолетта', birth: { date: '2000-01-01' }, chart: my, _u: Date.now() });
+  goTo('astro'); asub('syn');
+  await new Promise(r => setTimeout(r, 500));
+  const el = document.getElementById('astro-syn');
+  const html1 = el.innerHTML;
+  const tx = el.textContent;
+  // 4) Структура: вход → разделы → «В целом»; без шаблонной рамки.
+  const opener = /гармоничных контактов \d+, напряжённых \d+/.test(tx);
+  const sections = /Притяжение и близость/.test(tx) && /Как вы общаетесь и думаете вместе/.test(tx) && /Что усиливает друг друга/.test(tx);
+  const noFrame = !/Ваш [А-Я][а-я]+ ↔/.test(tx);
+  const orderOk = tx.indexOf('Притяжение и близость') < tx.indexOf('В целом');
+  // 5) Анти-клише: старые заготовки не встречаются чаще 1 раза на экран.
+  const cliche = ['звучат в унисон', 'открывают друг другу возможности', 'точку роста пары']
+    .every(p => (tx.split(p).length - 1) <= 1);
+  // 6) Поколенческое — только в свёрнутом «Фоне эпохи».
+  const eraEl = document.getElementById('syn-era');
+  const eraHidden = !!eraEl && eraEl.style.display === 'none' && /Уран/.test(eraEl.textContent);
+  // Скрывается именно генерационная↔генерационная (prio 0); личная↔генерационная
+  // (например, Луна—Уран) — легитимная динамика пары и остаётся в разделах.
+  const sigs = computeSynastry(my, my).hits.map(synSignal);
+  const genOnlyEra = sigs.filter(s => s.prio === 0).every(s => s.section === 'era')
+    && sigs.filter(s => s.prio > 0).every(s => s.section !== 'era')
+    && Array.from(eraEl.querySelectorAll('[data-rule], .si-text'))
+      .filter(d => /·/.test(d.textContent))
+      .every(d => (d.textContent.match(/Уран|Нептун|Плутон/g) || []).length >= 2);
+  // 7) Синтез: доминанта + держится + вызов + честная кода; без процентов.
+  const synM = tx.match(/В этой паре доминирует[\s\S]*?определяет судьбу пары\./);
+  const synWords = synM ? synM[0].split(/\s+/).length : 0;
+  const synthesis = !!synM && synWords >= 50 && synWords <= 200 && !/%/.test(synM[0]) && /не приговор/.test(synM[0]);
+  // 8) Тапы на полные тексты сохранены; детерминизм рендера.
+  const taps = document.querySelectorAll('#astro-syn [data-rule^="synastry."]').length >= 5;
+  await rSynastry();
+  const deterministic = document.getElementById('astro-syn').innerHTML === html1;
+  goTo('home'); DB.astroBirth = null; DB.astroCharts = []; DB.astroPartners = [];
+  return { pairsOk, prioOk, opener, sections, noFrame, orderOk, cliche, eraHidden, genOnlyEra, synthesis, synWords, taps, deterministic };
+});
+ok(synNT.pairsOk, 'синастрия v2: семантический слой — 25 пар × 2 тона (наблюдение → смысл → быт)');
+ok(synNT.prioOk, 'синастрия v2: иерархия — личные > личные↔социальные > прочие > поколенческие');
+ok(synNT.opener && synNT.sections && synNT.orderOk, 'синастрия v2: вход-абзац → тематические разделы → «В целом»');
+ok(synNT.noFrame && synNT.cliche, 'синастрия v2: рамка «Ваш X ↔ Y» убрана, старые клише ≤1 раза на экран');
+ok(synNT.eraHidden && synNT.genOnlyEra, 'синастрия v2: поколенческие пары — только в свёрнутом «Фоне эпохи»');
+ok(synNT.synthesis, `синастрия v2: синтез «В целом» (${synNT.synWords} слов), без процентов, с честной кодой`);
+ok(synNT.taps && synNT.deterministic, 'синастрия v2: тапы на полные тексты сохранены, рендер детерминирован');
 
 // ── Астрология: полный портрет карты (интро, Asc/MC, синтез-слой) ──
 const portT = await page.evaluate(async () => {
