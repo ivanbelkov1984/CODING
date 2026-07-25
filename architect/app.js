@@ -3192,15 +3192,21 @@ async function rPartsStars() {
 }
 
 // Сетка South Indian: фиксированные позиции знаков (по часовой от Овна).
-// North Indian стиль — отложен (задокументировано в README).
 const SOUTH_GRID = [['Рыбы', 'Овен', 'Телец', 'Близнецы'], ['Водолей', null, null, 'Рак'], ['Козерог', null, null, 'Лев'], ['Стрелец', 'Скорпион', 'Весы', 'Дева']];
 const JYO_ABBR = { Sun: 'Сл', Moon: 'Лн', Mercury: 'Ме', Venus: 'Ве', Mars: 'Ма', Jupiter: 'Юп', Saturn: 'Са', Uranus: 'Ур', Neptune: 'Не', Pluto: 'Пл' };
+// Легенда сокращений (задача владельца: таблица не должна быть головоломкой).
+const JYO_ABBR_LEGEND = 'Сл — Солнце · Лн — Луна · Ме — Меркурий · Ве — Венера · Ма — Марс · Юп — Юпитер · Са — Сатурн · Ра — Раху · Ке — Кету · Ур — Уран · Не — Нептун · Пл — Плутон · Лг — лагна (асцендент)';
 const DASHA_THEMES = { 'Кету': 'отпускание и глубинный опыт', 'Венера': 'отношения и чувство ценного', 'Солнце': 'ясность и самовыражение', 'Луна': 'чувства и забота', 'Марс': 'энергия и решимость', 'Раху': 'новизна и сильные желания', 'Юпитер': 'рост и смысл', 'Сатурн': 'структура и зрелость', 'Меркурий': 'учёба и связи' };
-function jyoGrid(placed) {   // placed: { 'Овен': ['Сл','Лн'], … }
+// Элемент сетки: строка (просто буквы) или {t, rule, title} — тапаемое
+// сокращение, открывающее текст интерпретации (как на основном колесе).
+function jyoCellItem(it) {
+  return typeof it === 'string' ? esc(it) : `<span${ruleAttr(it.rule, it.title)}>${esc(it.t)}</span>`;
+}
+function jyoGrid(placed) {   // placed: { 'Овен': ['Сл', {t,rule,title}], … }
   return '<div class="jyo-grid">' + SOUTH_GRID.map(row => row.map(sign => {
     if (!sign) return '<div class="jyo-cell jyo-empty"></div>';
     const items = placed[sign] || [];
-    return `<div class="jyo-cell"><div class="jyo-sign">${esc(sign.slice(0, 3))}</div><div class="jyo-pl">${items.map(esc).join(' ')}</div></div>`;
+    return `<div class="jyo-cell"><div class="jyo-sign">${esc(sign.slice(0, 3))}</div><div class="jyo-pl">${items.map(jyoCellItem).join(' ')}</div></div>`;
   }).join('')).join('') + '</div>';
 }
 // North Indian стиль: ромбовидная разметка, ДОМА фиксированы (1-й — верхний
@@ -3217,8 +3223,9 @@ function jyoNorthChart(placedByIdx, lagnaIdx) {
     const [x, y] = POS[h];
     s += `<text x="${x}" y="${y - 11}" class="jn-num">${signIdx + 1}</text>`;
     const items = placedByIdx[signIdx] || [];
-    s += `<text x="${x}" y="${y + 5}" class="jn-pl">${items.slice(0, 4).map(esc).join(' ')}</text>`;
-    if (items.length > 4) s += `<text x="${x}" y="${y + 19}" class="jn-pl">${items.slice(4).map(esc).join(' ')}</text>`;
+    const tsp = it => typeof it === 'string' ? `<tspan>${esc(it)}</tspan>` : `<tspan${ruleAttr(it.rule, it.title)}>${esc(it.t)}</tspan>`;
+    s += `<text x="${x}" y="${y + 5}" class="jn-pl">${items.slice(0, 4).map(tsp).join(' ')}</text>`;
+    if (items.length > 4) s += `<text x="${x}" y="${y + 19}" class="jn-pl">${items.slice(4).map(tsp).join(' ')}</text>`;
   }
   return s + '</svg>';
 }
@@ -3254,30 +3261,61 @@ async function rJyotish() {
     const dasha = vimshottariDasha(moon.lon, b0, new Date());
     const tab = STATE.jyoTab || 'rashi';
     let html = '';
+    // Тап по грахе → развёрнутый текст grahaInRashi (внешние планеты — без тапа: их нет в 9 грахах).
+    const G_KEY = { Sun: 'Surya', Moon: 'Chandra', Mars: 'Mangala', Mercury: 'Budha', Jupiter: 'Guru', Venus: 'Shukra', Saturn: 'Shani' };
+    const rashiSkOf = idx => RASHI[idx].split(' ')[0];
+    // Тапаемое сокращение для сетки: правило по раши, в котором стоит граха.
+    const abbrItem = (body, name, signIdx) => {
+      const rule = body === 'Rahu' ? `grahaInRashi.Rahu.${rashiSkOf(signIdx)}` : body === 'Ketu' ? `grahaInRashi.Ketu.${rashiSkOf(signIdx)}` : G_KEY[body] ? `grahaInRashi.${G_KEY[body]}.${rashiSkOf(signIdx)}` : '';
+      const t = body === 'Rahu' ? 'Ра' : body === 'Ketu' ? 'Ке' : JYO_ABBR[body] || name[0];
+      return rule ? { t, rule, title: `${name} — ${RASHI[signIdx]}` } : t;
+    };
+    const legendNote = `<div class="si-text" style="color:var(--t4);font-size:.72rem;line-height:1.6;margin:.2rem 0 .4rem">${JYO_ABBR_LEGEND}. Тап по сокращению в таблице — пояснение.</div>`;
     if (tab === 'rashi') {
       // Сетка индексируется западными именами знаков (SOUTH_GRID) — кладём по индексу.
       const placed = {};
-      const put = (idx, abbr, first) => { const k = ZODIAC[idx]; placed[k] = placed[k] || []; first ? placed[k].unshift(abbr) : placed[k].push(abbr); };
-      sid.forEach(p => put(Math.floor(p.lon / 30), JYO_ABBR[p.body] || p.name[0]));
-      put(Math.floor(rahu / 30), 'Ра'); put(Math.floor(ketu / 30), 'Ке');
+      const put = (idx, item, first) => { const k = ZODIAC[idx]; placed[k] = placed[k] || []; first ? placed[k].unshift(item) : placed[k].push(item); };
+      sid.forEach(p => put(Math.floor(p.lon / 30), abbrItem(p.body, p.name, Math.floor(p.lon / 30))));
+      put(Math.floor(rahu / 30), abbrItem('Rahu', 'Раху', Math.floor(rahu / 30)));
+      put(Math.floor(ketu / 30), abbrItem('Ketu', 'Кету', Math.floor(ketu / 30)));
       if (last.chart.angles) put(Math.floor(norm360(last.chart.angles.asc.lon - aya) / 30), 'Лг', true);
-      // Тап по грахе → развёрнутый текст grahaInRashi (внешние планеты — без тапа: их нет в 9 грахах).
-      const G_KEY = { Sun: 'Surya', Moon: 'Chandra', Mars: 'Mangala', Mercury: 'Budha', Jupiter: 'Guru', Venus: 'Shukra', Saturn: 'Shani' };
-      const rashiSk = L => RASHI[Math.floor(L / 30)].split(' ')[0];
+      const rashiSk = L => rashiSkOf(Math.floor(L / 30));
       const lagnaIdx = last.chart.angles ? Math.floor(norm360(last.chart.angles.asc.lon - aya) / 30) : null;
-      html = `<div class="f-lbl">Раши D1 (${esc(AYANAMSHAS[ayaKey].ru)}, айанамша ${aya.toFixed(2)}°)</div>` + jyoChartHtml(placed, lagnaIdx) +
+      html = `<div class="f-lbl">Раши D1 (${esc(AYANAMSHAS[ayaKey].ru)}, айанамша ${aya.toFixed(2)}°)</div>` + jyoChartHtml(placed, lagnaIdx) + legendNote +
         sid.map(p => `<div class="si-text" style="color:var(--t3)"${ruleAttr(G_KEY[p.body] ? `grahaInRashi.${G_KEY[p.body]}.${rashiSk(p.lon)}` : '', `${p.name} в знаке ${p.sign}`)}>${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°${(ucchaBala(p.body, p.lon) != null) ? ' · уччабала ' + ucchaBala(p.body, p.lon) : ''}${G_KEY[p.body] ? ' <span style="color:var(--accent);font-size:.72rem">подробнее</span>' : ''}</div>`).join('') +
         `<div class="si-text" style="color:var(--t3)"${ruleAttr(`grahaInRashi.Rahu.${rashiSk(rahu)}`, 'Раху в знаке')}>Раху (ср.): ${esc(RASHI[Math.floor(rahu / 30)])} ${(rahu % 30).toFixed(1)}° <span style="color:var(--accent);font-size:.72rem">подробнее</span></div>` +
         `<div class="si-text" style="color:var(--t3)"${ruleAttr(`grahaInRashi.Ketu.${rashiSk(ketu)}`, 'Кету в знаке')}>Кету: ${esc(RASHI[Math.floor(ketu / 30)])} ${(ketu % 30).toFixed(1)}° <span style="color:var(--accent);font-size:.72rem">подробнее</span></div>` +
         `<div class="si-text" style="margin-top:.3rem"${ruleAttr(`nakshatraMoon.${dasha.nakshatra}`, `Луна в накшатре ${dasha.nakshatra}`)}>Накшатра Луны: <b>${esc(dasha.nakshatra)}</b>, пада ${dasha.pada} <span style="color:var(--accent);font-size:.72rem">подробнее</span></div>`;
     }
     if (tab === 'navamsha') {
+      // Смысловой контекст ДО таблицы (задача владельца, текст из ТЗ).
+      const intro = `<div class="si-text" style="line-height:1.55;margin-bottom:.5rem">Навамша (D9) — карта брака и внутренней силы. В ведической традиции считается, что эта карта показывает, насколько по-настоящему реализуются обещания вашей основной карты (D1) — особенно в браке, отношениях и духовном пути. Планета может выглядеть сильной в основной карте, но в Навамше проявить себя иначе — это показывает разницу между внешним обещанием и внутренней реализацией.</div>`;
       const placed = {};
-      sid.forEach(p => { const s = ZODIAC[vargaSign(9, p.lon)]; (placed[s] = placed[s] || []).push(JYO_ABBR[p.body] || p.name[0]); });
+      sid.forEach(p => { const s9 = vargaSign(9, p.lon); const k = ZODIAC[s9]; (placed[k] = placed[k] || []).push(abbrItem(p.body, p.name, s9)); });
+      const put9 = (body, name, lon) => { const s9 = vargaSign(9, lon); const k = ZODIAC[s9]; (placed[k] = placed[k] || []).push(abbrItem(body, name, s9)); };
+      put9('Rahu', 'Раху', rahu); put9('Ketu', 'Кету', ketu);
       const navLagna = last.chart.angles ? vargaSign(9, norm360(last.chart.angles.asc.lon - aya)) : null;
-      html = '<div class="f-lbl">Навамша D9</div>' + jyoChartHtml(placed, navLagna) +
-        `<div class="si-text" style="color:var(--t3)">D10 (дашамша): ` + ['Sun', 'Moon'].map(b => { const p = sid.find(x => x.body === b); return `${esc(p.name)} — ${esc(RASHI[vargaSign(10, p.lon)])}`; }).join(' · ') + '</div>' +
-        '<div class="si-text" style="color:var(--t3)">Также считаются: D7, D12 (D16–D60 отложены).</div>';
+      if (navLagna != null) { const k = ZODIAC[navLagna]; (placed[k] = placed[k] || []).unshift('Лг'); }
+      // Варготтама: граха в одном знаке в D1 и D9 — главный практический вывод.
+      const vargo = [];
+      sid.forEach(p => { if (G_KEY[p.body] && Math.floor(p.lon / 30) === vargaSign(9, p.lon)) vargo.push({ name: p.name, sign: p.sign }); });
+      if (Math.floor(rahu / 30) === vargaSign(9, rahu)) vargo.push({ name: 'Раху', sign: RASHI[Math.floor(rahu / 30)] });
+      if (Math.floor(ketu / 30) === vargaSign(9, ketu)) vargo.push({ name: 'Кету', sign: RASHI[Math.floor(ketu / 30)] });
+      let vargoHtml = '<div class="f-lbl" style="margin-top:.5rem">Варготтама</div>';
+      vargoHtml += vargo.length
+        ? vargo.map(v => `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(v.name)} — Варготтама</b> (${esc(v.sign)}): находится в одном и том же знаке и в основной карте, и в Навамше. Это значит, что обещание этой планеты полностью подтверждается на более глубоком уровне — редкое и сильное указание.</div></div></div>`).join('')
+        : '<div class="si-text" style="color:var(--t3)">В этой карте нет планет-Варготтама. Это обычная ситуация: Варготтама — редкое усиление, а не обязательный элемент карты.</div>';
+      // Технические детали (свёрнуты): другие варги — не грузим ими с порога.
+      const vargaLine = (dn, ru) => `<div class="f-lbl" style="margin-top:.3rem">${ru}</div><div class="si-text" style="color:var(--t3);line-height:1.7">` +
+        sid.filter(p => G_KEY[p.body]).map(p => `${esc(p.name)}: ${esc(RASHI[vargaSign(dn, p.lon)])}`).join(' · ') + '</div>';
+      const tech = `<button class="btn btn-s btn-full" style="margin-top:.5rem" onclick="const d=$('jyo-tech');d.style.display=d.style.display==='none'?'block':'none'">Технические детали (другие варги) — показать/скрыть</button>
+        <div id="jyo-tech" style="display:none">
+          ${vargaLine(10, 'D10 · дашамша — карьера и признание')}
+          ${vargaLine(7, 'D7 · саптамша — дети и продолжение')}
+          ${vargaLine(12, 'D12 · двадашамша — родители и корни')}
+          <div class="si-text" style="color:var(--t4);font-size:.72rem;margin-top:.3rem">Более тонкие варги (D16–D60) не рассчитываются: их правила противоречивы в источниках — честнее не показывать, чем показывать спорное.</div>
+        </div>`;
+      html = intro + '<div class="f-lbl">Навамша D9</div>' + jyoChartHtml(placed, navLagna) + legendNote + vargoHtml + tech;
     }
     if (tab === 'dasha') {
       if (dasha.current) {
@@ -3298,7 +3336,7 @@ async function rJyotish() {
         + pRow(`Карана: ${esc(pan.karana)}`, `karana.${pan.karana}`, `Карана ${pan.karana}`);
       if (yogas.length) html += '<div class="f-lbl" style="margin-top:.4rem">Йоги</div>' + yogas.map(y => `<div class="si-text" style="color:var(--t3)">${esc(y)}</div>`).join('');
     }
-    html += '<div class="be-note" style="color:var(--t3)">Джйотиш — сидерическая традиция. Символическое; не прогноз и не диагноз. Айанамша — линейная аппроксимация (±минуты дуги); вара без коррекции на восход; North Indian стиль, D16–D60 и полная Шадбала — отложены.</div>';
+    html += '<div class="be-note" style="color:var(--t3)">Джйотиш — сидерическая традиция. Символическое; не прогноз и не диагноз. Айанамша — линейная аппроксимация (±минуты дуги); вара без коррекции на восход; D16–D60 и полная Шадбала — отложены.</div>';
     out.innerHTML = html;
   } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
 }

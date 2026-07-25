@@ -2529,6 +2529,54 @@ ok(hsT.picked && hsT.kept, 'кнопки: «Выбрать рекомендов�
 ok(hsT.descAll && hsT.grouped && hsT.hint, 'подписи у всех 6 систем, редкие — в группе «для специалистов», общая подсказка есть');
 ok(hsT.savedKept, 'авто-дефолт не переписывает сохранённый выбор пользователя');
 
+// ── Джйотиш: Навамша D9 — контекст, легенда, Варготтама, свёрнутые варги (задача владельца) ──
+const navT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'whole' };
+  DB.astroCharts = []; await runNatalChart();
+  goTo('astro'); asub('jyo');
+  await new Promise(r => setTimeout(r, 400));
+  STATE.jyoTab = 'navamsha'; await rJyotish();
+  const el = document.getElementById('astro-jyo');
+  const tx = el.textContent;
+  // 1) Вводный смысл ДО таблицы (дословный текст из ТЗ).
+  const intro = /карта брака и внутренней силы/.test(tx) && /внешним обещанием и внутренней реализацией/.test(tx)
+    && tx.indexOf('карта брака') < tx.indexOf('Варготтама');
+  // 2) Легенда сокращений и тапаемые сокращения в сетке.
+  const legend = /Сл — Солнце/.test(tx) && /Лг — лагна/.test(tx);
+  const gridTaps = el.querySelectorAll('.jyo-grid [data-rule]').length >= 5;
+  // 3) Варготтама: сверка вывода UI с независимым пересчётом.
+  const A = window.Astronomy; const t = A.MakeTime(birthUTCDate(DB.astroBirth));
+  const aya = ayanamsha('lahiri', t);
+  const classical = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn'];
+  let expected = 0;
+  DB.astroCharts[0].chart.planets.forEach(p => {
+    const L = norm360(p.lon - aya);
+    if (classical.includes(p.body) && Math.floor(L / 30) === vargaSign(9, L)) expected++;
+  });
+  const rahu = norm360(meanRahuLon(t) - aya), ketu = norm360(rahu + 180);
+  if (Math.floor(rahu / 30) === vargaSign(9, rahu)) expected++;
+  if (Math.floor(ketu / 30) === vargaSign(9, ketu)) expected++;
+  const uiCount = (tx.match(/— Варготтама/g) || []).length;
+  const vargoOk = expected > 0 ? uiCount === expected : /нет планет-Варготтама/.test(tx);
+  // 4) Технические детали свёрнуты; повисшая строка «Также считаются» исчезла.
+  const techEl = document.getElementById('jyo-tech');
+  const techHidden = !!techEl && techEl.style.display === 'none';
+  const techContent = /дашамша — карьера/.test(techEl.innerHTML) && /саптамша — дети/.test(techEl.innerHTML)
+    && /двадашамша — родители/.test(techEl.innerHTML) && /D16–D60/.test(techEl.innerHTML);
+  const noDangling = !/Также считаются/.test(tx);
+  // 5) Тот же подход в D1: сетка тапаема.
+  STATE.jyoTab = 'rashi'; await rJyotish();
+  const d1Taps = document.querySelectorAll('#astro-jyo .jyo-grid [data-rule]').length >= 5;
+  goTo('home'); DB.astroBirth = null; DB.astroCharts = []; STATE.jyoTab = 'rashi';
+  return { intro, legend, gridTaps, expected, uiCount, vargoOk, techHidden, techContent, noDangling, d1Taps };
+});
+ok(navT.intro, 'навамша: вводный смысл («карта брака и внутренней силы») стоит ДО таблицы');
+ok(navT.legend && navT.gridTaps, 'навамша: легенда сокращений + сокращения в сетке тапаемы');
+ok(navT.vargoOk, `навамша: Варготтама сверена с независимым расчётом (${navT.uiCount}/${navT.expected}${navT.expected === 0 ? ', явное «нет»' : ''})`);
+ok(navT.techHidden && navT.techContent && navT.noDangling, 'навамша: D10/D7/D12 в свёрнутых «Технических деталях», повисшая строка убрана');
+ok(navT.d1Taps, 'раши D1: сетка тоже тапаема (тот же подход)');
+
 // ── Астрология: полный портрет карты (интро, Asc/MC, синтез-слой) ──
 const portT = await page.evaluate(async () => {
   await loadAstroEngine(); await loadAstroRules();
