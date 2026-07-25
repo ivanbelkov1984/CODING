@@ -2215,6 +2215,66 @@ ok(covT.retTap, 'возвращения: карточки аспектов от�
 ok(covT.stub, 'ШАГ 3: отсутствующий текст → честная заглушка, не пустая карточка');
 ok(covT.chironText, 'экран точек: тап по Хирону открывает развёрнутый текст');
 
+// ── Астрология P2: новые тексты (звёзды, точки, гармоники, прогрессии) ──
+const p2uiT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = [];
+  await runNatalChart();
+  // 1) Файл extra: 118 текстов, ключевые категории.
+  await loadAstroTexts('extra');
+  const E = window.ASTRO_TEXTS_EXTRA;
+  const cnt = Object.keys(E).length;
+  const catOk = !!E['star.Regulus'] && !!E['arabicPart.Spirit'] && !!E['antivertexInSign.Овен']
+    && !!E['eastPointInSign.Рыбы'] && !!E['progSunInSign.Водолей'] && !!E['harmonic.5']
+    && !!E['profectionYear.7'] && !!E['midpointPair.Sun-Moon'];
+  // 2) Покрытие: новые префиксы валидируются, мусор — нет.
+  const hasOk = astroHasText('star.Regulus') && astroHasText('harmonic.5') && astroHasText('midpointPair.Sun-Moon')
+    && !astroHasText('star.Unknown') && !astroHasText('harmonic.64') && !astroHasText('midpointPair.Sun-Foo');
+  goTo('astro');
+  // 3) Экран звёзд: каталог с тапами (10 звёзд).
+  asub('parts');
+  await new Promise(r => setTimeout(r, 500));
+  const starTaps = document.querySelectorAll('#astro-parts [data-rule^="star."]').length;
+  const arabicTaps = document.querySelectorAll('#astro-parts [data-rule^="arabicPart."]').length;
+  // 4) Тап по звезде из каталога открывает текст.
+  const starEl = document.querySelector('#astro-parts [data-rule="star.Regulus"]');
+  if (starEl) starEl.click();
+  await new Promise(r => setTimeout(r, 300));
+  const starText = document.getElementById('astro-text-body').textContent.length > 400;
+  closeOv('ov-astro-text');
+  // 5) Мидпоинты: тапы у пар; гармоника H5 с тапом.
+  asub('mid');
+  await new Promise(r => setTimeout(r, 200));
+  const midTaps = document.querySelectorAll('#astro-mid [data-rule^="midpointPair."]').length >= 1;
+  document.getElementById('astro-harm-n').value = '5';
+  rHarmonic();
+  const harmTap = !!document.querySelector('#astro-harm [data-rule="harmonic.5"]');
+  // 6) Прогрессии: тема этапа с тапом progSunInSign; профекция с тапом.
+  asub('prog'); STATE.progSeg = 'secondary';
+  document.getElementById('astro-prog-age').value = '30';
+  await rPrognostics();
+  const progTap = !!document.querySelector('#astro-prog [data-rule^="progSunInSign."]');
+  STATE.progSeg = 'profection';
+  await rPrognostics();
+  const profTap = !!document.querySelector('#astro-prog [data-rule^="profectionYear."]');
+  STATE.progSeg = 'secondary';
+  // 7) Экран точек: Антивертекс/Восточная теперь с тапами.
+  asub('points');
+  const avTap = !!document.querySelector('#astro-points-out [data-rule^="antivertexInSign."]');
+  const epTap = !!document.querySelector('#astro-points-out [data-rule^="eastPointInSign."]');
+  goTo('home');
+  DB.astroBirth = null; DB.astroCharts = [];
+  return { cnt, catOk, hasOk, starTaps, arabicTaps, starText, midTaps, harmTap, progTap, profTap, avTap, epTap };
+});
+ok(p2uiT.cnt === 118 && p2uiT.catOk, `P2: extra-файл 118 текстов, все 8 категорий (${p2uiT.cnt})`);
+ok(p2uiT.hasOk, 'P2: правило покрытия знает новые префиксы и отвергает мусор');
+ok(p2uiT.starTaps >= 10 && p2uiT.arabicTaps >= 2, `P2: каталог звёзд (${p2uiT.starTaps}) и арабские точки (${p2uiT.arabicTaps}) с тапами`);
+ok(p2uiT.starText, 'P2: тап по Регулу открывает развёрнутый текст');
+ok(p2uiT.midTaps && p2uiT.harmTap, 'P2: мидпоинт-пары и гармоника H5 открывают тексты');
+ok(p2uiT.progTap && p2uiT.profTap, 'P2: прогрессированное Солнце и профекция года с тапами');
+ok(p2uiT.avTap && p2uiT.epTap, 'P2: Антивертекс и Восточная точка теперь с текстами');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

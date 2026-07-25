@@ -3022,11 +3022,14 @@ async function rPartsStars() {
     let html = '';
     if (parts) {
       html += '<div class="f-lbl" style="margin-top:.5rem">Арабские точки <span style="font-weight:500;color:var(--t3)">(историческая техника)</span></div>' +
-        parts.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+        parts.map(p => `<div class="si-text" style="color:var(--t3)"${ruleAttr(ARABIC_KEYS[p.name] ? 'arabicPart.' + ARABIC_KEYS[p.name] : '', p.name)}>${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°${ARABIC_KEYS[p.name] ? ' <span style="color:var(--accent);font-size:.72rem">подробнее</span>' : ''}</div>`).join('');
     } else html += '<div class="si-text" style="color:var(--t3)">Арабские точки требуют известного времени рождения.</div>';
     html += '<div class="f-lbl" style="margin-top:.4rem">Неподвижные звёзды (соединения, орб 1°)</div>' +
-      (stars.length ? stars.map(s => `<div class="si-text" style="color:var(--t3)">${esc(s.planet)} ∪ ${esc(s.star)} (орб ${s.orb}°)</div>`).join('')
+      (stars.length ? stars.map(s => `<div class="si-text" style="color:var(--t3)"${ruleAttr(STAR_KEYS[s.star] ? 'star.' + STAR_KEYS[s.star] : '', `Звезда ${s.star}`)}>${esc(s.planet)} ∪ ${esc(s.star)} (орб ${s.orb}°)${STAR_KEYS[s.star] ? ' <span style="color:var(--accent);font-size:.72rem">подробнее</span>' : ''}</div>`).join('')
         : '<div class="si-text" style="color:var(--t3)">Нет соединений с ключевыми звёздами в орбе 1°.</div>');
+    // Справочник всех отслеживаемых звёзд (текст доступен даже без соединения).
+    html += '<div class="f-lbl" style="margin-top:.4rem">Каталог звёзд</div><div style="display:flex;flex-wrap:wrap;gap:.35rem">' +
+      FIXED_STARS.map(st => `<span class="snpill" style="font-size:.72rem"${ruleAttr(STAR_KEYS[st.name] ? 'star.' + STAR_KEYS[st.name] : '', `Звезда ${st.name}`)}>${esc(st.name)}</span>`).join('') + '</div>';
     html += '<div class="be-note" style="color:var(--t3)">Историко-символический слой (классические трактаты; каталог Hipparcos + прецессия). Без драматизации: это не события и не диагнозы. Первичные дирекции и ректификация — research-preview, не реализованы.</div>';
     out.innerHTML = html;
   } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
@@ -3138,7 +3141,7 @@ async function rPrognostics() {
       html = `<div class="f-lbl">Вторичные прогрессии (возраст ${dir.ageYears.toFixed(1)}; снаружи колеса)</div>` +
         sec.planets.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
       const ps = sec.planets.find(p => p.body === 'Sun');
-      if (R && ps && R.planetInSign.Sun[ps.sign]) html += `<div class="si-row" style="margin-top:.4rem"><div class="si-body"><div class="si-text"><b>Сейчас по символическому таймингу звучит тема (${esc(ps.sign)}):</b> ${esc(R.planetInSign.Sun[ps.sign])}</div></div></div>`;
+      if (R && ps && R.planetInSign.Sun[ps.sign]) html += `<div class="si-row" style="margin-top:.4rem"${ruleAttr(`progSunInSign.${ps.sign}`, `Прогрессированное Солнце в знаке ${ps.sign}`)}><div class="si-body"><div class="si-text"><b>Сейчас по символическому таймингу звучит тема (${esc(ps.sign)}):</b> ${esc(R.planetInSign.Sun[ps.sign])} <span style="color:var(--accent);font-size:.75rem">подробнее</span></div></div></div>`;
       html += `<div class="f-lbl" style="margin-top:.4rem">Третичные (1 день = 1 лунный месяц)</div>` +
         ter.planets.slice(0, 3).map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
     }
@@ -3152,7 +3155,7 @@ async function rPrognostics() {
       if (wheelEl) wheelEl.innerHTML = '';
       if (dir.profection) {
         html = `<div class="f-lbl">Годовые профекции</div>
-          <div class="si-row"><div class="si-body"><div class="si-text"><b>Возраст ${dir.profection.age}: год ${dir.profection.house}-го дома (${esc(dir.profection.sign)}).</b> В фокусе года — ${esc(HOUSE_THEMES[dir.profection.house] || '')}. Хозяин года ведётся по знаку ${esc(dir.profection.sign)}.</div></div></div>`;
+          <div class="si-row"${ruleAttr(`profectionYear.${dir.profection.house}`, `Год ${dir.profection.house}-го дома`)}><div class="si-body"><div class="si-text"><b>Возраст ${dir.profection.age}: год ${dir.profection.house}-го дома (${esc(dir.profection.sign)}).</b> В фокусе года — ${esc(HOUSE_THEMES[dir.profection.house] || '')}. Хозяин года ведётся по знаку ${esc(dir.profection.sign)}. <span style="color:var(--accent);font-size:.75rem">подробнее</span></div></div></div>`;
       } else html = '<div class="ai-sp-empty">Профекции требуют известного времени рождения (нужен Асцендент).</div>';
     }
     html += '<div class="be-note" style="color:var(--t3)">Символический тайминг (день=год; Найбод; эллинистические профекции). Не событие и не прогноз.</div>';
@@ -3252,9 +3255,17 @@ function rMidpoints() {
   if (!last) { out.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай натальную карту.</div>'; return; }
   const hits = computeMidpointTree(last.chart);
   out.innerHTML = '<div class="f-lbl" style="margin-top:.5rem">Дерево мидпоинтов <span style="font-weight:500;color:var(--t3)">(жёсткие аспекты, орб 1.5°)</span></div>' +
-    (hits.length ? hits.slice(0, 15).map(h => `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(h.point)}</b> = ${esc(h.pair)} (${h.angle}°, орб ${h.orb}°)</div></div></div>`).join('')
+    (hits.length ? hits.slice(0, 15).map(h => `<div class="si-row"${ruleAttr(midpointRule(h.pair), `Мидпоинт ${h.pair}`)}><div class="si-body"><div class="si-text"><b>${esc(h.point)}</b> = ${esc(h.pair)} (${h.angle}°, орб ${h.orb}°)${astroHasText(midpointRule(h.pair)) ? ' <span style="color:var(--accent);font-size:.72rem">подробнее</span>' : ''}</div></div></div>`).join('')
       : '<div class="si-text" style="color:var(--t3)">Нет попаданий в орб 1.5°.</div>') +
     '<div class="be-note" style="color:var(--t3)">Уранская техника (Витте/Эбертин). Символическое, не прогноз.</div>';
+}
+// Мидпоинт-пара «Солнце/Луна» → rule id midpointPair.Sun-Moon (порядок PLANETS).
+function midpointRule(pairRu) {
+  const byRu = {}; Object.keys(ASTRO_RU).forEach(b => byRu[ASTRO_RU[b]] = b);
+  const [a, b] = String(pairRu).split('/').map(s => byRu[s.trim()]);
+  if (!a || !b) return '';
+  const ia = ASTRO_BODIES.indexOf(a), ib = ASTRO_BODIES.indexOf(b);
+  return `midpointPair.${ia <= ib ? a + '-' + b : b + '-' + a}`;
 }
 function rHarmonic() {
   const out = $('astro-harm'); if (!out) return;
@@ -3262,7 +3273,7 @@ function rHarmonic() {
   if (!last) { out.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай натальную карту.</div>'; return; }
   const n = Math.max(2, Math.min(64, parseInt(($('astro-harm-n') && $('astro-harm-n').value) || '5', 10) || 5));
   const h = computeHarmonic(last.chart, n);
-  out.innerHTML = `<div class="f-lbl" style="margin-top:.5rem">Гармоника H${n}</div>` +
+  out.innerHTML = `<div class="f-lbl" style="margin-top:.5rem"${ruleAttr(`harmonic.${n}`, `Гармоника H${n}`)}>Гармоника H${n}${astroHasText(`harmonic.${n}`) ? ' <span style="color:var(--accent);font-size:.72rem;text-transform:none">подробнее</span>' : ''}</div>` +
     h.planets.map(p => `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°</div></div></div>`).join('') +
     (h.conj.length ? '<div class="f-lbl" style="margin-top:.4rem">Соединения в гармонике</div>' + h.conj.map(c => `<div class="si-text" style="color:var(--t3)">${esc(c.a)} ∪ ${esc(c.b)} (орб ${c.orb}°)</div>`).join('') : '') +
     '<div class="be-note" style="color:var(--t3)">Техника Дж. Аддея: долгота × N. Символическое.</div>';
@@ -3689,8 +3700,9 @@ function antab(t) {
     const rowA = (txt, attr) => `<div class="si-row"${attr || ''}><div class="si-body"><div class="si-text">${txt}</div></div></div>`;
     const pr = (nm, z, extra, key) => z ? rowA(`<b>${nm}</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°${extra || ''}`,
       key ? ruleAttr(`pointInSign.${key}.${z.sign}`, `${nm} в знаке ${z.sign}`) : '') : '';
+    const prX = (nm, z, prefix) => z ? rowA(`<b>${nm}</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°`, ruleAttr(`${prefix}.${z.sign}`, `${nm} в знаке ${z.sign}`)) : '';
     html = pr('Точка Судьбы', P.fortune, P.fortune && (P.fortune.isDay ? ' (дневная)' : ' (ночная)'), 'Fortune') + pr('Лилит (ср.)', P.lilith, '', 'Lilith')
-      + pr('Вертекс', P.vertex, '', 'Vertex') + pr('Антивертекс', P.antivertex) + pr('Восточная точка', P.eastPoint);
+      + pr('Вертекс', P.vertex, '', 'Vertex') + prX('Антивертекс', P.antivertex, 'antivertexInSign') + prX('Восточная точка', P.eastPoint, 'eastPointInSign');
     if ((c.asteroids || []).length) html += `<div class="f-lbl" style="margin-top:.4rem">Астероиды (прибл.)</div>`
       + c.asteroids.map(a => rowA(`<b>${esc(a.name)}</b> — ${esc(a.sign)} ${a.deg.toFixed(1)}°`,
         ruleAttr(`pointInSign.${a.body}.${a.sign}`, `${a.name} в знаке ${a.sign}`))).join('');
@@ -3698,7 +3710,8 @@ function antab(t) {
   }
   if (t === 'mid') {
     const tree = computeMidpointTree(c).slice(0, 14);
-    html = tree.length ? tree.map(x => row(`<b>${esc(x.point)}</b> = ${esc(x.pair)} (${x.angle}°, орб ${x.orb}°)`)).join('')
+    const rowM = (txt, attr) => `<div class="si-row"${attr || ''}><div class="si-body"><div class="si-text">${txt}</div></div></div>`;
+    html = tree.length ? tree.map(x => rowM(`<b>${esc(x.point)}</b> = ${esc(x.pair)} (${x.angle}°, орб ${x.orb}°)${astroHasText(midpointRule(x.pair)) ? ' <span style="color:var(--accent);font-size:.72rem">подробнее</span>' : ''}`, ruleAttr(midpointRule(x.pair), `Мидпоинт ${x.pair}`))).join('')
       : '<div class="ai-sp-empty">Нет точных контактов с мидпоинтами (орб 1.5°).</div>';
   }
   out.innerHTML = html + '<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Символическое, не прогноз и не диагноз.</div>';
@@ -3731,7 +3744,11 @@ const ASTRO_TEXTS_PARTS = {
   natal: ['planetInSign', 'planetInHouse', 'ascInSign', 'houseCusp', 'aspectMeaning', 'pointInSign'],
   transit: ['transit'], synastry: ['synastry'],
   jyotish: ['grahaInRashi', 'nakshatraMoon', 'mahadasha'],
+  extra: ['star', 'arabicPart', 'antivertexInSign', 'eastPointInSign', 'progSunInSign', 'harmonic', 'profectionYear', 'midpointPair'],
 };
+// Ключи P2-части (для правила покрытия и маппинга из UI).
+const STAR_KEYS = { 'Альгол': 'Algol', 'Альголь': 'Algol', 'Альциона': 'Alcyone', 'Альдебаран': 'Aldebaran', 'Бетельгейзе': 'Betelgeuse', 'Сириус': 'Sirius', 'Регул': 'Regulus', 'Спика': 'Spica', 'Антарес': 'Antares', 'Вега': 'Vega', 'Фомальгаут': 'Fomalhaut' };
+const ARABIC_KEYS = { 'Точка Духа': 'Spirit', 'Точка Брака': 'Marriage', 'Точка Болезни (истор.)': 'Sickness', 'Точка Смерти (истор.)': 'Death' };
 const _astroTextsLoad = {};
 function loadAstroTexts(part) {
   const g = 'ASTRO_TEXTS_' + part.toUpperCase();
@@ -3775,6 +3792,12 @@ function astroHasText(ruleId) {
     case 'grahaInRashi': return p.length === 3 && ASTRO_TEXT_GRAHAS.includes(p[1]);
     case 'nakshatraMoon': return p.length === 2 && ASTRO_TEXT_NAKSHATRAS.includes(p[1]);
     case 'mahadasha': return p.length === 2 && ASTRO_TEXT_DASHA.includes(p[1]);
+    case 'star': return p.length === 2 && Object.values(STAR_KEYS).includes(p[1]);
+    case 'arabicPart': return p.length === 2 && Object.values(ARABIC_KEYS).includes(p[1]);
+    case 'antivertexInSign': case 'eastPointInSign': case 'progSunInSign': return p.length === 2 && sign(p[1]);
+    case 'harmonic': return p.length === 2 && +p[1] >= 2 && +p[1] <= 12;
+    case 'profectionYear': return p.length === 2 && +p[1] >= 1 && +p[1] <= 12;
+    case 'midpointPair': { const pr = (p[1] || '').split('-'); return p.length === 2 && pr.length === 2 && body(pr[0]) && body(pr[1]); }
     default: return false;
   }
 }
@@ -4172,6 +4195,7 @@ function rPointsScreen() {
   const row = (txt, attr) => `<div class="si-row"${attr || ''}><div class="si-body"><div class="si-text">${txt}${attr ? ' <span style="color:var(--accent);font-size:.75rem">подробнее</span>' : ''}</div></div></div>`;
   const pr = (nm, z, extra, key) => z ? row(`<b>${nm}</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°${extra || ''}`,
     key ? ruleAttr(`pointInSign.${key}.${z.sign}`, `${nm} в знаке ${z.sign}`) : '') : '';
+  const prX = (nm, z, prefix) => z ? row(`<b>${nm}</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°`, ruleAttr(`${prefix}.${z.sign}`, `${nm} в знаке ${z.sign}`)) : '';
   let html = '';
   if ((c.asteroids || []).length) html += '<div class="f-lbl">Астероиды и Хирон (прибл.)</div>'
     + c.asteroids.map(a => row(`<b>${esc(a.name)}</b> — ${esc(a.sign)} ${a.deg.toFixed(1)}°`,
@@ -4179,7 +4203,7 @@ function rPointsScreen() {
   html += '<div class="f-lbl" style="margin-top:.4rem">Точки</div>'
     + pr('Лилит (ср. апогей)', P.lilith, '', 'Lilith')
     + pr('Точка Судьбы', P.fortune, P.fortune && (P.fortune.isDay ? ' (дневная формула)' : ' (ночная формула)'), 'Fortune')
-    + pr('Вертекс', P.vertex, '', 'Vertex') + pr('Антивертекс', P.antivertex) + pr('Восточная точка', P.eastPoint);
+    + pr('Вертекс', P.vertex, '', 'Vertex') + prX('Антивертекс', P.antivertex, 'antivertexInSign') + prX('Восточная точка', P.eastPoint, 'eastPointInSign');
   if (!P.fortune) html += '<div class="si-text" style="color:var(--t3)">Вертекс и Точка Судьбы требуют известного времени рождения.</div>';
   if ((c.antiscia || []).length) html += '<div class="f-lbl" style="margin-top:.4rem">Антисции</div>'
     + c.antiscia.map(a => row(`${esc(a.name)} → ${esc(a.sign)} ${a.deg.toFixed(1)}°`)).join('');
