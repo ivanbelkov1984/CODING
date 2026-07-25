@@ -275,7 +275,10 @@ await page.evaluate(() => {
   saveIns();
 });
 await page.waitForTimeout(250);
-ok(await page.evaluate(() => document.querySelectorAll('#react-card.on .rc-row').length >= 1), 'после сохранения инсайта появляется карточка-отклик');
+// Класс .on навешивается вторым requestAnimationFrame — ждём селектор,
+// а не фиксированную паузу (гонка проявлялась при росте объёма приложения).
+const rcOn = await page.waitForSelector('#react-card.on .rc-row', { timeout: 3000 }).then(() => true).catch(() => false);
+ok(rcOn, 'после сохранения инсайта появляется карточка-отклик');
 ok(await page.evaluate(() => /Перекликается|мысль|записей|запись/.test(document.getElementById('react-card').textContent)), 'отклик содержательный (эхо/темп/тема)');
 ok(await page.evaluate(() => !!document.querySelector('#h-vector .vec-card')), 'виджет «Вектор недели» построен');
 ok(await page.evaluate(() => /запис/.test(document.querySelector('#h-vector .vec-sub').textContent)), 'вектор показывает движение за неделю');
@@ -2576,6 +2579,65 @@ ok(navT.legend && navT.gridTaps, 'навамша: легенда сокраще�
 ok(navT.vargoOk, `навамша: Варготтама сверена с независимым расчётом (${navT.uiCount}/${navT.expected}${navT.expected === 0 ? ', явное «нет»' : ''})`);
 ok(navT.techHidden && navT.techContent && navT.noDangling, 'навамша: D10/D7/D12 в свёрнутых «Технических деталях», повисшая строка убрана');
 ok(navT.d1Taps, 'раши D1: сетка тоже тапаема (тот же подход)');
+
+// ── «Мои записи»: индивидуальное удаление любой пользовательской записи ──
+const recT = await page.evaluate(async () => {
+  const now = Date.now(); const day = todayKey();
+  DB.checkins.push({ id: now + 1, date: '2026-01-01', sl: 7, sq: 7, cl: 8, mv: 6, st: 3, ci: true, _u: now });
+  DB.cravings.push({ id: now + 2, kind: 'cue', intensity: 7, outcome: 'held', day, _u: now });
+  DB.meds.push({ id: now + 3, name: 'Витамин D (тест)', active: true, _u: now });
+  DB.medIntakes.push({ id: now + 4, medId: now + 3, at: new Date().toISOString(), _u: now });
+  DB.symptoms.push({ id: now + 5, name: 'тестовый симптом', severity: 4, day, _u: now });
+  DB.measures.push({ id: now + 6, name: 'вес', value: '80', unit: 'кг', day, _u: now });
+  DB.evolution.unshift({ id: now + 7, lv: 1, text: 'тестовая веха', dt: 'сегодня', _u: now });
+  DB.bots.push({ id: now + 8, title: 'тестовая задача', prio: 'high', done: false, _u: now });
+  DB.chats = DB.chats || []; DB.chats.push({ id: now + 9, title: 'тестовый чат', msgs: [], _u: now });
+  DB.astroPartners = DB.astroPartners || []; DB.astroPartners.push({ id: now + 10, label: 'Тест-партнёр', _u: now });
+  DB.oq.push('Тестовый вопрос?');
+  DB.astroBirth = { date: '2000-01-01', timeKnown: false, utcOffset: 0 };
+  persist();
+  openRecords();
+  const ovOn = document.getElementById('ov-records').classList.contains('on');
+  const sel = document.getElementById('rec-coll');
+  const optionCount = sel.options.length;
+  const delOne = (coll, id) => {
+    sel.value = coll; rRecords();
+    const shown = document.querySelectorAll('#records-list .si-row').length > 0;
+    recDel(coll, id);
+    return shown && !(DB[coll] || []).some(r => r.id === id) && !!DB._del[id];
+  };
+  const allDeleted = ['checkins', 'cravings', 'medIntakes', 'meds', 'symptoms', 'measures', 'evolution', 'bots', 'chats', 'astroPartners']
+    .every((coll, i) => delOne(coll, now + [1, 2, 4, 3, 5, 6, 7, 8, 9, 10][i]));
+  // Undo возвращает последнюю удалённую запись (партнёра) и снимает надгробие.
+  undoDelete();
+  const undone = DB.astroPartners.some(r => r.id === now + 10) && !DB._del[now + 10];
+  recDel('astroPartners', now + 10);
+  // oq: удаление по индексу (confirm автопринимается харнессом), __ts обновлён.
+  sel.value = 'oq'; rRecords();
+  const tsBefore = DB.__ts || 0;
+  recDelOq(DB.oq.indexOf('Тестовый вопрос?'));
+  const oqGone = !DB.oq.includes('Тестовый вопрос?') && (DB.__ts || 0) >= tsBefore;
+  // astroBirth: отдельная строка + подтверждение.
+  sel.value = 'astroBirth'; rRecords();
+  const birthRow = /Дата и место рождения/.test(document.getElementById('records-list').textContent);
+  recDelBirth();
+  const birthGone = DB.astroBirth === null;
+  // Слияние: надгробие партнёра действует и при merge «с другим устройством».
+  const merged = mergeDB({ ...DEFAULT_DB, _del: { [now + 10]: Date.now() }, __ts: Date.now() },
+    { ...DEFAULT_DB, astroPartners: [{ id: now + 10, label: 'Тест-партнёр', _u: now }], __ts: now });
+  const mergeKills = !merged.astroPartners.some(r => r.id === now + 10);
+  // astroBirth — скалярное поле: более свежий документ (с null) побеждает.
+  const merged2 = mergeDB({ ...DEFAULT_DB, astroBirth: null, __ts: Date.now() },
+    { ...DEFAULT_DB, astroBirth: { date: '2000-01-01' }, __ts: now });
+  const birthMerge = merged2.astroBirth === null;
+  closeOv('ov-records');
+  return { ovOn, optionCount, allDeleted, undone, oqGone, birthRow, birthGone, mergeKills, birthMerge };
+});
+ok(recT.ovOn && recT.optionCount >= 21, `«Мои записи»: менеджер открывается, типов записей ${recT.optionCount} (≥21)`);
+ok(recT.allDeleted, '«Мои записи»: каждый тип удаляется индивидуально (запись исчезает + надгробие для синка)');
+ok(recT.undone, '«Мои записи»: удаление можно отменить (undo возвращает запись и снимает надгробие)');
+ok(recT.oqGone && recT.birthRow && recT.birthGone, '«Мои записи»: открытые вопросы и данные рождения удаляются с подтверждением');
+ok(recT.mergeKills && recT.birthMerge, 'синк: надгробие партнёра действует при слиянии; удаление данных рождения переживает merge');
 
 // ── Астрология: полный портрет карты (интро, Asc/MC, синтез-слой) ──
 const portT = await page.evaluate(async () => {

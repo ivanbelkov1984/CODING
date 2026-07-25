@@ -1412,7 +1412,93 @@ function undoDelete() {
   persist();
   // перерисовать всё, что могло зависеть от удалённой записи
   try { rIns(); rHIns(); rKPIs(); detectPatterns(); rDrms(); rPats(); rSpi(); } catch(e) {}
+  try { rRecords(); } catch(e) {}   // список «Мои записи», если открыт
   hptMed(); toast('Восстановлено', 'ok');
+}
+// ─── «МОИ ЗАПИСИ»: просмотр и индивидуальное удаление любой записи ───
+// Задача владельца: каждая введённая пользователем запись удаляется по
+// одной. Единый менеджер в Настройках → Данные; удаление — через тот же
+// delUndo (надгробие для синка + несколько секунд на отмену). Коллекции,
+// у которых уже есть удаление на своих экранах, здесь тоже доступны.
+const REC_COLLS = {
+  checkins:   { ru: 'Чек-ины',            sum: r => `${r.date || r.day || ''} · сон ${r.sl ?? '—'} · ясность ${r.cl ?? '—'} · стресс ${r.st ?? '—'}` },
+  moments:    { ru: 'Моменты',            sum: r => `${r.day || ''} · приятность ${Math.round(r.valence)} · энергия ${Math.round(r.activation)}${r.emo ? ' · ' + r.emo : ''}` },
+  whys:       { ru: 'Разборы «Зачем?»',   sum: r => `${r.day || ''} · ${r.symptom || r.need || 'разбор'}` },
+  cravings:   { ru: 'Тяга (импульсы)',    sum: r => `${r.day || ''} · сила ${r.intensity ?? '—'} · ${r.outcome === 'held' ? 'пережил' : 'уступил'}` },
+  meds:       { ru: 'План приёма',        sum: r => r.name || 'позиция плана' },
+  medIntakes: { ru: 'Факты приёма',       sum: r => { const m = (DB.meds || []).find(x => x && x.id === r.medId); return `${(r.at || r.createdAt || '').slice(0, 10)} · ${m ? m.name : 'препарат'}`; } },
+  symptoms:   { ru: 'Симптомы',           sum: r => `${r.day || ''} · ${r.name || ''} (${r.severity ?? '—'}/10)` },
+  measures:   { ru: 'Измерения',          sum: r => `${r.day || ''} · ${r.name || ''}: ${r.value ?? ''} ${r.unit || ''}` },
+  insights:   { ru: 'Инсайты',            sum: r => r.title || (r.body || '').slice(0, 48) || 'инсайт' },
+  dreams:     { ru: 'Сны',                sum: r => `${r.date || ''} · ${r.title || 'сон'}` },
+  patterns:   { ru: 'Паттерны',           sum: r => (r.text || '').slice(0, 48) },
+  spiritual:  { ru: 'Духовное',           sum: r => `${r.date || ''} · ${r.type || ''}` },
+  evolution:  { ru: 'Эволюция',           sum: r => `${r.dt || ''} · ${(r.text || '').slice(0, 44)}` },
+  bots:       { ru: 'Задачи',             sum: r => `${r.done ? '✓ ' : ''}${r.title || ''}` },
+  chats:      { ru: 'Чаты с ИИ',          sum: r => r.title || 'диалог' },
+  sphereLogs: { ru: 'Записи по сферам',   sum: r => { const s = (DB.spheres || []).find(x => x && x.id === r.sphereId); return `${r.date || ''} · ${s ? s.name : 'сфера'}: ${r.value === true ? '✓' : r.value === false ? '—' : r.value}`; } },
+  spheres:    { ru: 'Сферы (с историей)', sum: r => r.name || 'сфера', cascade: true },
+  astroCharts:{ ru: 'Расчёты натальной карты', sum: r => `${(r.createdAt || '').slice(0, 10)} · расчёт карты` },
+  astroPartners: { ru: 'Партнёры (синастрия)', sum: r => r.label || 'партнёр' },
+};
+function openRecords() {
+  const sel = $('rec-coll');
+  if (sel && !sel.options.length) rRecordsFillSelect();
+  rRecords(); openOv('ov-records');
+}
+function rRecordsFillSelect() {
+  const sel = $('rec-coll'); if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = Object.keys(REC_COLLS).map(k =>
+    `<option value="${k}">${esc(REC_COLLS[k].ru)} (${(DB[k] || []).length})</option>`).join('')
+    + `<option value="oq">Открытые вопросы (${(DB.oq || []).length})</option>`
+    + `<option value="astroBirth">Данные рождения (${DB.astroBirth ? 1 : 0})</option>`;
+  if (cur) sel.value = cur;
+}
+function rRecords() {
+  rRecordsFillSelect();
+  const out = $('records-list'); if (!out) return;
+  const coll = ($('rec-coll') && $('rec-coll').value) || 'checkins';
+  const delBtn = act => `<button class="btn btn-s" style="flex:none" onclick="${act}" aria-label="Удалить"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:14px;height:14px;color:var(--t4)"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>`;
+  if (coll === 'oq') {
+    out.innerHTML = (DB.oq || []).length ? DB.oq.map((q, i) =>
+      `<div class="si-row"><div class="si-body"><div class="si-text">${esc(q)}</div></div>${delBtn(`recDelOq(${i})`)}</div>`).join('')
+      : '<div class="bk-empty" style="padding:.6rem 0">Записей этого типа нет.</div>';
+    return;
+  }
+  if (coll === 'astroBirth') {
+    out.innerHTML = DB.astroBirth
+      ? `<div class="si-row"><div class="si-body"><div class="si-text">Дата и место рождения (${esc(DB.astroBirth.date || '')}${DB.astroBirth.place ? ', ' + esc(DB.astroBirth.place) : ''})</div></div>${delBtn('recDelBirth()')}</div>`
+      : '<div class="bk-empty" style="padding:.6rem 0">Данные рождения не заполнены.</div>';
+    return;
+  }
+  const cfg = REC_COLLS[coll]; if (!cfg) { out.innerHTML = ''; return; }
+  const list = [...(DB[coll] || [])].sort((a, b) => _ru(b) - _ru(a));
+  out.innerHTML = list.length ? list.slice(0, 300).map(r =>
+    `<div class="si-row"><div class="si-body"><div class="si-text">${esc(cfg.sum(r) || 'запись')}</div></div>${delBtn(`recDel('${coll}',${JSON.stringify(r.id)})`)}</div>`).join('')
+    + (list.length > 300 ? `<div class="si-text" style="color:var(--t3);padding:.4rem 0">Показаны последние 300 из ${list.length}.</div>` : '')
+    : '<div class="bk-empty" style="padding:.6rem 0">Записей этого типа нет.</div>';
+}
+function recDel(coll, id) {
+  if (coll === 'spheres') {   // каскад: сфера + все её логи — только с явным подтверждением
+    const s = (DB.spheres || []).find(x => x && x.id === id);
+    if (!confirm(`Удалить сферу «${s ? s.name : ''}» со всеми её записями?`)) return;
+    deleteSphere(id); rRecords(); try { rSpheres(); } catch (e) {}
+    toast('Сфера удалена', 'ok'); return;
+  }
+  delUndo(coll, id, () => { rRecords(); }, 'Запись удалена');
+}
+function recDelOq(i) {
+  if (!confirm('Удалить этот вопрос?')) return;
+  (DB.oq || []).splice(i, 1);
+  DB.__ts = Date.now();   // oq сливается как скалярное поле — по свежести документа
+  persist(); rRecords(); toast('Вопрос удалён', 'ok');
+}
+function recDelBirth() {
+  if (!confirm('Удалить данные рождения? Уже рассчитанные карты останутся в «Расчёты натальной карты» — их можно удалить отдельно.')) return;
+  DB.astroBirth = null;
+  DB.__ts = Date.now();   // astroBirth сливается как скалярное поле
+  persist(); rRecords(); toast('Данные рождения удалены', 'ok');
 }
 function toastUndo(msg) {
   const el = document.createElement('div');
@@ -6505,7 +6591,7 @@ function genRecoveryKey() {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','bots','digests','spheres','sphereLogs','chats','cravings'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','astroPartners','bots','digests','spheres','sphereLogs','chats','cravings'];
 function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
 function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
 const _ru = r => r._u || r.id || 0;   // «когда обновлено» с откатом на id (id = Date.now())
@@ -6532,9 +6618,9 @@ function mergeDB(local, remote) {
   for (const k in del) if (del[k] < cutoff) delete del[k];
   const out = { ...DEFAULT_DB, ...local, _del: del };
   IDCOLS.forEach(c => { out[c] = mergeById(local[c] || [], remote[c] || [], del); });
-  // скалярные поля (состояние/главы/вопросы) — берём из более свежего документа
+  // скалярные поля (состояние/главы/вопросы/данные рождения) — из более свежего документа
   const scal = (remote.__ts || 0) > (local.__ts || 0) ? remote : local;
-  ['vit','chapters','oq','env'].forEach(k => { if (scal[k] !== undefined) out[k] = scal[k]; });
+  ['vit','chapters','oq','env','astroBirth'].forEach(k => { if (scal[k] !== undefined) out[k] = scal[k]; });
   out.__ts = Math.max(local.__ts || 0, remote.__ts || 0);
   return out;
 }
