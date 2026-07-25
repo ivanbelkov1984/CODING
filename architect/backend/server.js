@@ -11,6 +11,7 @@ import rateLimit from 'express-rate-limit';
 import pg from 'pg';
 import mountPush from './push.js';   // Web Push (под VAPID-guard; без ключей — no-op)
 import mountFeedback from './feedback.js'; // Обратная связь (append-only лог)
+import mountAstroBatch from './astro_batch.js'; // Астро-тексты: OpenAI Batch (ключ только в env)
 
 const { Pool } = pg;
 const PORT = process.env.PORT || 3000;
@@ -69,6 +70,7 @@ app.use('/api', rateLimit({
 // Web Push — аддитивно и защищённо: любая ошибка не роняет сервер/синхронизацию.
 try { mountPush(app, pool); } catch (e) { console.error('push mount failed:', e.message); }
 try { mountFeedback(app, pool); } catch (e) { console.error('feedback mount failed:', e.message); }
+try { mountAstroBatch(app, pool); } catch (e) { console.error('astro-batch mount failed:', e.message); }
 
 const isUuid = s => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s || '');
 const isObj  = v => v && typeof v === 'object' && !Array.isArray(v);
