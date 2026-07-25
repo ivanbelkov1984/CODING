@@ -2275,6 +2275,47 @@ ok(p2uiT.midTaps && p2uiT.harmTap, 'P2: мидпоинт-пары и гармо�
 ok(p2uiT.progTap && p2uiT.profTap, 'P2: прогрессированное Солнце и профекция года с тапами');
 ok(p2uiT.avTap && p2uiT.epTap, 'P2: Антивертекс и Восточная точка теперь с текстами');
 
+// ── Астрология P3: панчанга/антисции тапы + астероиды и звёзды на колесе ──
+const p3T = await page.evaluate(async () => {
+  await loadAstroEngine();
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = [];
+  await runNatalChart();
+  goTo('astro');
+  // 1) Покрытие новых префиксов.
+  const hasOk = astroHasText('tithi.30') && astroHasText('vara.7') && astroHasText('yoga.27')
+    && astroHasText('karana.Вишти') && astroHasText('antiscia.Sun')
+    && !astroHasText('tithi.31') && !astroHasText('karana.Нет') && !astroHasText('antiscia.Foo');
+  // 2) Панчанга-таб: 4 тапа (тити/вара/йога/карана).
+  asub('jyo'); STATE.jyoTab = 'panchanga';
+  await rJyotish();
+  const panTaps = ['tithi.', 'vara.', 'yoga.', 'karana.'].filter(p => document.querySelector(`#astro-jyo [data-rule^="${p}"]`)).length;
+  STATE.jyoTab = 'rashi';
+  // 3) Антисции: тапы на экране точек.
+  asub('points');
+  const antTaps = document.querySelectorAll('#astro-points-out [data-rule^="antiscia."]').length;
+  // 4) Колесо: тумблер выключен → без extras; включён → астероиды и звёзды.
+  CFG.astroWheelExtras = false;
+  asub('natal');
+  const offExtras = document.querySelectorAll('#astro-wheel .aw-extra, #astro-wheel .aw-star').length;
+  CFG.astroWheelExtras = true;
+  rNatalScreen();
+  const astExtras = document.querySelectorAll('#astro-wheel .aw-extra').length;
+  const starExtras = document.querySelectorAll('#astro-wheel .aw-star').length;
+  const tapable = /astroFullText\('pointInSign\./.test(document.getElementById('astro-wheel').innerHTML)
+    && /astroFullText\('star\./.test(document.getElementById('astro-wheel').innerHTML);
+  CFG.astroWheelExtras = false;
+  goTo('home');
+  DB.astroBirth = null; DB.astroCharts = [];
+  return { hasOk, panTaps, antTaps, offExtras, astExtras, starExtras, tapable };
+});
+ok(p3T.hasOk, 'P3: покрытие тити/вара/йога/карана/антисции (мусор отвергается)');
+ok(p3T.panTaps === 4, `P3: панчанга — 4 тапа (тити/вара/йога/карана), получено ${p3T.panTaps}`);
+ok(p3T.antTaps === 10, `P3: антисции — 10 тапов (${p3T.antTaps})`);
+ok(p3T.offExtras === 0, 'P3: тумблер выключен → на колесе нет астероидов и звёзд');
+ok(p3T.astExtras === 6 && p3T.starExtras === 10, `P3: тумблер включён → 6 астероидов + 10 звёзд на колесе (${p3T.astExtras}/${p3T.starExtras})`);
+ok(p3T.tapable, 'P3: астероиды и звёзды на колесе открывают тексты по тапу');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

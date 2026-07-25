@@ -2942,7 +2942,7 @@ function panchanga(sidSun, sidMoon, birthLocal) {
   const yoga = Math.floor(norm360(sidSun + sidMoon) / (360 / YOGA_COUNT));
   const karanaIdx = Math.floor(d / 6);                            // 0..59
   const karana = (karanaIdx === 0) ? 'Кимстугхна' : (karanaIdx >= 57) ? ['Шакуни','Чатушпада','Нага'][karanaIdx - 57] : KARANA_MOVABLE[(karanaIdx - 1) % 7];
-  return { tithi: tithiNum, tithiName, paksha, vara: VARA_RU[birthLocal.getUTCDay()], yoga: yoga + 1, karana };
+  return { tithi: tithiNum, tithiName, paksha, vara: VARA_RU[birthLocal.getUTCDay()], varaIdx: birthLocal.getUTCDay() + 1, yoga: yoga + 1, karana };
 }
 // Классические йоги (базовый проверяемый набор; список не полный).
 const EXALT = { Sun: 10, Moon: 33, Mars: 298, Mercury: 165, Jupiter: 95, Venus: 357, Saturn: 200 };  // сид. долготы экзальтаций
@@ -3103,7 +3103,12 @@ async function rJyotish() {
     if (tab === 'panchanga') {
       const pan = panchanga(sun.lon, moon.lon, new Date(b0.getTime() + (DB.astroBirth.utcOffset || 0) * 3600e3));
       const yogas = jyotishYogas(sid);
-      html = `<div class="f-lbl">Панчанга рождения</div><div class="si-text" style="color:var(--t3)">Тити: ${esc(pan.tithiName)} (${pan.paksha}, №${pan.tithi}) · Вара: ${esc(pan.vara)} · Йога: №${pan.yoga} · Карана: ${esc(pan.karana)}</div>`;
+      const pRow = (label, rule, title) => `<div class="si-text" style="color:var(--t3)"${ruleAttr(rule, title)}>${label}${astroHasText(rule) ? ' <span style="color:var(--accent);font-size:.72rem">подробнее</span>' : ''}</div>`;
+      html = `<div class="f-lbl">Панчанга рождения</div>`
+        + pRow(`Тити: ${esc(pan.tithiName)} (${pan.paksha}, №${pan.tithi})`, `tithi.${pan.tithi}`, `Тити №${pan.tithi} — ${pan.tithiName}`)
+        + pRow(`Вара: ${esc(pan.vara)}`, `vara.${pan.varaIdx}`, `Вара — ${pan.vara}`)
+        + pRow(`Йога: №${pan.yoga}`, `yoga.${pan.yoga}`, `Йога №${pan.yoga}`)
+        + pRow(`Карана: ${esc(pan.karana)}`, `karana.${pan.karana}`, `Карана ${pan.karana}`);
       if (yogas.length) html += '<div class="f-lbl" style="margin-top:.4rem">Йоги</div>' + yogas.map(y => `<div class="si-text" style="color:var(--t3)">${esc(y)}</div>`).join('');
     }
     html += '<div class="be-note" style="color:var(--t3)">Джйотиш — сидерическая традиция. Символическое; не прогноз и не диагноз. Айанамша — линейная аппроксимация (±минуты дуги); вара без коррекции на восход; North Indian стиль, D16–D60 и полная Шадбала — отложены.</div>';
@@ -3616,7 +3621,39 @@ function renderChartWheel(chart, o = {}) {
     s += line(p.lon, rZo, rZo + S * .016, 'aw-tick');
     s += `<text x="${F(px)}" y="${F(py)}" class="aw-planet aw-transit">${PLANET_GLYPHS[p.body] || '•'}</text>`;
   }
+  // Опция «астероиды и звёзды на колесе»: глифы астероидов внутри планетного
+  // пояса, звёзды — метки у зодиакального кольца; тап открывает текст.
+  if (o.extras) {
+    for (const a of (o.extras.asteroids || [])) {
+      const [px, py] = xy(a.lon, rHub + S * .033);
+      const rule = `pointInSign.${a.body}.${zodiacOf(a.lon).sign}`;
+      s += `<text x="${F(px)}" y="${F(py)}" class="aw-planet aw-extra"${o.static ? '' : ` onclick="astroFullText('${rule}','${(ASTEROID_WHEEL_GLYPHS[a.body] ? a.name : a.name)} в знаке ${zodiacOf(a.lon).sign}')"`}>${ASTEROID_WHEEL_GLYPHS[a.body] || '•'}</text>`;
+    }
+    for (const st of (o.extras.stars || [])) {
+      const [px, py] = xy(st.lon, rZi - S * .028);
+      const key = STAR_KEYS[st.name];
+      s += `<text x="${F(px)}" y="${F(py)}" class="aw-star"${o.static || !key ? '' : ` onclick="astroFullText('star.${key}','Звезда ${st.name}')"`}>✦</text>`;
+    }
+  }
   return s + '</svg>';
+}
+const ASTEROID_WHEEL_GLYPHS = { Chiron: '⚷', Ceres: '⚳', Pallas: '⚴', Juno: '⚵', Vesta: '⚶', Lilith: '⚸' };
+// Годы от J2000 без движка (для прецессии звёзд на колесе; TT-поправка ничтожна).
+function yearsSinceJ2000(date) { return (date.getTime() - Date.UTC(2000, 0, 1, 12)) / (365.25 * 864e5); }
+function wheelExtras(chart) {
+  if (!CFG.astroWheelExtras) return null;
+  const b = DB.astroBirth;
+  const yrs = yearsSinceJ2000(b ? birthUTCDate(b) : new Date());
+  const asteroids = [...(chart.asteroids || [])];
+  if (chart.points && chart.points.lilith) asteroids.push({ body: 'Lilith', name: 'Лилит', lon: chart.points.lilith.lon });
+  return { asteroids, stars: FIXED_STARS.map(st => ({ name: st.name, lon: norm360(st.lon + PRECESSION_DEG_PER_YEAR * yrs) })) };
+}
+function toggleWheelExtras() {
+  CFG.astroWheelExtras = !CFG.astroWheelExtras;
+  persist();
+  const tg = $('astro-extras-tog'); if (tg) tg.classList.toggle('on', !!CFG.astroWheelExtras);
+  toast(CFG.astroWheelExtras ? 'Астероиды и звёзды показаны на колесе' : 'Астероиды и звёзды скрыты', 'ok');
+  rNatalScreen();
 }
 
 // Полноэкранное колесо: оверлей во всю высоту, только колесо + детали планет.
@@ -3624,7 +3661,7 @@ function openFullWheel() {
   const last = (DB.astroCharts || []).slice(-1)[0];
   if (!last) { toast('Сначала рассчитай натальную карту', 'warn'); return; }
   const el = $('astro-wheel-full');
-  if (el) el.innerHTML = renderChartWheel(last.chart, { size: 340 });
+  if (el) el.innerHTML = renderChartWheel(last.chart, { size: 340, extras: wheelExtras(last.chart) });
   const info = $('astro-wheel-full-info');
   if (info) info.innerHTML = '<div class="si-text" style="color:var(--t3);text-align:center">Тап по планете — детали</div>';
   openOv('ov-astro-wheel');
@@ -3655,7 +3692,7 @@ function rNatalScreen() {
     if (info) info.innerHTML = ''; if (out) out.innerHTML = '';
     return;
   }
-  wrap.innerHTML = renderChartWheel(last.chart, { size: 340 });
+  wrap.innerHTML = renderChartWheel(last.chart, { size: 340, extras: wheelExtras(last.chart) });
   if (info) info.innerHTML = '';
   antab(STATE.astroTab || 'planets');
   rChartSummary();   // человеческое резюме — первым блоком экрана (3.1a)
@@ -3744,7 +3781,7 @@ const ASTRO_TEXTS_PARTS = {
   natal: ['planetInSign', 'planetInHouse', 'ascInSign', 'houseCusp', 'aspectMeaning', 'pointInSign'],
   transit: ['transit'], synastry: ['synastry'],
   jyotish: ['grahaInRashi', 'nakshatraMoon', 'mahadasha'],
-  extra: ['star', 'arabicPart', 'antivertexInSign', 'eastPointInSign', 'progSunInSign', 'harmonic', 'profectionYear', 'midpointPair'],
+  extra: ['star', 'arabicPart', 'antivertexInSign', 'eastPointInSign', 'progSunInSign', 'harmonic', 'profectionYear', 'midpointPair', 'tithi', 'vara', 'yoga', 'karana', 'antiscia'],
 };
 // Ключи P2-части (для правила покрытия и маппинга из UI).
 const STAR_KEYS = { 'Альгол': 'Algol', 'Альголь': 'Algol', 'Альциона': 'Alcyone', 'Альдебаран': 'Aldebaran', 'Бетельгейзе': 'Betelgeuse', 'Сириус': 'Sirius', 'Регул': 'Regulus', 'Спика': 'Spica', 'Антарес': 'Antares', 'Вега': 'Vega', 'Фомальгаут': 'Fomalhaut' };
@@ -3798,6 +3835,11 @@ function astroHasText(ruleId) {
     case 'harmonic': return p.length === 2 && +p[1] >= 2 && +p[1] <= 12;
     case 'profectionYear': return p.length === 2 && +p[1] >= 1 && +p[1] <= 12;
     case 'midpointPair': { const pr = (p[1] || '').split('-'); return p.length === 2 && pr.length === 2 && body(pr[0]) && body(pr[1]); }
+    case 'tithi': return p.length === 2 && +p[1] >= 1 && +p[1] <= 30;
+    case 'vara': return p.length === 2 && +p[1] >= 1 && +p[1] <= 7;
+    case 'yoga': return p.length === 2 && +p[1] >= 1 && +p[1] <= 27;
+    case 'karana': return p.length === 2 && ['Бава','Балава','Каулава','Тайтила','Гара','Ваниджа','Вишти','Шакуни','Чатушпада','Нага','Кимстугхна'].includes(p[1]);
+    case 'antiscia': return p.length === 2 && body(p[1]);
     default: return false;
   }
 }
@@ -4205,14 +4247,19 @@ function rPointsScreen() {
     + pr('Точка Судьбы', P.fortune, P.fortune && (P.fortune.isDay ? ' (дневная формула)' : ' (ночная формула)'), 'Fortune')
     + pr('Вертекс', P.vertex, '', 'Vertex') + prX('Антивертекс', P.antivertex, 'antivertexInSign') + prX('Восточная точка', P.eastPoint, 'eastPointInSign');
   if (!P.fortune) html += '<div class="si-text" style="color:var(--t3)">Вертекс и Точка Судьбы требуют известного времени рождения.</div>';
-  if ((c.antiscia || []).length) html += '<div class="f-lbl" style="margin-top:.4rem">Антисции</div>'
-    + c.antiscia.map(a => row(`${esc(a.name)} → ${esc(a.sign)} ${a.deg.toFixed(1)}°`)).join('');
+  if ((c.antiscia || []).length) {
+    const byRu = {}; Object.keys(ASTRO_RU).forEach(b => byRu[ASTRO_RU[b]] = b);
+    html += '<div class="f-lbl" style="margin-top:.4rem">Антисции</div>'
+      + c.antiscia.map(a => row(`${esc(a.name)} → ${esc(a.sign)} ${a.deg.toFixed(1)}°`,
+        ruleAttr(byRu[a.name] ? 'antiscia.' + byRu[a.name] : '', `Антисция: ${a.name}`))).join('');
+  }
   html += '<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Символическое, не прогноз и не диагноз. Астероиды — двухтелое приближение (JPL).</div>';
   out.innerHTML = html;
 }
 
 // Экран «Настройки расчёта»: заполняем форму сохранёнными данными рождения.
 function fillAstroForm() {
+  const xt = $('astro-extras-tog'); if (xt) xt.classList.toggle('on', !!CFG.astroWheelExtras);
   const b = DB.astroBirth;
   if (b) {
     if ($('ab-date')) $('ab-date').value = b.date || '';
