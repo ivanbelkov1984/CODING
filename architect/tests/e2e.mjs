@@ -2316,6 +2316,49 @@ ok(p3T.offExtras === 0, 'P3: тумблер выключен → на колес
 ok(p3T.astExtras === 6 && p3T.starExtras === 10, `P3: тумблер включён → 6 астероидов + 10 звёзд на колесе (${p3T.astExtras}/${p3T.starExtras})`);
 ok(p3T.tapable, 'P3: астероиды и звёзды на колесе открывают тексты по тапу');
 
+// ── Астрология: North Indian стиль ведической сетки ──
+const niT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = [];
+  await runNatalChart();
+  goTo('astro'); asub('jyo');
+  // 1) North: ромбовидная сетка, 12 номеров раши, дом 1 = лагна.
+  CFG.jyoStyle = 'north';
+  STATE.jyoTab = 'rashi';
+  await rJyotish();
+  const northSvg = !!document.querySelector('#astro-jyo .jyo-north');
+  const nums = [...document.querySelectorAll('#astro-jyo .jn-num')].map(n => +n.textContent);
+  // Лагна: тропический Asc 87.78° − Лахири 23.85° = 63.93° → Митхуна (№3).
+  const lagnaOk = nums.length === 12 && nums[0] === 3;
+  const allNums = [...nums].sort((a, b) => a - b).join(',') === '1,2,3,4,5,6,7,8,9,10,11,12';
+  // 2) Навамша в North тоже рендерится.
+  STATE.jyoTab = 'navamsha';
+  await rJyotish();
+  const navNorth = !!document.querySelector('#astro-jyo .jyo-north');
+  // 3) Переключение обратно в South.
+  CFG.jyoStyle = 'south';
+  STATE.jyoTab = 'rashi';
+  await rJyotish();
+  const southBack = !!document.querySelector('#astro-jyo .jyo-grid') && !document.querySelector('#astro-jyo .jyo-north');
+  // 4) Без времени рождения North честно падает в South с пояснением.
+  CFG.jyoStyle = 'north';
+  DB.astroBirth = { date: '2000-01-01', timeKnown: false, utcOffset: 0 };
+  DB.astroCharts = [];
+  await runNatalChart();
+  await rJyotish();
+  const fallback = !!document.querySelector('#astro-jyo .jyo-grid') && /требует известного времени/.test(document.getElementById('astro-jyo').textContent);
+  CFG.jyoStyle = 'south';
+  goTo('home');
+  DB.astroBirth = null; DB.astroCharts = [];
+  return { northSvg, lagnaOk, allNums, navNorth, southBack, fallback };
+});
+ok(niT.northSvg && niT.allNums, 'North Indian: ромбовидная сетка с 12 номерами раши');
+ok(niT.lagnaOk, 'North Indian: дом 1 показывает раши лагны (Митхуна №3 для golden-карты)');
+ok(niT.navNorth, 'North Indian: навамша D9 рендерится в северном стиле');
+ok(niT.southBack, 'переключение стилей: South возвращается');
+ok(niT.fallback, 'без времени рождения North честно падает в South с пояснением');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
