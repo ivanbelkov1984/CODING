@@ -2160,6 +2160,61 @@ ok(fullT.routeOk, 'полная база: маршрутизация rule id →
 ok(fullT.ovOn && fullT.modalOk && fullT.titleOk, 'модал «Подробнее»: полный текст + заголовок + дисклеймер');
 ok(fullT.sumModal, 'резюме «Кто вы по карте»: тап по блоку открывает развёрнутый текст');
 
+// ── Астрология P1: покрытие тапами готовых текстов + правило заглушки ──
+const covT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'placidus' };
+  DB.astroCharts = []; DB.astroPartners = [];
+  await runNatalChart();
+  goTo('astro');
+  // 1) Правило покрытия: валидные и невалидные rule id.
+  const hasOk = astroHasText('pointInSign.Chiron.Овен') && astroHasText('grahaInRashi.Shani.Дхану')
+    && astroHasText('mahadasha.Кету') && !astroHasText('pointInSign.EastPoint.Овен')
+    && !astroHasText('grahaInRashi.Uranus.Меша') && !astroHasText('star.Регул') && !astroHasText('');
+  // 2) Экран «Астероиды и точки»: Хирон с тапом, Антивертекс/Восточная — без.
+  asub('points');
+  const chironTap = !!document.querySelector('#astro-points-out [data-rule^="pointInSign.Chiron."]');
+  const fortuneTap = !!document.querySelector('#astro-points-out [data-rule^="pointInSign.Fortune."]');
+  const pointsRules = [...document.querySelectorAll('#astro-points-out [data-rule]')].map(d => d.dataset.rule);
+  const noBare = pointsRules.every(r => astroHasText(r));
+  // 3) Ведическая: граха с тапом, внешняя планета — без, накшатра и даша — с тапом.
+  asub('jyo'); STATE.jyoTab = 'rashi';
+  await rJyotish();
+  const grahaTap = !!document.querySelector('#astro-jyo [data-rule^="grahaInRashi.Shani."], #astro-jyo [data-rule^="grahaInRashi.Surya."]');
+  const uranusBare = ![...document.querySelectorAll('#astro-jyo [data-rule]')].some(d => /Uranus|Neptune|Pluto/.test(d.dataset.rule));
+  const nakTap = !!document.querySelector('#astro-jyo [data-rule^="nakshatraMoon."]');
+  STATE.jyoTab = 'dasha';
+  await rJyotish();
+  const dashaTap = !!document.querySelector('#astro-jyo [data-rule^="mahadasha."]');
+  STATE.jyoTab = 'rashi';
+  // 4) Возвращения: карточки аспектов с тапом на полный transit-текст.
+  asub('ret');
+  document.getElementById('astro-ret-type').value = 'solar';
+  document.getElementById('astro-ret-period').value = '2026';
+  await rReturns();
+  const retTap = !!document.querySelector('#astro-ret [data-rule^="transit."]');
+  // 5) Заглушка: валидный маршрут, но отсутствующий ключ → честный текст, не пусто.
+  await astroFullText('pointInSign.Chiron.НетТакогоЗнака', 'Тест');
+  await new Promise(r => setTimeout(r, 200));
+  const stub = /Расшифровка для этого элемента готовится/.test(document.getElementById('astro-text-body').textContent);
+  closeOv('ov-astro-text');
+  // 6) Реальный тап: Хирон открывает полный текст.
+  asub('points');
+  document.querySelector('#astro-points-out [data-rule^="pointInSign.Chiron."]').click();
+  await new Promise(r => setTimeout(r, 300));
+  const chironText = document.getElementById('astro-text-body').textContent.length > 400;
+  closeOv('ov-astro-text');
+  goTo('home');
+  DB.astroBirth = null; DB.astroCharts = [];
+  return { hasOk, chironTap, fortuneTap, noBare, grahaTap, uranusBare, nakTap, dashaTap, retTap, stub, chironText };
+});
+ok(covT.hasOk, 'правило покрытия: astroHasText точен (включая отказ для непокрытых объектов)');
+ok(covT.chironTap && covT.fortuneTap && covT.noBare, 'экран точек: тапы у покрытых объектов, «голых» ссылок нет');
+ok(covT.grahaTap && covT.uranusBare && covT.nakTap && covT.dashaTap, 'ведическая: тапы у грах/накшатры/даши, внешние планеты — честно без тапа');
+ok(covT.retTap, 'возвращения: карточки аспектов открывают полный transit-текст');
+ok(covT.stub, 'ШАГ 3: отсутствующий текст → честная заглушка, не пустая карточка');
+ok(covT.chironText, 'экран точек: тап по Хирону открывает развёрнутый текст');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
