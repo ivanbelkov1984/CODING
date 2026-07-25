@@ -3261,7 +3261,7 @@ async function rPartsStars() {
     const t = window.Astronomy.MakeTime(birthUTCDate(DB.astroBirth));
     const parts = computeArabicParts(last.chart);
     const stars = computeFixedStarHits(last.chart, t);
-    let html = '';
+    let html = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin:.4rem 0">Исторический слой карты. Арабские точки — расчётные «фокусы» старинной традиции (каждая про свою тему), неподвижные звёзды — яркие звёзды неба, к которым прижались ваши планеты. Слой для любопытных; тап со значком › — пояснение.</div>`;
     if (parts) {
       html += '<div class="f-lbl" style="margin-top:.5rem">Арабские точки <span style="font-weight:500;color:var(--t3)">(историческая техника)</span></div>' +
         parts.map(p => `<div class="si-text" style="color:var(--t3)"${ruleAttr(ARABIC_KEYS[p.name] ? 'arabicPart.' + ARABIC_KEYS[p.name] : '', p.name)}>${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°${ARABIC_KEYS[p.name] ? ' <span style="color:var(--accent);font-size:.72rem">подробнее</span>' : ''}</div>`).join('');
@@ -3367,7 +3367,8 @@ async function rJyotish() {
       if (last.chart.angles) put(Math.floor(norm360(last.chart.angles.asc.lon - aya) / 30), 'Лг', true);
       const rashiSk = L => rashiSkOf(Math.floor(L / 30));
       const lagnaIdx = last.chart.angles ? Math.floor(norm360(last.chart.angles.asc.lon - aya) / 30) : null;
-      html = `<div class="f-lbl">Раши D1 (${esc(AYANAMSHAS[ayaKey].ru)}, айанамша ${aya.toFixed(2)}°)</div>` + jyoChartHtml(placed, lagnaIdx) + legendNote +
+      html = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.4rem">Ведическая карта считается по сидерическому зодиаку — со сдвигом на айанамшу (~24°). Поэтому знаки здесь могут отличаться от западной карты: это не ошибка, а другая система отсчёта.</div>`
+        + `<div class="f-lbl">Раши D1 (${esc(AYANAMSHAS[ayaKey].ru)}, айанамша ${aya.toFixed(2)}°)</div>` + jyoChartHtml(placed, lagnaIdx) + legendNote +
         sid.map(p => `<div class="si-text" style="color:var(--t3)"${ruleAttr(G_KEY[p.body] ? `grahaInRashi.${G_KEY[p.body]}.${rashiSk(p.lon)}` : '', `${p.name} в знаке ${p.sign}`)}>${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°${(ucchaBala(p.body, p.lon) != null) ? ' · уччабала ' + ucchaBala(p.body, p.lon) : ''}${G_KEY[p.body] ? ' <span style="color:var(--accent);font-size:.72rem">подробнее</span>' : ''}</div>`).join('') +
         `<div class="si-text" style="color:var(--t3)"${ruleAttr(`grahaInRashi.Rahu.${rashiSk(rahu)}`, 'Раху в знаке')}>Раху (ср.): ${esc(RASHI[Math.floor(rahu / 30)])} ${(rahu % 30).toFixed(1)}° <span style="color:var(--accent);font-size:.72rem">подробнее</span></div>` +
         `<div class="si-text" style="color:var(--t3)"${ruleAttr(`grahaInRashi.Ketu.${rashiSk(ketu)}`, 'Кету в знаке')}>Кету: ${esc(RASHI[Math.floor(ketu / 30)])} ${(ketu % 30).toFixed(1)}° <span style="color:var(--accent);font-size:.72rem">подробнее</span></div>` +
@@ -3404,18 +3405,21 @@ async function rJyotish() {
       html = intro + '<div class="f-lbl">Навамша D9</div>' + jyoChartHtml(placed, navLagna) + legendNote + vargoHtml + tech;
     }
     if (tab === 'dasha') {
+      html = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.4rem">Даши — ведический календарь больших периодов жизни: 120-летний цикл делится между девятью грахами, и каждая окрашивает свой отрезок своей темой. Главное здесь — текущий период.</div>`;
       if (dasha.current) {
         const theme = DASHA_THEMES[dasha.current.lord];
-        html = `<div class="si-row"${ruleAttr(`mahadasha.${dasha.current.lord}`, `Маха-даша ${dasha.current.lord}`)}><div class="si-body"><div class="si-text"><b>Сейчас — маха-даша ${esc(dasha.current.lord)}</b> (до ${dasha.current.to.toISOString().slice(0, 10)})${theme ? `: большой период, окрашенный темой «${esc(theme)}»` : ''}.${dasha.antar ? ` Внутри — антардаша ${esc(dasha.antar.lord)} (до ${dasha.antar.to.toISOString().slice(0, 10)}).` : ''} <span style="color:var(--accent);font-size:.75rem">подробнее</span></div></div></div>`;
+        html += `<div class="si-row"${ruleAttr(`mahadasha.${dasha.current.lord}`, `Маха-даша ${dasha.current.lord}`)}><div class="si-body"><div class="si-text"><b>Сейчас — маха-даша ${esc(dasha.current.lord)}</b> (до ${dasha.current.to.toISOString().slice(0, 10)})${theme ? `: большой период, окрашенный темой «${esc(theme)}»` : ''}.${dasha.antar ? ` Внутри — антардаша ${esc(dasha.antar.lord)} (до ${dasha.antar.to.toISOString().slice(0, 10)}).` : ''} <span style="color:var(--accent);font-size:.75rem">подробнее</span></div></div></div>`;
       }
-      html += '<div class="f-lbl" style="margin-top:.4rem">Полный цикл Вимшоттари (120 лет)</div>' +
-        dasha.seq.map(d => `<div class="si-text" style="color:${d === dasha.current ? 'var(--t1)' : 'var(--t3)'}">${esc(d.lord)}: ${d.from.toISOString().slice(0, 10)} — ${d.to.toISOString().slice(0, 10)}</div>`).join('');
+      html += `<button class="btn btn-s btn-full" style="margin-top:.4rem" onclick="const d=$('dasha-full');d.style.display=d.style.display==='none'?'block':'none'">Полный цикл Вимшоттари (120 лет) — показать/скрыть</button>
+        <div id="dasha-full" style="display:none">` +
+        dasha.seq.map(d => `<div class="si-text" style="color:${d === dasha.current ? 'var(--t1)' : 'var(--t3)'}">${esc(d.lord)}: ${d.from.toISOString().slice(0, 10)} — ${d.to.toISOString().slice(0, 10)}</div>`).join('') + '</div>';
     }
     if (tab === 'panchanga') {
       const pan = panchanga(sun.lon, moon.lon, new Date(b0.getTime() + (DB.astroBirth.utcOffset || 0) * 3600e3));
       const yogas = jyotishYogas(sid);
       const pRow = (label, rule, title) => `<div class="si-text" style="color:var(--t3)"${ruleAttr(rule, title)}>${label}${astroHasText(rule) ? ' <span style="color:var(--accent);font-size:.72rem">подробнее</span>' : ''}</div>`;
-      html = `<div class="f-lbl">Панчанга рождения</div>`
+      html = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.4rem">Панчанга — пять характеристик момента рождения по ведическому лунному календарю: лунный день, день недели, соединение светил и половина лунного дня. Каждая несёт свой оттенок — тап открывает пояснение.</div>`
+        + `<div class="f-lbl">Панчанга рождения</div>`
         + pRow(`Тити: ${esc(pan.tithiName)} (${pan.paksha}, №${pan.tithi})`, `tithi.${pan.tithi}`, `Тити №${pan.tithi} — ${pan.tithiName}`)
         + pRow(`Вара: ${esc(pan.vara)}`, `vara.${pan.varaIdx}`, `Вара — ${pan.vara}`)
         + pRow(`Йога: №${pan.yoga}`, `yoga.${pan.yoga}`, `Йога №${pan.yoga}`)
@@ -3454,18 +3458,45 @@ async function rPrognostics() {
       const sec = computeProgressions(DB.astroBirth, at, 'secondary');
       const ter = computeProgressions(DB.astroBirth, at, 'tertiary');
       if (wheelEl) wheelEl.innerHTML = renderChartWheel(last.chart, { size: 340, static: true, transits: sec.planets });
-      html = `<div class="f-lbl">Вторичные прогрессии (возраст ${dir.ageYears.toFixed(1)}; снаружи колеса)</div>` +
-        sec.planets.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+      // Смысловой контекст ДО данных (правило: не показывать сырое без пояснения).
+      html = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.4rem">Вторичные прогрессии — «внутренний календарь»: каждый день после рождения символически равен году жизни. Они описывают не события, а то, как медленно меняются ваши внутренние темы.</div>`
+        + `<div class="f-lbl">Вторичные прогрессии (возраст ${dir.ageYears.toFixed(1)}; снаружи колеса)</div>`;
       const ps = sec.planets.find(p => p.body === 'Sun');
-      if (R && ps && R.planetInSign.Sun[ps.sign]) html += `<div class="si-row" style="margin-top:.4rem"${ruleAttr(`progSunInSign.${ps.sign}`, `Прогрессированное Солнце в знаке ${ps.sign}`)}><div class="si-body"><div class="si-text"><b>Сейчас по символическому таймингу звучит тема (${esc(ps.sign)}):</b> ${esc(R.planetInSign.Sun[ps.sign])} <span style="color:var(--accent);font-size:.75rem">подробнее</span></div></div></div>`;
-      html += `<div class="f-lbl" style="margin-top:.4rem">Третичные (1 день = 1 лунный месяц)</div>` +
-        ter.planets.slice(0, 3).map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+      if (R && ps && R.planetInSign.Sun[ps.sign]) html += `<div class="si-row" style="margin-top:.4rem"${ruleAttr(`progSunInSign.${ps.sign}`, `Прогрессированное Солнце в знаке ${ps.sign}`)}><div class="si-body"><div class="si-text"><b>Большая тема этих лет (${esc(ps.sign)}):</b> ${esc(R.planetInSign.Sun[ps.sign])} <span style="color:var(--accent);font-size:.75rem">подробнее</span></div></div></div>`;
+      const pm = sec.planets.find(p => p.body === 'Moon');
+      if (R && pm && R.planetInSign.Moon[pm.sign]) html += `<div class="si-row"><div class="si-body"><div class="si-text"><b>Эмоциональный сезон (~2.5 года, ${esc(pm.sign)}):</b> ${esc(R.planetInSign.Moon[pm.sign])}</div></div></div>`;
+      html += `<button class="btn btn-s btn-full" style="margin-top:.4rem" onclick="const d=$('prog-tech');d.style.display=d.style.display==='none'?'block':'none'">Все прогрессированные позиции — показать/скрыть</button>
+        <div id="prog-tech" style="display:none">` +
+        sec.planets.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('') +
+        `<div class="f-lbl" style="margin-top:.4rem">Третичные (1 день = 1 лунный месяц — тонкий, быстрый слой)</div>` +
+        ter.planets.slice(0, 3).map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('') + '</div>';
     }
     if (seg === 'solararc') {
       if (wheelEl) wheelEl.innerHTML = renderChartWheel(last.chart, { size: 340, static: true, transits: dir.directed });
-      html = `<div class="f-lbl">Солнечная дуга (возраст ${dir.ageYears.toFixed(1)}; снаружи колеса)</div>
-        <div class="si-text" style="color:var(--t3)">Дуга: ${dir.solarArc.toFixed(2)}° · Найбод: ${dir.naibod.toFixed(2)}°</div>` +
-        dir.directed.map(p => `<div class="si-text" style="color:var(--t3)">SA ${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+      html = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.4rem">Солнечная дуга: вся карта символически сдвигается примерно на 1° за год жизни. Главные «звонки» — когда сдвинутая (дирекционная) планета доходит до вашей натальной точки.</div>`
+        + `<div class="f-lbl">Солнечная дуга (возраст ${dir.ageYears.toFixed(1)}; снаружи колеса)</div>
+        <div class="si-text" style="color:var(--t3)">Дуга: ${dir.solarArc.toFixed(2)}° · Найбод: ${dir.naibod.toFixed(2)}°</div>`;
+      // Активные дирекционные контакты к наталу (орб 1°) — с текстами аспектов.
+      const byRu = {}; Object.keys(ASTRO_RU).forEach(b => byRu[ASTRO_RU[b]] = b);
+      const dirHits = [];
+      for (const d of dir.directed) for (const n of last.chart.planets) {
+        if (d.name === n.name) continue;
+        const sep = Math.abs(((d.lon - n.lon + 180) % 360 + 360) % 360 - 180);
+        for (const asp of ASTRO_ASPECTS) {
+          const off = Math.abs(sep - asp.angle);
+          if (off <= 1) { dirHits.push({ d: d.name, n: n.name, aspect: asp.name, orb: off }); break; }
+        }
+      }
+      dirHits.sort((a, b) => a.orb - b.orb);
+      if (dirHits.length) html += '<div class="f-lbl" style="margin-top:.4rem">Активные дирекции этого времени (орб 1°)</div>' +
+        dirHits.slice(0, 6).map(h => {
+          const tx = aspectMeaningText(byRu[h.d], byRu[h.n], h.aspect);
+          return `<div class="si-row"><div class="si-body"><div class="si-text"><b>SA ${esc(h.d)} ${esc(h.aspect)} ${esc(h.n)}</b> (орб ${h.orb.toFixed(1)}°)${tx ? `<div style="color:var(--t3)"${ruleAttr(tx.ruleId, `${h.d} ${h.aspect} ${h.n}`)}>${esc(tx.text)}</div>` : ''}</div></div></div>`;
+        }).join('');
+      else html += '<div class="si-text" style="color:var(--t3);margin-top:.3rem">Сейчас нет точных дирекционных контактов (орб 1°) — спокойный участок по этой технике.</div>';
+      html += `<button class="btn btn-s btn-full" style="margin-top:.4rem" onclick="const d=$('sa-tech');d.style.display=d.style.display==='none'?'block':'none'">Все дирекционные позиции — показать/скрыть</button>
+        <div id="sa-tech" style="display:none">` +
+        dir.directed.map(p => `<div class="si-text" style="color:var(--t3)">SA ${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('') + '</div>';
     }
     if (seg === 'profection') {
       if (wheelEl) wheelEl.innerHTML = '';
@@ -3508,8 +3539,13 @@ async function rReturns() {
     if (!ret) { if (wheelEl) wheelEl.innerHTML = ''; out.innerHTML = '<div class="ai-sp-empty">Возвращение не найдено в окне поиска.</div>'; return; }
     const pl = bodiesAt(window.Astronomy.MakeTime(ret));
     if (wheelEl) wheelEl.innerHTML = renderChartWheel(natal, { size: 340, static: true, transits: pl });
-    let html = `<div class="f-lbl">${esc(title)}: ${ret.toISOString().slice(0, 16).replace('T', ' ')} UTC</div>` +
-      pl.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('');
+    let html = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.4rem">${type === 'solar'
+      ? 'Соляр — «карта года»: небо в момент, когда Солнце вернулось в свою натальную точку (около дня рождения). Символический тон ближайшего года — главное здесь не позиции, а аспекты к вашей карте ниже.'
+      : 'Лунар — «карта месяца»: небо в момент возвращения Луны в натальную точку (примерно раз в 27 дней). Тонкий, короткий слой — эмоциональный тон месяца.'}</div>`
+      + `<div class="f-lbl">${esc(title)}: ${ret.toISOString().slice(0, 16).replace('T', ' ')} UTC</div>`
+      + `<button class="btn btn-s btn-full" style="margin:.3rem 0" onclick="const d=$('ret-tech');d.style.display=d.style.display==='none'?'block':'none'">Позиции планет возврата — показать/скрыть</button>
+        <div id="ret-tech" style="display:none">` +
+      pl.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('') + '</div>';
     // Ключевые аспекты карты возврата к наталу (карточки, по силе).
     const tr = computeTransits(natal, ret);
     const hits = [...tr.hits].sort((a, b) => parseFloat(a.exact) - parseFloat(b.exact)).slice(0, 6);
@@ -3570,7 +3606,8 @@ function rMidpoints() {
   const last = (DB.astroCharts || []).slice(-1)[0];
   if (!last) { out.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай натальную карту.</div>'; return; }
   const hits = computeMidpointTree(last.chart);
-  out.innerHTML = '<div class="f-lbl" style="margin-top:.5rem">Дерево мидпоинтов <span style="font-weight:500;color:var(--t3)">(жёсткие аспекты, орб 1.5°)</span></div>' +
+  out.innerHTML = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin:.4rem 0">Мидпоинт — точка ровно посередине между двумя планетами: чувствительное место, где их темы соединяются в одну. Ниже — какие ваши планеты стоят на таких точках. Тап по строке со значком › — пояснение пары.</div>`
+    + '<div class="f-lbl" style="margin-top:.2rem">Дерево мидпоинтов <span style="font-weight:500;color:var(--t3)">(жёсткие аспекты, орб 1.5°)</span></div>' +
     (hits.length ? hits.slice(0, 15).map(h => `<div class="si-row"${ruleAttr(midpointRule(h.pair), `Мидпоинт ${h.pair}`)}><div class="si-body"><div class="si-text"><b>${esc(h.point)}</b> = ${esc(h.pair)} (${h.angle}°, орб ${h.orb}°)${astroHasText(midpointRule(h.pair)) ? ' <span style="color:var(--accent);font-size:.72rem">подробнее</span>' : ''}</div></div></div>`).join('')
       : '<div class="si-text" style="color:var(--t3)">Нет попаданий в орб 1.5°.</div>') +
     '<div class="be-note" style="color:var(--t3)">Уранская техника (Витте/Эбертин). Символическое, не прогноз.</div>';
@@ -3589,7 +3626,8 @@ function rHarmonic() {
   if (!last) { out.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай натальную карту.</div>'; return; }
   const n = Math.max(2, Math.min(64, parseInt(($('astro-harm-n') && $('astro-harm-n').value) || '5', 10) || 5));
   const h = computeHarmonic(last.chart, n);
-  out.innerHTML = `<div class="f-lbl" style="margin-top:.5rem"${ruleAttr(`harmonic.${n}`, `Гармоника H${n}`)}>Гармоника H${n}${astroHasText(`harmonic.${n}`) ? ' <span style="color:var(--accent);font-size:.72rem;text-transform:none">подробнее</span>' : ''}</div>` +
+  out.innerHTML = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin:.4rem 0">Гармоническая карта — та же карта, «умноженная» на число N: она проявляет скрытые резонансы между планетами, невидимые в обычных аспектах. Смысл конкретной гармоники — по тапу на заголовок.</div>`
+    + `<div class="f-lbl" style="margin-top:.2rem"${ruleAttr(`harmonic.${n}`, `Гармоника H${n}`)}>Гармоника H${n}${astroHasText(`harmonic.${n}`) ? ' <span style="color:var(--accent);font-size:.72rem;text-transform:none">подробнее</span>' : ''}</div>` +
     h.planets.map(p => `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°</div></div></div>`).join('') +
     (h.conj.length ? '<div class="f-lbl" style="margin-top:.4rem">Соединения в гармонике</div>' + h.conj.map(c => `<div class="si-text" style="color:var(--t3)">${esc(c.a)} ∪ ${esc(c.b)} (орб ${c.orb}°)</div>`).join('') : '') +
     '<div class="be-note" style="color:var(--t3)">Техника Дж. Аддея: долгота × N. Символическое.</div>';
@@ -3765,7 +3803,8 @@ async function runTransits() {
     const wheelEl = $('astro-tr-wheel');
     if (wheelEl) wheelEl.innerHTML = last ? renderChartWheel(last.chart, { size: 340, static: true, transits: tr.current }) : '';
     // «Небо сейчас» — свёрнуто по умолчанию.
-    let html = `<button class="btn btn-s btn-full" onclick="const d=$('astro-sky');d.style.display=d.style.display==='none'?'block':'none'">Небо ${isToday ? 'сейчас' : 'на ' + esc(dv)} — показать/скрыть</button>` +
+    let html = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.4rem">Транзиты — где планеты ${isToday ? 'сегодня' : 'в выбранный день'} относительно вашей карты: какие ваши темы сейчас активированы. Это фон дня, не событие и не прогноз.</div>`
+      + `<button class="btn btn-s btn-full" onclick="const d=$('astro-sky');d.style.display=d.style.display==='none'?'block':'none'">Небо ${isToday ? 'сейчас' : 'на ' + esc(dv)} — показать/скрыть</button>` +
       '<div id="astro-sky" style="display:none">' +
       tr.current.map(p => `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°</div></div></div>`).join('') + '</div>';
     // Активные аспекты: карточки с текстом, сортировка по силе (меньший орб первым).
