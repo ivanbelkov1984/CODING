@@ -188,8 +188,12 @@ function jsonl(model, combos) {
 }
 
 // Выбор реально доступной модели: запрошенная, иначе первый доступный fallback.
+// Если /models недоступен (нестабильность OpenAI) — используем MODEL напрямую:
+// она уже доказанно работала в предыдущих батчах.
 async function pickModel() {
-  const list = await (await oa('/models')).json();
+  let list;
+  try { list = await (await oa('/models')).json(); }
+  catch (e) { if (e.noKey) throw e; console.error('pickModel: /models недоступен, беру', MODEL, '-', e.message.slice(0, 120)); return MODEL; }
   const have = new Set((list.data || []).map(m => m.id));
   if (have.has(MODEL)) return MODEL;
   for (const m of MODEL_FALLBACKS) if (have.has(m)) return m;
