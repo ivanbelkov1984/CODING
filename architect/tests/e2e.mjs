@@ -2453,6 +2453,104 @@ ok(portT.lineWater && portT.lineFixed, 'синтез: тексты «воды м
 ok(portT.stell && portT.uiOk, 'синтез: стеллиум Водолея (Марс+Уран+Нептун) найден и показан');
 ok(portT.noTime, 'честность: без времени рождения — без Asc/MC-блоков и полушарий');
 
+// ── Астрология: ректификация (инструмент сужения диапазона времени) ──
+const rectT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  // Синтетика: «истинное» время 15:30. События подобраны так, чтобы на даты
+  // событий солнечно-дуговые дирекции планет попадали в углы ИСТИННОЙ карты —
+  // функциональный тест восстановления времени по событиям.
+  const birthTrue = { date: '1990-04-15', time: '15:30', timeKnown: true, utcOffset: 3, lat: 55.75, lon: 37.62, houseSystem: 'whole' };
+  const chartTrue = computeNatalChart(birthTrue);
+  const a0 = chartTrue.angles.asc.lon, m0 = chartTrue.angles.mc.lon;
+  const angles4 = [a0, m0, (a0 + 180) % 360, (m0 + 180) % 360];
+  const birthNoTime = { date: '1990-04-15', timeKnown: false, utcOffset: 3, lat: 55.75, lon: 37.62 };
+  const noonUTC = new Date(Date.parse('1990-04-15T12:00:00Z') - 3 * 3600e3);
+  const noon = bodiesAt(window.Astronomy.MakeTime(noonUTC));
+  const sepOf = (x, y) => Math.abs(((x - y + 180) % 360 + 360) % 360 - 180);
+  // Дуга Солнца на дату (та же база-полдень, что в rectifyEventContext).
+  const sunN = noon.find(p => p.body === 'Sun').lon;
+  const arcAt = date => {
+    const ageYears = (Date.parse(date + 'T12:00:00Z') - Date.parse('1990-04-15T12:00:00Z')) / 864e5 / 365.2425;
+    const tP = window.Astronomy.MakeTime(new Date(noonUTC.getTime() + ageYears * 864e5));
+    return ((window.Astronomy.SunPosition(tP).elon - sunN) % 360 + 360) % 360;
+  };
+  const events = [];
+  outer:
+  for (let y = 2; y <= 69; y++) for (let m = 1; m <= 12; m++) {
+    const date = (1990 + y) + '-' + String(m).padStart(2, '0') + '-15';
+    if (events.length && Date.parse(date) - Date.parse(events[events.length - 1].date) < 1.5 * 365 * 864e5) continue;
+    const arc = arcAt(date);
+    const hit = noon.some(p => p.body !== 'Moon' &&
+      angles4.some(a => sepOf((p.lon + arc) % 360, a) < 0.25));
+    if (hit) { events.push({ id: events.length + 1, type: 'other', date }); if (events.length >= 6) break outer; }
+  }
+  // 1) Детерминизм: одинаковые входы → одинаковый результат.
+  const res1 = rectifyRun(birthNoTime, events, 'all', 30);
+  const res2 = rectifyRun(birthNoTime, events, 'all', 30);
+  const deterministic = JSON.stringify(res1) === JSON.stringify(res2);
+  // 2) Кандидат истинного времени гарантированно ловит все подобранные дирекции.
+  const c930 = res1.candidates.find(c => c.minute === 930);
+  const dirHits = c930 ? c930.hits.filter(h => /дирекция/.test(h.text)).length : 0;
+  const catchesAll = dirHits >= events.length;
+  // 3) Восстановление в суженном режиме («днём», как в ТЗ): истинное время
+  // попадает в один из топ-диапазонов (±30 мин); кластеры в рамках диапазона.
+  const resDay = rectifyRun(birthNoTime, events, 'day', 30);
+  const recovered = resDay.clusters.some(c => c.fromMin - 30 <= 930 && 930 <= c.toMin + 30);
+  const inRange = resDay.clusters.every(c => c.fromMin >= 660 && c.toMin <= 1080);
+  // 4) Кластеры: не больше 3, отсортированы по убыванию score, score > 0.
+  const clustersOk = res1.clusters.length <= 3 && resDay.clusters.length <= 3
+    && res1.clusters.every(c => c.score > 0)
+    && res1.clusters.every((c, i) => i === 0 || c.score <= res1.clusters[i - 1].score);
+  // 5) Диапазоны перебора: «ночь» — два отрезка через полночь, «день» — в рамках.
+  const night = rectifyCandidateMinutes('night', 30);
+  const nightOk = night.length === 16 && night.every(m => m >= 1320 || m < 360);
+  const day = rectifyCandidateMinutes('day', 15);
+  const dayOk = day.length === 28 && day.every(m => m >= 660 && m < 1080);
+  return { nEvents: events.length, deterministic, catchesAll, recovered, inRange, clustersOk, nightOk, dayOk };
+});
+ok(rectT.nEvents >= 4, `ректификация: синтетика дала ≥4 событий-дирекций (${rectT.nEvents})`);
+ok(rectT.inRange, 'ректификация: кластеры не выходят за выбранный диапазон поиска');
+ok(rectT.deterministic, 'ректификация: расчёт детерминирован (одни входы — один результат)');
+ok(rectT.catchesAll, 'ректификация: кандидат истинного времени ловит все подобранные дирекции к углам');
+ok(rectT.recovered, 'ректификация: истинное время (15:30) восстановлено в топ-диапазонах режима «днём» (±30 мин)');
+ok(rectT.clustersOk, 'ректификация: ≤3 кластеров, по убыванию согласованности, score > 0');
+ok(rectT.nightOk && rectT.dayOk, 'ректификация: пресеты диапазонов корректны (ночь через полночь, день в рамках)');
+
+const rectUi = await page.evaluate(async () => {
+  // Экран: без данных рождения — честная подсказка, не пустой расчёт.
+  DB.astroBirth = null; DB.astroRectify = null;
+  goTo('astro'); asub('rectify');
+  const noData = /Сначала — дата и место рождения/.test(document.getElementById('as-rectify').textContent);
+  const menuCard = /Уточнение времени рождения/.test(document.getElementById('as-menu').textContent);
+  const introHonest = /не автоматическое определение точного времени/.test(document.getElementById('as-rectify').textContent);
+  // С данными рождения (время неизвестно) — анкета и прогон.
+  DB.astroBirth = { date: '1990-04-15', time: '', timeKnown: false, utcOffset: 3, lat: 55.75, lon: 37.62, houseSystem: 'whole' };
+  asub('rectify');
+  const formOk = /Шаг 1/.test(document.getElementById('astro-rect-form').textContent);
+  const R = rectifyDB();
+  R.events = [ { id: 1, type: 'career', date: '2015-06-01' }, { id: 2, type: 'marriage', date: '2012-09-10' }, { id: 3, type: 'move', date: '2008-03-20' } ];
+  R.rangeMode = 'day'; R.stepMin = 30; R.temperament = 'earth';
+  await runRectify();
+  const outTx = document.getElementById('astro-rect-out').textContent;
+  // Обязательная честная формулировка — дословно по контракту.
+  const disclaimer = /Это статистическая оценка, не 100% гарантия — для точного подтверждения рекомендуем свидетельство о рождении или консультацию с профессиональным астрологом/.test(outTx);
+  const ranked = /№1/.test(outTx) && /Асцендент/.test(outTx);
+  const stored = !!(DB.astroRectify.lastResult && DB.astroRectify.lastResult.clusters);
+  // Незатирание: расчёт и «применить» НЕ меняют сохранённые данные рождения.
+  const notOverwritten1 = DB.astroBirth.timeKnown === false && DB.astroBirth.time === '';
+  rectifyApply('15:30');
+  const applyFills = document.getElementById('ab-time').value === '15:30';
+  const notOverwritten2 = DB.astroBirth.timeKnown === false && DB.astroBirth.time === '';
+  goTo('home');
+  DB.astroBirth = null; DB.astroRectify = null; DB.astroCharts = [];
+  return { noData, menuCard, introHonest, formOk, disclaimer, ranked, stored, notOverwritten1, applyFills, notOverwritten2 };
+});
+ok(rectUi.noData && rectUi.formOk, 'ректификация UI: без данных рождения — подсказка; с данными — анкета');
+ok(rectUi.menuCard && rectUi.introHonest, 'ректификация UI: карточка в меню + честное позиционирование («не автоматическое определение»)');
+ok(rectUi.disclaimer, 'ректификация UI: обязательная формулировка о статистической оценке — дословно');
+ok(rectUi.ranked && rectUi.stored, 'ректификация UI: ранжированные варианты с Асцендентом, результат сохранён');
+ok(rectUi.notOverwritten1 && rectUi.applyFills && rectUi.notOverwritten2, 'ректификация UI: данные рождения не перезаписываются — «применить» лишь подставляет время в форму');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 

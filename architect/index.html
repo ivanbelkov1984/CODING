@@ -288,6 +288,7 @@
       <button class="astro-card wide" onclick="asub('syn')"><span class="ac-ico">💞</span>Синастрия (сравнить с другим)<span class="ac-sub">две карты, bi-wheel</span></button>
     </div>
     <div class="astro-grid" style="margin-top:.5rem">
+      <button class="astro-card wide" onclick="asub('rectify')"><span class="ac-ico">⏱</span>Уточнение времени рождения<span class="ac-sub">сужение диапазона по событиям жизни</span></button>
       <button class="astro-card wide" onclick="asub('setup')"><span class="ac-ico">⚙️</span>Настройки расчёта<span class="ac-sub">данные рождения, система домов</span></button>
     </div>
     <div class="card mx" style="margin-top:.75rem"><div class="tog-row" style="border-bottom:none"><span class="tog-lbl">Карточка «Транзит дня» на «Сегодня»</span><div class="tog" id="astro-daily-tog" onclick="toggleAstroDaily()" role="switch"></div></div></div>
@@ -435,6 +436,17 @@
       <button class="btn btn-p btn-full" onclick="saveAstroPartner()"><i data-lucide="user-plus"></i>Добавить и сравнить</button>
       <div id="astro-syn-wheel"></div>
       <div id="astro-syn"></div>
+    </div>
+  </div>
+
+  <!-- Экран «Уточнение времени рождения» (ректификация — инструмент
+       сужения диапазона по жизненным событиям, не определение точного времени) -->
+  <div class="asub" id="as-rectify" style="display:none">
+    <button class="as-back" onclick="asub('menu')">‹ Астрология</button>
+    <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.7rem">
+      <div class="card mx" style="padding:.8rem 1rem"><div class="si-text" style="line-height:1.55">Если точное время рождения неизвестно, этот инструмент помогает <b>сузить диапазон</b> на основе жизненных событий: он перебирает варианты времени и оценивает, насколько ключевые даты вашей жизни совпадают с символическими указаниями карты (дирекции, прогрессии и транзиты к углам). Это не автоматическое определение точного времени — результат всегда статистическая оценка.</div></div>
+      <div id="astro-rect-form"></div>
+      <div id="astro-rect-out"></div>
     </div>
   </div>
 

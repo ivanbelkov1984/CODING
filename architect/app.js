@@ -68,6 +68,7 @@ const DEFAULT_DB = {
   astroTexts: [],     // Астрология: кэш собранных текстов (ruleIds+promptVersion для аудита)
   astroAiConsent: null, // Астрология, режим 2: согласие по категориям {diary,health,habits,acceptedAt,version}; отзыв в любой момент
   astroPartners: [],  // Синастрия: сохранённые карты партнёров (label + birth + chart; sensitive, только локально)
+  astroRectify: null, // Ректификация: анкета событий + последний результат (sensitive, только локально)
   spheres: [],        // пользовательские сферы жизни (тип трекера у каждой)
   sphereLogs: [],     // дневные записи по сферам: {sphereId, date, value, note}
   bots: [
@@ -2866,6 +2867,149 @@ function searchReturn(body, targetLon, startDate, windowDays) {
   }
   return null;
 }
+// ─── РЕКТИФИКАЦИЯ: УТОЧНЕНИЕ ВРЕМЕНИ РОЖДЕНИЯ (по контракту владельца) ──
+// Полуавтоматический ИНСТРУМЕНТ СУЖЕНИЯ ДИАПАЗОНА, не «автоматическое
+// определение точного времени». Метод: перебор кандидатов времени с шагом
+// 15–30 мин → для каждого Asc/MC/Dsc/IC → счёт попаданий солнечно-дуговых
+// дирекций, вторичных прогрессий и транзитов внешних планет к углам на даты
+// жизненных событий (жёсткие аспекты 0/90/180, орб 1.5°) → нормированный
+// score → 2–3 ранжированных диапазона. Темперамент — только сверка со
+// стихией Асцендента (маркер в выводе, в score не входит). Расчёт чисто
+// детерминированный: одинаковые входы дают одинаковый результат.
+const RECTIFY_ORB = 1.5;               // орб попадания к углу, °
+const RECTIFY_HARD = [                 // жёсткие аспекты к углам + вес
+  { angle: 0, ru: 'соединение', w: 1.0 },
+  { angle: 180, ru: 'оппозиция', w: 0.9 },
+  { angle: 90, ru: 'квадрат', w: 0.8 },
+];
+const RECTIFY_EVENT_TYPES = {          // тип события → релевантный угол (вес ×1.5)
+  move:     { ru: 'Переезд',                    angle: 'ic' },
+  marriage: { ru: 'Брак / начало отношений',    angle: 'dsc' },
+  divorce:  { ru: 'Развод / расставание',       angle: 'dsc' },
+  child:    { ru: 'Рождение ребёнка',           angle: 'ic' },
+  career:   { ru: 'Карьерный поворот',          angle: 'mc' },
+  health:   { ru: 'Серьёзное событие здоровья', angle: 'asc' },
+  other:    { ru: 'Другое важное событие',      angle: null },
+};
+const RECTIFY_ANGLE_RU = { asc: 'Асцендент', mc: 'MC', dsc: 'Десцендент', ic: 'IC' };
+// Диапазоны перебора, минуты местного времени (night — два отрезка через полночь).
+const RECTIFY_RANGES = {
+  all:     { ru: 'Весь день (время неизвестно)', spans: [[0, 1440]] },
+  morning: { ru: 'Утром (05:00–12:00)',          spans: [[300, 720]] },
+  day:     { ru: 'Днём (11:00–18:00)',           spans: [[660, 1080]] },
+  evening: { ru: 'Вечером (17:00–24:00)',        spans: [[1020, 1440]] },
+  night:   { ru: 'Ночью (22:00–06:00)',          spans: [[1320, 1440], [0, 360]] },
+};
+const RECTIFY_TEMPERAMENTS = {
+  fire:  'Энергичный, импульсивный, действую первым (огонь)',
+  earth: 'Практичный, спокойный, ценю стабильность (земля)',
+  air:   'Общительный, любознательный, живу идеями (воздух)',
+  water: 'Чувствительный, эмоциональный, глубоко переживаю (вода)',
+};
+const ELEMENT_OF_SIGN_IDX = i => ['fire', 'earth', 'air', 'water'][i % 4];
+const RECTIFY_ELEMENT_RU = { fire: 'огонь', earth: 'земля', air: 'воздух', water: 'вода' };
+const rectifyMinToTime = m => String(Math.floor((m % 1440) / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+function rectifyCandidateMinutes(rangeMode, stepMin) {
+  const r = RECTIFY_RANGES[rangeMode] || RECTIFY_RANGES.all;
+  const out = [];
+  for (const [a, b] of r.spans) for (let m = a; m < b; m += stepMin) out.push(m);
+  return out;
+}
+// Контекст события, НЕ зависящий от кандидата времени (считается один раз):
+// дуга Солнца, быстрые прогрессированные планеты, транзитные внешние планеты.
+// База — полдень: сдвиг реального времени на часы двигает прогрессированную
+// дату на те же часы (Луна ≤ 0.4°) и дугу на ≤ 0.05° — в пределах орба.
+function rectifyEventContext(birth, ev, noonPlanets) {
+  const A = window.Astronomy;
+  const base = { ...birth, time: '12:00', timeKnown: true };
+  const at = new Date(ev.date + 'T12:00:00Z');
+  const prog = computeProgressions(base, at, 'secondary');
+  const sunN = noonPlanets.find(p => p.body === 'Sun').lon;
+  const sunP = prog.planets.find(p => p.body === 'Sun').lon;
+  const t = A.MakeTime(at);
+  const transits = ['Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'].map(b =>
+    ({ name: ASTRO_RU[b], lon: A.Ecliptic(A.GeoVector(A.Body[b], t, true)).elon }));
+  return {
+    ev, arc: norm360(sunP - sunN),
+    prog: prog.planets.filter(p => ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars'].includes(p.body)),
+    transits,
+  };
+}
+// Score одного кандидата времени: углы на этот момент + попадания по всем событиям.
+function rectifyScoreCandidate(minute, birth, noonPlanets, evCtxs) {
+  const A = window.Astronomy;
+  const time = rectifyMinToTime(minute);
+  const utc = new Date(Date.parse(birth.date + 'T' + time + ':00Z') - (birth.utcOffset || 0) * 3600e3);
+  const t = A.MakeTime(utc);
+  const eps = 23.4392911;
+  const lst = (A.SiderealTime(t) * 15 + birth.lon + 360) % 360;
+  const ramc = lst * DEG;
+  const mc = norm360(Math.atan2(Math.sin(ramc), Math.cos(ramc) * Math.cos(eps * DEG)) / DEG);
+  const asc = ascFromRamc(lst, eps, birth.lat);
+  const angles = { asc, mc, dsc: norm360(asc + 180), ic: norm360(mc + 180) };
+  // Солнце/Луну считаем на время кандидата (Луна за сутки уходит на 13°);
+  // медленные тела достаточно взять с полудня.
+  const sunLon = A.SunPosition(t).elon, moonLon = A.EclipticGeoMoon(t).lon;
+  const natal = noonPlanets.map(p =>
+    p.body === 'Sun' ? { ...p, lon: sunLon } : p.body === 'Moon' ? { ...p, lon: moonLon } : p);
+  let score = 0; const hits = [];
+  const sep = (a, b) => Math.abs(((a - b + 180) % 360 + 360) % 360 - 180);
+  for (const ec of evCtxs) {
+    const relevant = (RECTIFY_EVENT_TYPES[ec.ev.type] || {}).angle;
+    const year = (ec.ev.date || '').slice(0, 4);
+    const check = (list, techW, techRu) => {
+      for (const pt of list) for (const k of ['asc', 'mc', 'dsc', 'ic']) {
+        const s = sep(pt.lon, angles[k]);
+        for (const asp of RECTIFY_HARD) {
+          const d = Math.abs(s - asp.angle);
+          if (d <= RECTIFY_ORB) {
+            const w = techW * asp.w * (k === relevant ? 1.5 : 1) * (1 - d / (RECTIFY_ORB * 1.2));
+            score += w;
+            hits.push({ w, text: `${year} · ${techRu}: ${pt.name} ${asp.ru} ${RECTIFY_ANGLE_RU[k]} (${(RECTIFY_EVENT_TYPES[ec.ev.type] || {}).ru || 'событие'})` });
+            break;
+          }
+        }
+      }
+    };
+    check(natal.map(p => ({ name: p.name, lon: norm360(p.lon + ec.arc) })), 3, 'дирекция');
+    check(ec.prog, 2, 'прогрессия');
+    check(ec.transits, 1, 'транзит');
+  }
+  return { minute, time, score, ascLon: asc, ascSign: zodiacOf(asc).sign, hits };
+}
+// Полный прогон: кандидаты → score → кластеры соседних сильных кандидатов.
+function rectifyRun(birth, events, rangeMode, stepMin) {
+  const A = window.Astronomy;
+  const noonUTC = new Date(Date.parse(birth.date + 'T12:00:00Z') - (birth.utcOffset || 0) * 3600e3);
+  const noonPlanets = bodiesAt(A.MakeTime(noonUTC));
+  const b0 = noonUTC.getTime();
+  const evCtxs = events
+    .filter(ev => /^\d{4}-\d{2}-\d{2}$/.test(ev.date) && Date.parse(ev.date + 'T12:00:00Z') > b0)
+    .map(ev => rectifyEventContext(birth, ev, noonPlanets));
+  const candidates = rectifyCandidateMinutes(rangeMode, stepMin)
+    .map(m => rectifyScoreCandidate(m, birth, noonPlanets, evCtxs));
+  return { candidates, clusters: rectifyClusters(candidates, stepMin), eventsUsed: evCtxs.length };
+}
+// Кластеры: пик → расширение на соседей (≥ 50% пика), до 3 диапазонов.
+function rectifyClusters(candidates, stepMin) {
+  const used = new Set(); const clusters = [];
+  const byMin = {}; candidates.forEach(c => byMin[c.minute] = c);
+  while (clusters.length < 3) {
+    let peak = null;
+    for (const c of candidates) if (!used.has(c.minute) && c.score > 0 && (!peak || c.score > peak.score)) peak = c;
+    if (!peak) break;
+    let lo = peak.minute, hi = peak.minute;
+    while (byMin[lo - stepMin] && !used.has(lo - stepMin) && byMin[lo - stepMin].score >= peak.score * 0.5) lo -= stepMin;
+    while (byMin[hi + stepMin] && !used.has(hi + stepMin) && byMin[hi + stepMin].score >= peak.score * 0.5) hi += stepMin;
+    for (let m = lo; m <= hi; m += stepMin) used.add(m);
+    clusters.push({
+      fromMin: lo, toMin: hi + stepMin, from: rectifyMinToTime(lo), to: rectifyMinToTime(hi + stepMin),
+      peak: peak.time, score: peak.score, ascSign: peak.ascSign, ascLon: peak.ascLon,
+      hits: [...peak.hits].sort((a, b) => b.w - a.w).slice(0, 3).map(h => h.text),
+    });
+  }
+  return clusters;
+}
 // ─── ДЖЙОТИШ / ВЕДИЧЕСКАЯ (очередь 3) ───────────────────────────────
 // Нативная реализация открытых формул (VedAstro/Jyotish — только как
 // референс определений; GPL-код НЕ копировался). Сидерическая долгота =
@@ -3596,6 +3740,7 @@ function asub(name) {
   if (name === 'points') rPointsScreen();
   if (name === 'syn') rSynastry();
   if (name === 'setup') fillAstroForm();
+  if (name === 'rectify') rRectify();
 }
 
 // Главный экран раздела: превью-колесо (или пустое состояние) + сетка карточек.
@@ -4406,6 +4551,119 @@ function fillAstroForm() {
     if ($('ab-houses')) $('ab-houses').value = b.houseSystem || 'whole';
   }
   rAstroChart();
+}
+
+// ─── РЕКТИФИКАЦИЯ: ЭКРАН (анкета событий → диапазон → результат) ─────
+// Данные анкеты — sensitive, живут локально в DB.astroRectify (additive).
+function rectifyDB() {
+  if (!DB.astroRectify) DB.astroRectify = {
+    kType: 'rectification_input', privacyClass: 'sensitive',
+    events: [], temperament: '', rangeMode: 'all', stepMin: 30,
+    createdAt: nowISO(), sv: SCHEMA_VERSION, _u: Date.now(),
+  };
+  return DB.astroRectify;
+}
+function rRectify() {
+  const box = $('astro-rect-form'); if (!box) return;
+  const R = rectifyDB();
+  const b = DB.astroBirth;
+  const ready = b && /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') && isFinite(b.lat) && isFinite(b.lon);
+  if (!ready) {
+    box.innerHTML = `<div class="card mx tap" style="padding:1rem;cursor:pointer" onclick="asub('setup')" role="button">
+      <div class="si-text" style="font-weight:600">Сначала — дата и место рождения</div>
+      <div class="si-text" style="color:var(--t3);margin-top:.25rem">Для перебора вариантов времени нужны дата рождения, широта, долгота и UTC-офсет (в «Настройках расчёта»). Само время указывать не нужно.</div></div>`;
+    const out = $('astro-rect-out'); if (out) out.innerHTML = '';
+    return;
+  }
+  let html = '<div class="f-lbl">Шаг 1 · Жизненные события (чем больше, тем точнее; лучше 3+)</div>';
+  html += (R.events || []).map(ev => `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc((RECTIFY_EVENT_TYPES[ev.type] || {}).ru || 'Событие')}</b> — ${esc(ev.date)}</div></div>
+    <button class="btn btn-s" onclick="rectifyDelEvent(${ev.id})" aria-label="Удалить">✕</button></div>`).join('');
+  html += `<div style="display:flex;gap:.5rem;align-items:flex-end;margin-top:.4rem">
+    <div style="flex:2"><div class="f-lbl">Тип</div><select class="field" id="rect-ev-type">${Object.keys(RECTIFY_EVENT_TYPES).map(k =>
+      `<option value="${k}">${esc(RECTIFY_EVENT_TYPES[k].ru)}</option>`).join('')}</select></div>
+    <div style="flex:2"><div class="f-lbl">Дата (ГГГГ-ММ-ДД)</div><input class="field" id="rect-ev-date" placeholder="2010-06-15"></div>
+    <button class="btn btn-s" style="flex:1" onclick="rectifyAddEvent()">＋</button>
+  </div>
+  <div class="f-lbl" style="margin-top:.7rem">Ваш темперамент (опционально — для сверки с Асцендентом)</div>
+  <select class="field" id="rect-temp" onchange="rectifyDB().temperament=this.value;persist()">
+    <option value="">Не указывать</option>${Object.keys(RECTIFY_TEMPERAMENTS).map(k =>
+      `<option value="${k}"${R.temperament === k ? ' selected' : ''}>${esc(RECTIFY_TEMPERAMENTS[k])}</option>`).join('')}
+  </select>
+  <div class="f-lbl" style="margin-top:.7rem">Шаг 2 · Что известно о времени</div>
+  <div style="display:flex;gap:.5rem">
+    <select class="field" id="rect-range" style="flex:2" onchange="rectifyDB().rangeMode=this.value;persist()">${Object.keys(RECTIFY_RANGES).map(k =>
+      `<option value="${k}"${R.rangeMode === k ? ' selected' : ''}>${esc(RECTIFY_RANGES[k].ru)}</option>`).join('')}</select>
+    <select class="field" id="rect-step" style="flex:1" onchange="rectifyDB().stepMin=parseInt(this.value,10);persist()">
+      <option value="30"${R.stepMin === 30 ? ' selected' : ''}>шаг 30 мин</option>
+      <option value="15"${R.stepMin === 15 ? ' selected' : ''}>шаг 15 мин</option>
+    </select>
+  </div>
+  <button class="btn btn-p btn-full" style="margin-top:.7rem" onclick="runRectify()"><i data-lucide="clock"></i>Сузить диапазон</button>`;
+  box.innerHTML = html;
+  icons();
+}
+function rectifyAddEvent() {
+  const type = ($('rect-ev-type') ? $('rect-ev-type').value : 'other') || 'other';
+  const date = ($('rect-ev-date') ? $('rect-ev-date').value : '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast('Дата события в формате ГГГГ-ММ-ДД', 'warn'); return; }
+  const b = DB.astroBirth;
+  if (b && Date.parse(date) <= Date.parse(b.date)) { toast('Событие должно быть после даты рождения', 'warn'); return; }
+  const R = rectifyDB();
+  R.events.push({ id: Date.now(), type, date });
+  R._u = Date.now(); persist(); rRectify();
+}
+function rectifyDelEvent(id) {
+  const R = rectifyDB();
+  R.events = R.events.filter(e => e.id !== id);
+  R._u = Date.now(); persist(); rRectify();
+}
+async function runRectify() {
+  const out = $('astro-rect-out'); if (!out) return;
+  const R = rectifyDB(); const b = DB.astroBirth;
+  if (!(R.events || []).length) { out.innerHTML = '<div class="ai-sp-empty">Добавь хотя бы одно жизненное событие (лучше три и больше).</div>'; return; }
+  out.innerHTML = '<div class="ai-sp-empty">Перебираю варианты времени…</div>';
+  try {
+    await loadAstroEngine();
+    const res = rectifyRun(b, R.events, R.rangeMode || 'all', R.stepMin || 30);
+    R.lastResult = { ranAt: nowISO(), rangeMode: R.rangeMode, stepMin: R.stepMin, clusters: res.clusters, eventsUsed: res.eventsUsed };
+    R._u = Date.now(); persist();
+    out.innerHTML = rectifyResultHtml(res, R);
+  } catch (e) {
+    out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать (нет сети для загрузки движка?). Попробуй ещё раз.</div>';
+  }
+}
+function rectifyResultHtml(res, R) {
+  if (!res.eventsUsed) return '<div class="ai-sp-empty">Ни одно событие не подошло: даты должны быть корректными и после рождения.</div>';
+  if (!res.clusters.length) return '<div class="si-text" style="color:var(--t3)">По этим событиям не нашлось ни одного попадания к углам — сузить диапазон не удалось. Попробуй добавить другие события или расширить диапазон поиска.</div>';
+  const top = res.clusters[0];
+  const maxScore = top.score || 1;
+  // Формулировка результата — дословно по контракту владельца (честная подача).
+  let html = `<div class="card mx" style="padding:.9rem 1rem;margin-top:.8rem"><div class="si-text" style="line-height:1.55">Наиболее вероятный диапазон времени рождения по совпадению с вашими жизненными событиями: <b>${esc(top.from)}–${esc(top.to)}</b>. Это статистическая оценка, не 100% гарантия — для точного подтверждения рекомендуем свидетельство о рождении или консультацию с профессиональным астрологом.</div></div>`;
+  html += res.clusters.map((c, i) => {
+    const el = ELEMENT_OF_SIGN_IDX(Math.floor(c.ascLon / 30));
+    const temp = R.temperament
+      ? (R.temperament === el
+        ? '<div class="si-text" style="color:var(--green)">✓ Стихия Асцендента совпадает с вашим темпераментом</div>'
+        : `<div class="si-text" style="color:var(--t3)">Стихия Асцендента здесь — ${esc(RECTIFY_ELEMENT_RU[el])}, ваш темперамент ближе к стихии «${esc(RECTIFY_ELEMENT_RU[R.temperament])}»</div>`)
+      : '';
+    return `<div class="si-row"><div class="si-body">
+      <div class="si-text"><b>№${i + 1} · ${esc(c.from)}–${esc(c.to)}</b> · согласованность ${Math.round(c.score / maxScore * 100)}%</div>
+      <div class="si-text" style="margin-top:.2rem"><span ${ruleAttr('ascInSign.' + c.ascSign, 'Асцендент в знаке ' + c.ascSign)}>Асцендент: <b>${esc(c.ascSign)}</b></span> (на пике ${esc(c.peak)})</div>
+      ${temp}
+      ${c.hits.length ? `<div class="si-text" style="color:var(--t4);font-size:.72rem;margin-top:.25rem">${c.hits.map(esc).join('<br>')}</div>` : ''}
+      <button class="btn btn-s" style="margin-top:.4rem" onclick="rectifyApply('${esc(c.peak)}')">Проверить это время в настройках</button>
+    </div></div>`;
+  }).join('');
+  html += `<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Инструмент сужения диапазона на основе жизненных событий (дирекции, прогрессии, транзиты к углам; орб ${RECTIFY_ORB}°). Не «автоматическое определение точного времени». Данные рождения не перезаписываются — время применится только если сам сохранишь его в настройках.</div>`;
+  return html;
+}
+// Подставляет время-кандидат в форму настроек, НЕ сохраняя: явное решение
+// остаётся за пользователем (кнопка «Сохранить и рассчитать»).
+function rectifyApply(time) {
+  asub('setup');   // fillAstroForm заполнит форму из сохранённых данных
+  if ($('ab-time')) $('ab-time').value = time;
+  const tk = $('ab-time-known'); if (tk) tk.classList.add('on');
+  toast('Время подставлено — проверь и нажми «Сохранить и рассчитать»', 'ok');
 }
 
 // Мягкое напоминание на «Сегодня»: по каким активным планам сегодня ещё не
