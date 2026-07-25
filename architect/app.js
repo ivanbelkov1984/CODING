@@ -3746,6 +3746,8 @@ function rNatalScreen() {
   if (info) info.innerHTML = '';
   antab(STATE.astroTab || 'planets');
   rChartSummary();   // человеческое резюме — первым блоком экрана (3.1a)
+  rPersona();        // «Ваша маска для мира» (Asc) и «Ваше призвание» (MC)
+  rPortrait();       // «Общий портрет»: стихии/качества/полушария/стеллиумы
 }
 
 function antab(t) {
@@ -3831,7 +3833,7 @@ const ASTRO_TEXTS_PARTS = {
   natal: ['planetInSign', 'planetInHouse', 'ascInSign', 'houseCusp', 'aspectMeaning', 'pointInSign'],
   transit: ['transit'], synastry: ['synastry'],
   jyotish: ['grahaInRashi', 'nakshatraMoon', 'mahadasha'],
-  extra: ['star', 'arabicPart', 'antivertexInSign', 'eastPointInSign', 'progSunInSign', 'harmonic', 'profectionYear', 'midpointPair', 'tithi', 'vara', 'yoga', 'karana', 'antiscia'],
+  extra: ['star', 'arabicPart', 'antivertexInSign', 'eastPointInSign', 'progSunInSign', 'harmonic', 'profectionYear', 'midpointPair', 'tithi', 'vara', 'yoga', 'karana', 'antiscia', 'mcInSign'],
 };
 // Ключи P2-части (для правила покрытия и маппинга из UI).
 const STAR_KEYS = { 'Альгол': 'Algol', 'Альголь': 'Algol', 'Альциона': 'Alcyone', 'Альдебаран': 'Aldebaran', 'Бетельгейзе': 'Betelgeuse', 'Сириус': 'Sirius', 'Регул': 'Regulus', 'Спика': 'Spica', 'Антарес': 'Antares', 'Вега': 'Vega', 'Фомальгаут': 'Fomalhaut' };
@@ -3881,7 +3883,7 @@ function astroHasText(ruleId) {
     case 'mahadasha': return p.length === 2 && ASTRO_TEXT_DASHA.includes(p[1]);
     case 'star': return p.length === 2 && Object.values(STAR_KEYS).includes(p[1]);
     case 'arabicPart': return p.length === 2 && Object.values(ARABIC_KEYS).includes(p[1]);
-    case 'antivertexInSign': case 'eastPointInSign': case 'progSunInSign': return p.length === 2 && sign(p[1]);
+    case 'antivertexInSign': case 'eastPointInSign': case 'progSunInSign': case 'mcInSign': return p.length === 2 && sign(p[1]);
     case 'harmonic': return p.length === 2 && +p[1] >= 2 && +p[1] <= 12;
     case 'profectionYear': return p.length === 2 && +p[1] >= 1 && +p[1] <= 12;
     case 'midpointPair': { const pr = (p[1] || '').split('-'); return p.length === 2 && pr.length === 2 && body(pr[0]) && body(pr[1]); }
@@ -4016,6 +4018,88 @@ async function rChartSummary() {
     <div class="si-row"><div class="si-body"><div class="si-text">${esc(deepCached.text)}</div></div></div>`;
   html += '<div class="be-note" style="color:var(--t3)">Символическое описание в западной традиции — не прогноз, не диагноз и не оценка личности.</div>';
   out.innerHTML = html;
+}
+
+// «Ваша маска для мира» (Асцендент) и «Ваше призвание» (MC) — отдельные
+// большие темы личности; краткий текст + тап к развёрнутому (180-220 слов).
+async function rPersona() {
+  const out = $('astro-persona'); if (!out) return;
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (!last || !last.chart.angles) { out.innerHTML = ''; return; }
+  try { await loadAstroRules(); } catch (e) { out.innerHTML = ''; return; }
+  const R = window.ASTRO_RULES;
+  const ascSign = last.chart.angles.asc.sign, mcSign = last.chart.angles.mc.sign;
+  const block = (lbl, sign, short, rule, title) => short ? `<div class="f-lbl" style="margin-top:.5rem">${lbl} <span style="font-weight:500;color:var(--t3)">(${esc(sign)})</span></div>
+    <div class="si-row"${ruleAttr(rule, title)}><div class="si-body"><div class="si-text">${esc(short)}${astroHasText(rule) ? ' <span style="color:var(--accent);font-size:.75rem">подробнее</span>' : ''}</div></div></div>` : '';
+  out.innerHTML =
+    block('Ваша маска для мира', ascSign, (R.ascInSign || {})[ascSign], 'ascInSign.' + ascSign, 'Асцендент в знаке ' + ascSign) +
+    block('Ваше призвание', mcSign, (R.mcInSign || {})[mcSign], 'mcInSign.' + mcSign, 'MC в знаке ' + mcSign);
+}
+
+// «Общий портрет карты»: вычисляемый синтез — стихии, качества,
+// полушария, стеллиумы. Пороги: доминанта ≥4 планет (стихия) / ≥5
+// (качество из трёх), дефицит ≤1; полушарие ≥7 из 10; стеллиум ≥3.
+function computeChartBalance(chart) {
+  const R = window.ASTRO_RULES; if (!R || !R.signInfo) return null;
+  const el = {}, qu = {}, bySign = {};
+  for (const p of chart.planets) {
+    const [e, q] = R.signInfo[p.sign] || [];
+    if (e) el[e] = (el[e] || 0) + 1;
+    if (q) qu[q] = (qu[q] || 0) + 1;
+    (bySign[p.sign] = bySign[p.sign] || []).push(p.name);
+  }
+  const lines = [];
+  const fmt = obj => Object.entries(obj).map(([k, n]) => `${k} ${n}`).join(' · ');
+  let anyEl = false;
+  for (const e of ['огонь', 'земля', 'воздух', 'вода']) {
+    const n = el[e] || 0;
+    if (n >= 4) { lines.push({ t: R.balance[e + '_много'], k: e + '_много' }); anyEl = true; }
+    else if (n <= 1) { lines.push({ t: R.balance[e + '_мало'], k: e + '_мало' }); anyEl = true; }
+  }
+  if (!anyEl) lines.push({ t: R.balance['стихии_ровно'], k: 'стихии_ровно' });
+  let anyQ = false;
+  for (const q of ['кардинальный', 'фиксированный', 'мутабельный']) {
+    const n = qu[q] || 0;
+    if (n >= 5) { lines.push({ t: R.balance[q + '_много'], k: q + '_много' }); anyQ = true; }
+    else if (n <= 1) { lines.push({ t: R.balance[q + '_мало'], k: q + '_мало' }); anyQ = true; }
+  }
+  if (!anyQ) lines.push({ t: R.balance['качества_ровно'], k: 'качества_ровно' });
+  // Полушария — только при известных домах.
+  let hemi = null;
+  if (chart.houses && chart.houses.length) {
+    const east = chart.houses.filter(h => [1, 2, 3, 10, 11, 12].includes(h.house)).length;
+    const north = chart.houses.filter(h => h.house >= 1 && h.house <= 6).length;
+    hemi = { east, west: 10 - east, north, south: 10 - north };
+    if (east >= 7) lines.push({ t: R.balance['восток'], k: 'восток' });
+    else if (east <= 3) lines.push({ t: R.balance['запад'], k: 'запад' });
+    if (north >= 7) lines.push({ t: R.balance['север'], k: 'север' });
+    else if (north <= 3) lines.push({ t: R.balance['юг'], k: 'юг' });
+  }
+  // Стеллиумы: 3+ планеты в одном знаке / доме.
+  const stelliums = [];
+  for (const [sign, names] of Object.entries(bySign)) if (names.length >= 3)
+    stelliums.push({ t: `Стеллиум в знаке ${sign} (${names.join(', ')}): темы «${(R.signInfo[sign] || [])[2] || ''}» звучат в вас особенно концентрированно — это один из главных акцентов карты.`, k: 'stellium_sign' });
+  if (chart.houses && chart.houses.length) {
+    const byHouse = {};
+    for (const h of chart.houses) (byHouse[h.house] = byHouse[h.house] || []).push(ASTRO_RU[h.body] || h.body);
+    for (const [hn, names] of Object.entries(byHouse)) if (names.length >= 3)
+      stelliums.push({ t: `Стеллиум в ${hn}-м доме (${names.join(', ')}): сфера «${HOUSE_THEMES[hn] || ''}» насыщена энергией — она из центральных в вашей жизни.`, k: 'stellium_house' });
+  }
+  return { elements: el, qualities: qu, hemi, lines, stelliums, elStr: fmt(el), quStr: fmt(qu) };
+}
+async function rPortrait() {
+  const out = $('astro-portrait'); if (!out) return;
+  const last = (DB.astroCharts || []).slice(-1)[0];
+  if (!last) { out.innerHTML = ''; return; }
+  try { await loadAstroRules(); } catch (e) { out.innerHTML = ''; return; }
+  const b = computeChartBalance(last.chart);
+  if (!b) { out.innerHTML = ''; return; }
+  const row = txt => `<div class="si-row"><div class="si-body"><div class="si-text">${esc(txt)}</div></div></div>`;
+  out.innerHTML = '<div class="f-lbl" style="margin-top:.5rem">Общий портрет вашей карты</div>'
+    + `<div class="si-text" style="color:var(--t4);font-size:.75rem;margin-bottom:.2rem">Стихии: ${esc(b.elStr)} · Качества: ${esc(b.quStr)}${b.hemi ? ` · Восток/Запад: ${b.hemi.east}/${b.hemi.west} · Низ/Верх: ${b.hemi.north}/${b.hemi.south}` : ''}</div>`
+    + b.lines.map(l => row(l.t)).join('')
+    + b.stelliums.map(s => row(s.t)).join('')
+    + (!last.chart.houses ? '<div class="si-text" style="color:var(--t3)">Полушария и стеллиумы по домам считаются при известном времени рождения.</div>' : '');
 }
 
 // Слой 2, ИИ-полировка: связать факты, ничего не добавляя. С кэшем.
