@@ -3073,10 +3073,14 @@ async function rJyotish() {
       sid.forEach(p => put(Math.floor(p.lon / 30), JYO_ABBR[p.body] || p.name[0]));
       put(Math.floor(rahu / 30), 'Ра'); put(Math.floor(ketu / 30), 'Ке');
       if (last.chart.angles) put(Math.floor(norm360(last.chart.angles.asc.lon - aya) / 30), 'Лг', true);
+      // Тап по грахе → развёрнутый текст grahaInRashi (внешние планеты — без тапа: их нет в 9 грахах).
+      const G_KEY = { Sun: 'Surya', Moon: 'Chandra', Mars: 'Mangala', Mercury: 'Budha', Jupiter: 'Guru', Venus: 'Shukra', Saturn: 'Shani' };
+      const rashiSk = L => RASHI[Math.floor(L / 30)].split(' ')[0];
       html = `<div class="f-lbl">Раши D1 · South Indian (${esc(AYANAMSHAS[ayaKey].ru)}, айанамша ${aya.toFixed(2)}°)</div>` + jyoGrid(placed) +
-        sid.map(p => `<div class="si-text" style="color:var(--t3)">${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°${(ucchaBala(p.body, p.lon) != null) ? ' · уччабала ' + ucchaBala(p.body, p.lon) : ''}</div>`).join('') +
-        `<div class="si-text" style="color:var(--t3)">Раху (ср.): ${esc(RASHI[Math.floor(rahu / 30)])} ${(rahu % 30).toFixed(1)}° · Кету: ${esc(RASHI[Math.floor(ketu / 30)])} ${(ketu % 30).toFixed(1)}°</div>` +
-        `<div class="si-text" style="margin-top:.3rem">Накшатра Луны: <b>${esc(dasha.nakshatra)}</b>, пада ${dasha.pada}</div>`;
+        sid.map(p => `<div class="si-text" style="color:var(--t3)"${ruleAttr(G_KEY[p.body] ? `grahaInRashi.${G_KEY[p.body]}.${rashiSk(p.lon)}` : '', `${p.name} в знаке ${p.sign}`)}>${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°${(ucchaBala(p.body, p.lon) != null) ? ' · уччабала ' + ucchaBala(p.body, p.lon) : ''}${G_KEY[p.body] ? ' <span style="color:var(--accent);font-size:.72rem">подробнее</span>' : ''}</div>`).join('') +
+        `<div class="si-text" style="color:var(--t3)"${ruleAttr(`grahaInRashi.Rahu.${rashiSk(rahu)}`, 'Раху в знаке')}>Раху (ср.): ${esc(RASHI[Math.floor(rahu / 30)])} ${(rahu % 30).toFixed(1)}° <span style="color:var(--accent);font-size:.72rem">подробнее</span></div>` +
+        `<div class="si-text" style="color:var(--t3)"${ruleAttr(`grahaInRashi.Ketu.${rashiSk(ketu)}`, 'Кету в знаке')}>Кету: ${esc(RASHI[Math.floor(ketu / 30)])} ${(ketu % 30).toFixed(1)}° <span style="color:var(--accent);font-size:.72rem">подробнее</span></div>` +
+        `<div class="si-text" style="margin-top:.3rem"${ruleAttr(`nakshatraMoon.${dasha.nakshatra}`, `Луна в накшатре ${dasha.nakshatra}`)}>Накшатра Луны: <b>${esc(dasha.nakshatra)}</b>, пада ${dasha.pada} <span style="color:var(--accent);font-size:.72rem">подробнее</span></div>`;
     }
     if (tab === 'navamsha') {
       const placed = {};
@@ -3088,7 +3092,7 @@ async function rJyotish() {
     if (tab === 'dasha') {
       if (dasha.current) {
         const theme = DASHA_THEMES[dasha.current.lord];
-        html = `<div class="si-row"><div class="si-body"><div class="si-text"><b>Сейчас — маха-даша ${esc(dasha.current.lord)}</b> (до ${dasha.current.to.toISOString().slice(0, 10)})${theme ? `: большой период, окрашенный темой «${esc(theme)}»` : ''}.${dasha.antar ? ` Внутри — антардаша ${esc(dasha.antar.lord)} (до ${dasha.antar.to.toISOString().slice(0, 10)}).` : ''}</div></div></div>`;
+        html = `<div class="si-row"${ruleAttr(`mahadasha.${dasha.current.lord}`, `Маха-даша ${dasha.current.lord}`)}><div class="si-body"><div class="si-text"><b>Сейчас — маха-даша ${esc(dasha.current.lord)}</b> (до ${dasha.current.to.toISOString().slice(0, 10)})${theme ? `: большой период, окрашенный темой «${esc(theme)}»` : ''}.${dasha.antar ? ` Внутри — антардаша ${esc(dasha.antar.lord)} (до ${dasha.antar.to.toISOString().slice(0, 10)}).` : ''} <span style="color:var(--accent);font-size:.75rem">подробнее</span></div></div></div>`;
       }
       html += '<div class="f-lbl" style="margin-top:.4rem">Полный цикл Вимшоттари (120 лет)</div>' +
         dasha.seq.map(d => `<div class="si-text" style="color:${d === dasha.current ? 'var(--t1)' : 'var(--t3)'}">${esc(d.lord)}: ${d.from.toISOString().slice(0, 10)} — ${d.to.toISOString().slice(0, 10)}</div>`).join('');
@@ -3193,7 +3197,7 @@ async function rReturns() {
     if (hits.length) html += '<div class="f-lbl" style="margin-top:.4rem">Ключевые аспекты к наталу</div>' +
       hits.map(h => { const tx = transitHitText(h);
         return `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(h.transit)} → ваш ${esc(h.natal)}.</b> ${tx ? esc(tx.text) : esc(h.aspect)}</div>
-          <div class="si-text" style="color:var(--t4);font-size:.72rem">${esc(h.aspect)} · точность ${h.exact}°</div></div></div>`; }).join('');
+          <div class="si-text" style="color:var(--t4);font-size:.72rem"${tx ? ruleAttr(tx.ruleId, `${h.transit} к вашему ${h.natal}`) : ''}>${esc(h.aspect)} · точность ${h.exact}°${tx && astroHasText(tx.ruleId) ? ' · <span style="color:var(--accent)">подробнее</span>' : ''}</div></div></div>`; }).join('');
     html += '<div class="be-note" style="color:var(--t3)">Момент точного возвращения светила в натальную долготу — символическая карта периода, не прогноз.</div>';
     out.innerHTML = html;
   } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
@@ -3682,11 +3686,14 @@ function antab(t) {
   }
   if (t === 'points') {
     const P = c.points || {};
-    const pr = (nm, z, extra) => z ? row(`<b>${nm}</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°${extra || ''}`) : '';
-    html = pr('Точка Судьбы', P.fortune, P.fortune && (P.fortune.isDay ? ' (дневная)' : ' (ночная)')) + pr('Лилит (ср.)', P.lilith)
-      + pr('Вертекс', P.vertex) + pr('Антивертекс', P.antivertex) + pr('Восточная точка', P.eastPoint);
+    const rowA = (txt, attr) => `<div class="si-row"${attr || ''}><div class="si-body"><div class="si-text">${txt}</div></div></div>`;
+    const pr = (nm, z, extra, key) => z ? rowA(`<b>${nm}</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°${extra || ''}`,
+      key ? ruleAttr(`pointInSign.${key}.${z.sign}`, `${nm} в знаке ${z.sign}`) : '') : '';
+    html = pr('Точка Судьбы', P.fortune, P.fortune && (P.fortune.isDay ? ' (дневная)' : ' (ночная)'), 'Fortune') + pr('Лилит (ср.)', P.lilith, '', 'Lilith')
+      + pr('Вертекс', P.vertex, '', 'Vertex') + pr('Антивертекс', P.antivertex) + pr('Восточная точка', P.eastPoint);
     if ((c.asteroids || []).length) html += `<div class="f-lbl" style="margin-top:.4rem">Астероиды (прибл.)</div>`
-      + c.asteroids.map(a => row(`<b>${esc(a.name)}</b> — ${esc(a.sign)} ${a.deg.toFixed(1)}°`)).join('');
+      + c.asteroids.map(a => rowA(`<b>${esc(a.name)}</b> — ${esc(a.sign)} ${a.deg.toFixed(1)}°`,
+        ruleAttr(`pointInSign.${a.body}.${a.sign}`, `${a.name} в знаке ${a.sign}`))).join('');
     if (!html) html = '<div class="ai-sp-empty">Точки требуют известного времени рождения.</div>';
   }
   if (t === 'mid') {
@@ -3744,6 +3751,38 @@ function astroTextPart(ruleId) {
   for (const [part, prefixes] of Object.entries(ASTRO_TEXTS_PARTS)) if (prefixes.includes(prefix)) return part;
   return null;
 }
+// ШАГ 3 (правило покрытия): тап «Подробнее» выдаётся ТОЛЬКО объектам,
+// для которых текст реально есть в базе. Знание покрытия — по структуре
+// rule id (зеркалит реестр генерации). Новый объект без текста никогда
+// не получит «пустую карточку».
+const ASTRO_TEXT_POINTS = ['Chiron', 'Ceres', 'Pallas', 'Juno', 'Vesta', 'Lilith', 'Fortune', 'Vertex'];
+const ASTRO_TEXT_GRAHAS = ['Surya', 'Chandra', 'Mangala', 'Budha', 'Guru', 'Shukra', 'Shani', 'Rahu', 'Ketu'];
+const ASTRO_TEXT_NAKSHATRAS = ['Ашвини','Бхарани','Криттика','Рохини','Мригашира','Ардра','Пунарвасу','Пушья','Ашлеша','Магха','Пурва-Пхалгуни','Уттара-Пхалгуни','Хаста','Читра','Свати','Вишакха','Анурадха','Джйештха','Мула','Пурва-Ашадха','Уттара-Ашадха','Шравана','Дхаништха','Шатабхиша','Пурва-Бхадрапада','Уттара-Бхадрапада','Ревати'];
+const ASTRO_TEXT_DASHA = ['Кету','Венера','Солнце','Луна','Марс','Раху','Юпитер','Сатурн','Меркурий'];
+function astroHasText(ruleId) {
+  const p = String(ruleId).split('.');
+  const sign = s => ZODIAC.includes(s);
+  const body = b => ASTRO_BODIES.includes(b);
+  const asp = a => ASTRO_ASPECTS.some(x => x.name === a);
+  switch (p[0]) {
+    case 'planetInSign': return p.length === 3 && body(p[1]) && sign(p[2]);
+    case 'planetInHouse': return p.length === 3 && body(p[1]) && +p[2] >= 1 && +p[2] <= 12;
+    case 'ascInSign': return p.length === 2 && sign(p[1]);
+    case 'houseCusp': return p.length === 3 && +p[1] >= 1 && +p[1] <= 12 && sign(p[2]);
+    case 'aspectMeaning': { const pair = (p[1] || '').split('-'); return p.length === 3 && pair.length === 2 && body(pair[0]) && body(pair[1]) && asp(p[2]); }
+    case 'transit': case 'synastry': return p.length === 4 && body(p[1]) && asp(p[2]) && body(p[3]);
+    case 'pointInSign': return p.length === 3 && ASTRO_TEXT_POINTS.includes(p[1]) && sign(p[2]);
+    case 'grahaInRashi': return p.length === 3 && ASTRO_TEXT_GRAHAS.includes(p[1]);
+    case 'nakshatraMoon': return p.length === 2 && ASTRO_TEXT_NAKSHATRAS.includes(p[1]);
+    case 'mahadasha': return p.length === 2 && ASTRO_TEXT_DASHA.includes(p[1]);
+    default: return false;
+  }
+}
+// Атрибуты тапа: выдаются только при реальном покрытии (иначе пустая строка).
+function ruleAttr(ruleId, title) {
+  return astroHasText(ruleId) ? ` data-rule="${esc(ruleId)}"${title ? ` data-rule-title="${esc(title)}"` : ''}` : '';
+}
+
 // Полный текст по rule id → модал (title = человекочитаемая метка).
 async function astroFullText(ruleId, title) {
   const part = astroTextPart(ruleId); if (!part) return;
@@ -3757,7 +3796,7 @@ async function astroFullText(ruleId, title) {
     if (body) body.innerHTML = txt
       ? esc(txt).split('\n').filter(s => s.trim()).map(p => `<p class="si-text" style="margin:.45rem 0">${p}</p>`).join('')
         + '<div class="be-note" style="color:var(--t3)">Символическое описание, не прогноз и не диагноз.</div>'
-      : '<div class="ai-sp-empty">Для этой комбинации развёрнутого текста нет.</div>';
+      : '<div class="ai-sp-empty">Расшифровка для этого элемента готовится.</div>';
   } catch (e) { if (body) body.innerHTML = '<div class="ai-sp-empty">Не удалось загрузить тексты.</div>'; }
 }
 // Тап по любому элементу с data-rule в астро-разделе открывает полный текст.
@@ -4129,15 +4168,18 @@ function rPointsScreen() {
   const last = (DB.astroCharts || []).slice(-1)[0];
   if (!last) { out.innerHTML = '<div class="ai-sp-empty">Сначала рассчитай карту в «Настройках расчёта».</div>'; return; }
   const c = last.chart, P = c.points || {};
-  const row = txt => `<div class="si-row"><div class="si-body"><div class="si-text">${txt}</div></div></div>`;
-  const pr = (nm, z, extra) => z ? row(`<b>${nm}</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°${extra || ''}`) : '';
+  // Тап «подробнее» — только там, где текст реально есть (правило покрытия).
+  const row = (txt, attr) => `<div class="si-row"${attr || ''}><div class="si-body"><div class="si-text">${txt}${attr ? ' <span style="color:var(--accent);font-size:.75rem">подробнее</span>' : ''}</div></div></div>`;
+  const pr = (nm, z, extra, key) => z ? row(`<b>${nm}</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°${extra || ''}`,
+    key ? ruleAttr(`pointInSign.${key}.${z.sign}`, `${nm} в знаке ${z.sign}`) : '') : '';
   let html = '';
   if ((c.asteroids || []).length) html += '<div class="f-lbl">Астероиды и Хирон (прибл.)</div>'
-    + c.asteroids.map(a => row(`<b>${esc(a.name)}</b> — ${esc(a.sign)} ${a.deg.toFixed(1)}°`)).join('');
+    + c.asteroids.map(a => row(`<b>${esc(a.name)}</b> — ${esc(a.sign)} ${a.deg.toFixed(1)}°`,
+      ruleAttr(`pointInSign.${a.body}.${a.sign}`, `${a.name} в знаке ${a.sign}`))).join('');
   html += '<div class="f-lbl" style="margin-top:.4rem">Точки</div>'
-    + pr('Лилит (ср. апогей)', P.lilith)
-    + pr('Точка Судьбы', P.fortune, P.fortune && (P.fortune.isDay ? ' (дневная формула)' : ' (ночная формула)'))
-    + pr('Вертекс', P.vertex) + pr('Антивертекс', P.antivertex) + pr('Восточная точка', P.eastPoint);
+    + pr('Лилит (ср. апогей)', P.lilith, '', 'Lilith')
+    + pr('Точка Судьбы', P.fortune, P.fortune && (P.fortune.isDay ? ' (дневная формула)' : ' (ночная формула)'), 'Fortune')
+    + pr('Вертекс', P.vertex, '', 'Vertex') + pr('Антивертекс', P.antivertex) + pr('Восточная точка', P.eastPoint);
   if (!P.fortune) html += '<div class="si-text" style="color:var(--t3)">Вертекс и Точка Судьбы требуют известного времени рождения.</div>';
   if ((c.antiscia || []).length) html += '<div class="f-lbl" style="margin-top:.4rem">Антисции</div>'
     + c.antiscia.map(a => row(`${esc(a.name)} → ${esc(a.sign)} ${a.deg.toFixed(1)}°`)).join('');
