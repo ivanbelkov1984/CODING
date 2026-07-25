@@ -7,7 +7,9 @@
 //  Реестр зеркалит architect/tools/astro_texts_batch.py (1861 позиция).
 // ═══════════════════════════════════════════════════════════════
 
-const MODEL = 'gpt-5.4';
+const MODEL = process.env.OPENAI_MODEL || 'gpt-5.4';
+// Если запрошенная модель недоступна аккаунту — берём первую доступную из списка.
+const MODEL_FALLBACKS = ['gpt-5.4', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-4.1', 'gpt-4o'];
 const API = 'https://api.openai.com/v1';
 
 const PLANETS = [['Sun','Солнце'],['Moon','Луна'],['Mercury','Меркурий'],['Venus','Венера'],['Mars','Марс'],['Jupiter','Юпитер'],['Saturn','Сатурн'],['Uranus','Уран'],['Neptune','Нептун'],['Pluto','Плутон']];
@@ -46,11 +48,23 @@ export function registry() {
   return out;
 }
 
-function jsonl() {
+function jsonl(model) {
   return registry().map(([id, entity]) => JSON.stringify({
     custom_id: id, method: 'POST', url: '/v1/chat/completions',
-    body: { model: MODEL, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: TEMPLATE(entity) }], max_tokens: 700, temperature: 0.8 },
+    body: { model, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: TEMPLATE(entity) }], max_tokens: 700, temperature: 0.8 },
   })).join('\n');
+}
+
+// Выбор реально доступной модели: запрошенная, иначе первый доступный fallback.
+async function pickModel() {
+  const list = await (await oa('/models')).json();
+  const have = new Set((list.data || []).map(m => m.id));
+  if (have.has(MODEL)) return MODEL;
+  for (const m of MODEL_FALLBACKS) if (have.has(m)) return m;
+  // Последний шанс: любой gpt-* чат (самый «старший» по имени).
+  const gpts = [...have].filter(id => /^gpt-[45]/.test(id) && !/audio|realtime|image|search|transcribe|tts/.test(id)).sort().reverse();
+  if (gpts.length) return gpts[0];
+  throw new Error('Ни одна подходящая gpt-модель недоступна этому ключу');
 }
 
 async function oa(path, opts = {}) {
@@ -76,9 +90,21 @@ export default function mountAstroBatch(app, pool) {
     try {
       await ready;
       const last = (await pool.query('SELECT * FROM astro_batches ORDER BY id DESC LIMIT 1')).rows[0];
-      if (last && Date.now() - new Date(last.created_at).getTime() < 24 * 3600e3 && last.status !== 'failed')
-        return res.status(409).json({ error: 'Батч уже запускался за последние 24 часа', batch_id: last.batch_id, status: last.status });
-      const content = jsonl();
+      if (last && Date.now() - new Date(last.created_at).getTime() < 24 * 3600e3) {
+        // Перезапуск разрешён, только если прошлый батч закончился без результата
+        // (все запросы отклонены / failed) — иначе держим лимит 1/24ч.
+        let dead = last.status === 'failed';
+        if (!dead) {
+          try {
+            const b = await (await oa(`/batches/${last.batch_id}`)).json();
+            const rc = b.request_counts || {};
+            dead = ['failed', 'cancelled', 'expired'].includes(b.status) || (b.status === 'completed' && !b.output_file_id && rc.completed === 0);
+          } catch (e) { /* статус не получить — считаем живым */ }
+        }
+        if (!dead) return res.status(409).json({ error: 'Батч уже запускался за последние 24 часа', batch_id: last.batch_id, status: last.status });
+      }
+      const model = await pickModel();
+      const content = jsonl(model);
       const fd = new FormData();
       fd.append('purpose', 'batch');
       fd.append('file', new Blob([content], { type: 'application/jsonl' }), 'astro_batch.jsonl');
@@ -88,7 +114,7 @@ export default function mountAstroBatch(app, pool) {
         body: JSON.stringify({ input_file_id: up.id, endpoint: '/v1/chat/completions', completion_window: '24h' }),
       })).json();
       await pool.query('INSERT INTO astro_batches (batch_id, status) VALUES ($1, $2)', [batch.id, batch.status || 'created']);
-      res.json({ batch_id: batch.id, status: batch.status, requests: registry().length });
+      res.json({ batch_id: batch.id, status: batch.status, requests: registry().length, model });
     } catch (e) {
       res.status(e.noKey ? 503 : 500).json({ error: e.message });
     }
@@ -103,6 +129,19 @@ export default function mountAstroBatch(app, pool) {
       const b = await (await oa(`/batches/${last.batch_id}`)).json();
       if (b.status !== last.status) await pool.query('UPDATE astro_batches SET status=$1 WHERE id=$2', [b.status, last.id]);
       res.json({ batch_id: b.id, status: b.status, counts: b.request_counts || null, output_file_id: b.output_file_id || null });
+    } catch (e) { res.status(e.noKey ? 503 : 500).json({ error: e.message }); }
+  });
+
+  // Диагностика: первые строки error-файла последнего батча (почему упали запросы).
+  app.get('/api/astro-batch/errors', async (_req, res) => {
+    try {
+      await ready;
+      const last = (await pool.query('SELECT * FROM astro_batches ORDER BY id DESC LIMIT 1')).rows[0];
+      if (!last) return res.status(404).json({ error: 'Батчей не было' });
+      const b = await (await oa(`/batches/${last.batch_id}`)).json();
+      if (!b.error_file_id) return res.json({ batch_id: b.id, status: b.status, errors: b.errors || null, note: 'error-файла нет' });
+      const txt = await (await oa(`/files/${b.error_file_id}/content`)).text();
+      res.json({ batch_id: b.id, status: b.status, sample: txt.split('\n').slice(0, 3) });
     } catch (e) { res.status(e.noKey ? 503 : 500).json({ error: e.message }); }
   });
 
