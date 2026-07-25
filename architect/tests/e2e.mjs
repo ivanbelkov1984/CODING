@@ -33,6 +33,9 @@ await page.goto(FILE);
 await page.waitForTimeout(500);
 await page.evaluate(() => {
   try { document.getElementById('splash').style.display = 'none'; } catch (_) {}
+  // Песочница тестов офлайн: глушим автосинк на весь прогон, иначе отложенный
+  // таймер persist() стреляет «sync fail» в случайной точке сьюта (гонка).
+  window.ARCHITECT_API = ''; if (typeof resetSyncState === 'function') resetSyncState();
   CFG.userName = 'Тест';
   document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
   const DAY = 864e5, iso = n => new Date(Date.now() - n * DAY).toISOString().slice(0, 10);
@@ -2497,6 +2500,14 @@ const rectT = await page.evaluate(async () => {
   const resDay = rectifyRun(birthNoTime, events, 'day', 30);
   const recovered = resDay.clusters.some(c => c.fromMin - 30 <= 930 && 930 <= c.toMin + 30);
   const inRange = resDay.clusters.every(c => c.fromMin >= 660 && c.toMin <= 1080);
+  // 3a) Метрика поддержки абсолютная: 1..eventsUsed, у топ-кластера — большинство.
+  const supportedOk = resDay.clusters.every(c => c.supported >= 1 && c.supported <= resDay.eventsUsed)
+    && resDay.clusters[0].supported >= Math.ceil(resDay.eventsUsed / 2);
+  // 3b) Грязные данные: одна дата сбита на 2 года (дуга уходит на ~2° — мимо
+  // орба) — истинное время всё равно удерживается остальными событиями.
+  const dirtyEvents = [{ ...events[0], date: (parseInt(events[0].date.slice(0, 4), 10) + 2) + events[0].date.slice(4) }, ...events.slice(1)];
+  const resDirty = rectifyRun(birthNoTime, dirtyEvents, 'day', 30);
+  const dirtyRecovered = resDirty.clusters.some(c => c.fromMin - 30 <= 930 && 930 <= c.toMin + 30);
   // 4) Кластеры: не больше 3, отсортированы по убыванию score, score > 0.
   const clustersOk = res1.clusters.length <= 3 && resDay.clusters.length <= 3
     && res1.clusters.every(c => c.score > 0)
@@ -2506,8 +2517,10 @@ const rectT = await page.evaluate(async () => {
   const nightOk = night.length === 16 && night.every(m => m >= 1320 || m < 360);
   const day = rectifyCandidateMinutes('day', 15);
   const dayOk = day.length === 28 && day.every(m => m >= 660 && m < 1080);
-  return { nEvents: events.length, deterministic, catchesAll, recovered, inRange, clustersOk, nightOk, dayOk };
+  return { nEvents: events.length, deterministic, catchesAll, recovered, inRange, supportedOk, dirtyRecovered, clustersOk, nightOk, dayOk };
 });
+ok(rectT.supportedOk, 'ректификация: метрика «поддержано X из Y» абсолютная, топ-вариант держит большинство событий');
+ok(rectT.dirtyRecovered, 'ректификация: одна дата, сбитая на 2 года, не ломает восстановление (устойчивость к грязным данным)');
 ok(rectT.nEvents >= 4, `ректификация: синтетика дала ≥4 событий-дирекций (${rectT.nEvents})`);
 ok(rectT.inRange, 'ректификация: кластеры не выходят за выбранный диапазон поиска');
 ok(rectT.deterministic, 'ректификация: расчёт детерминирован (одни входы — один результат)');
@@ -2536,6 +2549,15 @@ const rectUi = await page.evaluate(async () => {
   const disclaimer = /Это статистическая оценка, не 100% гарантия — для точного подтверждения рекомендуем свидетельство о рождении или консультацию с профессиональным астрологом/.test(outTx);
   const ranked = /№1/.test(outTx) && /Асцендент/.test(outTx);
   const stored = !!(DB.astroRectify.lastResult && DB.astroRectify.lastResult.clusters);
+  // Калибровка: метрика абсолютная («X из 3 событий»), процентов нет,
+  // при 3 событиях предупреждение «мало данных» не показывается.
+  const supportMetric = /поддержано \d+ из 3 событий/.test(outTx) && !/согласованность \d+%/.test(outTx);
+  const noWarnAt3 = !/Недостаточно данных/.test(outTx);
+  // 1–2 события — явное предупреждение о ненадёжности.
+  R.events = R.events.slice(0, 2);
+  await runRectify();
+  const outTx2 = document.getElementById('astro-rect-out').textContent;
+  const warnAt2 = /Недостаточно данных для надёжной оценки/.test(outTx2) && /из 2 событий/.test(outTx2);
   // Незатирание: расчёт и «применить» НЕ меняют сохранённые данные рождения.
   const notOverwritten1 = DB.astroBirth.timeKnown === false && DB.astroBirth.time === '';
   rectifyApply('15:30');
@@ -2543,12 +2565,14 @@ const rectUi = await page.evaluate(async () => {
   const notOverwritten2 = DB.astroBirth.timeKnown === false && DB.astroBirth.time === '';
   goTo('home');
   DB.astroBirth = null; DB.astroRectify = null; DB.astroCharts = [];
-  return { noData, menuCard, introHonest, formOk, disclaimer, ranked, stored, notOverwritten1, applyFills, notOverwritten2 };
+  return { noData, menuCard, introHonest, formOk, disclaimer, ranked, stored, supportMetric, noWarnAt3, warnAt2, notOverwritten1, applyFills, notOverwritten2 };
 });
 ok(rectUi.noData && rectUi.formOk, 'ректификация UI: без данных рождения — подсказка; с данными — анкета');
 ok(rectUi.menuCard && rectUi.introHonest, 'ректификация UI: карточка в меню + честное позиционирование («не автоматическое определение»)');
 ok(rectUi.disclaimer, 'ректификация UI: обязательная формулировка о статистической оценке — дословно');
 ok(rectUi.ranked && rectUi.stored, 'ректификация UI: ранжированные варианты с Асцендентом, результат сохранён');
+ok(rectUi.supportMetric && rectUi.noWarnAt3, 'ректификация UI: метрика «поддержано X из Y событий» без процентов; при 3 событиях без предупреждения');
+ok(rectUi.warnAt2, 'ректификация UI: при 1–2 событиях — явное «Недостаточно данных для надёжной оценки»');
 ok(rectUi.notOverwritten1 && rectUi.applyFills && rectUi.notOverwritten2, 'ректификация UI: данные рождения не перезаписываются — «применить» лишь подставляет время в форму');
 
 // ── Никаких неожиданных ошибок ──

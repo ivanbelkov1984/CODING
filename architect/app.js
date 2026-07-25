@@ -2954,7 +2954,8 @@ function rectifyScoreCandidate(minute, birth, noonPlanets, evCtxs) {
     p.body === 'Sun' ? { ...p, lon: sunLon } : p.body === 'Moon' ? { ...p, lon: moonLon } : p);
   let score = 0; const hits = [];
   const sep = (a, b) => Math.abs(((a - b + 180) % 360 + 360) % 360 - 180);
-  for (const ec of evCtxs) {
+  for (let ei = 0; ei < evCtxs.length; ei++) {
+    const ec = evCtxs[ei];
     const relevant = (RECTIFY_EVENT_TYPES[ec.ev.type] || {}).angle;
     const year = (ec.ev.date || '').slice(0, 4);
     const check = (list, techW, techRu) => {
@@ -2965,7 +2966,9 @@ function rectifyScoreCandidate(minute, birth, noonPlanets, evCtxs) {
           if (d <= RECTIFY_ORB) {
             const w = techW * asp.w * (k === relevant ? 1.5 : 1) * (1 - d / (RECTIFY_ORB * 1.2));
             score += w;
-            hits.push({ w, text: `${year} · ${techRu}: ${pt.name} ${asp.ru} ${RECTIFY_ANGLE_RU[k]} (${(RECTIFY_EVENT_TYPES[ec.ev.type] || {}).ru || 'событие'})` });
+            // ev — идентичность события: по ней считается честная метрика
+            // «поддержано X из Y событий» (а не относительный процент).
+            hits.push({ w, ev: ei, text: `${year} · ${techRu}: ${pt.name} ${asp.ru} ${RECTIFY_ANGLE_RU[k]} (${(RECTIFY_EVENT_TYPES[ec.ev.type] || {}).ru || 'событие'})` });
             break;
           }
         }
@@ -3005,6 +3008,7 @@ function rectifyClusters(candidates, stepMin) {
     clusters.push({
       fromMin: lo, toMin: hi + stepMin, from: rectifyMinToTime(lo), to: rectifyMinToTime(hi + stepMin),
       peak: peak.time, score: peak.score, ascSign: peak.ascSign, ascLon: peak.ascLon,
+      supported: new Set(peak.hits.map(h => h.ev)).size,   // скольким событиям вариант отвечает
       hits: [...peak.hits].sort((a, b) => b.w - a.w).slice(0, 3).map(h => h.text),
     });
   }
@@ -4636,9 +4640,14 @@ function rectifyResultHtml(res, R) {
   if (!res.eventsUsed) return '<div class="ai-sp-empty">Ни одно событие не подошло: даты должны быть корректными и после рождения.</div>';
   if (!res.clusters.length) return '<div class="si-text" style="color:var(--t3)">По этим событиям не нашлось ни одного попадания к углам — сузить диапазон не удалось. Попробуй добавить другие события или расширить диапазон поиска.</div>';
   const top = res.clusters[0];
-  const maxScore = top.score || 1;
+  let html = '';
+  // Калибровка честности: 1–2 события статистически почти ничего не сужают —
+  // говорим это прямо, а не прячем за уверенной подачей.
+  if (res.eventsUsed < 3) {
+    html += `<div class="card mx" style="padding:.8rem 1rem;margin-top:.8rem;border-left:3px solid var(--orange,#f90)"><div class="si-text" style="line-height:1.5"><b>⚠️ Недостаточно данных для надёжной оценки.</b> Введено событий: ${res.eventsUsed}. По 1–2 событиям совпадения почти всегда найдутся у многих вариантов времени — результат ниже считай черновой прикидкой. Добавь минимум 3 события (лучше больше), чтобы диапазоны стали осмысленными.</div></div>`;
+  }
   // Формулировка результата — дословно по контракту владельца (честная подача).
-  let html = `<div class="card mx" style="padding:.9rem 1rem;margin-top:.8rem"><div class="si-text" style="line-height:1.55">Наиболее вероятный диапазон времени рождения по совпадению с вашими жизненными событиями: <b>${esc(top.from)}–${esc(top.to)}</b>. Это статистическая оценка, не 100% гарантия — для точного подтверждения рекомендуем свидетельство о рождении или консультацию с профессиональным астрологом.</div></div>`;
+  html += `<div class="card mx" style="padding:.9rem 1rem;margin-top:.8rem"><div class="si-text" style="line-height:1.55">Наиболее вероятный диапазон времени рождения по совпадению с вашими жизненными событиями: <b>${esc(top.from)}–${esc(top.to)}</b>. Это статистическая оценка, не 100% гарантия — для точного подтверждения рекомендуем свидетельство о рождении или консультацию с профессиональным астрологом.</div></div>`;
   html += res.clusters.map((c, i) => {
     const el = ELEMENT_OF_SIGN_IDX(Math.floor(c.ascLon / 30));
     const temp = R.temperament
@@ -4646,15 +4655,17 @@ function rectifyResultHtml(res, R) {
         ? '<div class="si-text" style="color:var(--green)">✓ Стихия Асцендента совпадает с вашим темпераментом</div>'
         : `<div class="si-text" style="color:var(--t3)">Стихия Асцендента здесь — ${esc(RECTIFY_ELEMENT_RU[el])}, ваш темперамент ближе к стихии «${esc(RECTIFY_ELEMENT_RU[R.temperament])}»</div>`)
       : '';
+    // Метрика — абсолютная и самоограничивающая: «поддержано X из Y событий»
+    // (при 2 событиях максимум честно выглядит как «2 из 2», а не «100%»).
     return `<div class="si-row"><div class="si-body">
-      <div class="si-text"><b>№${i + 1} · ${esc(c.from)}–${esc(c.to)}</b> · согласованность ${Math.round(c.score / maxScore * 100)}%</div>
+      <div class="si-text"><b>№${i + 1} · ${esc(c.from)}–${esc(c.to)}</b> · поддержано ${c.supported} из ${res.eventsUsed} событий</div>
       <div class="si-text" style="margin-top:.2rem"><span ${ruleAttr('ascInSign.' + c.ascSign, 'Асцендент в знаке ' + c.ascSign)}>Асцендент: <b>${esc(c.ascSign)}</b></span> (на пике ${esc(c.peak)})</div>
       ${temp}
       ${c.hits.length ? `<div class="si-text" style="color:var(--t4);font-size:.72rem;margin-top:.25rem">${c.hits.map(esc).join('<br>')}</div>` : ''}
       <button class="btn btn-s" style="margin-top:.4rem" onclick="rectifyApply('${esc(c.peak)}')">Проверить это время в настройках</button>
     </div></div>`;
   }).join('');
-  html += `<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Инструмент сужения диапазона на основе жизненных событий (дирекции, прогрессии, транзиты к углам; орб ${RECTIFY_ORB}°). Не «автоматическое определение точного времени». Данные рождения не перезаписываются — время применится только если сам сохранишь его в настройках.</div>`;
+  html += `<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Инструмент сужения диапазона на основе жизненных событий (дирекции, прогрессии, транзиты к углам; орб ${RECTIFY_ORB}°). Не «автоматическое определение точного времени». Неточная дата события (ошибка в месяцах) размывает картину — указывай даты настолько точно, насколько помнишь. Данные рождения не перезаписываются — время применится только если сам сохранишь его в настройках.</div>`;
   return html;
 }
 // Подставляет время-кандидат в форму настроек, НЕ сохраняя: явное решение
