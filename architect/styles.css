@@ -1337,3 +1337,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 #pg-astro [data-rule],#pg-astro [data-rules]{cursor:pointer}
 .aw-extra{fill:var(--purple);font-size:12px;cursor:pointer}
 .aw-star{fill:var(--gold);font-size:9px;text-anchor:middle;dominant-baseline:central;cursor:pointer}
+.jyo-north{width:100%;max-width:360px;display:block;margin:.4rem auto}
+.jn-line{stroke:var(--bd2);stroke-width:1.5;fill:none}
+.jn-num{fill:var(--t4);font-size:10px;text-anchor:middle}
+.jn-pl{fill:var(--t1);font-size:12px;font-weight:600;text-anchor:middle}

@@ -3047,6 +3047,34 @@ function jyoGrid(placed) {   // placed: { 'Овен': ['Сл','Лн'], … }
     return `<div class="jyo-cell"><div class="jyo-sign">${esc(sign.slice(0, 3))}</div><div class="jyo-pl">${items.map(esc).join(' ')}</div></div>`;
   }).join('')).join('') + '</div>';
 }
+// North Indian стиль: ромбовидная разметка, ДОМА фиксированы (1-й — верхний
+// центральный ромб, счёт против часовой), в полях — номера раши и грахи.
+// Требует известной лагны; без времени рождения — fallback на South.
+function jyoNorthChart(placedByIdx, lagnaIdx) {
+  const POS = [[160, 80], [80, 40], [40, 80], [80, 160], [40, 240], [80, 280], [160, 240], [240, 280], [280, 240], [240, 160], [280, 80], [240, 40]];
+  let s = '<svg viewBox="0 0 320 320" class="jyo-north" role="img" aria-label="Ведическая карта North Indian">';
+  s += '<rect x="1" y="1" width="318" height="318" class="jn-line"/>';
+  s += '<line x1="1" y1="1" x2="319" y2="319" class="jn-line"/><line x1="319" y1="1" x2="1" y2="319" class="jn-line"/>';
+  s += '<path d="M160 1 L319 160 L160 319 L1 160 Z" class="jn-line"/>';
+  for (let h = 0; h < 12; h++) {
+    const signIdx = (lagnaIdx + h) % 12;
+    const [x, y] = POS[h];
+    s += `<text x="${x}" y="${y - 11}" class="jn-num">${signIdx + 1}</text>`;
+    const items = placedByIdx[signIdx] || [];
+    s += `<text x="${x}" y="${y + 5}" class="jn-pl">${items.slice(0, 4).map(esc).join(' ')}</text>`;
+    if (items.length > 4) s += `<text x="${x}" y="${y + 19}" class="jn-pl">${items.slice(4).map(esc).join(' ')}</text>`;
+  }
+  return s + '</svg>';
+}
+function jyoChartHtml(placedByName, lagnaIdx) {
+  const style = ($('jyo-style') && $('jyo-style').value) || CFG.jyoStyle || 'south';
+  if (style === 'north' && lagnaIdx != null) {
+    const byIdx = {}; ZODIAC.forEach((z, i) => { if (placedByName[z]) byIdx[i] = placedByName[z]; });
+    return jyoNorthChart(byIdx, lagnaIdx);
+  }
+  return jyoGrid(placedByName) + (style === 'north' && lagnaIdx == null
+    ? '<div class="si-text" style="color:var(--t3)">North Indian требует известного времени рождения (лагна) — показан South Indian.</div>' : '');
+}
 function jtab(t) { STATE.jyoTab = t;
   document.querySelectorAll('#astro-jtabs .snpill').forEach(p => p.classList.toggle('on', p.dataset.jt === t));
   rJyotish();
@@ -3062,6 +3090,7 @@ async function rJyotish() {
     const b0 = birthUTCDate(DB.astroBirth);
     const t = A.MakeTime(b0);
     const ayaKey = ($('astro-aya') && $('astro-aya').value) || 'lahiri';
+    const js = $('jyo-style'); if (js && CFG.jyoStyle) js.value = CFG.jyoStyle;   // восстановление выбора стиля
     const aya = ayanamsha(ayaKey, t);
     const sid = last.chart.planets.map(p => { const L = norm360(p.lon - aya); return { body: p.body, name: p.name, lon: L, sign: RASHI[Math.floor(L / 30)], deg: L % 30 }; });
     const rahu = norm360(meanRahuLon(t) - aya), ketu = norm360(rahu + 180);
@@ -3079,7 +3108,8 @@ async function rJyotish() {
       // Тап по грахе → развёрнутый текст grahaInRashi (внешние планеты — без тапа: их нет в 9 грахах).
       const G_KEY = { Sun: 'Surya', Moon: 'Chandra', Mars: 'Mangala', Mercury: 'Budha', Jupiter: 'Guru', Venus: 'Shukra', Saturn: 'Shani' };
       const rashiSk = L => RASHI[Math.floor(L / 30)].split(' ')[0];
-      html = `<div class="f-lbl">Раши D1 · South Indian (${esc(AYANAMSHAS[ayaKey].ru)}, айанамша ${aya.toFixed(2)}°)</div>` + jyoGrid(placed) +
+      const lagnaIdx = last.chart.angles ? Math.floor(norm360(last.chart.angles.asc.lon - aya) / 30) : null;
+      html = `<div class="f-lbl">Раши D1 (${esc(AYANAMSHAS[ayaKey].ru)}, айанамша ${aya.toFixed(2)}°)</div>` + jyoChartHtml(placed, lagnaIdx) +
         sid.map(p => `<div class="si-text" style="color:var(--t3)"${ruleAttr(G_KEY[p.body] ? `grahaInRashi.${G_KEY[p.body]}.${rashiSk(p.lon)}` : '', `${p.name} в знаке ${p.sign}`)}>${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°${(ucchaBala(p.body, p.lon) != null) ? ' · уччабала ' + ucchaBala(p.body, p.lon) : ''}${G_KEY[p.body] ? ' <span style="color:var(--accent);font-size:.72rem">подробнее</span>' : ''}</div>`).join('') +
         `<div class="si-text" style="color:var(--t3)"${ruleAttr(`grahaInRashi.Rahu.${rashiSk(rahu)}`, 'Раху в знаке')}>Раху (ср.): ${esc(RASHI[Math.floor(rahu / 30)])} ${(rahu % 30).toFixed(1)}° <span style="color:var(--accent);font-size:.72rem">подробнее</span></div>` +
         `<div class="si-text" style="color:var(--t3)"${ruleAttr(`grahaInRashi.Ketu.${rashiSk(ketu)}`, 'Кету в знаке')}>Кету: ${esc(RASHI[Math.floor(ketu / 30)])} ${(ketu % 30).toFixed(1)}° <span style="color:var(--accent);font-size:.72rem">подробнее</span></div>` +
@@ -3088,7 +3118,8 @@ async function rJyotish() {
     if (tab === 'navamsha') {
       const placed = {};
       sid.forEach(p => { const s = ZODIAC[vargaSign(9, p.lon)]; (placed[s] = placed[s] || []).push(JYO_ABBR[p.body] || p.name[0]); });
-      html = '<div class="f-lbl">Навамша D9 · South Indian</div>' + jyoGrid(placed) +
+      const navLagna = last.chart.angles ? vargaSign(9, norm360(last.chart.angles.asc.lon - aya)) : null;
+      html = '<div class="f-lbl">Навамша D9</div>' + jyoChartHtml(placed, navLagna) +
         `<div class="si-text" style="color:var(--t3)">D10 (дашамша): ` + ['Sun', 'Moon'].map(b => { const p = sid.find(x => x.body === b); return `${esc(p.name)} — ${esc(RASHI[vargaSign(10, p.lon)])}`; }).join(' · ') + '</div>' +
         '<div class="si-text" style="color:var(--t3)">Также считаются: D7, D12 (D16–D60 отложены).</div>';
     }
