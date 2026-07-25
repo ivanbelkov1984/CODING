@@ -2680,10 +2680,18 @@ function computeNatalChart(birth) {
     angles = { asc: zodiacOf(asc), mc: zodiacOf(mc) };
     // Система домов — выбор пользователя (по умолчанию whole-sign).
     const hsys = birth.houseSystem || 'whole';
-    const cusps = houseCusps(hsys, { asc: zodiacOf(asc).lon, mc: zodiacOf(mc).lon, ramc: lst, eps: 23.4392911, phi: birth.lat });
+    const hctx = { asc: zodiacOf(asc).lon, mc: zodiacOf(mc).lon, ramc: lst, eps: 23.4392911, phi: birth.lat };
+    let cusps = houseCusps(hsys, hctx);
+    let usedSys = hsys;
+    // Полярный страж: за Полярным кругом (~66.6°+) квадрантные системы при
+    // «неудачном» звёздном времени срывают порядок куспидов (дом шириной
+    // 300°+, сумма ≠ 360°) — формулы «зажаты» и молчат. Честный ответ:
+    // автоматический откат на Whole-sign с явной пометкой, а не тихая ложь.
+    if (!cuspsSane(cusps)) { usedSys = 'whole'; cusps = houseCusps('whole', hctx); }
     houses = planets.map(p => ({ body: p.body, house: houseOfLon(p.lon, cusps) }));
-    houses.system = hsys; houses.cusps = cusps;
-    housesMeta = { system: hsys, cusps };   // сериализуемо (свойства массива localStorage не переживают)
+    houses.system = usedSys; houses.cusps = cusps;
+    housesMeta = { system: usedSys, cusps };   // сериализуемо (свойства массива localStorage не переживают)
+    if (usedSys !== hsys) housesMeta.fallbackFrom = hsys;
   }
   // ── 1.2: астероиды/Хирон (прибл., two-body JPL) + доп. точки ──
   const asteroids = Object.keys(ASTEROID_ELEMENTS).map(k => {
@@ -3556,6 +3564,18 @@ function houseCusps(system, ctx) {
   c[5] = norm360(c[11] + 180); c[6] = norm360(c[12] + 180); c[8] = norm360(c[2] + 180); c[9] = norm360(c[3] + 180);
   return c;
 }
+// Санитарная проверка куспидов: каждый дом шириной (0°, 180°), полный круг
+// 360°. Нарушение = система не имеет корректного решения на этой широте
+// (полярный срыв квадрантных систем — известное ограничение всех калькуляторов).
+function cuspsSane(c) {
+  let acc = 0;
+  for (let k = 1; k <= 12; k++) {
+    const d = norm360(c[k === 12 ? 1 : k + 1] - c[k]);
+    if (!isFinite(d) || d <= 0 || d >= 180) return false;
+    acc += d;
+  }
+  return Math.abs(acc - 360) < 0.05;
+}
 // Дом планеты по куспидам: k, если долгота лежит в [cusp_k, cusp_{k+1}) по ходу.
 function houseOfLon(lon, cusps) {
   for (let k = 1; k <= 12; k++) {
@@ -3683,41 +3703,28 @@ async function runNatalChart() {
     if (out) out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать (нет сети для загрузки движка?). Попробуй ещё раз.</div>';
   }
 }
+// Экран настроек после расчёта: короткое понятное подтверждение вместо
+// технического дампа (фидбек владельца: «перечень, я даже не понимаю, что
+// это»). Полный разбор — на экране «Натальная карта» с текстами по тапу;
+// антисции и точки — на своих экранах с пояснениями.
 function rAstroChart(chart) {
   const out = $('astro-out'); if (!out) return;
   if (!chart) { const last = (DB.astroCharts || []).slice(-1)[0]; chart = last && last.chart; }
   if (!chart) { out.innerHTML = ''; return; }
-  let html = '<div class="f-lbl" style="margin-top:.5rem">Планеты в знаках</div>';
-  html += chart.planets.map(p => {
-    const h = chart.houses ? (chart.houses.find(x => x.body === p.body) || {}).house : null;
-    return `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°${p.retro ? ' ℞' : ''}${h ? ` · ${h}-й дом` : ''}</div></div></div>`;
-  }).join('');
-  if (chart.angles) {
-    html += `<div class="f-lbl" style="margin-top:.5rem">Углы</div>
-      <div class="si-row"><div class="si-body"><div class="si-text">Асцендент — ${esc(chart.angles.asc.sign)} ${chart.angles.asc.deg.toFixed(1)}° · MC — ${esc(chart.angles.mc.sign)} ${chart.angles.mc.deg.toFixed(1)}°</div></div></div>`;
-  } else if (!chart.timeKnown) {
-    html += `<div class="si-text" style="color:var(--t3);margin:.4rem 0">Время рождения не указано — асцендент и дома не рассчитываются (полдень не подставляем; позиции планет даны на дату, Луна может отличаться в пределах суток).</div>`;
+  const sun = chart.planets.find(p => p.body === 'Sun'), moon = chart.planets.find(p => p.body === 'Moon');
+  let html = `<div class="card" style="padding:.9rem 1rem;margin-top:.6rem">
+    <div class="si-text" style="font-weight:600">✓ Карта рассчитана</div>
+    <div class="si-text" style="margin-top:.35rem">Солнце — ${esc(sun.sign)} ${sun.deg.toFixed(1)}° · Луна — ${esc(moon.sign)} ${moon.deg.toFixed(1)}°${chart.angles ? ` · Асцендент — ${esc(chart.angles.asc.sign)} ${chart.angles.asc.deg.toFixed(1)}°` : ''}</div>`;
+  if (chart.housesMeta && chart.housesMeta.fallbackFrom) {
+    html += `<div class="si-text" style="color:var(--t3);margin-top:.4rem">⚠️ Выбранная система домов на этой широте не имеет корректного решения (Полярный круг) — дома честно рассчитаны по Whole-sign.</div>`;
   }
-  if (chart.asteroids && chart.asteroids.length) {
-    html += '<div class="f-lbl" style="margin-top:.5rem">Астероиды и Хирон <span style="font-weight:500;color:var(--t3)">(прибл.)</span></div>' +
-      chart.asteroids.map(p => `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(p.name)}</b> — ${esc(p.sign)} ${p.deg.toFixed(1)}°</div></div></div>`).join('');
+  if (!chart.timeKnown) {
+    html += `<div class="si-text" style="color:var(--t3);margin-top:.4rem">Время рождения не указано — асцендент и дома не рассчитываются (полдень не подставляем; позиции планет даны на дату, Луна может отличаться в пределах суток).</div>`;
   }
-  if (chart.points && chart.points.lilith) {
-    html += '<div class="f-lbl" style="margin-top:.5rem">Дополнительные точки</div>';
-    html += `<div class="si-row"><div class="si-body"><div class="si-text"><b>Лилит</b> (ср. апогей) — ${esc(chart.points.lilith.sign)} ${chart.points.lilith.deg.toFixed(1)}°</div></div></div>`;
-    if (chart.points.fortune) html += `<div class="si-row"><div class="si-body"><div class="si-text"><b>Точка Судьбы</b> (${chart.points.fortune.isDay ? 'дневная' : 'ночная'} формула) — ${esc(chart.points.fortune.sign)} ${chart.points.fortune.deg.toFixed(1)}°</div></div></div>`;
-    if (chart.points.vertex) html += `<div class="si-row"><div class="si-body"><div class="si-text"><b>Вертекс</b> — ${esc(chart.points.vertex.sign)} ${chart.points.vertex.deg.toFixed(1)}° · <b>Восточная точка</b> — ${esc(chart.points.eastPoint.sign)} ${chart.points.eastPoint.deg.toFixed(1)}°</div></div></div>`;
-  }
-  if (chart.antiscia && chart.antiscia.length) {
-    html += '<div class="f-lbl" style="margin-top:.5rem">Антисции <span style="font-weight:500;color:var(--t3)">(зеркало оси Рак–Козерог)</span></div>' +
-      `<div class="si-text" style="color:var(--t3);line-height:1.7">${chart.antiscia.map(a => `${esc(a.name)}: ${esc(a.sign)} ${a.deg.toFixed(1)}°`).join(' · ')}</div>`;
-  }
-  if (chart.aspects.length) {
-    html += '<div class="f-lbl" style="margin-top:.5rem">Мажорные аспекты</div>' +
-      chart.aspects.slice(0, 12).map(a => `<div class="si-row"><div class="si-body"><div class="si-text">${esc(a.a)} ${esc(a.name)} ${esc(a.b)} (орб ${a.exact}°)</div></div></div>`).join('');
-  }
-  html += `<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Символическая интерпретация в западной тропической традиции. Не прогноз, не диагноз, не влияет на остальные разделы. ${esc(chart.versions.engine)} · ${esc(chart.versions.ruleset)}</div>`;
+  html += `<button class="btn btn-p btn-full" style="margin-top:.6rem" onclick="asub('natal')"><i data-lucide="sparkles"></i>Открыть натальную карту</button>
+    <div class="be-note" style="margin-top:.5rem;color:var(--t3)">Полный разбор — планеты, дома, аспекты, точки — на экране карты, с пояснением по тапу на каждом элементе. Не прогноз, не диагноз, не влияет на остальные разделы. ${esc(chart.versions.engine)} · ${esc(chart.versions.ruleset)}</div></div>`;
   out.innerHTML = html;
+  icons();
 }
 // ─── АСТРОЛОГИЯ: РАЗДЕЛ НАВИГАЦИИ, МЕНЮ-КАРТОЧКИ И КОЛЕСО КАРТЫ ─────
 // Самостоятельный пункт навигации (не в Настройках): меню выбора экранов,
@@ -3917,8 +3924,10 @@ function antab(t) {
   if (t === 'houses') {
     if (!c.angles) html = '<div class="ai-sp-empty">Дома считаются только при известном времени рождения.</div>';
     else if (c.housesMeta && c.housesMeta.cusps) {
-      const names = { whole: 'Whole-sign', placidus: 'Плацидус', equal: 'Равнодомная', campanus: 'Кампанус', regiomontanus: 'Региомонтанус' };
+      const names = { whole: 'Whole-sign', placidus: 'Плацидус', koch: 'Кох', equal: 'Равнодомная', campanus: 'Кампанус', regiomontanus: 'Региомонтанус' };
       html = `<div class="f-lbl">Система: ${esc(names[c.housesMeta.system] || c.housesMeta.system)}</div>` +
+        (c.housesMeta.fallbackFrom ? `<div class="si-text" style="color:var(--t3);margin:.3rem 0">⚠️ Система «${esc(names[c.housesMeta.fallbackFrom] || c.housesMeta.fallbackFrom)}» на этой широте не имеет корректного решения (за Полярным кругом — известное ограничение всех астрологических калькуляторов), поэтому дома честно рассчитаны по Whole-sign.</div>` : '') +
+        (!c.housesMeta.fallbackFrom && DB.astroBirth && Math.abs(DB.astroBirth.lat || 0) > 66 && !['whole', 'equal'].includes(c.housesMeta.system) ? `<div class="si-text" style="color:var(--t3);margin:.3rem 0">На полярной широте дома в этой системе могут быть сильно растянуты (один дом — полнеба) — это свойство самой системы, не ошибка расчёта. Whole-sign или Равнодомная здесь надёжнее.</div>` : '') +
         Array.from({ length: 12 }, (_, i) => {
           const z = zodiacOf(c.housesMeta.cusps[i + 1]);
           const tx = houseCuspText(i + 1, z.sign);
@@ -4554,7 +4563,20 @@ function fillAstroForm() {
     if ($('ab-lon')) $('ab-lon').value = b.lon == null ? '' : String(b.lon);
     if ($('ab-houses')) $('ab-houses').value = b.houseSystem || 'whole';
   }
+  updatePolarWarn();
   rAstroChart();
+}
+
+// Полярное предупреждение (ПРОВЕРКА владельца): выше ~66° квадрантные системы
+// искажаются, выше ~66.6° могут не иметь решения. Показываем до расчёта.
+const QUADRANT_HOUSE_RU = { placidus: 'Плацидус', koch: 'Кох', campanus: 'Кампанус', regiomontanus: 'Региомонтанус' };
+function updatePolarWarn() {
+  const el = $('ab-polar-warn'); if (!el) return;
+  const lat = Math.abs(parseFloat($('ab-lat') ? $('ab-lat').value : ''));
+  const hs = $('ab-houses') ? $('ab-houses').value : 'whole';
+  const bad = isFinite(lat) && lat > 66 && !!QUADRANT_HOUSE_RU[hs];
+  el.style.display = bad ? 'block' : 'none';
+  if (bad) el.textContent = `⚠️ Широта ${lat.toFixed(1)}° — у Полярного круга. Система «${QUADRANT_HOUSE_RU[hs]}» на такой широте может давать неточный результат (сильно растянутые дома), а выше ~66.6° — вовсе не иметь решения: тогда дома автоматически посчитаются по Whole-sign с пометкой. Рекомендуем Whole-sign или Равнодомную.`;
 }
 
 // ─── РЕКТИФИКАЦИЯ: ЭКРАН (анкета событий → диапазон → результат) ─────
