@@ -1335,3 +1335,5 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .jyo-pl{font-size:.78rem;color:var(--t1);font-weight:560;line-height:1.35;word-break:break-word}
 #astro-wheel-full .astro-wheel-svg{max-width:none;width:100%}
 #pg-astro [data-rule],#pg-astro [data-rules]{cursor:pointer}
+.aw-extra{fill:var(--purple);font-size:12px;cursor:pointer}
+.aw-star{fill:var(--gold);font-size:9px;text-anchor:middle;dominant-baseline:central;cursor:pointer}
