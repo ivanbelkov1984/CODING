@@ -2879,6 +2879,67 @@ ok(pdT.keyOk, `первичные дирекции: ключ Найбода, о�
 ok(pdT.uiOk, 'первичные дирекции UI: интро с честной чувствительностью ±4 мин ≈ ±1 год, полный список свёрнут');
 ok(pdT.noTime, 'первичные дирекции: без времени рождения — честный отказ');
 
+// ── Джйотиш: полная Шадбала (BPHS гл. 27; контракт владельца) ──
+const sbT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  // 1) Юниты спхута-дришти: опорные точки классической функции.
+  const dr = (a, d, s) => sbDrishti(a, d, s || 1);
+  const drishtiOk = dr('Sun', 180) === 60 && dr('Sun', 90) === 45 && dr('Sun', 120) === 30
+    && dr('Sun', 60) === 15 && dr('Sun', 0) === 0 && dr('Saturn', 65, 3) === 60
+    && dr('Mars', 100, 4) === 60 && dr('Jupiter', 125, 5) === 60;
+  // 2) Юниты новых варг (стандарт Парашары).
+  const vOk = vargaSign(2, 10) === 4 && vargaSign(2, 40) === 3       // хора: Овен→Лев, Телец→Рак
+    && vargaSign(3, 15) === 4 && vargaSign(3, 45) === 5              // дрекана: Овен 15° (2-й декан) → Лев, Телец 15° → Дева
+    && vargaSign(30, 3) === 0 && vargaSign(30, 27) === 6             // тримшамша Овна: Ма(Овен), Ве(Весы)
+    && vargaSign(30, 33) === 1 && vargaSign(30, 57) === 7;           // тримшамша Тельца: Ве(Телец), Ма(Скорпион)
+  // 3) Пакша-синтетика: полнолуние → бенефики 60, Луна 120, малефики 0.
+  const lons0 = { Sun: 0, Moon: 180, Mars: 10, Mercury: 20, Jupiter: 30, Venus: 40, Saturn: 50 };
+  const birth0 = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62 };
+  const t0 = window.Astronomy.MakeTime(new Date(Date.UTC(2000, 0, 1, 12)));
+  const sb0 = computeShadbala(lons0, 0, birth0, t0);
+  const pakshaOk = Math.abs(sb0.Jupiter.paksha - 60) < 0.01 && Math.abs(sb0.Moon.paksha - 120) < 0.01 && Math.abs(sb0.Saturn.paksha - 0) < 0.01;
+  // Кендради: граха в знаке лагны (Солнце в 0° при лагне 0°) = кендра 60.
+  const kendraOk = sb0.Sun.kendradi === 60;
+  // 4) Реальная карта J2000: диапазоны всех компонентов и структура.
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'whole' };
+  DB.astroCharts = []; await runNatalChart();
+  const chart = DB.astroCharts[0].chart;
+  const t = window.Astronomy.MakeTime(birthUTCDate(DB.astroBirth));
+  const aya = ayanamsha('lahiri', t);
+  const sidLons = {};
+  SB_GRAHAS.forEach(g => { const p = chart.planets.find(x => x.body === g); sidLons[g] = ((p.lon - aya) % 360 + 360) % 360; });
+  const sb = computeShadbala(sidLons, ((chart.angles.asc.lon - aya) % 360 + 360) % 360, DB.astroBirth, t);
+  const rangesOk = SB_GRAHAS.every(g => { const b = sb[g];
+    return b.uchcha >= 0 && b.uchcha <= 60 && b.saptavargaja >= 7 * 1.875 && b.saptavargaja <= 315
+      && [0, 15, 30].includes(b.ojayugma) && [15, 30, 60].includes(b.kendradi) && [0, 15].includes(b.drekkana)
+      && b.dig >= 0 && b.dig <= 60 && b.nathonnata >= 0 && b.nathonnata <= 60
+      && b.paksha >= 0 && b.paksha <= 120 && [0, 60].includes(b.tribhaga) && b.abdadi >= 0 && b.abdadi <= 150
+      && b.ayana >= 0 && b.ayana <= 120 && b.cheshta >= 0 && b.cheshta <= 60
+      && Math.abs(b.drik) <= 105 && b.total > 0 && isFinite(b.rupas);
+  });
+  const naisOk = sb.Sun.naisargika === 60 && sb.Saturn.naisargika === 8.57
+    && sb.Sun.naisargika > sb.Moon.naisargika && sb.Moon.naisargika > sb.Venus.naisargika;
+  // Детерминизм.
+  const sb2 = computeShadbala(sidLons, ((chart.angles.asc.lon - aya) % 360 + 360) % 360, DB.astroBirth, t);
+  const det = JSON.stringify(sb) === JSON.stringify(sb2);
+  // 5) UI: таб «Шадбала» — интро, 7 грах с рупами и разбивкой; без времени — отказ.
+  goTo('astro'); asub('jyo');
+  STATE.jyoTab = 'bala'; await rJyotish();
+  const tx = document.getElementById('astro-jyo').textContent;
+  const uiOk = /шестикратная сила/.test(tx) && (tx.match(/рупы/g) || []).length >= 7
+    && /стхана/.test(tx) && /дрик/.test(tx) && /(выше|ниже) нормы/.test(tx) && /Юддха/.test(tx);
+  DB.astroBirth = { date: '2000-01-01', timeKnown: false, utcOffset: 0 };
+  DB.astroCharts = []; await runNatalChart(); await rJyotish();
+  const noTime = /требует известного времени/.test(document.getElementById('astro-jyo').textContent);
+  STATE.jyoTab = 'rashi'; goTo('home'); DB.astroBirth = null; DB.astroCharts = [];
+  return { drishtiOk, vOk, pakshaOk, kendraOk, rangesOk, naisOk, det, uiOk, noTime };
+});
+ok(sbT.drishtiOk, 'Шадбала: спхута-дришти — опорные точки (180°→60, 90°→45, 120°→30, 60°→15) + особые аспекты Ма/Юп/Са');
+ok(sbT.vOk, 'Шадбала: варги D2/D3/D30 — юниты стандарта Парашары');
+ok(sbT.pakshaOk && sbT.kendraOk, 'Шадбала: пакша-синтетика (полнолуние: бенефики 60, Луна 120, малефики 0) и кендради');
+ok(sbT.rangesOk && sbT.naisOk, 'Шадбала: все 12 подкомпонентов в границах BPHS; найсаргика-иерархия точна');
+ok(sbT.det && sbT.uiOk && sbT.noTime, 'Шадбала: детерминизм; таб с рупами/разбивкой/нормой; без времени — честный отказ');
+
 // ── Астрология: полный портрет карты (интро, Asc/MC, синтез-слой) ──
 const portT = await page.evaluate(async () => {
   await loadAstroEngine(); await loadAstroRules();

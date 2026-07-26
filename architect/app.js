@@ -3218,6 +3218,17 @@ function vargaSign(dn, sidLon) {
   if (dn === 12) return (signIdx + Math.floor(deg / 2.5)) % 12;                                 // двадашамша: от самого знака
   if (dn === 7)  { const p = Math.floor(deg / (30 / 7)); return ((signIdx % 2 === 0) ? (signIdx + p) : (signIdx + 6 + p)) % 12; }  // саптамша: нечётный знак (0-based чётный) от себя, чётный — от 7-го
   if (dn === 10) { const p = Math.floor(deg / 3); return ((signIdx % 2 === 0) ? (signIdx + p) : (signIdx + 8 + p)) % 12; }          // дашамша: нечётный от себя, чётный от 9-го
+  // Варги для Саптаваргаджа-балы (Шадбала, BPHS): правила стандартны.
+  if (dn === 2)  return (signIdx % 2 === 0) ? (deg < 15 ? 4 : 3) : (deg < 15 ? 3 : 4);          // хора: нечётный знак — Лев→Рак, чётный — Рак→Лев
+  if (dn === 3)  return (signIdx + [0, 4, 8][Math.floor(deg / 10)]) % 12;                       // дрекана: 1/5/9-й знаки
+  if (dn === 30) {                                                                              // тримшамша: неравные части по лордам
+    const odd = signIdx % 2 === 0;   // 0-based: Овен=0 — нечётный знак
+    const table = odd
+      ? [[5, 0], [10, 10], [18, 8], [25, 2], [30, 6]]     // Ма(Овен) Са(Водолей) Юп(Стрелец) Ме(Близнецы) Ве(Весы)
+      : [[5, 1], [12, 5], [20, 11], [25, 9], [30, 7]];    // Ве(Телец) Ме(Дева) Юп(Рыбы) Са(Козерог) Ма(Скорпион)
+    for (const [lim, s] of table) if (deg < lim) return s;
+    return table[4][1];
+  }
   return null;
 }
 // Вимшоттари-даша: старт от накшатры Луны. 120 лет.
@@ -3283,6 +3294,159 @@ function ucchaBala(body, sidLon) {
   const deb = norm360(EXALT[body] + 180);
   const dist = Math.abs(((sidLon - deb + 180) % 360 + 360) % 360 - 180);
   return Math.round(dist / 180 * 60 * 10) / 10;
+}
+
+// ─── ПОЛНАЯ ШАДБАЛА (BPHS, гл. 27; по контракту владельца 2026-07-26) ──
+// Все формулы — Брихат Парашара Хора Шастра (классика, public domain).
+// Задокументированные выборы вариантов (места, где школы расходятся,
+// перечислены и в ENGINE_README): бхавы — whole-sign от сидерической
+// лагны; хора-бала — равные часы от восхода; Чешта — непрерывная формула
+// бхуджа/3 (BPHS 27.24-25), а не таблица 8 состояний; Дрик — (бенефики −
+// малефики)/4 без спорного «super add»; Юддха-поправка опущена (требует
+// широт планет; сближение <1° — редкий случай, помечается в UI).
+const SB_GRAHAS = ['Sun', 'Moon', 'Mars', 'Mercury', 'Jupiter', 'Venus', 'Saturn'];
+const SB_LORD = [2, 5, 3, 1, 0, 3, 5, 2, 4, 6, 6, 4];   // лорд знака → индекс в SB_GRAHAS (Овен=Ма…)
+const SB_MOOLA = { Sun: [4, 0, 20], Moon: [1, 4, 20], Mars: [0, 0, 12], Mercury: [5, 16, 20], Jupiter: [8, 0, 10], Venus: [6, 0, 15], Saturn: [10, 0, 20] };  // [знак, от°, до°]
+// Естественная дружба (BPHS): для каждого — друзья / враги, прочие нейтральны.
+const SB_FRIENDS = {
+  Sun: ['Moon', 'Mars', 'Jupiter'], Moon: ['Sun', 'Mercury'], Mars: ['Sun', 'Moon', 'Jupiter'],
+  Mercury: ['Sun', 'Venus'], Jupiter: ['Sun', 'Moon', 'Mars'], Venus: ['Mercury', 'Saturn'], Saturn: ['Mercury', 'Venus'],
+};
+const SB_ENEMIES = {
+  Sun: ['Venus', 'Saturn'], Moon: [], Mars: ['Mercury'], Mercury: ['Moon'],
+  Jupiter: ['Mercury', 'Venus'], Venus: ['Sun', 'Moon'], Saturn: ['Sun', 'Moon', 'Mars'],
+};
+const SB_BENEFIC = { Sun: false, Moon: true, Mars: false, Mercury: true, Jupiter: true, Venus: true, Saturn: false };
+const SB_NAISARGIKA = { Sun: 60, Moon: 51.43, Venus: 42.86, Jupiter: 34.29, Mercury: 25.71, Mars: 17.14, Saturn: 8.57 };
+const SB_MIN = { Sun: 390, Moon: 360, Mars: 300, Mercury: 420, Jupiter: 390, Venus: 330, Saturn: 300 };  // BPHS 27.32-33
+// Средние долготы (Меёс, J2000 + ход за юлианский век TT) — для Чешты.
+const SB_MEAN = { Sun: [280.46646, 36000.76983], Mercury: [252.250906, 149472.674636], Venus: [181.979801, 58517.815676], Mars: [355.433, 19140.299304], Jupiter: [34.351519, 3034.905661], Saturn: [50.077444, 1222.113849] };
+const sbBhuja = k => { k = norm360(k); return k > 180 ? 360 - k : k; };
+// Составная дружба: естественная + временная (грахи в 2,3,4,10,11,12 от грахи).
+function sbCompound(g, lordG, sidLons) {
+  if (g === lordG) return 'own';
+  const nat = SB_FRIENDS[g].includes(lordG) ? 1 : SB_ENEMIES[g].includes(lordG) ? -1 : 0;
+  const houseDist = (Math.floor(sidLons[lordG] / 30) - Math.floor(sidLons[g] / 30) + 12) % 12 + 1;
+  const temp = [2, 3, 4, 10, 11, 12].includes(houseDist) ? 1 : -1;
+  const c = nat + temp;
+  return c >= 2 ? 'adhimitra' : c === 1 ? 'mitra' : c === 0 ? 'sama' : c === -1 ? 'shatru' : 'adhishatru';
+}
+const SB_DIGNITY_V = { own: 30, adhimitra: 22.5, mitra: 15, sama: 7.5, shatru: 3.75, adhishatru: 1.875 };
+// Спхута-дришти (BPHS 26): сила аспекта по угловой дистанции + особые
+// полные аспекты Марса (4/8), Юпитера (5/9), Сатурна (3/10) по знакам.
+function sbDrishti(fromG, dist, signDist) {
+  if ((fromG === 'Mars' && (signDist === 4 || signDist === 8)) ||
+      (fromG === 'Jupiter' && (signDist === 5 || signDist === 9)) ||
+      (fromG === 'Saturn' && (signDist === 3 || signDist === 10))) return 60;
+  if (dist < 30 || dist > 300) return 0;
+  if (dist <= 60) return (dist - 30) / 2;
+  if (dist <= 90) return (dist - 60) * 1 + 15;
+  if (dist <= 120) return 45 - (dist - 90) / 2;
+  if (dist <= 150) return 30 - (dist - 120);
+  if (dist <= 180) return (dist - 150) * 2;
+  return Math.max(0, 60 - (dist - 180) / 2);
+}
+// Полный расчёт: sidLons — сидерические долготы 7 грах; lagnaSid — лагна;
+// birth/t — момент рождения; sunDeclOf(lam) — склонение точки эклиптики.
+function computeShadbala(sidLons, lagnaSid, birth, t) {
+  const A = window.Astronomy;
+  const T = t.tt / 36525;
+  const lagnaSign = Math.floor(lagnaSid / 30);
+  const out = {};
+  // Восход/закат по полудуге Солнца (без рефракции — задокументировано).
+  const sunSid = sidLons.Sun;
+  const meanOf = g => norm360(SB_MEAN[g][0] + SB_MEAN[g][1] * T);
+  const declOf = lam => Math.asin(Math.sin(23.4392911 * DEG) * Math.sin(lam * DEG)) / DEG;
+  const b0 = birthUTCDate(birth);
+  // Для ната/хоры/трибхаги — местное СРЕДНЕЕ солнечное время (по долготе).
+  const lmtMin = ((b0.getTime() / 60000 + (birth.lon || 0) * 4) % 1440 + 1440) % 1440;
+  const sunDecl = declOf(norm360(A.SunPosition(t).elon));
+  const H0 = Math.acos(Math.max(-1, Math.min(1, -Math.tan((birth.lat || 0) * DEG) * Math.tan(sunDecl * DEG)))) / DEG;
+  const riseMin = 720 - H0 * 4, setMin = 720 + H0 * 4;  // мин местного среднего времени
+  const isDay = lmtMin >= riseMin && lmtMin < setMin;
+  // Лорды дня/часа/месяца/года (BPHS 27.13-14; ахаргана от эпохи Кали).
+  const wd = new Date(b0.getTime() + (birth.utcOffset || 0) * 3600e3).getUTCDay();
+  const VARA_LORD = ['Sun', 'Moon', 'Mars', 'Mercury', 'Jupiter', 'Venus', 'Saturn'];   // вс..сб
+  const CHALDEAN = ['Sun', 'Venus', 'Mercury', 'Moon', 'Saturn', 'Jupiter', 'Mars'];
+  const jd = 2451545.0 + t.ut;
+  const ahargana = Math.floor(jd - 588465.5);
+  const yearLord = VARA_LORD[(Math.floor(ahargana / 360) * 3 + 1) % 7];
+  const monthLord = VARA_LORD[(Math.floor(ahargana / 30) * 2 + 1) % 7];
+  const dayLord = VARA_LORD[wd];
+  // Хора: равные часы от восхода; первый час — лорд дня.
+  const sinceRise = ((lmtMin - riseMin) % 1440 + 1440) % 1440;
+  const horaIdx = Math.floor(sinceRise / 60);
+  const horaLord = CHALDEAN[(CHALDEAN.indexOf(dayLord) + horaIdx) % 7];
+  // Пакша: дуга Луна−Солнце.
+  const pakshaArc = sbBhuja(sidLons.Moon - sidLons.Sun);
+  const beneficPaksha = pakshaArc / 3;
+  // Тон дня для трибхаги.
+  const dayPart = isDay ? Math.min(2, Math.floor((lmtMin - riseMin) / ((setMin - riseMin) / 3))) : Math.min(2, Math.floor((((lmtMin - setMin) % 1440 + 1440) % 1440) / ((1440 - (setMin - riseMin)) / 3)));
+  const TRIBHAGA = isDay ? ['Mercury', 'Sun', 'Saturn'] : ['Moon', 'Venus', 'Mars'];
+  // Ната/унната: 60 в полдень (дневные грахи), 60 в полночь (ночные).
+  const unnataV = (720 - Math.min(Math.abs(lmtMin - 720), 720)) / 12;
+  for (const g of SB_GRAHAS) {
+    const lon = sidLons[g];
+    const sign = Math.floor(lon / 30), deg = lon % 30;
+    const b = {};
+    // ── Стхана ──
+    b.uchcha = ucchaBala(g, lon) || 0;
+    let sapta = 0;
+    for (const dn of [1, 2, 3, 7, 9, 12, 30]) {
+      const vs = vargaSign(dn, lon);
+      const lordG = SB_GRAHAS[SB_LORD[vs]];
+      const m = SB_MOOLA[g];
+      if (dn === 1 && vs === m[0] && deg >= m[1] && deg < m[2]) { sapta += 45; continue; }
+      sapta += SB_DIGNITY_V[sbCompound(g, lordG, sidLons)];
+    }
+    b.saptavargaja = sapta;
+    const navSign = vargaSign(9, lon);
+    const evenLover = g === 'Moon' || g === 'Venus';
+    b.ojayugma = ((sign % 2 === (evenLover ? 1 : 0)) ? 15 : 0) + ((navSign % 2 === (evenLover ? 1 : 0)) ? 15 : 0);
+    const house = ((sign - lagnaSign + 12) % 12) + 1;
+    b.kendradi = [1, 4, 7, 10].includes(house) ? 60 : [2, 5, 8, 11].includes(house) ? 30 : 15;
+    const drek = Math.floor(deg / 10);
+    b.drekkana = (['Sun', 'Mars', 'Jupiter'].includes(g) && drek === 0) || (['Moon', 'Venus'].includes(g) && drek === 1) || (['Mercury', 'Saturn'].includes(g) && drek === 2) ? 15 : 0;
+    b.sthana = b.uchcha + b.saptavargaja + b.ojayugma + b.kendradi + b.drekkana;
+    // ── Диг ── (точка силы: Сл/Ма — 10-я, Юп/Ме — 1-я, Лн/Ве — 4-я, Са — 7-я)
+    const mcSid = norm360(lagnaSid + 270);   // whole-sign упрощение оси: 10-я от лагны
+    const power = { Sun: mcSid, Mars: mcSid, Jupiter: lagnaSid, Mercury: lagnaSid, Moon: norm360(lagnaSid + 90), Venus: norm360(lagnaSid + 90), Saturn: norm360(lagnaSid + 180) };
+    b.dig = (180 - sbBhuja(lon - power[g])) / 3;
+    // ── Кала ──
+    b.nathonnata = g === 'Mercury' ? 60 : ['Sun', 'Jupiter', 'Venus'].includes(g) ? unnataV : 60 - unnataV;
+    b.paksha = (SB_BENEFIC[g] ? beneficPaksha : 60 - beneficPaksha) * (g === 'Moon' ? 2 : 1);
+    b.tribhaga = (g === 'Jupiter' || TRIBHAGA[dayPart] === g) ? 60 : 0;
+    b.abdadi = (yearLord === g ? 15 : 0) + (monthLord === g ? 30 : 0) + (dayLord === g ? 45 : 0) + (horaLord === g ? 60 : 0);
+    const decl = declOf(norm360(lon + ayanamsha('lahiri', t)));   // склонение по тропической долготе
+    const declSigned = g === 'Mercury' ? Math.abs(decl) : (g === 'Moon' || g === 'Saturn') ? -decl : decl;
+    b.ayana = Math.max(0, Math.min(60, (24 + declSigned) / 48 * 60)) * (g === 'Sun' ? 2 : 1);
+    b.kala = b.nathonnata + b.paksha + b.tribhaga + b.abdadi + b.ayana;
+    // ── Чешта ──
+    if (g === 'Sun') b.cheshta = b.ayana / 2;
+    else if (g === 'Moon') b.cheshta = b.paksha / 2;
+    else {
+      const seeghra = (g === 'Mercury' || g === 'Venus') ? meanOf(g) : meanOf('Sun');
+      const meanL = (g === 'Mercury' || g === 'Venus') ? meanOf('Sun') : meanOf(g);
+      const trueTrop = norm360(lon + ayanamsha('lahiri', t));
+      b.cheshta = sbBhuja(seeghra - norm360((meanL + trueTrop) / 2 + (Math.abs(meanL - trueTrop) > 180 ? 180 : 0))) / 3;
+    }
+    // ── Найсаргика · Дрик ──
+    b.naisargika = SB_NAISARGIKA[g];
+    let drik = 0;
+    for (const o of SB_GRAHAS) {
+      if (o === g) continue;
+      const dist = norm360(lon - sidLons[o]);   // от аспектора к грахе
+      const signDist = ((sign - Math.floor(sidLons[o] / 30) + 12) % 12) + 1;
+      const dr = sbDrishti(o, dist, signDist);
+      drik += (SB_BENEFIC[o] ? 1 : -1) * dr / 4;
+    }
+    b.drik = drik;
+    b.total = b.sthana + b.dig + b.kala + b.cheshta + b.naisargika + b.drik;
+    b.rupas = b.total / 60;
+    b.strong = b.total >= SB_MIN[g];
+    out[g] = b;
+  }
+  return out;
 }
 // ─── АРАБСКИЕ ТОЧКИ И НЕПОДВИЖНЫЕ ЗВЁЗДЫ (очередь 4) ────────────────
 // Арабские точки — классические формулы из арабских трактатов (public domain
@@ -3495,6 +3659,25 @@ async function rJyotish() {
       html += `<button class="btn btn-s btn-full" style="margin-top:.4rem" onclick="const d=$('dasha-full');d.style.display=d.style.display==='none'?'block':'none'">Полный цикл Вимшоттари (120 лет) — показать/скрыть</button>
         <div id="dasha-full" style="display:none">` +
         dasha.seq.map(d => `<div class="si-text" style="color:${d === dasha.current ? 'var(--t1)' : 'var(--t3)'}">${esc(d.lord)}: ${d.from.toISOString().slice(0, 10)} — ${d.to.toISOString().slice(0, 10)}</div>`).join('') + '</div>';
+    }
+    if (tab === 'bala') {
+      html = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.4rem">Шадбала — классическая «шестикратная сила» грах (BPHS): положение, направление, время, движение, природа и аспекты складываются в итог в рупах. Сильная граха увереннее проявляет свои темы. Значения у разных калькуляторов немного расходятся (школы считают под-компоненты по-разному) — наши выборы задокументированы.</div>`;
+      if (!last.chart.angles) {
+        html += '<div class="ai-sp-empty">Шадбала требует известного времени рождения (лагна, дома, время суток).</div>';
+      } else {
+        const sidLons = {};
+        SB_GRAHAS.forEach(g => { const p = sid.find(x => x.body === g); if (p) sidLons[g] = p.lon; });
+        const lagnaSid = norm360(last.chart.angles.asc.lon - aya);
+        const sb = computeShadbala(sidLons, lagnaSid, DB.astroBirth, t);
+        const rank = [...SB_GRAHAS].sort((a, b2) => sb[b2].total - sb[a].total);
+        html += '<div class="f-lbl">Сила грах (рупы; норма BPHS — своя у каждой)</div>' + rank.map(g => {
+          const b = sb[g]; const pct = Math.min(100, b.total / 10);
+          return `<div class="si-row"><div class="si-body"><div class="si-text"><b>${esc(ASTRO_RU[g])}</b> — ${b.rupas.toFixed(2)} рупы ${b.strong ? '<span style="color:var(--green)">✓ выше нормы</span>' : '<span style="color:var(--t3)">ниже нормы</span>'}
+            <div style="background:var(--bd);border-radius:4px;height:6px;margin:.3rem 0"><div style="width:${pct}%;height:6px;border-radius:4px;background:${b.strong ? 'var(--green)' : 'var(--t4)'}"></div></div>
+            <span style="color:var(--t4);font-size:.72rem">стхана ${b.sthana.toFixed(0)} · диг ${b.dig.toFixed(0)} · кала ${b.kala.toFixed(0)} · чешта ${b.cheshta.toFixed(0)} · найсаргика ${b.naisargika.toFixed(0)} · дрик ${b.drik.toFixed(0)}</span></div></div></div>`;
+        }).join('');
+        html += '<div class="si-text" style="color:var(--t4);font-size:.72rem;margin-top:.3rem">Юддха-поправка (война планет) не применяется — требует широт планет; случай редкий (сближение < 1°).</div>';
+      }
     }
     if (tab === 'panchanga') {
       const pan = panchanga(sun.lon, moon.lon, new Date(b0.getTime() + (DB.astroBirth.utcOffset || 0) * 3600e3));
