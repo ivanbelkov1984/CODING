@@ -65,10 +65,9 @@
       if (!button || !dock.contains(button)) return;
       const action = currentActions().find(item => item.id === button.dataset.action);
       if (action && typeof action.run === 'function') {
+        // Let the click and focus lifecycle finish. The observed overlay class
+        // change schedules the toolbar hide on the next animation frame.
         action.run();
-        // Hide immediately when an action opens a sheet, but preserve the
-        // clicked button until the browser has completed dispatching the click.
-        update();
       }
     });
     return dock;
