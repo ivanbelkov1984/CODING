@@ -1,0 +1,41 @@
+name: Full E2E diagnostic
+
+on:
+  pull_request:
+    paths:
+      - "architect/**"
+      - ".github/workflows/full-e2e-diagnostic.yml"
+
+jobs:
+  full-e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: architect
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: architect/package-lock.json
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Run full E2E and capture log
+        id: test
+        shell: bash
+        run: |
+          set +e
+          node build.mjs --combined dist/app.html > full-e2e.log 2>&1
+          node tests/e2e.mjs >> full-e2e.log 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: full-e2e-test-log
+          path: architect/full-e2e.log
+          if-no-files-found: error
+      - name: Fail after artifact upload
+        if: steps.test.outputs.exit_code != '0'
+        run: exit 1
