@@ -155,13 +155,16 @@ await page.evaluate(() => {
 });
 await page.reload();
 await page.waitForSelector('#nsh-context-dock');
-await page.evaluate(() => {
+const reloadState = await page.evaluate(() => {
   const splash = document.getElementById('splash');
   if (splash) splash.style.display = 'none';
   window.__ARCH_CONTEXT_DOCK__.update();
+  return {
+    hash: location.hash,
+    labels: [...document.querySelectorAll('#nsh-context-dock button')].map(item => item.getAttribute('aria-label')),
+  };
 });
-const reloadLabels = await dock.getByRole('button').evaluateAll(items => items.map(item => item.getAttribute('aria-label')));
-ok(location.hash !== '#/health' || reloadLabels.join('|') === 'Симптом|Измерение|Тяга', 'Перезагрузка не оставляет dock от предыдущего раздела');
+ok(reloadState.hash !== '#/health' || reloadState.labels.join('|') === 'Симптом|Измерение|Тяга', 'Перезагрузка не оставляет dock от предыдущего раздела');
 
 ok(errors.length === 0, `JS-ошибок нет (${errors.length})`);
 await browser.close();
