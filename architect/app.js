@@ -506,7 +506,7 @@ function goTo(tab, el) {
   if (tab==='health') rHealth();
   if (tab==='astro') asub('menu');
   if (tab==='settings') { rProfileRow(); checkApiStatus(); rPushStatus(); const kc=$('keys-cnt'); if (kc) kc.textContent = KEY_SERVICES.filter(s=>getAiKeyFor(s.p)).length + ' из ' + KEY_SERVICES.length; }
-  if (document.body.classList.contains('navshell')) nshHighlight(tab);
+  if (document.body.classList.contains('navshell')) { nshHighlight(tab); nshWriteHash(tab); }
 }
 function msub(tab, el) {
   document.querySelectorAll('[id^="ms-"]').forEach(t => t.style.display='none');
@@ -7862,7 +7862,7 @@ function navShellEnabled() { try { return localStorage.getItem('arch_nav_v2') ==
 // Вкладки shell → существующие id (goTo). «Ещё» открывает drawer со всеми разделами.
 const NSH_MAP = { today: 'home', diary: 'map', overview: 'sys' };
 function navGo(dest) {
-  if (dest === 'more') { openNav(); return; }
+  if (dest === 'more') { openOv('ov-more'); nshHighlight('more'); return; }
   const tab = NSH_MAP[dest];
   if (tab) goTo(tab);
 }
@@ -7877,14 +7877,54 @@ function nshHighlight(tab) {
   });
 }
 function openCapture() { openOv('ov-capture'); }
+// «Запись сферы» из лаунчера: если сферы есть — открыть лог первой, иначе
+// провести пользователя к разделу «Сферы» (там создать/выбрать). Данные не меняются.
+function captureSphere() {
+  closeOv('ov-capture');
+  if ((DB.spheres || []).length) openSphereLog(DB.spheres[0].id);
+  else { goTo('vit'); toast('Заведи сферу, чтобы отмечать трекер', ''); }
+}
 // Глобальная ＋ в topbar: при новом shell — «Записать», иначе прежний инсайт.
 function capturePlus() { if (navShellEnabled()) openCapture(); else openOv('ov-add'); }
+
+// ── Hash-роутинг (аддитивно; только при navshell) ───────────────
+// Делает состояние адресуемым и восстановимым при перезагрузке (сейчас
+// всегда открывается «Сегодня»). Canonical id (goTo-таргеты) — источник
+// правды; hash лишь их сериализует. Без флага не пишется и не читается.
+const NSH_SLUGS = { home: 'today', map: 'diary', sys: 'overview', vit: 'spheres', health: 'health', astro: 'astro', settings: 'settings' };
+const NSH_SLUGS_REV = { today: 'home', diary: 'map', overview: 'sys', spheres: 'vit', health: 'health', astro: 'astro', settings: 'settings' };
+function nshWriteHash(tab) {
+  const slug = NSH_SLUGS[tab]; if (!slug) return;
+  const h = '#/' + slug;
+  if (location.hash === h) return;
+  try { history.replaceState(null, '', h); } catch (e) { try { location.hash = h; } catch (_) {} }
+}
+function nshReadHash() {
+  const m = (location.hash || '').match(/^#\/([a-z]+)/);
+  return m ? (NSH_SLUGS_REV[m[1]] || null) : null;
+}
+let _nshHashBound = false;
+function nshBindHash() {
+  if (_nshHashBound) return; _nshHashBound = true;
+  window.addEventListener('hashchange', () => {
+    if (!document.body.classList.contains('navshell')) return;
+    const t = nshReadHash(); if (!t) return;
+    const cur = document.querySelector('.pg.on');
+    if (!cur || cur.id !== 'pg-' + t) goTo(t);
+  });
+}
 function applyNavShell() {
   const on = navShellEnabled();
   document.body.classList.toggle('navshell', on);
   const lbl = $('navshell-lbl'); if (lbl) lbl.textContent = on ? 'Вкл' : 'Выкл';
   const add = $('topbar-add'); if (add) add.setAttribute('aria-label', on ? 'Записать' : 'Новый инсайт');
-  if (on) { const pg = document.querySelector('.pg.on'); nshHighlight(pg ? pg.id.replace('pg-', '') : 'home'); }
+  if (on) {
+    nshBindHash();
+    // Восстановление состояния из hash при загрузке (иначе — текущий раздел).
+    const t = nshReadHash();
+    if (t) { const cur = document.querySelector('.pg.on'); if (!cur || cur.id !== 'pg-' + t) goTo(t); }
+    const pg = document.querySelector('.pg.on'); nshHighlight(pg ? pg.id.replace('pg-', '') : 'home');
+  }
 }
 function toggleNavShell() {
   const on = !navShellEnabled();

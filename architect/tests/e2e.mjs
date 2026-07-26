@@ -3128,32 +3128,50 @@ const nsh = await page.evaluate(() => {
   navGo('overview'); r.overview = document.getElementById('pg-sys').classList.contains('on');
   navGo('today');    r.today = document.getElementById('pg-home').classList.contains('on');
   r.todayActive = document.querySelector('.nsh-tab[data-nav="today"]').classList.contains('on');
-  navGo('more');     r.more = document.body.classList.contains('nav-open'); closeNav();
-  // «Записать» и ＋ открывают лаунчер с существующими типами.
+  // «Ещё» открывает сгруппированный хаб (1.1) со всеми разделами.
+  navGo('more');     r.more = document.getElementById('ov-more').classList.contains('on');
+  r.moreRows = document.querySelectorAll('#ov-more .srow').length;
+  r.moreActive = document.querySelector('.nsh-tab[data-nav="more"]').classList.contains('on');
+  closeOv('ov-more');
+  // Полный лаунчер «Записать» (1.2): все типы записи; «Запись сферы» не падает без сфер.
   openCapture();     r.capture = document.getElementById('ov-capture').classList.contains('on');
   r.capBtns = document.querySelectorAll('#ov-capture .nsh-cap').length;
-  closeOv('ov-capture');
+  captureSphere();   r.sphereSafe = true; // не бросает исключение даже без сфер
+  document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
   capturePlus();     r.plusCapture = document.getElementById('ov-capture').classList.contains('on');
   closeOv('ov-capture');
+  // Hash-роутинг (1.5): destination сериализуется и восстанавливается.
+  navGo('diary');    r.hashDiary = location.hash === '#/diary';
+  navGo('overview'); r.hashOverview = location.hash === '#/overview';
+  location.hash = '#/spheres'; window.dispatchEvent(new HashChangeEvent('hashchange'));
+  r.hashRestore = document.getElementById('pg-vit').classList.contains('on');
   // Тап-цели навигации ≥44px (accessibility).
   const small = [...document.querySelectorAll('#nsh-tabbar .nsh-tab, #nsh-fab')].filter(e => { const b = e.getBoundingClientRect(); return b.width < 44 || b.height < 44; });
   r.tapOk = small.length === 0;
-  // Выключаем — прежнее поведение возвращается байт-в-байт.
+  // Выключаем — прежнее поведение возвращается; hash больше не пишется.
   localStorage.setItem('arch_nav_v2', '0'); applyNavShell();
   r.offAgain = !document.body.classList.contains('navshell');
   r.offLabel = document.getElementById('topbar-add').getAttribute('aria-label');
+  const hashBefore = location.hash;
+  goTo('home'); r.hashFrozenOff = location.hash === hashBefore; // OFF: goTo не трогает hash
   capturePlus();     r.plusInsightOff = document.getElementById('ov-add').classList.contains('on');
-  closeOv('ov-add'); goTo('home');
+  closeOv('ov-add');
+  try { history.replaceState(null, '', location.pathname); } catch (e) { location.hash = ''; }
+  goTo('home');
   return r;
 });
 ok(nsh.offNoClass && nsh.offHidden, 'nav shell: по умолчанию OFF — класс не стоит, таб-бар скрыт');
 ok(nsh.onClass && nsh.tabs === 4 && nsh.hasFab, 'nav shell ON: body.navshell, 4 вкладки + FAB');
 ok(nsh.addLabel === 'Записать' && nsh.offLabel === 'Новый инсайт', 'nav shell: ＋ = «Записать» при ON, «Новый инсайт» при OFF');
 ok(nsh.diary && nsh.overview && nsh.today, 'nav shell: вкладки ведут на существующие разделы (map/sys/home)');
-ok(nsh.todayActive && nsh.more, 'nav shell: активная вкладка подсвечена; «Ещё» открывает drawer со всеми разделами');
-ok(nsh.capture && nsh.capBtns >= 4 && nsh.plusCapture, 'nav shell: «Записать»/＋ открывают лаунчер с типами записи');
+ok(nsh.todayActive && nsh.more && nsh.moreActive && nsh.moreRows >= 9, 'nav shell 1.1: «Ещё» — сгруппированный хаб со всеми разделами, вкладка подсвечена');
+ok(nsh.capture && nsh.capBtns >= 9 && nsh.plusCapture, 'nav shell 1.2: полный лаунчер «Записать» (все типы записи)');
+ok(nsh.sphereSafe, 'nav shell 1.2: «Запись сферы» безопасна без сфер (без исключений)');
+ok(nsh.hashDiary && nsh.hashOverview, 'nav shell 1.5: раздел сериализуется в hash (#/diary, #/overview)');
+ok(nsh.hashRestore, 'nav shell 1.5: hashchange восстанавливает раздел (#/spheres → Сферы)');
 ok(nsh.tapOk, 'nav shell: тап-цели вкладок и FAB ≥44px');
 ok(nsh.offAgain && nsh.plusInsightOff, 'nav shell OFF: прежнее поведение возвращается (＋ = инсайт)');
+ok(nsh.hashFrozenOff, 'nav shell OFF: goTo не трогает location.hash');
 
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);

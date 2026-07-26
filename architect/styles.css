@@ -1385,3 +1385,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
   body.navshell .burger{display:none}
   body.navshell .nsh-tabbar{display:none}
 }
+/* «Ещё»-хаб и группы лаунчера «Записать» */
+.more-list{display:flex;flex-direction:column;gap:2px;padding:0 var(--s3) var(--s2)}
+.more-list .srow{border-radius:var(--r12)}
+#ov-capture .sec-lbl:first-of-type,#ov-more .sec-lbl:first-of-type{margin-top:0}
