@@ -506,6 +506,7 @@ function goTo(tab, el) {
   if (tab==='health') rHealth();
   if (tab==='astro') asub('menu');
   if (tab==='settings') { rProfileRow(); checkApiStatus(); rPushStatus(); const kc=$('keys-cnt'); if (kc) kc.textContent = KEY_SERVICES.filter(s=>getAiKeyFor(s.p)).length + ' из ' + KEY_SERVICES.length; }
+  if (document.body.classList.contains('navshell')) nshHighlight(tab);
 }
 function msub(tab, el) {
   document.querySelectorAll('[id^="ms-"]').forEach(t => t.style.display='none');
@@ -7834,6 +7835,7 @@ function initAll() {
     const tv = $('thv'); if(tv) tv.textContent = t==='dark'?'Ночная':'Дневная';
   }
   updateDomainLabel(); rProfileRow();
+  applyNavShell();
   rHome(); rCompass(); rAxCells(); rKPIs(); rIns(); rBook();
   rBots(); rPats(); rDrms(); rSpi(); rEvoList($('evo-sh')); rDig();
   icons();
@@ -7850,6 +7852,46 @@ document.addEventListener('DOMContentLoaded', () => {
   initAll();
 });
 
+
+// ═══ NAVIGATION SHELL 1.0 (за флагом arch_nav_v2) ════════════════
+// Аддитивный слой: нижний таб-бар (iPhone) / постоянный sidebar (iPad
+// portrait) / глобальное «Записать». Без флага body не получает класс
+// navshell → CSS-правила неактивны, поведение как раньше. Вкладки ведут
+// на СУЩЕСТВУЮЩИЕ destination id — ни один маршрут не теряется.
+function navShellEnabled() { try { return localStorage.getItem('arch_nav_v2') === '1'; } catch (e) { return false; } }
+// Вкладки shell → существующие id (goTo). «Ещё» открывает drawer со всеми разделами.
+const NSH_MAP = { today: 'home', diary: 'map', overview: 'sys' };
+function navGo(dest) {
+  if (dest === 'more') { openNav(); return; }
+  const tab = NSH_MAP[dest];
+  if (tab) goTo(tab);
+}
+// Обратный маппinг: подсветить активную вкладку по текущему разделу.
+// Разделы вне 4 вкладок (Сферы/Здоровье/Астро/Настройки) относятся к «Ещё».
+function nshHighlight(tab) {
+  const dest = tab === 'home' ? 'today' : tab === 'map' ? 'diary' : tab === 'sys' ? 'overview' : 'more';
+  document.querySelectorAll('.nsh-tab').forEach(b => {
+    const on = b.dataset.nav === dest;
+    b.classList.toggle('on', on);
+    if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  });
+}
+function openCapture() { openOv('ov-capture'); }
+// Глобальная ＋ в topbar: при новом shell — «Записать», иначе прежний инсайт.
+function capturePlus() { if (navShellEnabled()) openCapture(); else openOv('ov-add'); }
+function applyNavShell() {
+  const on = navShellEnabled();
+  document.body.classList.toggle('navshell', on);
+  const lbl = $('navshell-lbl'); if (lbl) lbl.textContent = on ? 'Вкл' : 'Выкл';
+  const add = $('topbar-add'); if (add) add.setAttribute('aria-label', on ? 'Записать' : 'Новый инсайт');
+  if (on) { const pg = document.querySelector('.pg.on'); nshHighlight(pg ? pg.id.replace('pg-', '') : 'home'); }
+}
+function toggleNavShell() {
+  const on = !navShellEnabled();
+  try { localStorage.setItem('arch_nav_v2', on ? '1' : '0'); } catch (e) {}
+  applyNavShell();
+  toast(on ? 'Новая навигация включена' : 'Новая навигация выключена', 'ok');
+}
 
 // ═══ SHELL: drawer-навигация, блок аккаунта, жесты ═══════════════
 function openNav()  { rSidebar(); document.body.classList.add('nav-open'); }

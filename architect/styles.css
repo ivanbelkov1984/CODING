@@ -1344,3 +1344,44 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .jn-line{stroke:var(--bd2);stroke-width:1.5;fill:none}
 .jn-num{fill:var(--t4);font-size:10px;text-anchor:middle}
 .jn-pl{fill:var(--t1);font-size:12px;font-weight:600;text-anchor:middle}
+
+/* ═══ NAVIGATION SHELL 1.0 ═══════════════════════════════════════
+   Аддитивный слой за флагом arch_nav_v2 (→ body.navshell). Без флага
+   ни одно правило не активно: базовый .nsh-tabbar скрыт, поведение
+   приложения байт-в-байт как раньше. Ничего из контента экранов,
+   расчётов, storage/sync/crypto не затрагивается. */
+.nsh-tabbar{display:none}
+.nsh-cap-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;padding:0 var(--s4) var(--s2)}
+.nsh-cap{display:flex;flex-direction:column;align-items:flex-start;gap:.3rem;padding:.85rem;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r12);text-align:left;min-height:44px}
+.nsh-cap:active{background:var(--bg3)}
+.nsh-cap-ic{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.nsh-cap-ic svg{width:18px;height:18px}
+.nsh-cap-t{font-weight:600;color:var(--t1);font-size:.92rem}
+.nsh-cap-d{font-size:.75rem;color:var(--t3)}
+
+/* iPhone (узкий экран): нижний таб-бар из 4 вкладок + центральный FAB */
+@media(max-width:767px){
+  body.navshell .nsh-tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:58;
+    align-items:center;justify-content:space-around;
+    padding:6px 8px calc(6px + env(safe-area-inset-bottom));
+    background:var(--sf);border-top:1px solid var(--bd)}
+  body.navshell .nsh-tab{display:flex;flex-direction:column;align-items:center;gap:2px;
+    flex:1;min-width:44px;min-height:48px;justify-content:center;background:transparent;
+    color:var(--t3);font-size:.66rem;font-weight:600;letter-spacing:.01em}
+  body.navshell .nsh-tab svg{width:22px;height:22px;stroke-width:1.9}
+  body.navshell .nsh-tab.on{color:var(--accent)}
+  body.navshell .nsh-fab{display:flex;align-items:center;justify-content:center;flex:none;
+    width:52px;height:52px;margin-top:-18px;border-radius:50%;
+    background:var(--blue-btn);color:#fff;box-shadow:0 4px 14px rgba(16,86,204,.4)}
+  body.navshell .nsh-fab svg{width:24px;height:24px;stroke-width:2.4}
+  body.navshell .content{padding-bottom:64px}
+  body.navshell .burger{display:none}
+}
+
+/* iPad portrait (768–900): постоянный sidebar вместо скрытого drawer */
+@media(min-width:768px) and (max-width:900px){
+  body.navshell .sidebar{position:static;transform:none;height:100dvh;width:240px;z-index:auto;padding-top:16px}
+  body.navshell .scrim{display:none;opacity:0;pointer-events:none}
+  body.navshell .burger{display:none}
+  body.navshell .nsh-tabbar{display:none}
+}

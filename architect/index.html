@@ -113,7 +113,7 @@
   </div>
   <div class="top-acts">
     <button class="ib" onclick="openOv('ov-search')" aria-label="Поиск"><i data-lucide="search"></i></button>
-    <button class="ib" onclick="openOv('ov-add')" aria-label="Новый инсайт"><i data-lucide="plus"></i></button>
+    <button class="ib" id="topbar-add" onclick="capturePlus()" aria-label="Новый инсайт"><i data-lucide="plus"></i></button>
     <button class="ib" onclick="goTo('settings')" aria-label="Настройки"><i data-lucide="settings"></i></button>
   </div>
 </header>
@@ -506,6 +506,7 @@
   <div class="card mx">
     <div class="srow" onclick="openProfiles()"><div class="sic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><span class="sl2">Профиль</span><span class="sv2" id="prof-current">—</span></div>
     <div class="srow" onclick="toggleTheme()"><div class="sic" style="background:var(--gold-l)"><svg style="color:var(--gold)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2"/></svg></div><span class="sl2">Тема</span><span class="sv2" id="thv">Дневная</span></div>
+    <div class="srow" onclick="toggleNavShell()"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15h18"/><path d="M9 15v6"/><path d="M15 15v6"/></svg></div><span class="sl2">Новая навигация (эксперимент)</span><span class="sv2" id="navshell-lbl">Выкл</span></div>
     <div class="srow" onclick="enableNotifications()"><div class="sic" style="background:var(--rose,#FEE)"><svg style="color:var(--rose,#FB7185)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></div><span class="sl2">Уведомления</span><span class="sv2" id="push-status">Выключены</span></div>
     <div class="srow" onclick="openOv('ov-cfg')"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg></div><span class="sl2">Конфигурация осей + AI-ключ</span><span class="sv2">Настроить</span></div>
     <div class="srow" onclick="openKeys()"><div class="sic" style="background:var(--gold-l)"><svg style="color:var(--gold)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div><span class="sl2">Ключи сервисов</span><span class="sv2" id="keys-cnt">—</span></div>
@@ -634,6 +635,15 @@
 </section>
 
 </main>
+
+<!-- ══ NAVIGATION SHELL 1.0 (за флагом arch_nav_v2; скрыто без body.navshell) ══ -->
+<nav class="nsh-tabbar" id="nsh-tabbar" aria-label="Основная навигация">
+  <button class="nsh-tab on" data-nav="today" onclick="navGo('today')" aria-label="Сегодня" aria-current="page"><i data-lucide="sun"></i><span>Сегодня</span></button>
+  <button class="nsh-tab" data-nav="diary" onclick="navGo('diary')" aria-label="Дневник"><i data-lucide="brain"></i><span>Дневник</span></button>
+  <button class="nsh-fab" id="nsh-fab" onclick="openCapture()" aria-label="Записать"><i data-lucide="plus"></i></button>
+  <button class="nsh-tab" data-nav="overview" onclick="navGo('overview')" aria-label="Обзор"><i data-lucide="bar-chart-3"></i><span>Обзор</span></button>
+  <button class="nsh-tab" data-nav="more" onclick="navGo('more')" aria-label="Ещё"><i data-lucide="menu"></i><span>Ещё</span></button>
+</nav>
 
 </div><!-- end #app -->
 
@@ -1599,6 +1609,21 @@
     </div>
 
     <button class="btn btn-s btn-full" id="be-close" style="margin:0 var(--s4) var(--s4)">Закрыть</button>
+  </div>
+</div>
+
+<!-- ══ «ЗАПИСАТЬ» — минимальный лаунчер (nav shell 1.0; типы не меняются) ══ -->
+<div class="ov" id="ov-capture" onclick="if(event.target===this)closeOv('ov-capture')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Записать</div>
+    <div class="nsh-cap-grid">
+      <button class="nsh-cap" onclick="openOv('ov-ci')"><span class="nsh-cap-ic" style="background:var(--green-l);color:var(--green)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg></span><span class="nsh-cap-t">Состояние</span><span class="nsh-cap-d">Check-in дня</span></button>
+      <button class="nsh-cap" onclick="openOv('ov-moment')"><span class="nsh-cap-ic" style="background:rgba(245,184,75,.16);color:#F5B84B"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="nsh-cap-t">Момент</span><span class="nsh-cap-d">Снимок сейчас</span></button>
+      <button class="nsh-cap" onclick="openOv('ov-add')"><span class="nsh-cap-ic" style="background:var(--blue-l);color:var(--blue-t)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span><span class="nsh-cap-t">Мысль / Инсайт</span><span class="nsh-cap-d">Знание, идея</span></button>
+      <button class="nsh-cap" onclick="openOv('ov-drm')"><span class="nsh-cap-ic" style="background:var(--purple-l);color:var(--purple)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span><span class="nsh-cap-t">Сон</span><span class="nsh-cap-d">Запись сна</span></button>
+    </div>
+    <button class="btn btn-g" style="width:100%;margin-top:.5rem" onclick="closeOv('ov-capture')">Закрыть</button>
   </div>
 </div>
 

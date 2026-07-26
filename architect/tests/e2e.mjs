@@ -3111,6 +3111,50 @@ ok(rectUi.supportMetric && rectUi.noWarnAt3, 'ректификация UI: ме�
 ok(rectUi.warnAt2, 'ректификация UI: при 1–2 событиях — явное «Недостаточно данных для надёжной оценки»');
 ok(rectUi.notOverwritten1 && rectUi.applyFills && rectUi.notOverwritten2, 'ректификация UI: данные рождения не перезаписываются — «применить» лишь подставляет время в форму');
 
+// ── Navigation shell 1.0 (за флагом arch_nav_v2; аддитивно, OFF по умолчанию) ──
+const nsh = await page.evaluate(() => {
+  const r = {};
+  // По умолчанию OFF: класс не стоит, таб-бар скрыт, ＋ = прежний инсайт.
+  r.offNoClass = !document.body.classList.contains('navshell');
+  r.offHidden = getComputedStyle(document.getElementById('nsh-tabbar')).display === 'none';
+  // Включаем флаг.
+  localStorage.setItem('arch_nav_v2', '1'); applyNavShell();
+  r.onClass = document.body.classList.contains('navshell');
+  r.addLabel = document.getElementById('topbar-add').getAttribute('aria-label');
+  r.tabs = document.querySelectorAll('#nsh-tabbar .nsh-tab').length;
+  r.hasFab = !!document.getElementById('nsh-fab');
+  // Вкладки shell ведут на СУЩЕСТВУЮЩИЕ разделы (ничего не потеряно).
+  navGo('diary');    r.diary = document.getElementById('pg-map').classList.contains('on');
+  navGo('overview'); r.overview = document.getElementById('pg-sys').classList.contains('on');
+  navGo('today');    r.today = document.getElementById('pg-home').classList.contains('on');
+  r.todayActive = document.querySelector('.nsh-tab[data-nav="today"]').classList.contains('on');
+  navGo('more');     r.more = document.body.classList.contains('nav-open'); closeNav();
+  // «Записать» и ＋ открывают лаунчер с существующими типами.
+  openCapture();     r.capture = document.getElementById('ov-capture').classList.contains('on');
+  r.capBtns = document.querySelectorAll('#ov-capture .nsh-cap').length;
+  closeOv('ov-capture');
+  capturePlus();     r.plusCapture = document.getElementById('ov-capture').classList.contains('on');
+  closeOv('ov-capture');
+  // Тап-цели навигации ≥44px (accessibility).
+  const small = [...document.querySelectorAll('#nsh-tabbar .nsh-tab, #nsh-fab')].filter(e => { const b = e.getBoundingClientRect(); return b.width < 44 || b.height < 44; });
+  r.tapOk = small.length === 0;
+  // Выключаем — прежнее поведение возвращается байт-в-байт.
+  localStorage.setItem('arch_nav_v2', '0'); applyNavShell();
+  r.offAgain = !document.body.classList.contains('navshell');
+  r.offLabel = document.getElementById('topbar-add').getAttribute('aria-label');
+  capturePlus();     r.plusInsightOff = document.getElementById('ov-add').classList.contains('on');
+  closeOv('ov-add'); goTo('home');
+  return r;
+});
+ok(nsh.offNoClass && nsh.offHidden, 'nav shell: по умолчанию OFF — класс не стоит, таб-бар скрыт');
+ok(nsh.onClass && nsh.tabs === 4 && nsh.hasFab, 'nav shell ON: body.navshell, 4 вкладки + FAB');
+ok(nsh.addLabel === 'Записать' && nsh.offLabel === 'Новый инсайт', 'nav shell: ＋ = «Записать» при ON, «Новый инсайт» при OFF');
+ok(nsh.diary && nsh.overview && nsh.today, 'nav shell: вкладки ведут на существующие разделы (map/sys/home)');
+ok(nsh.todayActive && nsh.more, 'nav shell: активная вкладка подсвечена; «Ещё» открывает drawer со всеми разделами');
+ok(nsh.capture && nsh.capBtns >= 4 && nsh.plusCapture, 'nav shell: «Записать»/＋ открывают лаунчер с типами записи');
+ok(nsh.tapOk, 'nav shell: тап-цели вкладок и FAB ≥44px');
+ok(nsh.offAgain && nsh.plusInsightOff, 'nav shell OFF: прежнее поведение возвращается (＋ = инсайт)');
+
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 
