@@ -17,7 +17,7 @@ const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 
 await page.goto(FILE);
-await page.waitForSelector('#nsh-context-dock');
+await page.waitForSelector('#nsh-context-dock', { state: 'attached' });
 await page.evaluate(() => {
   const splash = document.getElementById('splash');
   if (splash) splash.style.display = 'none';
@@ -154,7 +154,7 @@ await page.evaluate(() => {
   window.__ARCH_CONTEXT_DOCK__.update();
 });
 await page.reload();
-await page.waitForSelector('#nsh-context-dock');
+await page.waitForSelector('#nsh-context-dock', { state: 'attached' });
 const reloadState = await page.evaluate(() => {
   const splash = document.getElementById('splash');
   if (splash) splash.style.display = 'none';
