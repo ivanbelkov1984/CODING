@@ -33,7 +33,7 @@ async function copyBackup(outDir) {
 // новую версию кэша. Гармонично с уже работающим механизмом sw.js.
 async function contentVersion() {
   const h = createHash('sha256');
-  for (const f of ['index.html', 'styles.css', 'app.js', 'sw.js', 'lucide.js', 'astronomy.min.js', 'astro_rules.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) h.update(await readFile(join(DIR, f)));
+  for (const f of ['index.html', 'styles.css', 'app.js', 'context-action-dock.css', 'context-action-dock.js', 'sw.js', 'lucide.js', 'astronomy.min.js', 'astro_rules.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) h.update(await readFile(join(DIR, f)));
   // Изменение любого backup-модуля тоже должно давать новую версию кэша.
   for (const f of BACKUP_MODULES) h.update(await readFile(join(DIR, 'backup', f)));
   return 'v' + h.digest('hex').slice(0, 10);
@@ -44,11 +44,15 @@ async function contentVersion() {
 export async function buildCombined() {
   let html = await readFile(join(DIR, 'index.html'), 'utf8');
   const css = await readFile(join(DIR, 'styles.css'), 'utf8');
-  const js  = await readFile(join(DIR, 'app.js'), 'utf8');
-  html = html.replace('<link rel="stylesheet" href="styles.css">', () => '<style>\n' + css + '\n</style>');
-  html = html.replace('<script src="app.js"></script>', () => '<script>\n' + js + '\n</script>');
+  const contextCss = await readFile(join(DIR, 'context-action-dock.css'), 'utf8');
+  const js = await readFile(join(DIR, 'app.js'), 'utf8');
+  const contextJs = await readFile(join(DIR, 'context-action-dock.js'), 'utf8');
+  html = html.replace('<link rel="stylesheet" href="styles.css">', () => '<style>\n' + css + '\n' + contextCss + '\n</style>');
+  html = html.replace('<script src="app.js"></script>', () => '<script>\n' + js + '\n</script>\n<script>\n' + contextJs + '\n</script>');
   if (/href="styles\.css"|src="app\.js"/.test(html)) throw new Error('не удалось заинлайнить (осталась ссылка)');
   if (!html.includes(js.slice(0, 80))) throw new Error('JS не вставился дословно');
+  if (!html.includes('Context action dock — issue #138')) throw new Error('context action dock JS не вставился');
+  if (!html.includes('Context action dock — actions of the current section')) throw new Error('context action dock CSS не вставился');
   return html;
 }
 
