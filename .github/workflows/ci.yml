@@ -6,11 +6,33 @@ name: CI — Архитектор
 on:
   push:
     branches: [ MAIN, "claude/**" ]
-    paths: [ "architect/**" ]
+    paths: [ "architect/**", ".github/workflows/ci.yml" ]
   pull_request:
-    paths: [ "architect/**" ]
+    paths: [ "architect/**", ".github/workflows/ci.yml" ]
 
 jobs:
+  # Быстрый синтакс-линт: битый JS роняет CI за секунды, не тратя минуты
+  # на установку Chromium и полный E2E-прогон.
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: architect
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax check (node --check)
+        run: |
+          set -e
+          for f in app.js astro_rules.js astro_texts_natal.js astro_texts_transit.js \
+                   astro_texts_synastry.js astro_texts_jyotish.js astro_texts_extra.js \
+                   sw.js build.mjs tests/e2e.mjs backend/server.js backend/push.js \
+                   backend/astro_batch.js; do
+            if [ -f "$f" ]; then node --check "$f" && echo "OK $f"; fi
+          done
+
   e2e:
     runs-on: ubuntu-latest
     defaults:
