@@ -637,6 +637,10 @@
 </main>
 
 <!-- ══ NAVIGATION SHELL v2 (за флагом arch_nav_v2; скрыто без body.navshell) ══ -->
+<!-- Контекстная панель действий раздела (issue #138): отдельно от глобального
+     FAB «Записать», действия зависят от открытого раздела/подраздела, только
+     существующие обработчики. Наполняется nshCtxSync(); пуста → скрыта. -->
+<div class="nsh-ctx-dock" id="nsh-ctx-dock" role="toolbar" aria-label="Действия раздела"></div>
 <nav class="nsh-tabbar" id="nsh-tabbar" aria-label="Основная навигация">
   <button class="nsh-tab on" data-nav="today" onclick="navGo('today')" aria-label="Сегодня" aria-current="page"><i data-lucide="sun"></i><span>Сегодня</span></button>
   <button class="nsh-tab" data-nav="diary" onclick="navGo('diary')" aria-label="Дневник"><i data-lucide="brain"></i><span>Дневник</span></button>

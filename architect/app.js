@@ -506,7 +506,7 @@ function goTo(tab, el) {
   if (tab==='health') rHealth();
   if (tab==='astro') asub('menu');
   if (tab==='settings') { rProfileRow(); checkApiStatus(); rPushStatus(); const kc=$('keys-cnt'); if (kc) kc.textContent = KEY_SERVICES.filter(s=>getAiKeyFor(s.p)).length + ' из ' + KEY_SERVICES.length; }
-  if (document.body.classList.contains('navshell')) { nshHighlight(tab); nshWriteHash(tab); }
+  if (document.body.classList.contains('navshell')) { nshHighlight(tab); nshWriteHash(tab); nshCtxSync(); }
 }
 function msub(tab, el) {
   document.querySelectorAll('[id^="ms-"]').forEach(t => t.style.display='none');
@@ -524,6 +524,7 @@ function msub(tab, el) {
   if (tab==='spiritual') rSpi();
   if (tab==='graph')     rMap();
   if (tab==='chats')     rChats();
+  if (document.body.classList.contains('navshell')) nshCtxSync();
 }
 
 // ─── ОВЕРЛЕИ ────────────────────────────────────────────────────
@@ -541,6 +542,7 @@ function openOv(id) {
   if (id==='ov-why')      resetWhyForm();
   if (id==='ov-history')  rHistory();
   if (id==='ov-add')      { STATE.addMedia = []; rAddMedia(); }
+  if (document.body.classList.contains('navshell')) nshCtxSync();
 }
 // Собрать ВСЕ media-id, на которые ссылается любая запись любой коллекции db.
 function collectDbMediaRefs(db, out) {
@@ -588,6 +590,7 @@ async function gcMedia() {
 function closeOv(id) {
   $(id).classList.remove('on');
   document.body.style.overflow = '';
+  if (document.body.classList.contains('navshell')) nshCtxSync();
 }
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
@@ -4224,6 +4227,7 @@ function asub(name) {
   if (name === 'syn') rSynastry();
   if (name === 'setup') fillAstroForm();
   if (name === 'rectify') rRectify();
+  if (document.body.classList.contains('navshell')) nshCtxSync();
 }
 
 // Главный экран раздела: превью-колесо (или пустое состояние) + сетка карточек.
@@ -7950,6 +7954,7 @@ function nshApplyHash(fromInit) {
   const cur = document.querySelector('.pg.on');
   if (!cur || cur.id !== 'pg-' + tab) goTo(tab);
   else if (fromInit) nshHighlight(tab);
+  nshCtxSync();
   return true;
 }
 let _nshHashBound = false;
@@ -7975,6 +7980,7 @@ function applyNavShell() {
       nshHighlight(pg ? pg.id.replace('pg-', '') : 'home');
     }
   }
+  nshCtxSync();
 }
 // ── iPad/desktop: сгруппированный sidebar (TARGET-IA §5) ─────────
 // При флаге плоский список заменяется группами. Каждый пункт зовёт
@@ -8016,6 +8022,78 @@ function nshSidebarGroups(on) {
       `<button class="navlink"${tab ? ` data-tab="${tab}"` : ''} onclick="closeNav();${act}"><i data-lucide="${ico}"></i>${esc(label)}</button>`).join('')
   ).join('');
   nav.appendChild(box);
+  icons();
+}
+
+// ── Контекстный action dock (issue #138) — iPhone-only, первый этап ──
+// Отдельно от глобального FAB «Записать»: действия зависят от открытого
+// раздела/подраздела и вызывают ТОЛЬКО существующие обработчики/формы.
+// Registry keyed по canonical destination id и активному подмаршруту
+// ('_' — раздел без подмаршрутов). Первый пункт группы — primary,
+// остальные (максимум 2) — secondary. Разделы/подмаршруты без реального
+// безопасного действия сюда намеренно не включены (book/chats/graph —
+// нет отдельного прямого handler создания записи, не придумываем).
+const NSH_CONTEXT_ACTIONS = {
+  map: {
+    insights:  [['sparkles', 'Новый инсайт', "openOv('ov-add')"]],
+    dreams:    [['moon', 'Записать сон', "openOv('ov-drm')"]],
+    patterns:  [['git-branch', 'Новый паттерн', "openOv('ov-pat-add')"]],
+    spiritual: [['sparkles', 'Новая запись', "openOv('ov-spi-add')"]],
+    evolution: [['trending-up', 'Новая запись', "openOv('ov-evo-add')"]],
+  },
+  vit: { _: [
+    ['layers', 'Отметить сферу', 'captureSphere()'],
+    ['plus-circle', 'Новая сфера', 'openSphereEdit()'],
+  ] },
+  health: { _: [
+    ['activity', 'Симптом', "openOv('ov-symptom')"],
+    ['ruler', 'Измерение', "openOv('ov-measure')"],
+    ['flame', 'Тяга', "openOv('ov-craving')"],
+  ] },
+  sys: { _: [
+    ['bar-chart-3', 'Собрать обзор недели', 'mkDig()'],
+    ['file-text', 'Отчёт врачу', "openOv('ov-doc-report')"],
+  ] },
+  // Только натальная карта — единственный существующий безопасный экшен
+  // (openFullWheel сам обрабатывает отсутствие рассчитанной карты).
+  // Остальные подэкраны астрологии — без dock (не меняем астро-IA).
+  astro: { natal: [['maximize', 'Колесо на весь экран', 'openFullWheel()']] },
+};
+// Текущий раздел + активный подмаршрут (для поиска в registry).
+function nshCtxKey() {
+  const pg = document.querySelector('.pg.on');
+  const tab = pg ? pg.id.replace('pg-', '') : '';
+  if (tab === 'map') {
+    const p = document.querySelector('#subnav .snpill.on');
+    return [tab, p ? p.dataset.sub : 'insights'];
+  }
+  if (tab === 'astro') {
+    const vis = [...document.querySelectorAll('#pg-astro .asub')].find(d => d.style.display === 'block');
+    return [tab, vis ? vis.id.replace('as-', '') : 'menu'];
+  }
+  return [tab, '_'];
+}
+function nshCtxActions() {
+  const [tab, sub] = nshCtxKey();
+  const g = NSH_CONTEXT_ACTIONS[tab];
+  return (g && g[sub]) || [];
+}
+// Перерисовать/скрыть панель. Вызывается из goTo/msub/asub, открытия и
+// закрытия оверлеев, восстановления hash и переключения флага — панель
+// никогда не остаётся «от предыдущего раздела» и не перекрывает форму.
+function nshCtxSync() {
+  const dock = $('nsh-ctx-dock'); if (!dock) return;
+  const hide = () => { dock.classList.remove('on'); dock.innerHTML = ''; document.body.classList.remove('nsh-has-dock'); };
+  if (!document.body.classList.contains('navshell')) return hide();
+  if (document.querySelector('.ov.on')) return hide();       // лист/оверлей открыт — не перекрываем
+  const [tab] = nshCtxKey();
+  if (tab === 'home' || !tab) return hide();                  // Today — dock скрыт (дизайн не меняется)
+  const acts = nshCtxActions();
+  if (!acts.length) return hide();
+  dock.innerHTML = acts.map(([ico, label, act], i) =>
+    `<button type="button" class="nsh-ctx-btn${i === 0 ? ' nsh-ctx-p' : ''}" onclick="${act}"><i data-lucide="${ico}"></i><span>${esc(label)}</span></button>`).join('');
+  dock.classList.add('on');
+  document.body.classList.add('nsh-has-dock');
   icons();
 }
 function toggleNavShell() {

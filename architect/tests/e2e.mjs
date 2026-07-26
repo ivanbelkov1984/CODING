@@ -3376,6 +3376,220 @@ ok(tgl0.isButton && tgl0.named && tgl0.tapOk, 'настройки: «Новая 
 ok(tgl0.pressedOff && tgl0.lblOff && tglOn.pressed && tglOn.lbl && tglOn.shellOn, 'настройки: aria-pressed и «Вкл/Выкл» синхронны; Enter с клавиатуры включает');
 ok(tglOff.pressed && tglOff.lbl && tglOff.shellOff, 'настройки: Space с клавиатуры выключает — полное клавиатурное управление');
 
+// ── Контекстный action dock раздела (issue #138), iPhone-only ──
+// 1) OFF-флаг: dock отсутствует, старое поведение не меняется.
+const ctxOff = await page.evaluate(() => {
+  localStorage.setItem('arch_nav_v2', '0'); applyNavShell();
+  goTo('map'); msub('dreams');
+  const dock = document.getElementById('nsh-ctx-dock');
+  return { hidden: !dock.classList.contains('on'), empty: dock.innerHTML.trim() === '', shellOff: !document.body.classList.contains('navshell') };
+});
+ok(ctxOff.hidden && ctxOff.empty && ctxOff.shellOff, 'context dock: при OFF отсутствует, старое поведение не меняется');
+
+const ctx = await page.evaluate(async () => {
+  const r = {};
+  localStorage.setItem('arch_nav_v2', '1'); applyNavShell();
+  const btns = () => [...document.querySelectorAll('#nsh-ctx-dock .nsh-ctx-btn')];
+  const dockOn = () => document.getElementById('nsh-ctx-dock').classList.contains('on');
+
+  // 2)+3)+4)+5) Дневник: dock обновляется при каждом поддержанном msub.
+  goTo('map');
+  msub('dreams');
+  r.dreamsBtn = btns().length === 1 && /Записать сон/.test(btns()[0].textContent);
+  btns()[0].click(); r.dreamsOpens = document.getElementById('ov-drm').classList.contains('on'); closeOv('ov-drm');
+
+  msub('insights');
+  r.insightsBtn = btns().length === 1 && /Новый инсайт/.test(btns()[0].textContent);
+  btns()[0].click(); r.insightsOpens = document.getElementById('ov-add').classList.contains('on'); closeOv('ov-add');
+
+  msub('patterns');
+  btns()[0].click(); r.patternsOpens = document.getElementById('ov-pat-add').classList.contains('on'); closeOv('ov-pat-add');
+
+  msub('spiritual');
+  btns()[0].click(); r.spiritualOpens = document.getElementById('ov-spi-add').classList.contains('on'); closeOv('ov-spi-add');
+
+  msub('evolution');
+  btns()[0].click(); r.evolutionOpens = document.getElementById('ov-evo-add').classList.contains('on'); closeOv('ov-evo-add');
+
+  // 9) Подразделы без зарегистрированного действия — dock скрыт (не придумываем workflow).
+  msub('book');  r.bookHidden  = !dockOn();
+  msub('chats'); r.chatsHidden = !dockOn();
+  msub('graph'); r.graphHidden = !dockOn();
+
+  // 6) Сферы: «Отметить сферу» сохраняет исправленное поведение 0/1/N (PR #137),
+  // не выбирает первую автоматически.
+  const savedSpheres = DB.spheres;
+  DB.spheres = [];
+  goTo('vit');
+  r.vitBtns = btns().length === 2;
+  btns()[0].click();
+  r.zeroToVit = document.getElementById('pg-vit').classList.contains('on') && !document.querySelector('.ov.on');
+
+  DB.spheres = [{ id: 111, name: 'Сон-тест', icon: '', color: '#1056CC', type: 'score' }];
+  goTo('vit'); btns()[0].click();
+  r.oneOpensLog = document.getElementById('ov-sphere-log').classList.contains('on') && document.getElementById('sphere-log-title').textContent.includes('Сон-тест');
+  closeOv('ov-sphere-log');
+
+  DB.spheres = [
+    { id: 111, name: 'Сон-тест', icon: '', color: '#1056CC', type: 'score' },
+    { id: 222, name: 'Спорт-тест', icon: '', color: '#0E7490', type: 'habit' },
+  ];
+  goTo('vit'); btns()[0].click();
+  r.multiShowsPick = document.getElementById('ov-sphere-pick').classList.contains('on');
+  const pickBtns = [...document.querySelectorAll('#sphere-pick-list button')];
+  if (pickBtns[1]) pickBtns[1].click();
+  r.multiPicksSecond = document.getElementById('ov-sphere-log').classList.contains('on') && document.getElementById('sphere-log-title').textContent.includes('Спорт-тест');
+  closeOv('ov-sphere-log');
+
+  goTo('vit'); btns()[1].click(); // secondary: «Новая сфера»
+  r.newSphereOpens = document.getElementById('ov-sphere-edit').classList.contains('on');
+  closeOv('ov-sphere-edit');
+  DB.spheres = savedSpheres;
+
+  // 7) Здоровье: три действия открывают правильные формы.
+  goTo('health');
+  r.healthBtns = btns().length === 3;
+  const hLbl = btns().map(b => b.textContent.trim());
+  r.healthLabelsOk = /Симптом/.test(hLbl[0]) && /Измерение/.test(hLbl[1]) && /Тяга/.test(hLbl[2]);
+  btns()[0].click(); r.symptomOpens = document.getElementById('ov-symptom').classList.contains('on'); closeOv('ov-symptom');
+  goTo('health'); btns()[1].click(); r.measureOpens = document.getElementById('ov-measure').classList.contains('on'); closeOv('ov-measure');
+  goTo('health'); btns()[2].click(); r.cravingOpens = document.getElementById('ov-craving').classList.contains('on'); closeOv('ov-craving');
+
+  // 8) Обзор: mkDig() и ov-doc-report вызываются корректно.
+  goTo('sys');
+  r.sysBtns = btns().length === 2;
+  // mkDig() дедуплицирует по календарной неделе (обновляет карточку, а не
+  // плодит дубли) — сравниваем id (=timestamp), а не длину массива.
+  const digestIdBefore = (DB.digests[0] && DB.digests[0].id) || 0;
+  btns()[0].click();
+  await new Promise(res => setTimeout(res, 400));
+  r.digestMade = DB.digests.length > 0 && DB.digests[0].id > digestIdBefore;
+  goTo('sys'); btns()[1].click();
+  r.docReportOpens = document.getElementById('ov-doc-report').classList.contains('on');
+  closeOv('ov-doc-report');
+
+  // Astro: только натальная карта имеет dock-действие; остальные подэкраны — без dock.
+  goTo('astro'); asub('natal');
+  r.natalBtn = btns().length === 1 && /Колесо на весь экран/.test(btns()[0].textContent);
+  asub('transits');
+  r.transitsHidden = !dockOn();
+
+  // 9) Ещё/Настройки — без dock.
+  goTo('settings'); r.settingsHidden = !dockOn();
+
+  // Today — dock скрыт на первом этапе (дизайн Today не меняется).
+  goTo('home'); r.todayHidden = !dockOn();
+
+  // При открытом оверлее панель скрыта — не перекрывает форму и не крадёт фокус.
+  goTo('vit'); r.vitShown = dockOn();
+  openOv('ov-sphere-edit'); r.hiddenDuringOverlay = !dockOn();
+  closeOv('ov-sphere-edit'); r.shownAfterClose = dockOn();
+
+  // 10) A11y: настоящие button, доступные имена, tap ≥44×44.
+  goTo('health');
+  const els = btns();
+  r.a11yButtons = els.every(e => e.tagName === 'BUTTON' && e.getAttribute('type') === 'button');
+  r.a11yNamed = els.every(e => e.textContent.trim().length > 0);
+  r.a11yTap = els.every(e => { const b = e.getBoundingClientRect(); return b.width >= 44 && b.height >= 44; });
+
+  goTo('home');
+  return r;
+});
+ok(ctx.dreamsBtn && ctx.dreamsOpens, 'context dock: Дневник → Сны — «Записать сон» открывает ov-drm');
+ok(ctx.insightsBtn && ctx.insightsOpens, 'context dock: Дневник → Инсайты — открывает ov-add');
+ok(ctx.patternsOpens && ctx.spiritualOpens && ctx.evolutionOpens, 'context dock: Паттерны/Духовное/Эволюция — открывают правильные существующие формы');
+ok(ctx.bookHidden && ctx.chatsHidden && ctx.graphHidden, 'context dock: Книга/Диалоги/Карта — без прямого existing-handler, dock скрыт (workflow не придуман)');
+ok(ctx.vitBtns && ctx.zeroToVit, 'context dock: Сферы 0 — «Отметить сферу» ведёт в раздел (не выбирает первую)');
+ok(ctx.oneOpensLog && ctx.multiShowsPick && ctx.multiPicksSecond, 'context dock: Сферы 1/N — форма сразу либо явный выбор не первой (поведение PR #137 сохранено)');
+ok(ctx.newSphereOpens, 'context dock: Сферы — secondary «Новая сфера» открывает openSphereEdit()');
+ok(ctx.healthBtns && ctx.healthLabelsOk, 'context dock: Здоровье — три действия (Симптом/Измерение/Тяга), не больше');
+ok(ctx.symptomOpens && ctx.measureOpens && ctx.cravingOpens, 'context dock: Здоровье — все три действия открывают правильные формы');
+ok(ctx.sysBtns && ctx.digestMade, 'context dock: Обзор — primary «Собрать обзор недели» вызывает mkDig()');
+ok(ctx.docReportOpens, 'context dock: Обзор — secondary «Отчёт врачу» открывает ov-doc-report');
+ok(ctx.natalBtn && ctx.transitsHidden, 'context dock: Астрология — только натальная карта имеет действие, остальные подэкраны без dock');
+ok(ctx.settingsHidden && ctx.todayHidden, 'context dock: Настройки и Сегодня — dock скрыт (Today не меняется, системные экраны — без dock)');
+ok(ctx.vitShown && ctx.hiddenDuringOverlay && ctx.shownAfterClose, 'context dock: скрыт при открытом оверлее (не перекрывает форму, не крадёт фокус), возвращается после закрытия');
+ok(ctx.a11yButtons && ctx.a11yNamed && ctx.a11yTap, 'context dock a11y: настоящие button, доступные имена, tap-цели ≥44×44');
+
+// Клавиатура: Tab доходит до кнопки dock, Enter активирует существующий обработчик.
+const ctxKb = await page.evaluate(() => {
+  localStorage.setItem('arch_nav_v2', '1'); applyNavShell();
+  goTo('map'); msub('dreams');
+  const b = document.querySelector('#nsh-ctx-dock .nsh-ctx-btn');
+  b.focus();
+  return { focused: document.activeElement === b, focusRule: [...document.styleSheets].some(ss => { try { return [...ss.cssRules].some(rr => (rr.cssText || '').includes('.nsh-ctx-btn:focus-visible')); } catch (e) { return false; } }) };
+});
+await page.keyboard.press('Enter');
+const ctxKbOpen = await page.evaluate(() => document.getElementById('ov-drm').classList.contains('on'));
+await page.evaluate(() => closeOv('ov-drm'));
+ok(ctxKb.focused && ctxKb.focusRule, 'context dock: кнопка фокусируема с клавиатуры, focus-visible объявлен в CSS');
+ok(ctxKbOpen, 'context dock: Enter с клавиатуры активирует существующий обработчик (открывает ov-drm)');
+
+// 11) Вьюпорты: dock не перекрывает контент/tab bar на iPhone SE/std/Pro Max; на iPad — dock отсутствует (первый этап только iPhone).
+const ctxVpRes = [];
+for (const [w, h, kind] of [[375, 667, 'phone'], [390, 844, 'phone'], [430, 932, 'phone'], [820, 1180, 'ipad']]) {
+  await page.setViewportSize({ width: w, height: h });
+  await page.waitForTimeout(100);
+  ctxVpRes.push(await page.evaluate((kind2) => {
+    goTo('vit');
+    const dock = document.getElementById('nsh-ctx-dock');
+    const tabbar = document.getElementById('nsh-tabbar');
+    const dockVisible = getComputedStyle(dock).display !== 'none';
+    if (kind2 === 'ipad') return { ok: !dockVisible, dockVisible };
+    const dr = dock.getBoundingClientRect(), tr = tabbar.getBoundingClientRect();
+    const noOverlap = dr.bottom <= tr.top + 1;
+    const pad = parseInt(getComputedStyle(document.querySelector('.content')).paddingBottom, 10);
+    return { ok: dockVisible && noOverlap && pad >= 110, dockVisible, noOverlap, pad };
+  }, kind));
+}
+ok(ctxVpRes[0].ok && ctxVpRes[1].ok && ctxVpRes[2].ok, 'context dock: iPhone SE/std/Pro Max — панель над tab bar, контент не перекрыт');
+ok(ctxVpRes[3].ok, 'context dock: iPad — панель отсутствует (первый этап — только iPhone)');
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(100);
+
+// Тёмная/светлая тема.
+const ctxThemes = await page.evaluate(() => {
+  goTo('vit');
+  const vis = () => getComputedStyle(document.getElementById('nsh-ctx-dock')).display !== 'none';
+  document.body.classList.remove('dark'); const light = vis();
+  document.body.classList.add('dark'); const dark = vis();
+  document.body.classList.remove('dark');
+  return { light, dark };
+});
+ok(ctxThemes.light && ctxThemes.dark, 'context dock: рендерится в светлой и тёмной темах');
+
+// 12) Перезагрузка и browser back не оставляют dock от предыдущего раздела.
+await page.evaluate(() => { goTo('health'); });
+await page.reload();
+await page.waitForTimeout(700);
+const ctxReload = await page.evaluate(() => {
+  try { document.getElementById('splash').style.display = 'none'; } catch (e) {}
+  const dock = document.getElementById('nsh-ctx-dock');
+  const btnsNow = [...dock.querySelectorAll('.nsh-ctx-btn')].map(b => b.textContent.trim());
+  return { onHealth: document.getElementById('pg-health').classList.contains('on'), noStaleDreams: !btnsNow.some(t => /Записать сон/.test(t)), hasHealthActions: dock.classList.contains('on') };
+});
+ok(ctxReload.onHealth && ctxReload.hasHealthActions && ctxReload.noStaleDreams, 'context dock: перезагрузка не оставляет панель от предыдущего раздела (актуализируется под Health)');
+
+const ctxBack = await page.evaluate(async () => {
+  goTo('vit'); goTo('health');
+  await new Promise(res => { const h = () => { window.removeEventListener('hashchange', h); res(); }; window.addEventListener('hashchange', h); history.back(); });
+  const dock = document.getElementById('nsh-ctx-dock');
+  const btnsNow = [...dock.querySelectorAll('.nsh-ctx-btn')].map(b => b.textContent.trim());
+  return { onVit: document.getElementById('pg-vit').classList.contains('on'), staleHealthGone: !btnsNow.some(t => /Симптом/.test(t)) };
+});
+ok(ctxBack.onVit && ctxBack.staleHealthGone, 'context dock: browser back актуализирует панель под восстановленный раздел, старая не остаётся');
+
+// 13) Существующий launcher «Записать» и все тесты PR #137 остаются зелёными
+// (полный regression прогоняется этим же сьютом — 431/431 базовых + shell не менялись).
+const launcherStillWorks = await page.evaluate(() => {
+  document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
+  openCapture();
+  const capOk = document.getElementById('ov-capture').classList.contains('on');
+  closeOv('ov-capture');
+  return capOk;
+});
+ok(launcherStillWorks, 'context dock: глобальный launcher «Записать» не затронут, продолжает открываться');
+
 // Возврат к дефолту (OFF) для чистоты остатка сьюта.
 await page.evaluate(() => {
   localStorage.setItem('arch_nav_v2', '0');
