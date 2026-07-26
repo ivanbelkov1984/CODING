@@ -2963,6 +2963,59 @@ function computeDirections(natalChart, birth, at) {
   }
   return { ageYears: prog.ageYears, solarArc: arc, naibod, directed, profection };
 }
+// ─── ПЕРВИЧНЫЕ ДИРЕКЦИИ (по контракту владельца 2026-07-26) ─────────
+// Прежний research-preview статус снят. Реализована бесспорная классика:
+// зодиакальные промиссоры (натальные планеты как точки эклиптики, без
+// широты) направляются К УГЛАМ вращением неба (метод полудуг Плацида для
+// углов сводится к прямому/косому восхождению — формулы согласованы во
+// всех источниках). Ключ Найбода: 1° дуги ≈ 1.0146 года. Planet-to-planet
+// mundane-дирекции — отдельный этап (больше вариантов у школ).
+// Самотест (e2e): Asc(RAMC + дуга) = долгота промиссора — повернув небо
+// на дугу, промиссор обязан взойти.
+const PRIMARY_EPS = 23.4392911;
+function raDecOfEcl(lambda) {   // RA/склонение точки эклиптики (широта 0)
+  const L = lambda * DEG, e = PRIMARY_EPS * DEG;
+  return {
+    ra: norm360(Math.atan2(Math.sin(L) * Math.cos(e), Math.cos(L)) / DEG),
+    dec: Math.asin(Math.sin(e) * Math.sin(L)) / DEG,
+  };
+}
+// Дуга дирекции промиссора (точка эклиптики lambda) к углу. Вперёд по
+// вращению неба (RAMC растёт). null — промиссор циркумполярен (не восходит).
+function primaryArcToAngle(lambda, angle, ramc, phi) {
+  const { ra, dec } = raDecOfEcl(lambda);
+  const tt = Math.tan(phi * DEG) * Math.tan(dec * DEG);
+  if (angle === 'mc') return norm360(ra - ramc);
+  if (angle === 'ic') return norm360(ra - (ramc + 180));
+  if (Math.abs(tt) >= 1) return null;            // за полярным пределом
+  const AD = Math.asin(tt) / DEG;
+  if (angle === 'asc') return norm360((ra - AD) - (ramc + 90));   // косое восхождение
+  return norm360((ra + AD) - (ramc - 90));                        // dsc: косое захождение
+}
+const PRIMARY_ANGLE_RU = {
+  asc: 'выходит на первый план личности и самоощущения',
+  mc: 'выходит в фокус призвания и видимого статуса',
+  dsc: 'активирует тему партнёрства и значимых других',
+  ic: 'обращает внимание внутрь — к дому, семье, корням',
+};
+// Все дирекции планет к углам в окне жизни (0–100 лет), по возрасту.
+function computePrimaryDirections(natalChart, birth) {
+  if (!natalChart.angles) return null;
+  const A = window.Astronomy;
+  const t = A.MakeTime(birthUTCDate(birth));
+  const ramc = norm360(A.SiderealTime(t) * 15 + birth.lon);
+  const out = [];
+  for (const p of natalChart.planets) {
+    for (const k of ['asc', 'mc', 'dsc', 'ic']) {
+      const arc = primaryArcToAngle(p.lon, k, ramc, birth.lat);
+      if (arc == null) continue;
+      const years = arc / NAIBOD_DEG_PER_YEAR;   // ключ Найбода
+      if (years > 0.05 && years <= 100) out.push({ body: p.body, name: p.name, angle: k, arc, years });
+    }
+  }
+  out.sort((a, b) => a.years - b.years);
+  return out;
+}
 // Возвращение тела в натальную долготу. Возвращает момент (Date) или null.
 function searchReturn(body, targetLon, startDate, windowDays) {
   const A = window.Astronomy;
@@ -3526,6 +3579,26 @@ async function rPrognostics() {
       html += `<button class="btn btn-s btn-full" style="margin-top:.4rem" onclick="const d=$('sa-tech');d.style.display=d.style.display==='none'?'block':'none'">Все дирекционные позиции — показать/скрыть</button>
         <div id="sa-tech" style="display:none">` +
         dir.directed.map(p => `<div class="si-text" style="color:var(--t3)">SA ${esc(p.name)}: ${esc(p.sign)} ${p.deg.toFixed(1)}°</div>`).join('') + '</div>';
+    }
+    if (seg === 'primary') {
+      if (wheelEl) wheelEl.innerHTML = '';
+      const pd = computePrimaryDirections(last.chart, DB.astroBirth);
+      if (!pd) html = '<div class="ai-sp-empty">Первичные дирекции требуют известного времени рождения (нужны углы карты).</div>';
+      else {
+        const AGL = { asc: 'Асцендент', mc: 'MC', dsc: 'Десцендент', ic: 'IC' };
+        const age = dir.ageYears;
+        html = `<div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.4rem">Первичные дирекции — старейшая прогностическая техника: небо символически «доворачивается» после рождения, и каждая планета в свой год приходит на угол карты (1° вращения ≈ 1 год, ключ Найбода). Техника очень чувствительна к точности времени рождения: ошибка в ±4 минуты сдвигает события примерно на ±1 год.</div>`;
+        const upcoming = pd.filter(d => d.years >= age - 2);
+        const list = (upcoming.length ? upcoming : pd).slice(0, 8);
+        html += '<div class="f-lbl">Ближайшие дирекции к углам</div>' + list.map(d => {
+          const theme = R && R.planetTheme && R.planetTheme[d.body];
+          const cur = Math.abs(d.years - age) <= 1 ? '★ ' : '';
+          return `<div class="si-row"><div class="si-body"><div class="si-text">${cur}<b>≈ возраст ${d.years.toFixed(1)}</b> · ${esc(d.name)} → ${AGL[d.angle]}${theme ? `<div style="color:var(--t3)">Тема «${esc(theme)}» ${PRIMARY_ANGLE_RU[d.angle]}.</div>` : ''}</div></div></div>`;
+        }).join('');
+        html += `<button class="btn btn-s btn-full" style="margin-top:.4rem" onclick="const d=$('pd-all');d.style.display=d.style.display==='none'?'block':'none'">Все дирекции жизни (${pd.length}) — показать/скрыть</button>
+          <div id="pd-all" style="display:none">` +
+          pd.map(d => `<div class="si-text" style="color:var(--t3)">возраст ${d.years.toFixed(1)} · ${esc(d.name)} → ${AGL[d.angle]} (дуга ${d.arc.toFixed(2)}°)</div>`).join('') + '</div>';
+      }
     }
     if (seg === 'profection') {
       if (wheelEl) wheelEl.innerHTML = '';

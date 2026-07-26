@@ -2832,6 +2832,53 @@ ok(tlT.apsisOk, `True Lilith: физический golden — в 3 апогея�
 ok(tlT.oscOk, `True Lilith: колеблется вокруг средней (макс ${tlT.maxDev}°, в пределах ±40°, среднее ~0)`);
 ok(tlT.inChart && tlT.uiOk, 'True Lilith: в карте и на экране точек, с честной пометкой о колебании ±30°');
 
+// ── Астрология: первичные дирекции к углам (контракт владельца) ──
+const pdT = await page.evaluate(async () => {
+  await loadAstroEngine(); try { await loadAstroRules(); } catch (e) {}
+  const A = window.Astronomy;
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'whole' };
+  DB.astroCharts = []; await runNatalChart();
+  const chart = DB.astroCharts[0].chart;
+  const t = A.MakeTime(birthUTCDate(DB.astroBirth));
+  const ramc = ((A.SiderealTime(t) * 15 + 37.62) % 360 + 360) % 360;
+  const sep = (a, b) => Math.abs(((a - b + 180) % 360 + 360) % 360 - 180);
+  // 1) ФИЗИЧЕСКИЙ инвариант Asc: повернув небо на дугу дирекции, промиссор
+  // обязан взойти — Asc(RAMC+дуга) = долгота промиссора. Для всех 10 планет.
+  const ascOk = chart.planets.every(p => {
+    const arc = primaryArcToAngle(p.lon, 'asc', ramc, 55.75);
+    return arc == null || sep(ascFromRamc(ramc + arc, 23.4392911, 55.75), p.lon) < 0.05;
+  });
+  // 2) Инвариант MC: RA точки эклиптики на MC — прямое восхождение.
+  const mcOk = chart.planets.every(p => {
+    const arc = primaryArcToAngle(p.lon, 'mc', ramc, 55.75);
+    const ramc2 = (ramc + arc) * Math.PI / 180, e = 23.4392911 * Math.PI / 180;
+    const mcLon = ((Math.atan2(Math.sin(ramc2), Math.cos(ramc2) * Math.cos(e)) * 180 / Math.PI) + 360) % 360;
+    return sep(mcLon, p.lon) < 0.05;
+  });
+  // 3) Ключ Найбода и границы: годы = дуга/0.985647, всё в (0, 100], сортировка.
+  const pd = computePrimaryDirections(chart, DB.astroBirth);
+  const keyOk = pd.length >= 5 && pd.every(d => Math.abs(d.years - d.arc / 0.985647) < 1e-9 && d.years > 0 && d.years <= 100)
+    && pd.every((d, i) => i === 0 || d.years >= pd[i - 1].years);
+  // 4) UI: сегмент «Первичные» — интро с честной чувствительностью, список, полный свёрнут.
+  goTo('astro'); asub('prog');
+  STATE.progSeg = 'primary'; await rPrognostics();
+  const tx = document.getElementById('astro-prog').textContent;
+  const uiOk = /старейшая прогностическая техника/.test(tx) && /±4 минуты/.test(tx)
+    && /≈ возраст \d/.test(tx) && document.getElementById('pd-all').style.display === 'none';
+  // 5) Честный отказ без времени рождения.
+  DB.astroBirth = { date: '2000-01-01', timeKnown: false, utcOffset: 0 };
+  DB.astroCharts = []; await runNatalChart();
+  await rPrognostics();
+  const noTime = /требуют известного времени/.test(document.getElementById('astro-prog').textContent);
+  STATE.progSeg = 'secondary'; goTo('home'); DB.astroBirth = null; DB.astroCharts = [];
+  return { ascOk, mcOk, keyOk, n: pd.length, uiOk, noTime };
+});
+ok(pdT.ascOk, 'первичные дирекции: физический инвариант Asc — повернув небо на дугу, промиссор восходит (10 планет, ±0.05°)');
+ok(pdT.mcOk, 'первичные дирекции: инвариант MC — дуга через прямое восхождение точна (10 планет)');
+ok(pdT.keyOk, `первичные дирекции: ключ Найбода, окно 0–100 лет, сортировка (${pdT.n} событий)`);
+ok(pdT.uiOk, 'первичные дирекции UI: интро с честной чувствительностью ±4 мин ≈ ±1 год, полный список свёрнут');
+ok(pdT.noTime, 'первичные дирекции: без времени рождения — честный отказ');
+
 // ── Астрология: полный портрет карты (интро, Asc/MC, синтез-слой) ──
 const portT = await page.evaluate(async () => {
   await loadAstroEngine(); await loadAstroRules();
