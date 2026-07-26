@@ -1,0 +1,48 @@
+name: UX Evidence — Архитектор
+
+# Этап 0 «UX evidence foundation»: собирает воспроизводимый baseline
+# текущего «Архитектора» — скриншоты по матрице устройств × тем × состояний,
+# accessibility smoke, route inventory и performance baseline — и выкладывает
+# их артефактами. Это НЕ гейт качества: харнесс не чинит дефекты и завершается
+# успешно, даже если они найдены. Регрессионным гейтом остаётся ci.yml (e2e).
+
+on:
+  push:
+    branches: [ MAIN, "claude/**" ]
+    paths:
+      - "architect/**"
+      - ".github/workflows/ux-evidence.yml"
+  pull_request:
+    paths:
+      - "architect/**"
+      - ".github/workflows/ux-evidence.yml"
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: architect
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: architect/package-lock.json
+      - name: Install deps
+        run: npm install
+      - name: Install Chromium
+        # Playwright ставит СВОЮ ревизию Chromium под установленную версию —
+        # поэтому PW_CHROMIUM в CI не нужен (executablePath = playwright default).
+        run: npx playwright install --with-deps chromium
+      - name: Build + UX evidence
+        run: npm run evidence
+      - name: Upload evidence artifacts
+        if: always()   # выкладываем даже при частичных сбоях отдельных экранов
+        uses: actions/upload-artifact@v4
+        with:
+          name: ux-evidence
+          path: architect/evidence
+          retention-days: 21
+          if-no-files-found: warn
