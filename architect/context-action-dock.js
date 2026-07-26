@@ -66,8 +66,8 @@
       const action = currentActions().find(item => item.id === button.dataset.action);
       if (action && typeof action.run === 'function') {
         action.run();
-        // openOv/captureSphere may open a sheet; hide the dock in the same task,
-        // before focus can return to an action that is no longer relevant.
+        // Hide immediately when an action opens a sheet, but preserve the
+        // clicked button until the browser has completed dispatching the click.
         update();
       }
     });
@@ -103,11 +103,18 @@
     const overlayOpen = Boolean(document.querySelector('.ov.on'));
     const key = currentKey();
     const actions = shellOn && phone && !overlayOpen ? (ACTIONS[key] || []) : [];
-    const signature = actions.length ? `${key}:${actions.map(action => action.id).join(',')}` : 'hidden';
 
     document.body.classList.toggle('nsh-context-on', actions.length > 0);
     element.hidden = actions.length === 0;
 
+    // When hiding, keep the current children in the DOM so a click/focus event
+    // can finish cleanly. They are inaccessible while the toolbar is hidden.
+    if (!actions.length) {
+      renderedSignature = 'hidden';
+      return;
+    }
+
+    const signature = `${key}:${actions.map(action => action.id).join(',')}`;
     // goTo/msub/asub can emit several DOM mutations for one navigation action.
     // Do not detach and recreate already-correct buttons on every mutation.
     if (signature === renderedSignature) return;
@@ -123,7 +130,7 @@
       button.innerHTML = `<i data-lucide="${escapeHtml(action.icon)}"></i><span>${escapeHtml(action.label)}</span>`;
       element.appendChild(button);
     }
-    if (actions.length && window.lucide && typeof window.lucide.createIcons === 'function') {
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
       try { window.lucide.createIcons({ nodes: [element] }); } catch (_) {}
     }
   }
