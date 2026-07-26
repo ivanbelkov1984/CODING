@@ -40,6 +40,7 @@
 
   let dock = null;
   let frame = 0;
+  let renderedSignature = '';
 
   const escapeHtml = value => String(value || '')
     .replaceAll('&', '&amp;')
@@ -63,7 +64,12 @@
       const button = event.target.closest('button[data-action]');
       if (!button || !dock.contains(button)) return;
       const action = currentActions().find(item => item.id === button.dataset.action);
-      if (action && typeof action.run === 'function') action.run();
+      if (action && typeof action.run === 'function') {
+        action.run();
+        // openOv/captureSphere may open a sheet; hide the dock in the same task,
+        // before focus can return to an action that is no longer relevant.
+        update();
+      }
     });
     return dock;
   }
@@ -95,10 +101,17 @@
     const phone = Boolean(window.matchMedia && window.matchMedia('(max-width: 767px)').matches);
     const shellOn = document.body.classList.contains('navshell');
     const overlayOpen = Boolean(document.querySelector('.ov.on'));
-    const actions = shellOn && phone && !overlayOpen ? currentActions() : [];
+    const key = currentKey();
+    const actions = shellOn && phone && !overlayOpen ? (ACTIONS[key] || []) : [];
+    const signature = actions.length ? `${key}:${actions.map(action => action.id).join(',')}` : 'hidden';
 
     document.body.classList.toggle('nsh-context-on', actions.length > 0);
     element.hidden = actions.length === 0;
+
+    // goTo/msub/asub can emit several DOM mutations for one navigation action.
+    // Do not detach and recreate already-correct buttons on every mutation.
+    if (signature === renderedSignature) return;
+    renderedSignature = signature;
     element.replaceChildren();
 
     for (const action of actions) {
@@ -125,7 +138,11 @@
 
   function init() {
     if (!ensureDock()) return;
-    const observer = new MutationObserver(schedule);
+    const observer = new MutationObserver(mutations => {
+      // Lucide and our own render mutate descendants of the dock. Observing
+      // those mutations would create a render loop and detach focused buttons.
+      if (mutations.some(mutation => !dock.contains(mutation.target))) schedule();
+    });
     observer.observe(document.body, {
       subtree: true,
       attributes: true,
