@@ -6045,6 +6045,7 @@ function rSpheres() {
 }
 function sphereCard(s) {
   const st = sphereStats(s.id, 30) || {};
+  // eslint-disable-next-line no-useless-assignment -- защитная инициализация: при неизвестном s.type карточка рендерится пустой, а не «undefined»
   let body = '', action = '';
   if (s.type === 'score') {
     const val = st.today != null ? st.today : (st.last != null ? st.last : '—');
@@ -6559,7 +6560,7 @@ async function gptUnzip(buf) {
 // импортируются — дневник это твои слова). Эвристика «похоже на дневник»:
 // кириллица, развёрнутые сообщения, не код.
 function gptParseConvs(raw) {
-  let arr; try { arr = JSON.parse(raw); } catch (e) { throw new Error('файл не читается как JSON'); }
+  let arr; try { arr = JSON.parse(raw); } catch (e) { throw new Error('файл не читается как JSON', { cause: e }); }
   if (!Array.isArray(arr)) arr = (arr && arr.conversations) || [];
   const out = [];
   arr.forEach(c => {
@@ -6799,7 +6800,7 @@ async function api(path, { method='GET', body, timeout=12000, retries=2 } = {}) 
       const retryable = (e.name === 'AbortError' || e.name === 'TypeError') && !e.status;
       if (retryable && attempt < retries) { log('warn', 'сеть '+path, 'ретрай '+(attempt+1)); await _backoff(attempt); continue; }
       if (e.status) throw e;
-      throw new Error(e.name === 'AbortError' ? 'Таймаут — сервер не ответил' : 'Нет соединения');
+      throw new Error(e.name === 'AbortError' ? 'Таймаут — сервер не ответил' : 'Нет соединения', { cause: e });
     }
   }
   throw lastErr;
@@ -7346,7 +7347,7 @@ const AI_PROVIDERS = {
         });
       } catch (e) {
         clearTimeout(to);
-        throw new Error(e.name === 'AbortError' ? 'Таймаут запроса к Claude' : 'Нет соединения с Claude');
+        throw new Error(e.name === 'AbortError' ? 'Таймаут запроса к Claude' : 'Нет соединения с Claude', { cause: e });
       }
       clearTimeout(to);
       const data = await r.json().catch(() => null);

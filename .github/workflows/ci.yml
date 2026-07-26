@@ -11,8 +11,11 @@ on:
     paths: [ "architect/**", ".github/workflows/ci.yml" ]
 
 jobs:
-  # Быстрый синтакс-линт: битый JS роняет CI за секунды, не тратя минуты
-  # на установку Chromium и полный E2E-прогон.
+  # Быстрый гейт: битый/невалидный JS роняет CI за секунды, не тратя
+  # минуты на установку Chromium и полный E2E-прогон. Два слоя:
+  # node --check (мгновенный синтаксис) + ESLint (корректностные правила,
+  # порог 0 — аудит 2026-07-26 привёл базу к нулю, temporary threshold
+  # не понадобился; конфиг и осознанные исключения — architect/eslint.config.mjs).
   lint:
     runs-on: ubuntu-latest
     defaults:
@@ -23,6 +26,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: architect/package-lock.json
       - name: Syntax check (node --check)
         run: |
           set -e
@@ -32,8 +37,13 @@ jobs:
                    backend/astro_batch.js; do
             if [ -f "$f" ]; then node --check "$f" && echo "OK $f"; fi
           done
+      - name: Install deps
+        run: npm ci
+      - name: ESLint (порог 0)
+        run: npx eslint . --max-warnings=0
 
   e2e:
+    needs: lint   # fail-fast: браузерный прогон не стартует, если lint красный
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -43,6 +53,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: architect/package-lock.json
       - name: Install deps
         run: npm install
       - name: Install Chromium

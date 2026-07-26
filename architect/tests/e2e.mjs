@@ -1692,9 +1692,9 @@ const mcT = await page.evaluate(async () => {
   }
   // 3) Дома при исправленном MC: куспиды растут по ходу зодиака от Asc (порядок не ломается).
   const cusps = c.housesMeta.cusps;
-  let orderOk = true, acc = 0;
+  let acc = 0;
   for (let k = 1; k <= 12; k++) { const nx = cusps[k === 12 ? 1 : k + 1]; acc += ((nx - cusps[k]) % 360 + 360) % 360; }
-  orderOk = Math.abs(acc - 360) < 0.01;
+  const orderOk = Math.abs(acc - 360) < 0.01;
   return { mcGolden, ascGolden, horizonOk, orderOk, mc: c.angles.mc.lon.toFixed(2), asc: c.angles.asc.lon.toFixed(2) };
 });
 ok(mcT.mcGolden, `MC golden J2000/Москва: Водолей ~315.6° (получено ${mcT.mc}°) — 180°-флип исправлен`);
