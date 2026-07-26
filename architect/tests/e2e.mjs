@@ -2791,6 +2791,47 @@ ok(narT.retNar, 'narrative: соляр открывается «тоном го�
 ok(narT.jyoNar, 'narrative: ведическая карта — «ядро» (лагна + Луна/накшатра + текущая даша) одним абзацем');
 ok(narT.harmNar, 'narrative: соединения в гармонике объяснены («работают как один узел»)');
 
+// ── Астрология: True Lilith — оскулирующий апогей Луны (контракт владельца) ──
+const tlT = await page.evaluate(async () => {
+  await loadAstroEngine();
+  const A = window.Astronomy;
+  // 1) Физический golden: в момент апогея Луна стоит в своём оскулирующем
+  // апогее — её долгота обязана совпасть с True Lilith (3 апогея подряд).
+  let ap = A.SearchLunarApsis(A.MakeTime(new Date(Date.UTC(2026, 0, 1))));
+  const errs = [];
+  for (let i = 0; i < 6 && errs.length < 3; i++) {
+    if (ap.kind === 1) {   // апоцентр
+      const moonLon = A.EclipticGeoMoon(ap.time).lon;
+      const tl = trueLilithLon(ap.time);
+      errs.push(Math.abs(((tl - moonLon + 180) % 360 + 360) % 360 - 180));
+    }
+    ap = A.NextLunarApsis(ap);
+  }
+  const apsisOk = errs.length === 3 && errs.every(e => e < 0.3);
+  // 2) Осцилляция вокруг средней Лилит: заметная (>5° хоть раз), но ≤ ~40°;
+  // средняя знаковая разница за 2 года мала (истинная ходит ВОКРУГ средней).
+  let maxDev = 0, sum = 0; const N = 48;
+  for (let i = 0; i < N; i++) {
+    const t = A.MakeTime(new Date(Date.UTC(2025, 0, 1 + i * 15)));
+    const d = ((trueLilithLon(t) - meanLilithLon(t) + 180) % 360 + 360) % 360 - 180;
+    maxDev = Math.max(maxDev, Math.abs(d)); sum += d;
+  }
+  const oscOk = maxDev > 5 && maxDev < 40 && Math.abs(sum / N) < 8;
+  // 3) Карта и UI: обе Лилит в точках, честная пометка о колебании.
+  DB.astroBirth = { date: '2000-01-01', time: '12:00', timeKnown: true, utcOffset: 0, lat: 55.75, lon: 37.62, houseSystem: 'whole' };
+  DB.astroCharts = []; await runNatalChart();
+  const P = DB.astroCharts[0].chart.points;
+  const inChart = !!P.lilithTrue && isFinite(P.lilithTrue.lon) && P.lilith && P.lilithTrue.lon !== P.lilith.lon;
+  goTo('astro'); asub('points');
+  const tx = document.getElementById('astro-points-out').textContent;
+  const uiOk = /Лилит истинная/.test(tx) && /±30°/.test(tx) && /Лилит \(ср\. апогей\)/.test(tx);
+  goTo('home'); DB.astroBirth = null; DB.astroCharts = [];
+  return { apsisOk, errs: errs.map(e => +e.toFixed(3)), oscOk, maxDev: +maxDev.toFixed(1), inChart, uiOk };
+});
+ok(tlT.apsisOk, `True Lilith: физический golden — в 3 апогеях подряд совпадает с долготой Луны (ошибки ${tlT.errs}°)`);
+ok(tlT.oscOk, `True Lilith: колеблется вокруг средней (макс ${tlT.maxDev}°, в пределах ±40°, среднее ~0)`);
+ok(tlT.inChart && tlT.uiOk, 'True Lilith: в карте и на экране точек, с честной пометкой о колебании ±30°');
+
 // ── Астрология: полный портрет карты (интро, Asc/MC, синтез-слой) ──
 const portT = await page.evaluate(async () => {
   await loadAstroEngine(); await loadAstroRules();

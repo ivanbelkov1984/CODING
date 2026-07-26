@@ -2784,7 +2784,7 @@ function computeNatalChart(birth) {
     const a = asteroidLongitude(k, t); const z = zodiacOf(a.lon);
     return { body: k, name: ASTEROID_ELEMENTS[k].ru, lon: z.lon, sign: z.sign, deg: z.deg, approx: true };
   });
-  const points = { lilith: zodiacOf(meanLilithLon(t)) };
+  const points = { lilith: zodiacOf(meanLilithLon(t)), lilithTrue: zodiacOf(trueLilithLon(t)) };
   if (angles) {
     const sunP = planets.find(p => p.body === 'Sun'), moonP = planets.find(p => p.body === 'Moon');
     // День/ночь: высота Солнца над горизонтом.
@@ -2865,6 +2865,31 @@ function meanLilithLon(t) {
   const T = t.tt / 36525;
   const perigee = 83.3532465 + 4069.0137287 * T - 0.0103200 * T * T - T * T * T / 80053 + T * T * T * T / 18999000;
   return norm360(perigee + 180);
+}
+// True Lilith (оскулирующий апогей Луны) — по отдельному контракту владельца
+// (2026-07-26; прежний research-preview статус снят). Классическая небесная
+// механика, не копия чужого кода: элементы оскулирующей двухтеловой орбиты
+// из вектора состояния Луны (позиция GeoMoon + численная скорость ±60 с),
+// вектор эксцентриситета e = ((v²−μ/r)·r − (r·v)·v)/μ направлен в перигей;
+// апогей — противоположное направление; μ = GM(Земля)+GM(Луна).
+// Колеблется до ±30° вокруг средней Лилит — это свойство точки, не ошибка.
+// Самотест (e2e): в момент апогея (SearchLunarApsis) долгота Луны равна
+// долготе оскулирующего апогея — Луна в этот миг стоит в своём апогее.
+function trueLilithLon(t) {
+  const A = window.Astronomy;
+  const AU_KM = 1.495978707e8, DAY_S = 86400;
+  const MU = 398600.4418 + 4902.800066;      // км³/с² (IERS/DE: Земля + Луна)
+  const dtDays = 60 / DAY_S;                 // ±60 с для численной производной
+  const p0 = A.GeoMoon(t);
+  const pm = A.GeoMoon(t.AddDays(-dtDays)), pp = A.GeoMoon(t.AddDays(dtDays));
+  const r = [p0.x * AU_KM, p0.y * AU_KM, p0.z * AU_KM];
+  const v = [pp.x - pm.x, pp.y - pm.y, pp.z - pm.z].map(c => c * AU_KM / (2 * dtDays * DAY_S));
+  const rr = Math.hypot(r[0], r[1], r[2]);
+  const vv2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+  const rv = r[0] * v[0] + r[1] * v[1] + r[2] * v[2];
+  const k1 = (vv2 - MU / rr) / MU, k2 = rv / MU;
+  const apo = new A.Vector(-(k1 * r[0] - k2 * v[0]), -(k1 * r[1] - k2 * v[1]), -(k1 * r[2] - k2 * v[2]), t);
+  return A.Ecliptic(apo).elon;
 }
 // Вертекс: численно — западное пересечение эклиптики с первой вертикалью
 // (точка на prime vertical ⇔ скалярное произведение с вектором севера = 0).
@@ -4139,6 +4164,7 @@ function antab(t) {
       key ? ruleAttr(`pointInSign.${key}.${z.sign}`, `${nm} в знаке ${z.sign}`) : '') : '';
     const prX = (nm, z, prefix) => z ? rowA(`<b>${nm}</b> — ${esc(z.sign)} ${z.deg.toFixed(1)}°`, ruleAttr(`${prefix}.${z.sign}`, `${nm} в знаке ${z.sign}`)) : '';
     html = pr('Точка Судьбы', P.fortune, P.fortune && (P.fortune.isDay ? ' (дневная)' : ' (ночная)'), 'Fortune') + pr('Лилит (ср.)', P.lilith, '', 'Lilith')
+      + pr('Лилит истинная', P.lilithTrue, ' (оскул.)', 'Lilith')
       + pr('Вертекс', P.vertex, '', 'Vertex') + prX('Антивертекс', P.antivertex, 'antivertexInSign') + prX('Восточная точка', P.eastPoint, 'eastPointInSign');
     if ((c.asteroids || []).length) html += `<div class="f-lbl" style="margin-top:.4rem">Астероиды (прибл.)</div>`
       + c.asteroids.map(a => rowA(`<b>${esc(a.name)}</b> — ${esc(a.sign)} ${a.deg.toFixed(1)}°`,
@@ -4850,6 +4876,7 @@ function rPointsScreen() {
   html += '<div class="f-lbl" style="margin-top:.4rem">Точки</div>'
     + `<div class="si-text" style="color:var(--t3);line-height:1.5;margin:.1rem 0 .3rem">Расчётные точки — не небесные тела, а чувствительные места карты: Лилит — теневая тема, Точка Судьбы — где легче везёт, Вертекс — судьбоносные встречи.</div>`
     + pr('Лилит (ср. апогей)', P.lilith, '', 'Lilith')
+    + pr('Лилит истинная (оскул. апогей)', P.lilithTrue, ' <span style="color:var(--t4);font-size:.72rem">колеблется до ±30° от средней — это свойство точки</span>', 'Lilith')
     + pr('Точка Судьбы', P.fortune, P.fortune && (P.fortune.isDay ? ' (дневная формула)' : ' (ночная формула)'), 'Fortune')
     + pr('Вертекс', P.vertex, '', 'Vertex') + prX('Антивертекс', P.antivertex, 'antivertexInSign') + prX('Восточная точка', P.eastPoint, 'eastPointInSign');
   if (!P.fortune) html += '<div class="si-text" style="color:var(--t3)">Вертекс и Точка Судьбы требуют известного времени рождения.</div>';
