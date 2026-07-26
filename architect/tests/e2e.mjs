@@ -3112,7 +3112,7 @@ ok(rectUi.supportMetric && rectUi.noWarnAt3, 'ректификация UI: ме�
 ok(rectUi.warnAt2, 'ректификация UI: при 1–2 событиях — явное «Недостаточно данных для надёжной оценки»');
 ok(rectUi.notOverwritten1 && rectUi.applyFills && rectUi.notOverwritten2, 'ректификация UI: данные рождения не перезаписываются — «применить» лишь подставляет время в форму');
 
-// ── Navigation shell 1.0 (за флагом arch_nav_v2; аддитивно, OFF по умолчанию) ──
+// ── Navigation shell v2 — базовый слой (за флагом arch_nav_v2; аддитивно, OFF по умолчанию) ──
 const nsh = await page.evaluate(() => {
   const r = {};
   // По умолчанию OFF: класс не стоит, таб-бар скрыт, ＋ = прежний инсайт.
@@ -3187,7 +3187,9 @@ const nsh2 = await page.evaluate(async () => {
   const forms = [['ov-add', 'insight'], ['ov-drm', 'dream'], ['ov-why', 'why'], ['ov-symptom', 'symptom'], ['ov-measure', 'measure'], ['ov-craving', 'craving']];
   r.forms = forms.every(([ov]) => { openCap(); capGo(ov); return on(ov) && !on('ov-capture'); });
   openCap(); captureSphere();
-  r.sphere = !!document.querySelector('.ov.on') && !on('ov-capture');   // лог первой сферы открыт
+  // Открылась либо форма записи (1 сфера), либо явный выбор (несколько) —
+  // детальные сценарии 0/1/N проверяются отдельным блоком ниже.
+  r.sphere = (on('ov-sphere-log') || on('ov-sphere-pick')) && !on('ov-capture');
   document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
   // 3) Hash: #/capture и #/more адресуемы; закрытие возвращает hash раздела.
   goTo('home');
@@ -3294,6 +3296,86 @@ const reloadOk = await page.evaluate(() => {
   return { restored: document.getElementById('pg-sys').classList.contains('on'), flagOn: document.body.classList.contains('navshell') };
 });
 ok(reloadOk.flagOn && reloadOk.restored, 'shell v2: перезагрузка при ON восстанавливает раздел из hash (#/overview → Обзор)');
+
+// «Запись сферы»: 0 сфер → раздел «Сферы» с подсказкой; 1 → сразу форма;
+// несколько → явный выбор (не первая молча). Данные не персистятся.
+const sph = await page.evaluate(() => {
+  const r = {};
+  const on = id => document.getElementById(id).classList.contains('on');
+  const closeAll = () => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
+  const saved = DB.spheres;
+  try { document.getElementById('splash').style.display = 'none'; } catch (e) {}
+  // 0 сфер: никакая форма не открыта, ведём в раздел «Сферы».
+  DB.spheres = [];
+  goTo('home'); closeAll(); openCapture(); captureSphere();
+  r.zeroVit = on('pg-vit') && !document.querySelector('.ov.on');
+  r.zeroHash = location.hash === '#/spheres';
+  // 1 сфера: форма записи этой сферы открывается сразу.
+  DB.spheres = [{ id: 111, name: 'Сон-тест', icon: '', color: '#1056CC', type: 'score' }];
+  goTo('home'); closeAll(); openCapture(); captureSphere();
+  r.oneLog = on('ov-sphere-log') && document.getElementById('sphere-log-title').textContent.includes('Сон-тест');
+  r.oneHash = location.hash === '#/today';
+  closeAll();
+  // Несколько сфер: лист выбора; выбираем ЯВНО не первую.
+  DB.spheres = [
+    { id: 111, name: 'Сон-тест', icon: '', color: '#1056CC', type: 'score' },
+    { id: 222, name: 'Спорт-тест', icon: '', color: '#0E7490', type: 'habit' },
+  ];
+  goTo('home'); closeAll(); openCapture(); captureSphere();
+  r.pickShown = on('ov-sphere-pick') && !on('ov-sphere-log');
+  const btns = [...document.querySelectorAll('#sphere-pick-list button')];
+  r.pickA11y = btns.length === 2 && btns.every(b => b.tagName === 'BUTTON' && b.getAttribute('type') === 'button' && b.textContent.trim().length > 0);
+  btns[1].click();
+  r.pickSecond = on('ov-sphere-log') && !on('ov-sphere-pick') && document.getElementById('sphere-log-title').textContent.includes('Спорт-тест');
+  r.pickHash = location.hash === '#/today';
+  closeAll();
+  // Лист выбора нормально закрывается своей кнопкой «Закрыть».
+  openCapture(); captureSphere();
+  document.querySelector('#ov-sphere-pick .btn').click();
+  r.pickCloses = !on('ov-sphere-pick') && !on('ov-sphere-log');
+  closeAll();
+  DB.spheres = saved;
+  localStorage.setItem('arch_nav_v2', '0');
+  try { history.replaceState(null, '', location.pathname); } catch (e) { location.hash = ''; }
+  applyNavShell(); goTo('home');
+  return r;
+});
+ok(sph.zeroVit && sph.zeroHash, 'запись сферы: 0 сфер — переход в раздел «Сферы» (hash #/spheres), форма не открывается');
+ok(sph.oneLog && sph.oneHash, 'запись сферы: 1 сфера — её форма открывается сразу, hash корректен');
+ok(sph.pickShown && sph.pickA11y, 'запись сферы: несколько сфер — доступный явный выбор (настоящие кнопки с именами)');
+ok(sph.pickSecond && sph.pickHash && sph.pickCloses, 'запись сферы: выбор НЕ первой сферы открывает её openSphereLog; лист закрывается, hash корректен');
+
+// Переключатель «Новая навигация» в Настройках: настоящий <button>,
+// aria-pressed, синхронный статус «Вкл/Выкл», клавиатурное управление.
+const tgl0 = await page.evaluate(() => {
+  localStorage.setItem('arch_nav_v2', '0'); applyNavShell(); goTo('settings');
+  const t = document.getElementById('navshell-toggle');
+  const b = t.getBoundingClientRect();
+  return {
+    isButton: t.tagName === 'BUTTON' && t.getAttribute('type') === 'button',
+    named: /Новая навигация/.test(t.textContent),
+    pressedOff: t.getAttribute('aria-pressed') === 'false',
+    lblOff: document.getElementById('navshell-lbl').textContent === 'Выкл',
+    tapOk: b.height >= 44 && b.width >= 44,
+  };
+});
+await page.focus('#navshell-toggle');
+await page.keyboard.press('Enter');
+const tglOn = await page.evaluate(() => ({
+  pressed: document.getElementById('navshell-toggle').getAttribute('aria-pressed') === 'true',
+  lbl: document.getElementById('navshell-lbl').textContent === 'Вкл',
+  shellOn: document.body.classList.contains('navshell'),
+}));
+await page.keyboard.press('Space');
+const tglOff = await page.evaluate(() => ({
+  pressed: document.getElementById('navshell-toggle').getAttribute('aria-pressed') === 'false',
+  lbl: document.getElementById('navshell-lbl').textContent === 'Выкл',
+  shellOff: !document.body.classList.contains('navshell'),
+}));
+ok(tgl0.isButton && tgl0.named && tgl0.tapOk, 'настройки: «Новая навигация» — настоящий <button type=button> с доступным именем, tap ≥44px');
+ok(tgl0.pressedOff && tgl0.lblOff && tglOn.pressed && tglOn.lbl && tglOn.shellOn, 'настройки: aria-pressed и «Вкл/Выкл» синхронны; Enter с клавиатуры включает');
+ok(tglOff.pressed && tglOff.lbl && tglOff.shellOff, 'настройки: Space с клавиатуры выключает — полное клавиатурное управление');
+
 // Возврат к дефолту (OFF) для чистоты остатка сьюта.
 await page.evaluate(() => {
   localStorage.setItem('arch_nav_v2', '0');

@@ -7853,7 +7853,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-// ═══ NAVIGATION SHELL 1.0 (за флагом arch_nav_v2) ════════════════
+// ═══ NAVIGATION SHELL v2 (за флагом arch_nav_v2) ═════════════════
 // Аддитивный слой: нижний таб-бар (iPhone) / постоянный sidebar (iPad
 // portrait) / глобальное «Записать». Без флага body не получает класс
 // navshell → CSS-правила неактивны, поведение как раньше. Вкладки ведут
@@ -7884,13 +7884,26 @@ function capGo(ovId) {
   nshHashToPage();
   openOv(ovId);
 }
-// «Запись сферы» из лаунчера: если сферы есть — открыть лог первой, иначе
-// провести пользователя к разделу «Сферы» (там создать/выбрать). Данные не меняются.
+// «Запись сферы» из лаунчера: 0 сфер — провести в раздел «Сферы» и подсказать
+// создать; ровно 1 — сразу её форма; несколько — явный выбор пользователем
+// (запись не должна молча попадать в первую сферу). Данные и формы не меняются.
 function captureSphere() {
   closeOv('ov-capture');
-  if ((DB.spheres || []).length) { nshHashToPage(); openSphereLog(DB.spheres[0].id); }
-  else { goTo('vit'); toast('Заведи сферу, чтобы отмечать трекер', ''); }
+  nshHashToPage();
+  const list = DB.spheres || [];
+  if (!list.length) { goTo('vit'); toast('Заведи сферу, чтобы отмечать трекер', ''); return; }
+  if (list.length === 1) { openSphereLog(list[0].id); return; }
+  openSpherePick();
 }
+// Лист выбора сферы: настоящие кнопки с именами, ведёт в существующий
+// openSphereLog(id) — своей логики сохранения нет.
+function openSpherePick() {
+  const box = $('sphere-pick-list'); if (!box) return;
+  box.innerHTML = (DB.spheres || []).map(s =>
+    `<button type="button" class="srow" onclick="pickSphere(${s.id})"><span class="sl2">${esc(((s.icon || '') + ' ' + s.name).trim())}</span><span class="sv2">Отметить</span></button>`).join('');
+  openOv('ov-sphere-pick');
+}
+function pickSphere(id) { closeOv('ov-sphere-pick'); openSphereLog(id); }
 // Глобальная ＋ в topbar: при новом shell — «Записать», иначе прежний инсайт.
 function capturePlus() { if (navShellEnabled()) openCapture(); else openOv('ov-add'); }
 
@@ -7951,6 +7964,7 @@ function applyNavShell() {
   const on = navShellEnabled();
   document.body.classList.toggle('navshell', on);
   const lbl = $('navshell-lbl'); if (lbl) lbl.textContent = on ? 'Вкл' : 'Выкл';
+  const tgl = $('navshell-toggle'); if (tgl) tgl.setAttribute('aria-pressed', on ? 'true' : 'false');
   const add = $('topbar-add'); if (add) add.setAttribute('aria-label', on ? 'Записать' : 'Новый инсайт');
   nshSidebarGroups(on);
   if (on) {
