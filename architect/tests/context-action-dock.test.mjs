@@ -106,14 +106,21 @@ for (const [label, overlay] of [['Симптом', 'ov-symptom'], ['Измере
 }
 
 await page.evaluate(() => {
-  DB.digests = [];
+  window.__dockMkDigCalls = 0;
+  window.__dockMkDigOriginal = window.mkDig;
+  window.mkDig = () => { window.__dockMkDigCalls += 1; };
   goTo('sys');
   window.__ARCH_CONTEXT_DOCK__.update();
 });
 const overviewLabels = await dock.getByRole('button').evaluateAll(items => items.map(item => item.getAttribute('aria-label')));
 ok(overviewLabels.join('|') === 'Обзор недели|Отчёт врачу', 'Обзор: обзор недели + отчёт врачу');
 await activate(dock.getByRole('button', { name: 'Обзор недели' }));
-ok(await page.evaluate(() => DB.digests.length === 1), 'Обзор недели вызывает существующий mkDig');
+ok(await page.evaluate(() => window.__dockMkDigCalls === 1), 'Обзор недели вызывает существующий mkDig');
+await page.evaluate(() => {
+  window.mkDig = window.__dockMkDigOriginal;
+  delete window.__dockMkDigOriginal;
+  delete window.__dockMkDigCalls;
+});
 await activate(dock.getByRole('button', { name: 'Отчёт врачу' }));
 ok(await page.locator('#ov-doc-report').evaluate(element => element.classList.contains('on')), 'Отчёт врачу вызывает существующий генератор отчёта');
 await page.evaluate(() => closeOv('ov-doc-report'));
