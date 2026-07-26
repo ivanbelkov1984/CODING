@@ -506,6 +506,7 @@ function goTo(tab, el) {
   if (tab==='health') rHealth();
   if (tab==='astro') asub('menu');
   if (tab==='settings') { rProfileRow(); checkApiStatus(); rPushStatus(); const kc=$('keys-cnt'); if (kc) kc.textContent = KEY_SERVICES.filter(s=>getAiKeyFor(s.p)).length + ' из ' + KEY_SERVICES.length; }
+  if (document.body.classList.contains('navshell')) { nshHighlight(tab); nshWriteHash(tab); }
 }
 function msub(tab, el) {
   document.querySelectorAll('[id^="ms-"]').forEach(t => t.style.display='none');
@@ -7834,6 +7835,7 @@ function initAll() {
     const tv = $('thv'); if(tv) tv.textContent = t==='dark'?'Ночная':'Дневная';
   }
   updateDomainLabel(); rProfileRow();
+  applyNavShell();
   rHome(); rCompass(); rAxCells(); rKPIs(); rIns(); rBook();
   rBots(); rPats(); rDrms(); rSpi(); rEvoList($('evo-sh')); rDig();
   icons();
@@ -7850,6 +7852,178 @@ document.addEventListener('DOMContentLoaded', () => {
   initAll();
 });
 
+
+// ═══ NAVIGATION SHELL v2 (за флагом arch_nav_v2) ═════════════════
+// Аддитивный слой: нижний таб-бар (iPhone) / постоянный sidebar (iPad
+// portrait) / глобальное «Записать». Без флага body не получает класс
+// navshell → CSS-правила неактивны, поведение как раньше. Вкладки ведут
+// на СУЩЕСТВУЮЩИЕ destination id — ни один маршрут не теряется.
+function navShellEnabled() { try { return localStorage.getItem('arch_nav_v2') === '1'; } catch (e) { return false; } }
+// Вкладки shell → существующие id (goTo). «Ещё» открывает drawer со всеми разделами.
+const NSH_MAP = { today: 'home', diary: 'map', overview: 'sys' };
+function navGo(dest) {
+  if (dest === 'more') { openOv('ov-more'); nshHighlight('more'); nshPushHash('#/more'); return; }
+  const tab = NSH_MAP[dest];
+  if (tab) goTo(tab);
+}
+// Обратный маппinг: подсветить активную вкладку по текущему разделу.
+// Разделы вне 4 вкладок (Сферы/Здоровье/Астро/Настройки) относятся к «Ещё».
+function nshHighlight(tab) {
+  const dest = tab === 'home' ? 'today' : tab === 'map' ? 'diary' : tab === 'sys' ? 'overview' : 'more';
+  document.querySelectorAll('.nsh-tab').forEach(b => {
+    const on = b.dataset.nav === dest;
+    b.classList.toggle('on', on);
+    if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  });
+}
+function openCapture() { openOv('ov-capture'); nshPushHash('#/capture'); }
+// Роутинг из листа «Записать» в СУЩЕСТВУЮЩУЮ форму: лист закрывается,
+// hash возвращается к активному разделу (данные и формы не меняются).
+function capGo(ovId) {
+  closeOv('ov-capture');
+  nshHashToPage();
+  openOv(ovId);
+}
+// «Запись сферы» из лаунчера: 0 сфер — провести в раздел «Сферы» и подсказать
+// создать; ровно 1 — сразу её форма; несколько — явный выбор пользователем
+// (запись не должна молча попадать в первую сферу). Данные и формы не меняются.
+function captureSphere() {
+  closeOv('ov-capture');
+  nshHashToPage();
+  const list = DB.spheres || [];
+  if (!list.length) { goTo('vit'); toast('Заведи сферу, чтобы отмечать трекер', ''); return; }
+  if (list.length === 1) { openSphereLog(list[0].id); return; }
+  openSpherePick();
+}
+// Лист выбора сферы: настоящие кнопки с именами, ведёт в существующий
+// openSphereLog(id) — своей логики сохранения нет.
+function openSpherePick() {
+  const box = $('sphere-pick-list'); if (!box) return;
+  box.innerHTML = (DB.spheres || []).map(s =>
+    `<button type="button" class="srow" onclick="pickSphere(${s.id})"><span class="sl2">${esc(((s.icon || '') + ' ' + s.name).trim())}</span><span class="sv2">Отметить</span></button>`).join('');
+  openOv('ov-sphere-pick');
+}
+function pickSphere(id) { closeOv('ov-sphere-pick'); openSphereLog(id); }
+// Глобальная ＋ в topbar: при новом shell — «Записать», иначе прежний инсайт.
+function capturePlus() { if (navShellEnabled()) openCapture(); else openOv('ov-add'); }
+
+// ── Hash-роутинг v2 (аддитивно; только при navshell) ────────────
+// Делает состояние адресуемым: перезагрузка восстанавливает раздел,
+// back/forward браузера работают (переходы кладутся в историю pushState).
+// Canonical destination id — источник правды; hash лишь их сериализует.
+// Неизвестный hash безопасно ведёт на «Сегодня». Без флага hash не
+// пишется и не читается — поведение как раньше.
+const NSH_SLUGS = { home: 'today', map: 'diary', sys: 'overview', vit: 'spheres', health: 'health', astro: 'astro', settings: 'settings' };
+const NSH_SLUGS_REV = { today: 'home', diary: 'map', overview: 'sys', spheres: 'vit', health: 'health', astro: 'astro', settings: 'settings' };
+function nshPushHash(h, replace) {
+  if (!document.body.classList.contains('navshell')) return;
+  if (location.hash === h) return;
+  try { history[replace ? 'replaceState' : 'pushState'](null, '', h); } catch (e) { try { location.hash = h; } catch (_) {} }
+}
+function nshWriteHash(tab, replace) {
+  const slug = NSH_SLUGS[tab]; if (!slug) return;
+  nshPushHash('#/' + slug, replace);
+}
+// Hash активного раздела (после закрытия оверлеев «Записать»/«Ещё») —
+// заменой, чтобы не плодить записи истории.
+function nshHashToPage() {
+  if (!document.body.classList.contains('navshell')) return;
+  const pg = document.querySelector('.pg.on');
+  const tab = pg ? pg.id.replace('pg-', '') : 'home';
+  const slug = NSH_SLUGS[tab] || 'today';
+  try { history.replaceState(null, '', '#/' + slug); } catch (e) {}
+}
+// Применить текущий hash к приложению. Возвращает true, если hash понят.
+function nshApplyHash(fromInit) {
+  const m = (location.hash || '').match(/^#\/([a-z]+)/);
+  if (!m) return false;                       // нет hash — как раньше
+  const slug = m[1];
+  const closeSheets = () => { ['ov-capture', 'ov-more'].forEach(id => { const el = $(id); if (el && el.classList.contains('on')) el.classList.remove('on'); }); };
+  if (slug === 'capture') { openOv('ov-capture'); return true; }
+  if (slug === 'more') { openOv('ov-more'); nshHighlight('more'); return true; }
+  const tab = NSH_SLUGS_REV[slug];
+  if (!tab) {                                 // неизвестный hash → безопасно на «Сегодня»
+    closeSheets(); goTo('home'); nshWriteHash('home', true);
+    return true;
+  }
+  closeSheets();
+  const cur = document.querySelector('.pg.on');
+  if (!cur || cur.id !== 'pg-' + tab) goTo(tab);
+  else if (fromInit) nshHighlight(tab);
+  return true;
+}
+let _nshHashBound = false;
+function nshBindHash() {
+  if (_nshHashBound) return; _nshHashBound = true;
+  window.addEventListener('hashchange', () => {
+    if (!document.body.classList.contains('navshell')) return;
+    nshApplyHash(false);
+  });
+}
+function applyNavShell() {
+  const on = navShellEnabled();
+  document.body.classList.toggle('navshell', on);
+  const lbl = $('navshell-lbl'); if (lbl) lbl.textContent = on ? 'Вкл' : 'Выкл';
+  const tgl = $('navshell-toggle'); if (tgl) tgl.setAttribute('aria-pressed', on ? 'true' : 'false');
+  const add = $('topbar-add'); if (add) add.setAttribute('aria-label', on ? 'Записать' : 'Новый инсайт');
+  nshSidebarGroups(on);
+  if (on) {
+    nshBindHash();
+    // Восстановление раздела из hash при загрузке; без hash — как раньше.
+    if (!nshApplyHash(true)) {
+      const pg = document.querySelector('.pg.on');
+      nshHighlight(pg ? pg.id.replace('pg-', '') : 'home');
+    }
+  }
+}
+// ── iPad/desktop: сгруппированный sidebar (TARGET-IA §5) ─────────
+// При флаге плоский список заменяется группами. Каждый пункт зовёт
+// СУЩЕСТВУЮЩИЙ id; «Сферы» помещены в «День» (в §5 они не распределены,
+// а терять раздел нельзя) — отклонение задокументировано в PR.
+const NSH_SIDEBAR_GROUPS = [
+  ['День', [
+    ['home', 'sun', 'Сегодня', "goTo('home')"],
+    [null, 'plus-circle', 'Записать', 'openCapture()'],
+    ['vit', 'layers', 'Сферы', "goTo('vit')"],
+  ]],
+  ['Самопознание', [['map', 'brain', 'Дневник', "goTo('map')"]]],
+  ['Здоровье', [
+    ['health', 'heart-pulse', 'Здоровье', "goTo('health')"],
+    [null, 'file-text', 'Отчёт врачу', "goTo('health');openOv('ov-doc-report')"],
+  ]],
+  ['Аналитика', [['sys', 'bar-chart-3', 'Обзор', "goTo('sys')"]]],
+  ['Инструменты', [
+    ['astro', 'sparkles', 'Астрология', "goTo('astro')"],
+    [null, 'search', 'Поиск', "openOv('ov-search')"],
+    [null, 'list-checks', 'Мои записи', 'openRecords()'],
+  ]],
+  ['Система', [
+    [null, 'users', 'Профили', 'openProfiles()'],
+    ['settings', 'settings', 'Настройки', "goTo('settings')"],
+    [null, 'message-square', 'Обратная связь', "openOv('ov-feedback')"],
+  ]],
+];
+function nshSidebarGroups(on) {
+  const nav = $('nav'); if (!nav) return;
+  let box = $('nsh-nav-groups');
+  if (!on) { if (box) box.remove(); nav.querySelectorAll(':scope > .navlink, :scope > .side-div').forEach(el => el.style.display = ''); return; }
+  nav.querySelectorAll(':scope > .navlink, :scope > .side-div').forEach(el => el.style.display = 'none');
+  if (box) return;
+  box = document.createElement('div');
+  box.id = 'nsh-nav-groups';
+  box.innerHTML = NSH_SIDEBAR_GROUPS.map(([title, items]) =>
+    `<div class="nsh-grp-lbl">${esc(title)}</div>` + items.map(([tab, ico, label, act]) =>
+      `<button class="navlink"${tab ? ` data-tab="${tab}"` : ''} onclick="closeNav();${act}"><i data-lucide="${ico}"></i>${esc(label)}</button>`).join('')
+  ).join('');
+  nav.appendChild(box);
+  icons();
+}
+function toggleNavShell() {
+  const on = !navShellEnabled();
+  try { localStorage.setItem('arch_nav_v2', on ? '1' : '0'); } catch (e) {}
+  applyNavShell();
+  toast(on ? 'Новая навигация включена' : 'Новая навигация выключена', 'ok');
+}
 
 // ═══ SHELL: drawer-навигация, блок аккаунта, жесты ═══════════════
 function openNav()  { rSidebar(); document.body.classList.add('nav-open'); }
