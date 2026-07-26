@@ -28,7 +28,13 @@ await page.evaluate(() => {
 });
 
 const dock = page.locator('#nsh-context-dock');
-const activate = locator => locator.evaluate(button => button.click());
+const activate = label => page.evaluate(actionLabel => {
+  window.__ARCH_CONTEXT_DOCK__.update();
+  const button = [...document.querySelectorAll('#nsh-context-dock button')]
+    .find(item => item.getAttribute('aria-label') === actionLabel);
+  if (!button) throw new Error(`context action not found: ${actionLabel}`);
+  button.click();
+}, label);
 ok(await dock.isHidden(), 'OFF-флаг: context dock скрыт');
 
 await page.evaluate(() => {
@@ -50,7 +56,7 @@ async function openDiary(sub) {
 await openDiary('insights');
 let buttons = dock.getByRole('button');
 ok(await buttons.count() === 1 && await buttons.first().getAttribute('aria-label') === 'Новый инсайт', 'Дневник/Инсайты: правильное действие');
-await activate(buttons.first());
+await activate('Новый инсайт');
 ok(await page.locator('#ov-add').evaluate(element => element.classList.contains('on')), 'Новый инсайт открывает существующую ov-add');
 await page.evaluate(() => closeOv('ov-add'));
 
@@ -72,7 +78,7 @@ for (const [sub, label, overlay] of [
   await openDiary(sub);
   const action = dock.getByRole('button', { name: label });
   ok(await action.count() === 1, `Дневник/${sub}: действие доступно`);
-  await activate(action);
+  await activate(label);
   ok(await page.locator('#' + overlay).evaluate(element => element.classList.contains('on')), `Дневник/${sub}: открывается ${overlay}`);
   await page.evaluate(id => closeOv(id), overlay);
 }
@@ -87,7 +93,7 @@ await page.evaluate(() => {
 });
 buttons = dock.getByRole('button');
 ok(await buttons.count() === 2, 'Сферы: Отметить сферу + Новая сфера');
-await activate(dock.getByRole('button', { name: 'Отметить сферу' }));
+await activate('Отметить сферу');
 ok(await page.locator('#ov-sphere-pick').evaluate(element => element.classList.contains('on')), 'Несколько сфер: открывается явный выбор, первая не выбирается автоматически');
 ok(await page.locator('#sphere-pick-list button').count() === 2, 'Выбор показывает обе сферы');
 await page.evaluate(() => closeOv('ov-sphere-pick'));
@@ -99,7 +105,7 @@ await page.evaluate(() => {
 const healthLabels = await dock.getByRole('button').evaluateAll(items => items.map(item => item.getAttribute('aria-label')));
 ok(healthLabels.join('|') === 'Симптом|Измерение|Тяга', 'Здоровье: три существующих действия в правильном порядке');
 for (const [label, overlay] of [['Симптом', 'ov-symptom'], ['Измерение', 'ov-measure'], ['Тяга', 'ov-craving']]) {
-  await activate(dock.getByRole('button', { name: label }));
+  await activate(label);
   ok(await page.locator('#' + overlay).evaluate(element => element.classList.contains('on')), `Здоровье/${label}: открывается ${overlay}`);
   await page.evaluate(id => closeOv(id), overlay);
   await page.waitForFunction(() => !document.getElementById('nsh-context-dock').hidden);
@@ -114,14 +120,14 @@ await page.evaluate(() => {
 });
 const overviewLabels = await dock.getByRole('button').evaluateAll(items => items.map(item => item.getAttribute('aria-label')));
 ok(overviewLabels.join('|') === 'Обзор недели|Отчёт врачу', 'Обзор: обзор недели + отчёт врачу');
-await activate(dock.getByRole('button', { name: 'Обзор недели' }));
+await activate('Обзор недели');
 ok(await page.evaluate(() => window.__dockMkDigCalls === 1), 'Обзор недели вызывает существующий mkDig');
 await page.evaluate(() => {
   window.mkDig = window.__dockMkDigOriginal;
   delete window.__dockMkDigOriginal;
   delete window.__dockMkDigCalls;
 });
-await activate(dock.getByRole('button', { name: 'Отчёт врачу' }));
+await activate('Отчёт врачу');
 ok(await page.locator('#ov-doc-report').evaluate(element => element.classList.contains('on')), 'Отчёт врачу вызывает существующий генератор отчёта');
 await page.evaluate(() => closeOv('ov-doc-report'));
 
