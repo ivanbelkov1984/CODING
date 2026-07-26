@@ -138,18 +138,18 @@
 
   function init() {
     if (!ensureDock()) return;
-    const observer = new MutationObserver(mutations => {
-      // Lucide and our own render mutate descendants of the dock. Observing
-      // those mutations would create a render loop and detach focused buttons.
-      if (mutations.some(mutation => !dock.contains(mutation.target))) schedule();
-    });
-    observer.observe(document.body, {
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['class', 'style'],
+    const observer = new MutationObserver(schedule);
+    // Observe only state-bearing application nodes. Never observe the dock's
+    // descendants: Lucide replaces icon nodes and that must not trigger render.
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    document.querySelectorAll('.pg, .ov, #pg-map [id^="ms-"], #pg-astro .asub').forEach(element => {
+      observer.observe(element, { attributes: true, attributeFilter: ['class', 'style'] });
     });
     window.addEventListener('hashchange', schedule);
     window.addEventListener('resize', schedule);
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') schedule();
+    });
     update();
   }
 
