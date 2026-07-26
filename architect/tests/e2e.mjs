@@ -3388,6 +3388,11 @@ ok(ctxOff.hidden && ctxOff.empty && ctxOff.shellOff, 'context dock: при OFF �
 
 const ctx = await page.evaluate(async () => {
   const r = {};
+  // Явно без AI-ключа: dock-кнопка «Собрать обзор недели» вызывает mkDig(),
+  // который при наличии ключа тихо фонит enrichDigestAutonomously() —
+  // реальный сетевой запрос. Более ранние тесты могли оставить fake-ключ
+  // ('sk-test') в localStorage; здесь мы его не используем и не хотим.
+  setAiKey('');
   localStorage.setItem('arch_nav_v2', '1'); applyNavShell();
   const btns = () => [...document.querySelectorAll('#nsh-ctx-dock .nsh-ctx-btn')];
   const dockOn = () => document.getElementById('nsh-ctx-dock').classList.contains('on');
