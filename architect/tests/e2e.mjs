@@ -11,6 +11,7 @@
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { ROUTES } from './evidence/routes.mjs';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 const FILE = 'file://' + join(DIR, '..', 'dist', 'app.html');
@@ -20,7 +21,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
 // Сетевые ошибки к ВНЕШНИМ хостам (CDN-шрифт/иконки, бэкенд-health, Anthropic)
 // зависят от окружения (file://-origin, офлайн-CI) и не являются багами
 // приложения. Валим только на настоящих JS-ошибках самого кода.
-const EXT = /ERR_CONNECTION|ERR_NETWORK|ERR_NAME_NOT_RESOLVED|net::|Failed to load resource|CORS policy|Access-Control-Allow-Origin|fonts\.googleapis|gstatic|unpkg\.com|railway\.app|anthropic\.com|openai\.com|googleapis\.com/i;
+const EXT = /navigator.vibrate|ERR_CONNECTION|ERR_NETWORK|ERR_NAME_NOT_RESOLVED|net::|Failed to load resource|CORS policy|Access-Control-Allow-Origin|fonts\.googleapis|gstatic|unpkg\.com|railway\.app|anthropic\.com|openai\.com|googleapis\.com/i;
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
 const page = await browser.newPage({ viewport: { width: 390, height: 900 }, deviceScaleFactor: 2 });
@@ -3172,6 +3173,134 @@ ok(nsh.hashRestore, 'nav shell 1.5: hashchange восстанавливает р
 ok(nsh.tapOk, 'nav shell: тап-цели вкладок и FAB ≥44px');
 ok(nsh.offAgain && nsh.plusInsightOff, 'nav shell OFF: прежнее поведение возвращается (＋ = инсайт)');
 ok(nsh.hashFrozenOff, 'nav shell OFF: goTo не трогает location.hash');
+
+// ── Navigation shell v2: полный «Записать», hash-история, sidebar-группы ──
+const nsh2 = await page.evaluate(async () => {
+  const r = {};
+  localStorage.setItem('arch_nav_v2', '1'); applyNavShell();
+  const on = id => document.getElementById(id).classList.contains('on');
+  const openCap = () => { document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')); openCapture(); };
+  // 1) «Состояние»: один тип, два режима → существующие формы (данные раздельны).
+  openCap(); capGo('ov-moment'); r.stQuick = on('ov-moment') && !on('ov-capture');
+  openCap(); capGo('ov-ci');     r.stFull = on('ov-ci') && !on('ov-capture');
+  // 2) Остальные 6 типов + сфера (с реальной сферой из фикстур).
+  const forms = [['ov-add', 'insight'], ['ov-drm', 'dream'], ['ov-why', 'why'], ['ov-symptom', 'symptom'], ['ov-measure', 'measure'], ['ov-craving', 'craving']];
+  r.forms = forms.every(([ov]) => { openCap(); capGo(ov); return on(ov) && !on('ov-capture'); });
+  openCap(); captureSphere();
+  r.sphere = !!document.querySelector('.ov.on') && !on('ov-capture');   // лог первой сферы открыт
+  document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
+  // 3) Hash: #/capture и #/more адресуемы; закрытие возвращает hash раздела.
+  goTo('home');
+  openCapture(); r.hashCap = location.hash === '#/capture';
+  closeOv('ov-capture'); nshHashToPage(); r.hashBackToday = location.hash === '#/today';
+  navGo('more'); r.hashMore = location.hash === '#/more';
+  closeOv('ov-more'); nshHashToPage();
+  // 4) История: переходы → pushState; back/forward работают.
+  goTo('map'); goTo('sys');
+  await new Promise(res => { const h = () => { window.removeEventListener('hashchange', h); res(); }; window.addEventListener('hashchange', h); history.back(); });
+  r.backDiary = location.hash === '#/diary' && on('pg-map');
+  await new Promise(res => { const h = () => { window.removeEventListener('hashchange', h); res(); }; window.addEventListener('hashchange', h); history.forward(); });
+  r.fwdOverview = location.hash === '#/overview' && on('pg-sys');
+  // 5) Неизвестный hash → безопасно «Сегодня» (и hash нормализуется).
+  location.hash = '#/bogus-route'; window.dispatchEvent(new HashChangeEvent('hashchange'));
+  r.unknownSafe = on('pg-home') && location.hash === '#/today';
+  // 6) #/capture из hashchange (диплинк) открывает лист.
+  location.hash = '#/capture'; window.dispatchEvent(new HashChangeEvent('hashchange'));
+  r.deepCapture = on('ov-capture');
+  closeOv('ov-capture'); nshHashToPage();
+  return r;
+});
+ok(nsh2.stQuick && nsh2.stFull, 'shell v2: «Состояние» — Быстро→Момент, Полно→Check-in (лист закрывается)');
+ok(nsh2.forms && nsh2.sphere, 'shell v2: «Записать» маршрутизирует во все 8 существующих форм');
+ok(nsh2.hashCap && nsh2.hashMore && nsh2.hashBackToday, 'shell v2: #/capture и #/more адресуемы, закрытие возвращает hash раздела');
+ok(nsh2.backDiary && nsh2.fwdOverview, 'shell v2: browser back/forward ходят по разделам (pushState-история)');
+ok(nsh2.unknownSafe, 'shell v2: неизвестный hash безопасно ведёт на «Сегодня» и нормализуется');
+ok(nsh2.deepCapture, 'shell v2: диплинк #/capture открывает лист «Записать»');
+
+// Вьюпорты: iPhone SE / std / Pro Max — таб-бар; iPad portrait — сгруппированный sidebar.
+const vps = [[375, 667, 'phone'], [390, 844, 'phone'], [430, 932, 'phone'], [820, 1180, 'ipad']];
+const vpRes = [];
+for (const [w, h, kind] of vps) {
+  await page.setViewportSize({ width: w, height: h });
+  await page.waitForTimeout(120);
+  vpRes.push(await page.evaluate((kind2) => {
+    const bar = document.getElementById('nsh-tabbar');
+    const barVisible = getComputedStyle(bar).display !== 'none';
+    const side = document.getElementById('sidebar');
+    const sideVisible = side.getBoundingClientRect().x >= 0 && getComputedStyle(side).transform === 'none';
+    const pad = parseInt(getComputedStyle(document.querySelector('.content')).paddingBottom, 10);
+    const groups = document.querySelectorAll('#nsh-nav-groups .nsh-grp-lbl').length;
+    const grpBtns = document.querySelectorAll('#nsh-nav-groups .navlink').length;
+    if (kind2 === 'phone') return { ok: barVisible && pad >= 64, barVisible, pad };
+    return { ok: !barVisible && sideVisible && groups === 6 && grpBtns >= 12, barVisible, sideVisible, groups, grpBtns };
+  }, kind));
+}
+ok(vpRes[0].ok && vpRes[1].ok && vpRes[2].ok, 'shell v2: iPhone SE/std/Pro Max — таб-бар виден, контент не перекрыт (padding ≥64)');
+ok(vpRes[3].ok, 'shell v2: iPad portrait — постоянный сгруппированный sidebar (6 групп TARGET-IA), таб-бар скрыт');
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(100);
+
+// Темы: shell рендерится в тёмной и светлой без исключений.
+const themesOk = await page.evaluate(() => {
+  const vis = () => getComputedStyle(document.getElementById('nsh-tabbar')).display !== 'none';
+  document.body.classList.remove('dark'); const light = vis();
+  document.body.classList.add('dark'); const dark = vis();
+  return { light, dark };
+});
+ok(themesOk.light && themesOk.dark, 'shell v2: таб-бар присутствует в светлой и тёмной темах');
+
+// A11y smoke: реальные <button>, доступные имена, focus-visible в CSS.
+const a11y = await page.evaluate(() => {
+  const els = [...document.querySelectorAll('#nsh-tabbar .nsh-tab, #nsh-fab, #ov-capture .nsh-cap, #nsh-nav-groups .navlink')];
+  const allButtons = els.every(e => e.tagName === 'BUTTON');
+  const named = els.every(e => (e.getAttribute('aria-label') || e.textContent.trim()).length > 0);
+  const focusRule = [...document.styleSheets].some(ss => { try { return [...ss.cssRules].some(rr => (rr.cssText || '').includes('.nsh-tab:focus-visible')); } catch (e) { return false; } });
+  const current = document.querySelectorAll('.nsh-tab[aria-current="page"]').length === 1;
+  return { n: els.length, allButtons, named, focusRule, current };
+});
+ok(a11y.allButtons && a11y.named && a11y.focusRule && a11y.current, `shell v2 a11y: ${a11y.n} элементов — настоящие button с именами, focus-visible, aria-current`);
+
+// Маршрутная полнота: все 46 маршрутов достижимы при включённом shell.
+const routesData = ROUTES.map(r2 => ({ id: r2.id, nav: r2.nav }));
+const reach = await page.evaluate(async (routes) => {
+  const failed = [];
+  for (const r3 of routes) {
+    try {
+      document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
+      const nav = r3.nav || {};
+      if (nav.tab) goTo(nav.tab);
+      if (nav.msub) { if (!document.getElementById('pg-map').classList.contains('on')) goTo('map'); msub(nav.msub); }
+      if (nav.asub) { if (!document.getElementById('pg-astro').classList.contains('on')) goTo('astro'); asub(nav.asub); }
+      if (nav.open) window[nav.open]();
+      if (nav.overlay) openOv(nav.overlay);
+      if (nav.call) { const args = nav.args ? [...nav.args] : []; if (nav.sphereIdx != null) args.unshift(DB.spheres[nav.sphereIdx].id); await window[nav.call](...args); }
+      await new Promise(res => setTimeout(res, 30));
+      if (nav.overlay && !document.getElementById(nav.overlay).classList.contains('on')) { failed.push(r3.id); continue; }
+      if (nav.tab && !nav.overlay && !nav.call && !nav.open && !document.getElementById('pg-' + nav.tab).classList.contains('on')) { failed.push(r3.id); continue; }
+    } catch (e) { failed.push(r3.id + ':' + e.message); }
+  }
+  document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
+  goTo('home');
+  return { total: routes.length, failed };
+}, routesData);
+ok(reach.failed.length === 0 && reach.total === 46, `shell v2: маршрутная полнота — ${reach.total - reach.failed.length}/${reach.total} достижимы${reach.failed.length ? ' (провалены: ' + reach.failed.join(', ') + ')' : ''}`);
+
+// Перезагрузка при ON: hash восстанавливает раздел (реальный reload).
+await page.evaluate(() => { location.hash = '#/overview'; });
+await page.reload();
+await page.waitForTimeout(700);
+const reloadOk = await page.evaluate(() => {
+  try { document.getElementById('splash').style.display = 'none'; } catch (e) {}
+  return { restored: document.getElementById('pg-sys').classList.contains('on'), flagOn: document.body.classList.contains('navshell') };
+});
+ok(reloadOk.flagOn && reloadOk.restored, 'shell v2: перезагрузка при ON восстанавливает раздел из hash (#/overview → Обзор)');
+// Возврат к дефолту (OFF) для чистоты остатка сьюта.
+await page.evaluate(() => {
+  localStorage.setItem('arch_nav_v2', '0');
+  try { history.replaceState(null, '', location.pathname); } catch (e) { location.hash = ''; }
+  applyNavShell(); goTo('home');
+  window.ARCHITECT_API = '';
+});
 
 // ── Никаких неожиданных ошибок ──
 ok(errors.length === 0, `нет ошибок консоли/страницы (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);

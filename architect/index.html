@@ -1613,37 +1613,43 @@
 </div>
 
 <!-- ══ «ЗАПИСАТЬ» — минимальный лаунчер (nav shell 1.0; типы не меняются) ══ -->
-<div class="ov" id="ov-capture" onclick="if(event.target===this)closeOv('ov-capture')">
+<div class="ov" id="ov-capture" onclick="if(event.target===this){closeOv('ov-capture');nshHashToPage()}">
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Записать</div>
     <div class="sec-lbl" style="padding-left:var(--s4)">Состояние сейчас</div>
-    <div class="nsh-cap-grid">
-      <button class="nsh-cap" onclick="openOv('ov-ci')"><span class="nsh-cap-ic" style="background:var(--green-l);color:var(--green)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg></span><span class="nsh-cap-t">Состояние</span><span class="nsh-cap-d">Check-in дня</span></button>
-      <button class="nsh-cap" onclick="openOv('ov-moment')"><span class="nsh-cap-ic" style="background:rgba(245,184,75,.16);color:#F5B84B"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="nsh-cap-t">Момент</span><span class="nsh-cap-d">Снимок сейчас</span></button>
+    <!-- Один тип «Состояние», два режима (OWNER-DECISIONS §6). Данные пока
+         сохраняются раздельно (Момент/Check-in) — объединение это отдельный
+         schema-контракт 2.0; здесь только единый вход. -->
+    <div class="nsh-state-card">
+      <div class="nsh-cap-t" style="padding:0 .2rem">Состояние — как ты сейчас</div>
+      <div class="nsh-state-btns">
+        <button class="nsh-cap" onclick="capGo('ov-moment')"><span class="nsh-cap-ic" style="background:rgba(245,184,75,.16);color:#F5B84B"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="nsh-cap-t">Быстро</span><span class="nsh-cap-d">2 шкалы · ~15 сек</span></button>
+        <button class="nsh-cap" onclick="capGo('ov-ci')"><span class="nsh-cap-ic" style="background:var(--green-l);color:var(--green)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg></span><span class="nsh-cap-t">Полно</span><span class="nsh-cap-d">Check-in дня</span></button>
+      </div>
     </div>
     <div class="sec-lbl" style="padding-left:var(--s4)">Мысль и смысл</div>
     <div class="nsh-cap-grid">
-      <button class="nsh-cap" onclick="openOv('ov-add')"><span class="nsh-cap-ic" style="background:var(--blue-l);color:var(--blue-t)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span><span class="nsh-cap-t">Мысль / Инсайт</span><span class="nsh-cap-d">Знание, идея</span></button>
-      <button class="nsh-cap" onclick="openOv('ov-why')"><span class="nsh-cap-ic" style="background:var(--teal-l);color:var(--teal)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12" y2="17"/></svg></span><span class="nsh-cap-t">«Зачем?»</span><span class="nsh-cap-d">Разбор состояния</span></button>
-      <button class="nsh-cap" onclick="openOv('ov-drm')"><span class="nsh-cap-ic" style="background:var(--purple-l);color:var(--purple)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span><span class="nsh-cap-t">Сон</span><span class="nsh-cap-d">Запись сна</span></button>
+      <button class="nsh-cap" onclick="capGo('ov-add')"><span class="nsh-cap-ic" style="background:var(--blue-l);color:var(--blue-t)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span><span class="nsh-cap-t">Мысль / Инсайт</span><span class="nsh-cap-d">Знание, идея</span></button>
+      <button class="nsh-cap" onclick="capGo('ov-why')"><span class="nsh-cap-ic" style="background:var(--teal-l);color:var(--teal)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12" y2="17"/></svg></span><span class="nsh-cap-t">«Зачем?»</span><span class="nsh-cap-d">Разбор состояния</span></button>
+      <button class="nsh-cap" onclick="capGo('ov-drm')"><span class="nsh-cap-ic" style="background:var(--purple-l);color:var(--purple)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span><span class="nsh-cap-t">Сон</span><span class="nsh-cap-d">Запись сна</span></button>
     </div>
     <div class="sec-lbl" style="padding-left:var(--s4)">Тело</div>
     <div class="nsh-cap-grid">
-      <button class="nsh-cap" onclick="openOv('ov-symptom')"><span class="nsh-cap-ic" style="background:rgba(251,113,133,.16);color:#FB7185"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg></span><span class="nsh-cap-t">Симптом</span><span class="nsh-cap-d">Наблюдение</span></button>
-      <button class="nsh-cap" onclick="openOv('ov-measure')"><span class="nsh-cap-ic" style="background:var(--blue-l);color:var(--blue-t)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg></span><span class="nsh-cap-t">Измерение</span><span class="nsh-cap-d">Вес, давление…</span></button>
-      <button class="nsh-cap" onclick="openOv('ov-craving')"><span class="nsh-cap-ic" style="background:rgba(217,119,6,.16);color:#D97706"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2s4 4 4 9a4 4 0 0 1-8 0c0-5 4-9 4-9z"/></svg></span><span class="nsh-cap-t">Тяга</span><span class="nsh-cap-d">Импульс, срыв</span></button>
+      <button class="nsh-cap" onclick="capGo('ov-symptom')"><span class="nsh-cap-ic" style="background:rgba(251,113,133,.16);color:#FB7185"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg></span><span class="nsh-cap-t">Симптом</span><span class="nsh-cap-d">Наблюдение</span></button>
+      <button class="nsh-cap" onclick="capGo('ov-measure')"><span class="nsh-cap-ic" style="background:var(--blue-l);color:var(--blue-t)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg></span><span class="nsh-cap-t">Измерение</span><span class="nsh-cap-d">Вес, давление…</span></button>
+      <button class="nsh-cap" onclick="capGo('ov-craving')"><span class="nsh-cap-ic" style="background:rgba(217,119,6,.16);color:#D97706"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2s4 4 4 9a4 4 0 0 1-8 0c0-5 4-9 4-9z"/></svg></span><span class="nsh-cap-t">Тяга</span><span class="nsh-cap-d">Импульс, срыв</span></button>
     </div>
     <div class="sec-lbl" style="padding-left:var(--s4)">Практики и цели</div>
     <div class="nsh-cap-grid">
       <button class="nsh-cap" onclick="captureSphere()"><span class="nsh-cap-ic" style="background:var(--green-l);color:var(--green)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></span><span class="nsh-cap-t">Запись сферы</span><span class="nsh-cap-d">Отметить трекер</span></button>
     </div>
-    <button class="btn btn-g" style="width:calc(100% - 2*var(--s4));margin:.6rem var(--s4) 0" onclick="closeOv('ov-capture')">Закрыть</button>
+    <button class="btn btn-g" style="width:calc(100% - 2*var(--s4));margin:.6rem var(--s4) 0" onclick="closeOv('ov-capture');nshHashToPage()">Закрыть</button>
   </div>
 </div>
 
 <!-- ══ «ЕЩЁ» — сгруппированный хаб (nav shell 1.0; все разделы за ≤2 тапа) ══ -->
-<div class="ov" id="ov-more" onclick="if(event.target===this)closeOv('ov-more')">
+<div class="ov" id="ov-more" onclick="if(event.target===this){closeOv('ov-more');nshHashToPage()}">
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Ещё</div>
@@ -1673,7 +1679,7 @@
       <div class="srow" onclick="closeOv('ov-more');openProfiles()"><div class="sic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><span class="sl2">Профили</span><span class="sv2">Переключить / добавить</span></div>
       <div class="srow" onclick="closeOv('ov-more');openOv('ov-feedback')"><div class="sic" style="background:var(--gold-l)"><svg style="color:var(--gold)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div><span class="sl2">Обратная связь</span><span class="sv2">Написать</span></div>
     </div>
-    <button class="btn btn-g" style="width:calc(100% - 2*var(--s4));margin:.6rem var(--s4) 0" onclick="closeOv('ov-more')">Закрыть</button>
+    <button class="btn btn-g" style="width:calc(100% - 2*var(--s4));margin:.6rem var(--s4) 0" onclick="closeOv('ov-more');nshHashToPage()">Закрыть</button>
   </div>
 </div>
 

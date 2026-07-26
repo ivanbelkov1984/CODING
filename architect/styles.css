@@ -1380,12 +1380,22 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 
 /* iPad portrait (768–900): постоянный sidebar вместо скрытого drawer */
 @media(min-width:768px) and (max-width:900px){
-  body.navshell .sidebar{position:static;transform:none;height:100dvh;width:240px;z-index:auto;padding-top:16px}
+  body.navshell .sidebar{position:static;transform:none;transition:none;height:100dvh;width:240px;z-index:auto;padding-top:16px}
   body.navshell .scrim{display:none;opacity:0;pointer-events:none}
   body.navshell .burger{display:none}
   body.navshell .nsh-tabbar{display:none}
 }
 /* «Ещё»-хаб и группы лаунчера «Записать» */
 .more-list{display:flex;flex-direction:column;gap:2px;padding:0 var(--s3) var(--s2)}
+/* «Состояние» — один тип, два режима (единый вход; данные раздельны до 2.0) */
+.nsh-state-card{margin:0 var(--s4) var(--s2);padding:.7rem;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r12);display:flex;flex-direction:column;gap:.5rem}
+.nsh-state-btns{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.nsh-state-btns .nsh-cap{background:var(--sf)}
+/* Видимый клавиатурный фокус навигации (закрывает findings PR #134 для shell) */
+body.navshell .nsh-tab:focus-visible,body.navshell .nsh-fab:focus-visible,
+.nsh-cap:focus-visible,#nsh-nav-groups .navlink:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:10px}
+/* Группы sidebar (TARGET-IA §5) при navshell */
+#nsh-nav-groups{display:flex;flex-direction:column;gap:2px}
+.nsh-grp-lbl{font-size:.64rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--t4);padding:.7rem .8rem .25rem}
 .more-list .srow{border-radius:var(--r12)}
 #ov-capture .sec-lbl:first-of-type,#ov-more .sec-lbl:first-of-type{margin-top:0}
