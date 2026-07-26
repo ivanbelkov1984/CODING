@@ -58,6 +58,7 @@ const dreamButton = dock.getByRole('button', { name: 'Записать сон' }
 await dreamButton.focus();
 await page.keyboard.press('Enter');
 ok(await page.locator('#ov-drm').evaluate(element => element.classList.contains('on')), 'Записать сон работает с клавиатуры и открывает ov-drm');
+await page.waitForFunction(() => document.getElementById('nsh-context-dock').hidden);
 ok(await dock.isHidden(), 'При открытой форме dock скрыт и не перехватывает фокус');
 await page.evaluate(() => closeOv('ov-drm'));
 await page.waitForFunction(() => !document.getElementById('nsh-context-dock').hidden);
