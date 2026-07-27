@@ -1,0 +1,77 @@
+/* Context action dock — actions of the current section, separate from global FAB. */
+.nsh-context-dock {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  body.navshell .nsh-context-dock:not([hidden]) {
+    display: flex;
+    position: fixed;
+    z-index: 57;
+    left: 50%;
+    bottom: calc(66px + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    align-items: stretch;
+    gap: 6px;
+    max-width: calc(100vw - 24px);
+    min-height: 52px;
+    padding: 6px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    background: var(--sf);
+    border: 1px solid var(--bd2);
+    border-radius: 18px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .28);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  body.navshell .nsh-context-action {
+    display: flex;
+    flex: 1 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 11px;
+    color: var(--t2);
+    background: var(--bg2);
+    border: 1px solid transparent;
+    border-radius: 12px;
+    font: inherit;
+    font-size: .76rem;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+
+  body.navshell .nsh-context-action.primary {
+    color: #fff;
+    background: var(--blue-btn);
+  }
+
+  body.navshell .nsh-context-action svg {
+    width: 17px;
+    height: 17px;
+    flex: none;
+  }
+
+  body.navshell .nsh-context-action:active {
+    transform: scale(.98);
+  }
+
+  body.navshell .nsh-context-action:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  body.navshell.nsh-context-on .content {
+    padding-bottom: 126px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.navshell .nsh-context-action:active {
+    transform: none;
+  }
+}
