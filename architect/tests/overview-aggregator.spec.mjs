@@ -73,13 +73,16 @@ const on2 = await page.evaluate(() => {
 });
 ok(on2.overviewOn && on2.detailOff, 'ON-флаг: вход в Обзор открывает landing, не старый экран напрямую');
 
+// navigation-restructure: «Обзор»/прежние «Итоги» больше не top-level —
+// canonical hash теперь #/analytics (destination id pg-sys не менялся).
+// Старый #/overview стал безопасным алиасом на #/main — см. e2e.mjs.
 const on2b = await page.evaluate(() => {
   goTo('home');
-  location.hash = '#/overview';
+  location.hash = '#/analytics';
   window.dispatchEvent(new HashChangeEvent('hashchange'));
   return { overviewOn: getComputedStyle(document.getElementById('sys-overview')).display !== 'none', hash: location.hash };
 });
-ok(on2b.overviewOn && on2b.hash === '#/overview', 'ON-флаг: канонический hash #/overview восстанавливает landing');
+ok(on2b.overviewOn && on2b.hash === '#/analytics', 'ON-флаг: канонический hash #/analytics восстанавливает landing Обзора');
 
 // 3) Старые 30/365 и существующие функции доступны через «Подробный обзор».
 const old3 = await page.evaluate(() => {
@@ -230,7 +233,7 @@ ok(true, 'dock Обзора скрывается при открытом overlay
 await page.evaluate(() => closeOv('ov-search'));
 
 // 10) Reload/back/forward не оставляют чужой subroute или dock.
-await page.evaluate(() => { sysGo('detail'); location.hash = '#/overview'; });
+await page.evaluate(() => { sysGo('detail'); location.hash = '#/analytics'; });
 await page.reload();
 await page.waitForSelector('#nsh-tabbar', { state: 'attached' });
 await page.evaluate(() => { const s = document.getElementById('splash'); if (s) s.style.display = 'none'; });
@@ -241,7 +244,7 @@ const reload10 = await page.evaluate(() => ({
   detailOff: getComputedStyle(document.getElementById('sys-detail')).display === 'none',
   shellOn: document.body.classList.contains('navshell'),
 }));
-ok(reload10.shellOn && reload10.overviewOn && reload10.detailOff, 'reload на #/overview восстанавливает landing, а не detail-подэкран');
+ok(reload10.shellOn && reload10.overviewOn && reload10.detailOff, 'reload на #/analytics восстанавливает landing, а не detail-подэкран');
 
 const backfwd10 = await page.evaluate(async () => {
   goTo('home'); goTo('sys'); // landing

@@ -3128,15 +3128,21 @@ const nsh = await page.evaluate(() => {
   r.tabs = document.querySelectorAll('#nsh-tabbar .nsh-tab').length;
   r.hasFab = !!document.getElementById('nsh-fab');
   // Вкладки shell ведут на СУЩЕСТВУЮЩИЕ разделы (ничего не потеряно).
-  navGo('diary');    r.diary = document.getElementById('pg-map').classList.contains('on');
-  navGo('overview'); r.overview = document.getElementById('pg-sys').classList.contains('on');
-  navGo('today');    r.today = document.getElementById('pg-home').classList.contains('on');
-  r.todayActive = document.querySelector('.nsh-tab[data-nav="today"]').classList.contains('on');
-  // «Ещё» открывает сгруппированный хаб (1.1) со всеми разделами.
-  navGo('more');     r.more = document.getElementById('ov-more').classList.contains('on');
-  r.moreRows = document.querySelectorAll('#ov-more .srow').length;
-  r.moreActive = document.querySelector('.nsh-tab[data-nav="more"]').classList.contains('on');
-  closeOv('ov-more');
+  navGo('diary');      r.diary = document.getElementById('pg-map').classList.contains('on');
+  navGo('psychology'); r.psychology = document.getElementById('pg-psy').classList.contains('on');
+  navGo('astro');      r.astroNav = document.getElementById('pg-astro').classList.contains('on');
+  navGo('main');       r.main = document.getElementById('pg-home').classList.contains('on');
+  r.mainActive = document.querySelector('.nsh-tab[data-nav="main"]').classList.contains('on');
+  // Здоровье/Инструменты/Настройки/Учётная запись/Обратная связь достижимы
+  // через сгруппированный sidebar/drawer — без абстрактной «Ещё»-свалки.
+  const findGroupBtn = label => [...document.querySelectorAll('#nsh-nav-groups .navlink')].find(b => b.textContent.trim() === label);
+  r.healthReachable = !!findGroupBtn('Здоровье');
+  r.toolsReachable = !!findGroupBtn('Инструменты');
+  r.settingsReachable = !!findGroupBtn('Настройки');
+  r.accountReachable = !!findGroupBtn('Локальный профиль');
+  r.feedbackReachable = !!findGroupBtn('Обратная связь');
+  findGroupBtn('Здоровье').click();
+  r.health = document.getElementById('pg-health').classList.contains('on');
   // Полный лаунчер «Записать» (1.2): все типы записи; «Запись сферы» не падает без сфер.
   openCapture();     r.capture = document.getElementById('ov-capture').classList.contains('on');
   r.capBtns = document.querySelectorAll('#ov-capture .nsh-cap').length;
@@ -3145,8 +3151,8 @@ const nsh = await page.evaluate(() => {
   capturePlus();     r.plusCapture = document.getElementById('ov-capture').classList.contains('on');
   closeOv('ov-capture');
   // Hash-роутинг (1.5): destination сериализуется и восстанавливается.
-  navGo('diary');    r.hashDiary = location.hash === '#/diary';
-  navGo('overview'); r.hashOverview = location.hash === '#/overview';
+  navGo('diary');      r.hashDiary = location.hash === '#/diary';
+  navGo('psychology'); r.hashPsy = location.hash === '#/psychology';
   location.hash = '#/spheres'; window.dispatchEvent(new HashChangeEvent('hashchange'));
   r.hashRestore = document.getElementById('pg-vit').classList.contains('on');
   // Тап-цели навигации ≥44px (accessibility).
@@ -3165,13 +3171,17 @@ const nsh = await page.evaluate(() => {
   return r;
 });
 ok(nsh.freshProfileOn && nsh.freshTabbarVisible, 'rollout 1.4: без сохранённого значения (свежий профиль) — новая навигация ON по умолчанию');
-ok(nsh.onClass && nsh.tabs === 4 && nsh.hasFab, 'nav shell ON: body.navshell, 4 вкладки + FAB');
+ok(nsh.onClass && nsh.tabs === 4 && nsh.hasFab, 'nav shell ON: body.navshell, 4 вкладки (Главное/Дневник/Психология/Астрология) + FAB');
 ok(nsh.addLabel === 'Записать' && nsh.offLabel === 'Новый инсайт', 'nav shell: ＋ = «Записать» при ON, «Новый инсайт» при OFF');
-ok(nsh.diary && nsh.overview && nsh.today, 'nav shell: вкладки ведут на существующие разделы (map/sys/home)');
-ok(nsh.todayActive && nsh.more && nsh.moreActive && nsh.moreRows >= 9, 'nav shell 1.1: «Ещё» — сгруппированный хаб со всеми разделами, вкладка подсвечена');
+ok(nsh.diary && nsh.psychology && nsh.astroNav && nsh.main, 'nav shell: вкладки ведут на существующие разделы (map/psy/astro/home)');
+ok(nsh.mainActive, 'nav shell: вкладка «Главное» подсвечена при активном разделе');
+ok(nsh.healthReachable && nsh.toolsReachable && nsh.settingsReachable && nsh.accountReachable,
+  'nav shell IA: Здоровье/Инструменты/Настройки/Учётная запись достижимы через боковое меню (без абстрактной «Ещё»)');
+ok(nsh.feedbackReachable, 'nav shell IA: «Обратная связь» осталась достижима после удаления хаба «Ещё»');
+ok(nsh.health, 'nav shell IA: пункт «Здоровье» в боковом меню открывает pg-health');
 ok(nsh.capture && nsh.capBtns >= 9 && nsh.plusCapture, 'nav shell 1.2: полный лаунчер «Записать» (все типы записи)');
 ok(nsh.sphereSafe, 'nav shell 1.2: «Запись сферы» безопасна без сфер (без исключений)');
-ok(nsh.hashDiary && nsh.hashOverview, 'nav shell 1.5: раздел сериализуется в hash (#/diary, #/overview)');
+ok(nsh.hashDiary && nsh.hashPsy, 'nav shell 1.5: раздел сериализуется в hash (#/diary, #/psychology)');
 ok(nsh.hashRestore, 'nav shell 1.5: hashchange восстанавливает раздел (#/spheres → Сферы)');
 ok(nsh.tapOk, 'nav shell: тап-цели вкладок и FAB ≥44px');
 ok(nsh.offAgain && nsh.plusInsightOff, 'nav shell OFF: прежнее поведение возвращается (＋ = инсайт)');
@@ -3194,22 +3204,32 @@ const nsh2 = await page.evaluate(async () => {
   // детальные сценарии 0/1/N проверяются отдельным блоком ниже.
   r.sphere = (on('ov-sphere-log') || on('ov-sphere-pick')) && !on('ov-capture');
   document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
-  // 3) Hash: #/capture и #/more адресуемы; закрытие возвращает hash раздела.
+  // 3) Hash: #/capture адресуем; закрытие возвращает hash раздела.
   goTo('home');
   openCapture(); r.hashCap = location.hash === '#/capture';
-  closeOv('ov-capture'); nshHashToPage(); r.hashBackToday = location.hash === '#/today';
-  navGo('more'); r.hashMore = location.hash === '#/more';
-  closeOv('ov-more'); nshHashToPage();
+  closeOv('ov-capture'); nshHashToPage(); r.hashBackMain = location.hash === '#/main';
   // 4) История: переходы → pushState; back/forward работают.
-  goTo('map'); goTo('sys');
+  goTo('map'); goTo('psy');
   await new Promise(res => { const h = () => { window.removeEventListener('hashchange', h); res(); }; window.addEventListener('hashchange', h); history.back(); });
   r.backDiary = location.hash === '#/diary' && on('pg-map');
   await new Promise(res => { const h = () => { window.removeEventListener('hashchange', h); res(); }; window.addEventListener('hashchange', h); history.forward(); });
-  r.fwdOverview = location.hash === '#/overview' && on('pg-sys');
-  // 5) Неизвестный hash → безопасно «Сегодня» (и hash нормализуется).
+  r.fwdPsychology = location.hash === '#/psychology' && on('pg-psy');
+  // 5) Неизвестный hash → безопасно «Главное» (и hash нормализуется).
   location.hash = '#/bogus-route'; window.dispatchEvent(new HashChangeEvent('hashchange'));
-  r.unknownSafe = on('pg-home') && location.hash === '#/today';
-  // 6) #/capture из hashchange (диплинк) открывает лист.
+  r.unknownSafe = on('pg-home') && location.hash === '#/main';
+  // 6) Старые #/today, #/overview, #/more — рабочие алиасы, безопасно
+  // нормализуются в canonical #/main (Сегодня→Главное, Обзор/Ещё убраны
+  // из top-level IA — navigation-restructure).
+  goTo('map');
+  location.hash = '#/today'; window.dispatchEvent(new HashChangeEvent('hashchange'));
+  r.legacyToday = on('pg-home') && location.hash === '#/main';
+  goTo('map');
+  location.hash = '#/overview'; window.dispatchEvent(new HashChangeEvent('hashchange'));
+  r.legacyOverview = on('pg-home') && location.hash === '#/main';
+  goTo('map');
+  location.hash = '#/more'; window.dispatchEvent(new HashChangeEvent('hashchange'));
+  r.legacyMore = on('pg-home') && location.hash === '#/main';
+  // 7) #/capture из hashchange (диплинк) открывает лист.
   location.hash = '#/capture'; window.dispatchEvent(new HashChangeEvent('hashchange'));
   r.deepCapture = on('ov-capture');
   closeOv('ov-capture'); nshHashToPage();
@@ -3217,9 +3237,10 @@ const nsh2 = await page.evaluate(async () => {
 });
 ok(nsh2.stQuick && nsh2.stFull, 'shell v2: «Состояние» — Быстро→Момент, Полно→Check-in (лист закрывается)');
 ok(nsh2.forms && nsh2.sphere, 'shell v2: «Записать» маршрутизирует во все 8 существующих форм');
-ok(nsh2.hashCap && nsh2.hashMore && nsh2.hashBackToday, 'shell v2: #/capture и #/more адресуемы, закрытие возвращает hash раздела');
-ok(nsh2.backDiary && nsh2.fwdOverview, 'shell v2: browser back/forward ходят по разделам (pushState-история)');
-ok(nsh2.unknownSafe, 'shell v2: неизвестный hash безопасно ведёт на «Сегодня» и нормализуется');
+ok(nsh2.hashCap && nsh2.hashBackMain, 'shell v2: #/capture адресуем, закрытие возвращает hash раздела (#/main)');
+ok(nsh2.backDiary && nsh2.fwdPsychology, 'shell v2: browser back/forward ходят по разделам (pushState-история)');
+ok(nsh2.unknownSafe, 'shell v2: неизвестный hash безопасно ведёт на «Главное» и нормализуется');
+ok(nsh2.legacyToday && nsh2.legacyOverview && nsh2.legacyMore, 'shell v2: старые #/today, #/overview, #/more — безопасные алиасы, нормализуются в #/main');
 ok(nsh2.deepCapture, 'shell v2: диплинк #/capture открывает лист «Записать»');
 
 // Вьюпорты: iPhone SE / std / Pro Max — таб-бар; iPad portrait — сгруппированный sidebar.
@@ -3237,11 +3258,11 @@ for (const [w, h, kind] of vps) {
     const groups = document.querySelectorAll('#nsh-nav-groups .nsh-grp-lbl').length;
     const grpBtns = document.querySelectorAll('#nsh-nav-groups .navlink').length;
     if (kind2 === 'phone') return { ok: barVisible && pad >= 64, barVisible, pad };
-    return { ok: !barVisible && sideVisible && groups === 6 && grpBtns >= 12, barVisible, sideVisible, groups, grpBtns };
+    return { ok: !barVisible && sideVisible && groups === 3 && grpBtns === 10, barVisible, sideVisible, groups, grpBtns };
   }, kind));
 }
 ok(vpRes[0].ok && vpRes[1].ok && vpRes[2].ok, 'shell v2: iPhone SE/std/Pro Max — таб-бар виден, контент не перекрыт (padding ≥64)');
-ok(vpRes[3].ok, 'shell v2: iPad portrait — постоянный сгруппированный sidebar (6 групп TARGET-IA), таб-бар скрыт');
+ok(vpRes[3].ok, 'shell v2: iPad portrait — постоянный сгруппированный sidebar (3 группы: Основное/Дополнительно/Учётная запись), таб-бар скрыт');
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(100);
 
@@ -3291,14 +3312,29 @@ const reach = await page.evaluate(async (routes) => {
 ok(reach.failed.length === 0 && reach.total === 46, `shell v2: маршрутная полнота — ${reach.total - reach.failed.length}/${reach.total} достижимы${reach.failed.length ? ' (провалены: ' + reach.failed.join(', ') + ')' : ''}`);
 
 // Перезагрузка при ON: hash восстанавливает раздел (реальный reload).
-await page.evaluate(() => { location.hash = '#/overview'; });
+// #/analytics — новый canonical слаг прежних «Итоги» (теперь внутри
+// Инструменты, но destination id pg-sys и его hash остаются рабочими).
+await page.evaluate(() => { location.hash = '#/analytics'; });
 await page.reload();
 await page.waitForTimeout(700);
 const reloadOk = await page.evaluate(() => {
   try { document.getElementById('splash').style.display = 'none'; } catch (e) {}
   return { restored: document.getElementById('pg-sys').classList.contains('on'), flagOn: document.body.classList.contains('navshell') };
 });
-ok(reloadOk.flagOn && reloadOk.restored, 'shell v2: перезагрузка при ON восстанавливает раздел из hash (#/overview → Обзор)');
+ok(reloadOk.flagOn && reloadOk.restored, 'shell v2: перезагрузка при ON восстанавливает раздел из hash (#/analytics → прежние «Итоги»)');
+
+// Перезагрузка на старом #/overview: безопасно нормализуется в #/main —
+// Итоги/Обзор больше не top-level destination, старый hash не должен
+// молча открывать несуществующий top-level раздел.
+await page.evaluate(() => { location.hash = '#/overview'; });
+await page.reload();
+await page.waitForTimeout(700);
+const reloadLegacy = await page.evaluate(() => {
+  try { document.getElementById('splash').style.display = 'none'; } catch (e) {}
+  return { restored: document.getElementById('pg-home').classList.contains('on'), hash: location.hash, flagOn: document.body.classList.contains('navshell') };
+});
+ok(reloadLegacy.flagOn && reloadLegacy.restored && reloadLegacy.hash === '#/main',
+  'shell v2: перезагрузка на старом #/overview безопасно нормализуется в #/main («Главное»)');
 
 // «Запись сферы»: 0 сфер → раздел «Сферы» с подсказкой; 1 → сразу форма;
 // несколько → явный выбор (не первая молча). Данные не персистятся.
@@ -3317,7 +3353,7 @@ const sph = await page.evaluate(() => {
   DB.spheres = [{ id: 111, name: 'Сон-тест', icon: '', color: '#1056CC', type: 'score' }];
   goTo('home'); closeAll(); openCapture(); captureSphere();
   r.oneLog = on('ov-sphere-log') && document.getElementById('sphere-log-title').textContent.includes('Сон-тест');
-  r.oneHash = location.hash === '#/today';
+  r.oneHash = location.hash === '#/main';
   closeAll();
   // Несколько сфер: лист выбора; выбираем ЯВНО не первую.
   DB.spheres = [
@@ -3330,7 +3366,7 @@ const sph = await page.evaluate(() => {
   r.pickA11y = btns.length === 2 && btns.every(b => b.tagName === 'BUTTON' && b.getAttribute('type') === 'button' && b.textContent.trim().length > 0);
   btns[1].click();
   r.pickSecond = on('ov-sphere-log') && !on('ov-sphere-pick') && document.getElementById('sphere-log-title').textContent.includes('Спорт-тест');
-  r.pickHash = location.hash === '#/today';
+  r.pickHash = location.hash === '#/main';
   closeAll();
   // Лист выбора нормально закрывается своей кнопкой «Закрыть».
   openCapture(); captureSphere();

@@ -2,13 +2,15 @@ import { chromium } from 'playwright';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
-// Navigation Shell 1.3B + 1.4 — интеграционная стабилизация (issue #143).
-// Полный пользовательский путь через реальный shell целиком (Today → Записать
-// → Дневник → действие раздела → Обзор → Отчёт врачу → назад → reload) и
-// проверки rollout (свежий профиль ON / явный OFF уважается / roundtrip не
-// повреждает данные). Отдельные блоки уже покрыты context-action-dock.spec.mjs,
-// diary-aggregator.spec.mjs, overview-aggregator.spec.mjs — здесь проверяется
-// именно СКЛЕЙКА между экранами, а не повторение их тестов.
+// Navigation Shell 1.3B + 1.4 + navigation-restructure — интеграционная
+// стабилизация (issue #143, затем реструктуризация IA). Полный пользовательский
+// путь через реальный shell целиком (Главное → Записать → Дневник → действие
+// раздела → Психология → Инструменты → Обзор (прежние «Итоги») → Отчёт врачу →
+// назад → reload) и проверки rollout (свежий профиль ON / явный OFF уважается /
+// roundtrip не повреждает данные). Отдельные блоки уже покрыты
+// context-action-dock.spec.mjs, diary-aggregator.spec.mjs,
+// psychology-aggregator.spec.mjs, overview-aggregator.spec.mjs — здесь
+// проверяется именно СКЛЕЙКА между экранами, а не повторение их тестов.
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 const FILE = 'file://' + join(DIR, '..', 'dist', 'app.html');
@@ -106,35 +108,35 @@ ok(rtResult.afterOn.shellOn && rtResult.afterOn.tabbarVisible && rtResult.afterO
 await roundtrip.close();
 
 // ── 4) Полный пользовательский путь ──────────────────────────────────
-// Сегодня → Записать → Дневник → действие раздела → Обзор → Отчёт врачу →
-// назад → reload.
+// Главное → Записать → Дневник → действие раздела → Психология → Инструменты
+// → Обзор (прежние «Итоги») → Отчёт врачу → назад → reload.
 const journey = await boot();
 await journey.evaluate(() => { localStorage.setItem('arch_nav_v2', '1'); applyNavShell(); goTo('home'); });
 
-// Шаг 1: Сегодня — активная вкладка, FAB присутствует.
+// Шаг 1: Главное — активная вкладка, FAB присутствует.
 const step1 = await journey.evaluate(() => ({
-  onToday: document.getElementById('pg-home').classList.contains('on'),
-  todayTabActive: document.querySelector('.nsh-tab[data-nav="today"]').classList.contains('on'),
+  onMain: document.getElementById('pg-home').classList.contains('on'),
+  mainTabActive: document.querySelector('.nsh-tab[data-nav="main"]').classList.contains('on'),
   fabPresent: document.getElementById('nsh-fab').getAttribute('aria-label') === 'Записать',
 }));
-ok(step1.onToday && step1.todayTabActive && step1.fabPresent, 'путь 1/8: «Сегодня» активна, глобальный FAB «Записать» на месте');
+ok(step1.onMain && step1.mainTabActive && step1.fabPresent, 'путь 1/9: «Главное» активна, глобальный FAB «Записать» на месте');
 
 // Шаг 2: Записать → «Зачем?» (существующая форма, дальше пригодится в Дневнике).
 await journey.evaluate(() => { openCapture(); });
 const step2 = await journey.evaluate(() => document.getElementById('ov-capture').classList.contains('on'));
-ok(step2, 'путь 2/8: глобальный FAB открывает лист «Записать»');
+ok(step2, 'путь 2/9: глобальный FAB открывает лист «Записать»');
 await journey.evaluate(() => { capGo('ov-why'); });
 const step2b = await journey.evaluate(() => document.getElementById('ov-why').classList.contains('on') && !document.getElementById('ov-capture').classList.contains('on'));
-ok(step2b, 'путь 2/8: «Записать» → «Зачем?» открывает существующую форму, лист закрылся');
+ok(step2b, 'путь 2/9: «Записать» → «Зачем?» открывает существующую форму, лист закрылся');
 await journey.evaluate(() => { closeOv('ov-why'); });
 
-// Шаг 3: переход в Дневник — landing, не «Инсайты».
+// Шаг 3: переход в Дневник — landing (записи), не «Инсайты».
 await journey.evaluate(() => { goTo('map'); });
 const step3 = await journey.evaluate(() => ({
   overviewOn: getComputedStyle(document.getElementById('ms-overview')).display !== 'none',
   diaryTabActive: document.querySelector('.nsh-tab[data-nav="diary"]').classList.contains('on'),
 }));
-ok(step3.overviewOn && step3.diaryTabActive, 'путь 3/8: «Дневник» открывает landing, вкладка подсвечена');
+ok(step3.overviewOn && step3.diaryTabActive, 'путь 3/9: «Дневник» открывает landing, вкладка подсвечена');
 
 // Шаг 4: действие раздела — dock landing «Записать сон» → существующий ov-drm.
 await journey.waitForFunction(() => {
@@ -148,52 +150,70 @@ await journey.evaluate(() => {
   btn.click();
 });
 const step4 = await journey.evaluate(() => document.getElementById('ov-drm').classList.contains('on'));
-ok(step4, 'путь 4/8: dock landing Дневника → «Записать сон» открывает существующую форму');
+ok(step4, 'путь 4/9: dock landing Дневника → «Записать сон» открывает существующую форму');
 await journey.evaluate(() => { closeOv('ov-drm'); });
 
-// Шаг 5: переход в Обзор — landing недели, не старый 30-дневный экран напрямую.
-await journey.evaluate(() => { goTo('sys'); });
+// Шаг 5: переход в Психология — новая вкладка нижнего таб-бара; открытые
+// петли/моменты рендерятся тем же аггрегатором, что раньше был в Дневнике.
+await journey.evaluate(() => { goTo('psy'); });
 const step5 = await journey.evaluate(() => ({
-  overviewOn: getComputedStyle(document.getElementById('sys-overview')).display !== 'none',
-  overviewTabActive: document.querySelector('.nsh-tab[data-nav="overview"]').classList.contains('on'),
+  onPsy: document.getElementById('pg-psy').classList.contains('on'),
+  psyTabActive: document.querySelector('.nsh-tab[data-nav="psychology"]').classList.contains('on'),
   diaryStale: getComputedStyle(document.getElementById('ms-overview')).display === 'none' || document.getElementById('pg-map').classList.contains('on') === false,
 }));
-ok(step5.overviewOn && step5.overviewTabActive, 'путь 5/8: «Обзор» открывает landing недели, вкладка подсвечена');
-ok(step5.diaryStale, 'путь 5/8: уход из Дневника не оставляет его подраздел «залипшим» видимым поверх Обзора');
+ok(step5.onPsy && step5.psyTabActive, 'путь 5/9: «Психология» открывает раздел, вкладка подсвечена');
+ok(step5.diaryStale, 'путь 5/9: уход из Дневника не оставляет его подраздел «залипшим» видимым поверх Психологии');
 
-// Шаг 6: «Отчёт врачу» из Обзора — существующий overlay с текстом.
+// Шаг 6: Инструменты (сайдбар/drawer) → «Обзор (прежние «Итоги»)» — landing
+// недели, куда теперь ведёт бывший top-level таб «Обзор».
+await journey.evaluate(() => { goTo('tools'); });
+const step6 = await journey.evaluate(() => {
+  const btn = [...document.querySelectorAll('#pg-tools button')].find(b => b.textContent.includes('Обзор (прежние'));
+  btn.click();
+  return {
+    onTools: true,
+    overviewOn: getComputedStyle(document.getElementById('sys-overview')).display !== 'none',
+    onSys: document.getElementById('pg-sys').classList.contains('on'),
+  };
+});
+ok(step6.overviewOn && step6.onSys, 'путь 6/9: Инструменты → «Обзор (прежние «Итоги»)» открывает landing недели');
+
+// Шаг 7: «Отчёт врачу» из Обзора — существующий overlay с текстом.
 await journey.evaluate(() => { document.querySelector('#ov-health button').click(); });
-const step6 = await journey.evaluate(() => ({
+const step7 = await journey.evaluate(() => ({
   open: document.getElementById('ov-doc-report').classList.contains('on'),
   hasText: (document.getElementById('doc-report-text') || {}).value?.length > 0,
 }));
-ok(step6.open && step6.hasText, 'путь 6/8: «Отчёт врачу» из Обзора открывает заполненный существующий отчёт');
+ok(step7.open && step7.hasText, 'путь 7/9: «Отчёт врачу» из Обзора открывает заполненный существующий отчёт');
 await journey.evaluate(() => { closeOv('ov-doc-report'); });
 
-// Шаг 7: назад (browser back) — возвращает на Дневник (landing), без «Зачем?»/Сна/отчёта.
+// Шаг 8: назад (browser back) — возвращает на предыдущий раздел с hash-записью
+// (Инструменты), без «залипших» оверлеев.
 await journey.evaluate(async () => {
   await new Promise(res => { const h = () => { window.removeEventListener('hashchange', h); res(); }; window.addEventListener('hashchange', h); history.back(); });
 });
-const step7 = await journey.evaluate(() => ({
+const step8 = await journey.evaluate(() => ({
   overlaysClosed: !document.querySelector('.ov.on'),
-  onDiary: document.getElementById('pg-map').classList.contains('on'),
+  onTools: document.getElementById('pg-tools').classList.contains('on'),
 }));
-ok(step7.overlaysClosed && step7.onDiary, 'путь 7/8: browser back возвращает на предыдущий раздел (Дневник), оверлеи не «текут» между экранами');
+ok(step8.overlaysClosed && step8.onTools, 'путь 8/9: browser back возвращает на предыдущий раздел (Инструменты), оверлеи не «текут» между экранами');
 
-// Шаг 8: reload — состояние (текущий раздел) восстанавливается из hash, БЕЗ дублей/залипаний.
+// Шаг 9: reload — состояние (текущий раздел) восстанавливается из hash, БЕЗ дублей/залипаний.
+// Инструменты не входит в нижний таб-бар — корректно, что ни одна из четырёх
+// вкладок (Главное/Дневник/Психология/Астрология) не подсвечена.
 await journey.reload();
 await journey.waitForSelector('#nsh-tabbar', { state: 'attached' });
 await journey.evaluate(() => { const s = document.getElementById('splash'); if (s) s.style.display = 'none'; });
 await journey.waitForTimeout(650);
 await journey.evaluate(() => document.querySelectorAll('.ov.on').forEach(e => e.classList.remove('on')));
-const step8 = await journey.evaluate(() => ({
+const step9 = await journey.evaluate(() => ({
   shellOn: document.body.classList.contains('navshell'),
-  onDiary: document.getElementById('pg-map').classList.contains('on'),
+  onTools: document.getElementById('pg-tools').classList.contains('on'),
   noStrayOverlay: !document.querySelector('.ov.on'),
-  singleActiveTab: document.querySelectorAll('.nsh-tab.on').length === 1,
+  noWrongActiveTab: document.querySelectorAll('.nsh-tab.on').length === 0,
 }));
-ok(step8.shellOn && step8.onDiary && step8.noStrayOverlay && step8.singleActiveTab,
-  'путь 8/8: reload восстанавливает раздел из hash, ровно одна активная вкладка, оверлеев не осталось');
+ok(step9.shellOn && step9.onTools && step9.noStrayOverlay && step9.noWrongActiveTab,
+  'путь 9/9: reload восстанавливает раздел из hash (Инструменты), ни одна из 4 вкладок не подсвечена ложно, оверлеев не осталось');
 
 // ── 5) Общая стабилизация: отсутствие дублей действий там, где раньше
 //     dock накладывался на существующие кнопки (issue #143 §4).

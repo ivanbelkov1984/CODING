@@ -511,6 +511,19 @@
 
 <!-- ── НАСТРОЙКИ (отдельный экран, вход — шестерёнка в шапке) ─────── -->
 <section class="pg" id="pg-settings">
+  <!-- ══ Хаб настроек (navigation-restructure): категории маршрутизируют
+       в существующие формы/секции ниже — внутреннее содержимое настроек
+       в этом PR не переписано. ══ -->
+  <div class="sec-lbl">Категории</div>
+  <div class="more-list mx mb">
+    <button type="button" class="srow" onclick="settingsJump('Профиль и вид')"><span class="sic" style="background:var(--gold-l)"><i data-lucide="palette" style="color:var(--gold)"></i></span><span class="sl2">Внешний вид</span><span class="sv2">Тема, профиль</span></button>
+    <button type="button" class="srow" onclick="settingsJump('Профиль и вид')"><span class="sic" style="background:rgba(251,113,133,.16)"><i data-lucide="bell" style="color:#FB7185"></i></span><span class="sl2">Уведомления</span><span class="sv2">Push</span></button>
+    <button type="button" class="srow" onclick="openOv('ov-cfg')"><span class="sic" style="background:var(--teal-l)"><i data-lucide="sparkles" style="color:var(--teal)"></i></span><span class="sl2">Искусственный интеллект</span><span class="sv2">Оси, AI-ключ</span></button>
+    <button type="button" class="srow" onclick="settingsJump('Синхронизация')"><span class="sic" style="background:var(--blue-l)"><i data-lucide="refresh-cw" style="color:var(--blue-t)"></i></span><span class="sl2">Данные и синхронизация</span><span class="sv2">Sync, backup</span></button>
+    <button type="button" class="srow" onclick="openKeys()"><span class="sic" style="background:var(--purple-l)"><i data-lucide="shield" style="color:var(--purple)"></i></span><span class="sl2">Приватность и безопасность</span><span class="sv2">Ключи сервисов</span></button>
+    <button type="button" class="srow" onclick="openRecords()"><span class="sic" style="background:var(--orange-l,#FDEDD3)"><i data-lucide="list-checks" style="color:var(--orange,#D97706)"></i></span><span class="sl2">Организация приложения</span><span class="sv2">Мои записи</span></button>
+    <button type="button" class="srow" onclick="settingsJump('Команды')"><span class="sic" style="background:var(--bg2)"><i data-lucide="info" style="color:var(--t3)"></i></span><span class="sl2">О приложении</span><span class="sv2">Версия</span></button>
+  </div>
   <div class="sec-lbl">Синхронизация</div>
   <div class="card mx">
     <div class="srow" onclick="doSync()"><div class="sic" style="background:var(--blue-l)"><svg style="color:var(--blue-t)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></div><span class="sl2">Синхронизировать сейчас</span><span class="sv2" id="sync-lbl">Нажми — всё автоматически</span></div>
@@ -580,19 +593,15 @@
        при arch_nav_v2=ON). Только маршрутизация в существующие экраны/msub,
        без новых данных. При OFF — недостижимо (goTo('map') зовёт rIns()). ══ -->
   <div id="ms-overview" style="display:none">
-    <div id="diary-loops"></div>
-    <div id="diary-state"></div>
     <div id="diary-recent"></div>
     <div class="sec-lbl">Все разделы Дневника</div>
     <div class="more-list mx mb">
       <button type="button" class="srow" onclick="msub('insights')"><span class="sic" style="background:var(--blue-l)"><i data-lucide="sparkles" style="color:var(--blue-t)"></i></span><span class="sl2">Инсайты</span><span class="sv2">Мысли и наблюдения</span></button>
       <button type="button" class="srow" onclick="msub('dreams')"><span class="sic" style="background:var(--purple-l)"><i data-lucide="moon" style="color:var(--purple)"></i></span><span class="sl2">Сны</span><span class="sv2">Дневник сновидений</span></button>
       <button type="button" class="srow" onclick="msub('chats')"><span class="sic" style="background:var(--teal-l)"><i data-lucide="message-circle" style="color:var(--teal)"></i></span><span class="sl2">Диалоги</span><span class="sv2">Разговоры с ИИ вглубь</span></button>
-      <button type="button" class="srow" onclick="msub('graph')"><span class="sic" style="background:var(--green-l)"><i data-lucide="share-2" style="color:var(--green)"></i></span><span class="sl2">Карта</span><span class="sv2">Связи и темы</span></button>
-      <button type="button" class="srow" onclick="msub('patterns')"><span class="sic" style="background:var(--gold-l)"><i data-lucide="git-branch" style="color:var(--gold)"></i></span><span class="sl2">Паттерны</span><span class="sv2">Повторяющееся</span></button>
       <button type="button" class="srow" onclick="msub('book')"><span class="sic" style="background:var(--blue-l)"><i data-lucide="book-open" style="color:var(--blue-t)"></i></span><span class="sl2">Книга</span><span class="sv2">Главы</span></button>
-      <button type="button" class="srow" onclick="msub('spiritual')"><span class="sic" style="background:var(--purple-l)"><i data-lucide="sparkles" style="color:var(--purple)"></i></span><span class="sl2">Духовное</span><span class="sv2">Практика и путь</span></button>
-      <button type="button" class="srow" onclick="msub('evolution')"><span class="sic" style="background:var(--green-l)"><i data-lucide="trending-up" style="color:var(--green)"></i></span><span class="sl2">Эволюция</span><span class="sv2">Журнал развития</span></button>
+      <button type="button" class="srow" onclick="openOv('ov-history')"><span class="sic" style="background:var(--gold-l)"><i data-lucide="history" style="color:var(--gold)"></i></span><span class="sl2">История</span><span class="sv2">Моменты и разборы</span></button>
+      <button type="button" class="srow" onclick="openOv('ov-search')"><span class="sic" style="background:var(--green-l)"><i data-lucide="search" style="color:var(--green)"></i></span><span class="sl2">Поиск</span><span class="sv2">По записям</span></button>
     </div>
     <div style="height:5rem"></div>
   </div>
@@ -670,15 +679,62 @@
   </div>
 </section>
 
+<!-- ══ Психология (issue navigation-restructure: новый top-level раздел,
+     canonical #/psychology). Только маршрутизация в СУЩЕСТВУЮЩИЕ экраны/
+     destination id (msub внутри pg-map, ov-why, ov-history) — новой
+     психологической бизнес-логики нет. При OFF раздел недостижим (нет
+     старого эквивалента вкладки). ══ -->
+<section class="pg" id="pg-psy">
+  <div id="psy-loops"></div>
+  <div id="psy-moments"></div>
+  <div class="sec-lbl">Инструменты самопознания</div>
+  <div class="more-list mx mb">
+    <button type="button" class="srow" onclick="openOv('ov-why')"><span class="sic" style="background:var(--teal-l)"><i data-lucide="help-circle" style="color:var(--teal)"></i></span><span class="sl2">«Зачем?»</span><span class="sv2">Разбор состояния</span></button>
+    <button type="button" class="srow" onclick="goTo('map');msub('patterns')"><span class="sic" style="background:var(--gold-l)"><i data-lucide="git-branch" style="color:var(--gold)"></i></span><span class="sl2">Паттерны</span><span class="sv2">Повторяющееся</span></button>
+    <button type="button" class="srow" onclick="goTo('map');msub('graph')"><span class="sic" style="background:var(--green-l)"><i data-lucide="share-2" style="color:var(--green)"></i></span><span class="sl2">Граф связей</span><span class="sv2">Темы и карта</span></button>
+    <button type="button" class="srow" onclick="goTo('map');msub('spiritual')"><span class="sic" style="background:var(--purple-l)"><i data-lucide="sparkles" style="color:var(--purple)"></i></span><span class="sl2">Духовное</span><span class="sv2">Практика и путь</span></button>
+    <button type="button" class="srow" onclick="goTo('map');msub('evolution')"><span class="sic" style="background:var(--blue-l)"><i data-lucide="trending-up" style="color:var(--blue-t)"></i></span><span class="sl2">Эволюция</span><span class="sv2">Журнал развития</span></button>
+  </div>
+  <div style="height:5rem"></div>
+</section>
+
+<!-- ══ Инструменты (navigation-restructure): группа существующих входов —
+     ничего не переписано, только маршрутизация в существующие destination
+     id/overlay. Сферы и прежние Итоги больше не top-level — доступны
+     отсюда. ══ -->
+<section class="pg" id="pg-tools">
+  <div class="sec-lbl">Аналитика</div>
+  <div class="more-list mx mb">
+    <button type="button" class="srow" onclick="goTo('sys')"><span class="sic" style="background:var(--blue-l)"><i data-lucide="bar-chart-3" style="color:var(--blue-t)"></i></span><span class="sl2">Обзор (прежние «Итоги»)</span><span class="sv2">Неделя, живая карта, дайджесты</span></button>
+  </div>
+  <div class="sec-lbl">Данные</div>
+  <div class="more-list mx mb">
+    <button type="button" class="srow" onclick="goTo('vit')"><span class="sic" style="background:var(--green-l)"><i data-lucide="layers" style="color:var(--green)"></i></span><span class="sl2">Сферы</span><span class="sv2">Трекеры жизни</span></button>
+    <button type="button" class="srow" onclick="openOv('ov-search')"><span class="sic" style="background:var(--teal-l)"><i data-lucide="search" style="color:var(--teal)"></i></span><span class="sl2">Поиск по памяти</span><span class="sv2">Найти запись</span></button>
+    <button type="button" class="srow" onclick="openRecords()"><span class="sic" style="background:var(--orange-l,#FDEDD3)"><i data-lucide="list-checks" style="color:var(--orange,#D97706)"></i></span><span class="sl2">Мои записи</span><span class="sv2">Просмотр и удаление (21 тип)</span></button>
+    <button type="button" class="srow" onclick="openBackups()"><span class="sic" style="background:var(--blue-l)"><i data-lucide="refresh-cw" style="color:var(--blue-t)"></i></span><span class="sl2">Резервная копия</span><span class="sv2">Создать / восстановить</span></button>
+    <button type="button" class="srow" onclick="openEncBackup()"><span class="sic" style="background:var(--purple-l)"><i data-lucide="shield" style="color:var(--purple)"></i></span><span class="sl2">Зашифрованная резервная копия</span><span class="sv2">Создать · восстановить</span></button>
+    <button type="button" class="srow" onclick="openOv('ov-import')"><span class="sic" style="background:var(--green-l)"><i data-lucide="upload" style="color:var(--green)"></i></span><span class="sl2">Импорт и восстановление</span><span class="sv2">Из файла</span></button>
+  </div>
+  <div class="sec-lbl">Диагностика</div>
+  <div class="more-list mx mb">
+    <button type="button" class="srow" onclick="openLog()"><span class="sic" style="background:var(--bg2)"><i data-lucide="terminal" style="color:var(--t3)"></i></span><span class="sl2">Журнал синхронизации</span><span class="sv2">Открыть</span></button>
+  </div>
+  <div style="height:5rem"></div>
+</section>
+
 </main>
 
-<!-- ══ NAVIGATION SHELL v2 (за флагом arch_nav_v2; скрыто без body.navshell) ══ -->
+<!-- ══ NAVIGATION SHELL v2 (за флагом arch_nav_v2; скрыто без body.navshell).
+     navigation-restructure: 4 вкладки Главное/Дневник/Психология/Астрология
+     + FAB. Здоровье/Инструменты/Настройки/Учётная запись — через burger
+     (боковое/профильное меню), абстрактная вкладка «Ещё» упразднена. ══ -->
 <nav class="nsh-tabbar" id="nsh-tabbar" aria-label="Основная навигация">
-  <button class="nsh-tab on" data-nav="today" onclick="navGo('today')" aria-label="Сегодня" aria-current="page"><i data-lucide="sun"></i><span>Сегодня</span></button>
-  <button class="nsh-tab" data-nav="diary" onclick="navGo('diary')" aria-label="Дневник"><i data-lucide="brain"></i><span>Дневник</span></button>
+  <button class="nsh-tab on" data-nav="main" onclick="navGo('main')" aria-label="Главное" aria-current="page"><i data-lucide="sun"></i><span>Главное</span></button>
+  <button class="nsh-tab" data-nav="diary" onclick="navGo('diary')" aria-label="Дневник"><i data-lucide="book-open"></i><span>Дневник</span></button>
   <button class="nsh-fab" id="nsh-fab" onclick="openCapture()" aria-label="Записать"><i data-lucide="plus"></i></button>
-  <button class="nsh-tab" data-nav="overview" onclick="navGo('overview')" aria-label="Обзор"><i data-lucide="bar-chart-3"></i><span>Обзор</span></button>
-  <button class="nsh-tab" data-nav="more" onclick="navGo('more')" aria-label="Ещё"><i data-lucide="menu"></i><span>Ещё</span></button>
+  <button class="nsh-tab" data-nav="psychology" onclick="navGo('psychology')" aria-label="Психология"><i data-lucide="brain"></i><span>Психология</span></button>
+  <button class="nsh-tab" data-nav="astro" onclick="navGo('astro')" aria-label="Астрология"><i data-lucide="sparkles"></i><span>Астрология</span></button>
 </nav>
 
 </div><!-- end #app -->
@@ -1692,41 +1748,6 @@
     <div class="sh-title">Какую сферу отметить?</div>
     <div class="more-list" id="sphere-pick-list"></div>
     <button class="btn btn-g" style="width:calc(100% - 2*var(--s4));margin:.6rem var(--s4) 0" onclick="closeOv('ov-sphere-pick')">Закрыть</button>
-  </div>
-</div>
-
-<!-- ══ «ЕЩЁ» — сгруппированный хаб (nav shell v2; все разделы за ≤2 тапа) ══ -->
-<div class="ov" id="ov-more" onclick="if(event.target===this){closeOv('ov-more');nshHashToPage()}">
-  <div class="sheet">
-    <div class="sh-pull"></div>
-    <div class="sh-title">Ещё</div>
-    <div class="sec-lbl" style="padding-left:var(--s4)">Разделы</div>
-    <div class="more-list">
-      <div class="srow" onclick="closeOv('ov-more');goTo('vit')"><div class="sic" style="background:var(--green-l)"><svg style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></div><span class="sl2">Сферы</span><span class="sv2">Трекеры жизни</span></div>
-      <div class="srow" onclick="closeOv('ov-more');goTo('health')"><div class="sic" style="background:rgba(251,113,133,.16)"><svg style="color:#FB7185" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg></div><span class="sl2">Здоровье</span><span class="sv2">Приём, симптомы, измерения</span></div>
-      <div class="srow" onclick="closeOv('ov-more');goTo('astro')"><div class="sic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l1.9 5.8H20l-4.9 3.6 1.9 5.8L12 14.6 7 18.2l1.9-5.8L4 8.8h6.1z"/></svg></div><span class="sl2">Астрология</span><span class="sv2">Карта, периоды, отношения</span></div>
-    </div>
-    <div class="sec-lbl" style="padding-left:var(--s4)">Здоровье — быстро</div>
-    <div class="more-list">
-      <div class="srow" onclick="closeOv('ov-more');goTo('health');openOv('ov-doc-report')"><div class="sic" style="background:var(--blue-l)"><svg style="color:var(--blue-t)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg></div><span class="sl2">Отчёт врачу</span><span class="sv2">Собрать за период</span></div>
-    </div>
-    <div class="sec-lbl" style="padding-left:var(--s4)">Инструменты</div>
-    <div class="more-list">
-      <div class="srow" onclick="openOv('ov-search')"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div><span class="sl2">Поиск по памяти</span><span class="sv2">Найти запись</span></div>
-      <div class="srow" onclick="closeOv('ov-more');openRecords()"><div class="sic" style="background:var(--orange-l,#FDEDD3)"><svg style="color:var(--orange,#D97706)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><polyline points="3 5.5 4 6.5 6 4.5"/><polyline points="3 11.5 4 12.5 6 10.5"/></svg></div><span class="sl2">Мои записи</span><span class="sv2">Просмотр и удаление (21 тип)</span></div>
-    </div>
-    <div class="sec-lbl" style="padding-left:var(--s4)">Данные</div>
-    <div class="more-list">
-      <div class="srow" onclick="closeOv('ov-more');openBackups()"><div class="sic" style="background:var(--blue-l)"><svg style="color:var(--blue-t)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div><span class="sl2">Резервная копия</span><span class="sv2">Создать / зашифровать</span></div>
-      <div class="srow" onclick="openOv('ov-import')"><div class="sic" style="background:var(--green-l)"><svg style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><span class="sl2">Восстановление</span><span class="sv2">Импорт из файла</span></div>
-    </div>
-    <div class="sec-lbl" style="padding-left:var(--s4)">Система</div>
-    <div class="more-list">
-      <div class="srow" onclick="closeOv('ov-more');goTo('settings')"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div><span class="sl2">Настройки</span><span class="sv2">Оси, AI, тема</span></div>
-      <div class="srow" onclick="closeOv('ov-more');openProfiles()"><div class="sic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><span class="sl2">Профили</span><span class="sv2">Переключить / добавить</span></div>
-      <div class="srow" onclick="closeOv('ov-more');openOv('ov-feedback')"><div class="sic" style="background:var(--gold-l)"><svg style="color:var(--gold)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div><span class="sl2">Обратная связь</span><span class="sv2">Написать</span></div>
-    </div>
-    <button class="btn btn-g" style="width:calc(100% - 2*var(--s4));margin:.6rem var(--s4) 0" onclick="closeOv('ov-more');nshHashToPage()">Закрыть</button>
   </div>
 </div>
 

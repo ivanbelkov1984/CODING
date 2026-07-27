@@ -27,6 +27,10 @@
     'map:evolution': [
       { id: 'evolution', label: 'Новая запись', icon: 'trending-up', primary: true, run: () => openOv('ov-evo-add') },
     ],
+    psy: [
+      { id: 'psy-why', label: 'Разбор «Зачем?»', icon: 'help-circle', primary: true, run: () => openOv('ov-why') },
+      { id: 'psy-moment', label: 'Момент', icon: 'circle-dot', run: () => openOv('ov-moment') },
+    ],
     vit: [
       { id: 'sphere-log', label: 'Отметить сферу', icon: 'check-circle-2', primary: true, run: () => captureSphere() },
       { id: 'sphere-new', label: 'Новая сфера', icon: 'plus', run: () => openSphereEdit() },

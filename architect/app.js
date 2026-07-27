@@ -495,18 +495,22 @@ function goTo(tab, el) {
   if (pg) pg.classList.add('on');
   const nb = $('nt-'+tab) || el;
   if (nb) nb.classList.add('on');
-  $('ptitle').textContent = TITLES[tab] || tab;
+  const shellOn = document.body.classList.contains('navshell');
+  // «Сегодня»→«Главное» — только заголовок shell при ON; при OFF байт-в-байт
+  // как раньше (OFF-паритет с MAIN, TITLES.home не тронут).
+  $('ptitle').textContent = (tab === 'home' && shellOn) ? 'Главное' : (TITLES[tab] || tab);
   document.querySelectorAll('.navlink').forEach(n => n.classList.toggle('on', n.dataset.tab === tab));
   if (typeof closeNav === 'function') closeNav();
   if (typeof rSidebar === 'function') rSidebar();
   hpt();
   if (tab==='vit') { rSpheres(); rVit(); }
-  if (tab==='sys') { rLivingMap('livingmap-out'); rDig(); rReview(30); if (document.body.classList.contains('navshell')) sysGo('overview'); }
-  if (tab==='map') { if (document.body.classList.contains('navshell')) msub('overview'); else rIns(); }
+  if (tab==='sys') { rLivingMap('livingmap-out'); rDig(); rReview(30); if (shellOn) sysGo('overview'); }
+  if (tab==='map') { if (shellOn) msub('overview'); else rIns(); }
+  if (tab==='psy') rPsyLanding();
   if (tab==='health') rHealth();
   if (tab==='astro') asub('menu');
   if (tab==='settings') { rProfileRow(); checkApiStatus(); rPushStatus(); const kc=$('keys-cnt'); if (kc) kc.textContent = KEY_SERVICES.filter(s=>getAiKeyFor(s.p)).length + ' из ' + KEY_SERVICES.length; }
-  if (document.body.classList.contains('navshell')) { nshHighlight(tab); nshWriteHash(tab); }
+  if (shellOn) { nshHighlight(tab); nshWriteHash(tab); }
 }
 function msub(tab, el) {
   document.querySelectorAll('[id^="ms-"]').forEach(t => t.style.display='none');
@@ -2365,19 +2369,20 @@ function deleteWhyDet() {
 // ═══ ДНЕВНИК: агрегатор-landing (issue #141; только при arch_nav_v2=ON) ═══
 // Аддитивный read-only слой поверх уже существующих коллекций/экранов —
 // ничего не считает заново, не создаёт новых полей и не хранится отдельно.
+// navigation-restructure: Дневник сузился до записей (инсайты/сны/книга/
+// диалоги/история/поиск) — «Открытые петли»/паттерны/граф/духовное/
+// эволюция/моменты переехали на новый top-level раздел «Психология»
+// (см. rPsyLoops/rPsyMoments ниже). rDiaryLoops принимает targetId, чтобы
+// та же функция (тот же расчёт, тот же openWhy) обслуживала оба места.
 // «Открытые петли»: ТОЛЬКО разбор «Зачем?» с непустым action и
 // actionDone !== true (то же поле, что и в openWhy/markWhyAction) — это
 // единственная сущность с однозначным незавершённым статусом. DB.oq — это
 // вопросы для рефлексии (reflectOn(i) открывает НОВЫЙ инсайт с этим
-// вопросом), у них нет признака «незавершено», и свежий профиль уже несёт
-// два стартовых вопроса — включение их сюда ложно помечало бы почти любой
-// профиль как «есть незавершённое». DB.oq остаётся только в существующей
-// рефлексии на Today (rPrompts/reflectOn), landing его не трогает.
+// вопросом), у них нет признака «незавершено» — landing его не трогает.
 // Полностью пустое состояние — секция не рендерится вовсе: это и есть
-// спокойное обращение с пустотой (см. landing-иерархию ниже), а не
-// декоративная пустая карточка.
-function rDiaryLoops() {
-  const el = $('diary-loops'); if (!el) return;
+// спокойное обращение с пустотой, а не декоративная пустая карточка.
+function rDiaryLoops(targetId) {
+  const el = $(targetId || 'diary-loops'); if (!el) return;
   const whys = projAll('whys').filter(w => w && w.action && String(w.action).trim() && w.actionDone !== true);
   if (!whys.length) { el.innerHTML = ''; return; }
   const whyRows = whys.slice(0, 5).map(w => {
@@ -2387,37 +2392,33 @@ function rDiaryLoops() {
   }).join('');
   el.innerHTML = `<div class="sec-lbl">Открытые петли</div><div class="more-list mx mb">${whyRows}</div>`;
 }
-// «Состояния и моменты»: краткая read-only сводка последних Момента и
-// Check-in. momentLabel/dayComposite — существующие функции (никакой новой
-// медицинской/психологической оценки). Коллекции не объединяются.
-function rDiaryState() {
-  const el = $('diary-state'); if (!el) return;
+// «Моменты» (Психология): последний Момент по РЕАЛЬНОЙ свежести (createdAt
+// → day → id-fallback, не по позиции в массиве) + существующий ov-history.
+// momentLabel/projAll — существующие функции, никакой новой оценки.
+function rPsyMoments() {
+  const el = $('psy-moments'); if (!el) return;
   const moments = projAll('moments');
-  // Позиция в массиве — не контракт свежести (sync/restore/corrections могут
-  // её не сохранять). Настоящая свежесть: createdAt → day → id (timestamp-
-  // fallback, тот же приём, что и для DB.patterns в rDiaryRecent). Чтение,
-  // без сортировки/мутации исходного массива и записей.
   const momentTs = m => Date.parse(m.createdAt) || Date.parse((m.day || '') + 'T00:00:00') || m.id || 0;
-  const lastMom = moments.length ? moments.reduce((a, b) => momentTs(b) > momentTs(a) ? b : a) : null;
-  const cis = DB.checkins || [];
-  const lastCi = cis.length ? [...cis].sort((a, b) => (a.date || '') < (b.date || '') ? 1 : -1)[0] : null;
-  const momTxt = lastMom
-    ? `Момент · ${esc((lastMom.day || '').slice(5))} — приятность ${momentLabel(lastMom.valence)}, энергия ${momentLabel(lastMom.activation)}`
+  const last = moments.length ? moments.reduce((a, b) => momentTs(b) > momentTs(a) ? b : a) : null;
+  const txt = last
+    ? `Момент · ${esc((last.day || '').slice(5))} — приятность ${momentLabel(last.valence)}, энергия ${momentLabel(last.activation)}`
     : 'Моментов пока нет';
-  const comp = lastCi ? dayComposite(lastCi) : null;
-  const ciTxt = lastCi
-    ? `Check-in · ${esc(lastCi.date)}${comp != null ? ' — ' + comp.toFixed(1) + '/10' : ''}`
-    : 'Check-in пока нет';
-  el.innerHTML = `<div class="sec-lbl">Состояния и моменты</div>
-    <div class="card mx mb" style="padding:.85rem 1rem">
-      <div class="si-text">${momTxt}</div>
-      <div class="si-text" style="margin-top:.3rem">${ciTxt}</div>
-    </div>
+  el.innerHTML = `<div class="sec-lbl">Моменты</div>
+    <div class="card mx mb" style="padding:.85rem 1rem"><div class="si-text">${txt}</div></div>
     <div class="mx mb"><button type="button" class="btn btn-s" onclick="openOv('ov-history')"><i data-lucide="history"></i>Посмотреть историю</button></div>`;
 }
-// «Последние записи»: счётчик за неделю + дата последней по 5 коллекциям.
-// У DB.patterns нет createdAt/day — id уже несёт Date.now() (тот же приём,
-// что и в остальном коде, напр. uid()/mkDig), поэтому используем его как есть.
+// Landing Психологии целиком: открытые петли → моменты → (статический в
+// HTML) список существующих экранов самопознания.
+function rPsyLanding() {
+  rDiaryLoops('psy-loops');
+  rPsyMoments();
+  icons();
+}
+// «Последние записи» Дневника: счётчик за неделю + дата последней. Список
+// сужен до записей (инсайты/сны) — паттерны/духовное/эволюция теперь в
+// Психологии; DIARY_RECENT_GROUPS сохранён ПОЛНЫМ (5 коллекций) для
+// обратной совместимости с rOverviewWeek() в Обзоре (issue #143), которая
+// уже на него ссылается — здесь просто рендерится подмножество.
 const DIARY_RECENT_GROUPS = [
   ['insights', 'Инсайты', 'sparkles'],
   ['dreams', 'Сны', 'moon'],
@@ -2425,11 +2426,12 @@ const DIARY_RECENT_GROUPS = [
   ['spiritual', 'Духовное', 'sparkles'],
   ['evolution', 'Эволюция', 'trending-up'],
 ];
+const DIARY_RECORD_GROUPS = DIARY_RECENT_GROUPS.filter(([coll]) => coll === 'insights' || coll === 'dreams');
 function rDiaryRecent() {
   const el = $('diary-recent'); if (!el) return;
   const now = Date.now(), wk = 7 * 864e5;
   const ts = (coll, r) => coll === 'patterns' ? (r.id || 0) : (Date.parse(r.createdAt) || r.id || 0);
-  el.innerHTML = '<div class="sec-lbl">Последние записи</div><div class="more-list mx mb">' + DIARY_RECENT_GROUPS.map(([coll, label, ico]) => {
+  el.innerHTML = '<div class="sec-lbl">Последние записи</div><div class="more-list mx mb">' + DIARY_RECORD_GROUPS.map(([coll, label, ico]) => {
     const list = DB[coll] || [];
     const weekN = list.filter(r => r && now - ts(coll, r) <= wk).length;
     const last = list.length ? list.reduce((a, b) => ts(coll, a) > ts(coll, b) ? a : b) : null;
@@ -2437,11 +2439,10 @@ function rDiaryRecent() {
     return `<button type="button" class="srow" onclick="msub('${coll}')"><span class="sic"><i data-lucide="${ico}"></i></span><span class="sl2">${label}</span><span class="sv2">${weekN} за неделю · ${esc(lastTxt)}</span></button>`;
   }).join('') + '</div>';
 }
-// Landing целиком: порядок блоков строго по контракту issue #141 (§7):
-// открытые петли (если есть) → состояния/моменты → последние записи →
-// (статический в HTML) полный список разделов Дневника.
+// Landing целиком (сужено navigation-restructure): последние записи →
+// (статический в HTML) полный список разделов Дневника (записи).
 function rDiaryOverview() {
-  rDiaryLoops(); rDiaryState(); rDiaryRecent();
+  rDiaryRecent();
   icons();
 }
 
@@ -8080,19 +8081,22 @@ function navShellEnabled() {
     return true;                 // нет сохранённого значения — новый дефолт ON
   } catch (e) { return true; }
 }
-// Вкладки shell → существующие id (goTo). «Ещё» открывает drawer со всеми разделами.
-const NSH_MAP = { today: 'home', diary: 'map', overview: 'sys' };
+// Вкладки shell → существующие id (goTo). navigation-restructure: 4 вкладки
+// теперь Главное/Дневник/Психология/Астрология; Здоровье/Инструменты/
+// Настройки/Учётная запись — через боковое/профильное меню (см. burger →
+// nshSidebarGroups), не через абстрактную вкладку «Ещё» (упразднена).
+const NSH_MAP = { main: 'home', diary: 'map', psychology: 'psy', astro: 'astro' };
 function navGo(dest) {
-  if (dest === 'more') { openOv('ov-more'); nshHighlight('more'); nshPushHash('#/more'); return; }
   const tab = NSH_MAP[dest];
   if (tab) goTo(tab);
 }
-// Обратный маппinг: подсветить активную вкладку по текущему разделу.
-// Разделы вне 4 вкладок (Сферы/Здоровье/Астро/Настройки) относятся к «Ещё».
+// Обратный маппing: подсветить активную вкладку по текущему разделу.
+// Разделы вне 4 вкладок (Сферы/Здоровье/Обзор/Настройки/Инструменты) не
+// подсвечивают ни одну вкладку — они реальны только в боковом меню.
 function nshHighlight(tab) {
-  const dest = tab === 'home' ? 'today' : tab === 'map' ? 'diary' : tab === 'sys' ? 'overview' : 'more';
+  const dest = tab === 'home' ? 'main' : tab === 'map' ? 'diary' : tab === 'psy' ? 'psychology' : tab === 'astro' ? 'astro' : null;
   document.querySelectorAll('.nsh-tab').forEach(b => {
-    const on = b.dataset.nav === dest;
+    const on = !!dest && b.dataset.nav === dest;
     b.classList.toggle('on', on);
     if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   });
@@ -8131,11 +8135,19 @@ function capturePlus() { if (navShellEnabled()) openCapture(); else openOv('ov-a
 // ── Hash-роутинг v2 (аддитивно; только при navshell) ────────────
 // Делает состояние адресуемым: перезагрузка восстанавливает раздел,
 // back/forward браузера работают (переходы кладутся в историю pushState).
-// Canonical destination id — источник правды; hash лишь их сериализует.
-// Неизвестный hash безопасно ведёт на «Сегодня». Без флага hash не
-// пишется и не читается — поведение как раньше.
-const NSH_SLUGS = { home: 'today', map: 'diary', sys: 'overview', vit: 'spheres', health: 'health', astro: 'astro', settings: 'settings' };
-const NSH_SLUGS_REV = { today: 'home', diary: 'map', overview: 'sys', spheres: 'vit', health: 'health', astro: 'astro', settings: 'settings' };
+// Canonical destination id (см. goTo) НЕ меняются этим рефакторингом —
+// hash лишь их сериализует. navigation-restructure: canonical слаг для
+// home теперь #/main (было #/today); добавлен #/psychology (psy); у sys
+// (прежний «Обзор», теперь внутри Инструменты→Аналитика) новый слаг
+// #/analytics, т.к. #/overview выходит из употребления как canonical.
+// Старые #/today, #/overview, #/more остаются рабочими алиасами — молча
+// нормализуются в #/main (ALIASES ниже) при первом же обращении.
+const NSH_SLUGS = { home: 'main', map: 'diary', psy: 'psychology', vit: 'spheres', health: 'health', astro: 'astro', settings: 'settings', sys: 'analytics', tools: 'tools' };
+const NSH_SLUGS_REV = { main: 'home', diary: 'map', psychology: 'psy', spheres: 'vit', health: 'health', astro: 'astro', settings: 'settings', analytics: 'sys', tools: 'tools' };
+// Легаси-алиасы (issue navigation-restructure): безопасная нормализация
+// старых hash в новый canonical #/main — без исключения (unknown-hash
+// уже вёл на «Сегодня»/«Главное», это тот же безопасный fallback).
+const NSH_LEGACY_ALIASES = { today: 'main', overview: 'main', more: 'main' };
 function nshPushHash(h, replace) {
   if (!document.body.classList.contains('navshell')) return;
   if (location.hash === h) return;
@@ -8145,25 +8157,28 @@ function nshWriteHash(tab, replace) {
   const slug = NSH_SLUGS[tab]; if (!slug) return;
   nshPushHash('#/' + slug, replace);
 }
-// Hash активного раздела (после закрытия оверлеев «Записать»/«Ещё») —
-// заменой, чтобы не плодить записи истории.
+// Hash активного раздела (после закрытия оверлея «Записать») — заменой,
+// чтобы не плодить записи истории.
 function nshHashToPage() {
   if (!document.body.classList.contains('navshell')) return;
   const pg = document.querySelector('.pg.on');
   const tab = pg ? pg.id.replace('pg-', '') : 'home';
-  const slug = NSH_SLUGS[tab] || 'today';
+  const slug = NSH_SLUGS[tab] || 'main';
   try { history.replaceState(null, '', '#/' + slug); } catch (e) {}
 }
 // Применить текущий hash к приложению. Возвращает true, если hash понят.
 function nshApplyHash(fromInit) {
   const m = (location.hash || '').match(/^#\/([a-z]+)/);
   if (!m) return false;                       // нет hash — как раньше
-  const slug = m[1];
-  const closeSheets = () => { ['ov-capture', 'ov-more'].forEach(id => { const el = $(id); if (el && el.classList.contains('on')) el.classList.remove('on'); }); };
+  let slug = m[1];
+  if (NSH_LEGACY_ALIASES[slug]) {              // #/today, #/overview, #/more → #/main
+    slug = NSH_LEGACY_ALIASES[slug];
+    try { history.replaceState(null, '', '#/' + slug); } catch (e) {}
+  }
+  const closeSheets = () => { const el = $('ov-capture'); if (el && el.classList.contains('on')) el.classList.remove('on'); };
   if (slug === 'capture') { openOv('ov-capture'); return true; }
-  if (slug === 'more') { openOv('ov-more'); nshHighlight('more'); return true; }
   const tab = NSH_SLUGS_REV[slug];
-  if (!tab) {                                 // неизвестный hash → безопасно на «Сегодня»
+  if (!tab) {                                 // неизвестный hash → безопасно на «Главное»
     closeSheets(); goTo('home'); nshWriteHash('home', true);
     return true;
   }
@@ -8197,31 +8212,32 @@ function applyNavShell() {
     }
   }
 }
-// ── iPad/desktop: сгруппированный sidebar (TARGET-IA §5) ─────────
-// При флаге плоский список заменяется группами. Каждый пункт зовёт
-// СУЩЕСТВУЮЩИЙ id; «Сферы» помещены в «День» (в §5 они не распределены,
-// а терять раздел нельзя) — отклонение задокументировано в PR.
+// ── iPad/desktop sidebar + телефонное боковое/профильное меню ────
+// navigation-restructure: утверждённая владельцем структура — «Основное»
+// (5 основных раздела + «Записать»), «Дополнительно» (Инструменты/
+// Настройки), «Учётная запись» отдельной группой внизу списка (визуально
+// отделена своим заголовком). Тот же рендер используется и для iPhone —
+// открывается через burger (см. styles.css: burger больше не скрыт при
+// navshell на телефоне) — это и есть «доступное боковое/профильное меню»
+// вместо абстрактной вкладки «Ещё» (упразднена). Каждый пункт зовёт
+// СУЩЕСТВУЮЩИЙ id/handler — Сферы и прежние «Итоги» больше не top-level,
+// но никуда не удалены (доступны из «Инструменты»).
 const NSH_SIDEBAR_GROUPS = [
-  ['День', [
-    ['home', 'sun', 'Сегодня', "goTo('home')"],
+  ['Основное', [
+    ['home', 'sun', 'Главное', "goTo('home')"],
     [null, 'plus-circle', 'Записать', 'openCapture()'],
-    ['vit', 'layers', 'Сферы', "goTo('vit')"],
-  ]],
-  ['Самопознание', [['map', 'brain', 'Дневник', "goTo('map')"]]],
-  ['Здоровье', [
-    ['health', 'heart-pulse', 'Здоровье', "goTo('health')"],
-    [null, 'file-text', 'Отчёт врачу', "goTo('health');openOv('ov-doc-report')"],
-  ]],
-  ['Аналитика', [['sys', 'bar-chart-3', 'Обзор', "goTo('sys')"]]],
-  ['Инструменты', [
+    ['map', 'book-open', 'Дневник', "goTo('map')"],
+    ['psy', 'brain', 'Психология', "goTo('psy')"],
     ['astro', 'sparkles', 'Астрология', "goTo('astro')"],
-    [null, 'search', 'Поиск', "openOv('ov-search')"],
-    [null, 'list-checks', 'Мои записи', 'openRecords()'],
+    ['health', 'heart-pulse', 'Здоровье', "goTo('health')"],
   ]],
-  ['Система', [
-    [null, 'users', 'Профили', 'openProfiles()'],
+  ['Дополнительно', [
+    ['tools', 'wrench', 'Инструменты', "goTo('tools')"],
     ['settings', 'settings', 'Настройки', "goTo('settings')"],
     [null, 'message-square', 'Обратная связь', "openOv('ov-feedback')"],
+  ]],
+  ['Учётная запись', [
+    [null, 'user-circle', 'Локальный профиль', 'openProfiles()'],
   ]],
 ];
 function nshSidebarGroups(on) {
@@ -8244,6 +8260,13 @@ function toggleNavShell() {
   try { localStorage.setItem('arch_nav_v2', on ? '1' : '0'); } catch (e) {}
   applyNavShell();
   toast(on ? 'Новая навигация включена' : 'Новая навигация выключена', 'ok');
+}
+// Хаб настроек (navigation-restructure): категории пока маршрутизируют
+// внутрь существующих секций pg-settings скроллом к нужному sec-lbl —
+// внутреннее содержимое настроек в этом PR не переписано.
+function settingsJump(label) {
+  const el = [...document.querySelectorAll('#pg-settings .sec-lbl')].find(e => e.textContent.trim() === label);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ═══ SHELL: drawer-навигация, блок аккаунта, жесты ═══════════════

@@ -96,86 +96,57 @@ const old3 = await page.evaluate(() => {
 });
 ok(old3.dreamsOn && old3.patternsOn, 'старые прямые переходы msub(...) продолжают открывать соответствующие подразделы');
 
-// 4) Open loops: только whys с однозначным незавершённым статусом.
-// DB.oq — вопросы для рефлексии (reflectOn открывает НОВЫЙ инсайт), у них
-// нет признака незавершённости, и свежий профиль несёт стартовые вопросы —
-// непустые DB.oq сами по себе НЕ должны создавать секцию (владелец, PR #142).
-const loops4 = await page.evaluate(() => {
-  const savedWhys = DB.whys, savedOq = DB.oq;
-  const r = {};
-  DB.whys = []; DB.oq = [];
+// 4) Дневник сужен до записей (navigation-restructure): «Открытые петли»
+// и «Моменты» переехали в новую вкладку Психология (см.
+// psychology-aggregator.spec.mjs) — landing Дневника больше не содержит
+// #diary-loops/#diary-state, только «Последние записи» + статичный список.
+const noLegacyBlocks4 = await page.evaluate(() => {
   goTo('map');
-  r.empty = document.getElementById('diary-loops').innerHTML.trim() === '';
-  DB.oq = ['Что мне сейчас важно понять?', 'Второй стартовый вопрос'];
-  goTo('map');
-  r.oqAloneNoSection = document.getElementById('diary-loops').innerHTML.trim() === '';
-  DB.oq = [];
-  DB.whys = [{ id: 9001, day: '2026-01-05', action: 'Сделать паузу', actionDone: false, symptom: 'усталость' }];
-  goTo('map');
-  r.openWhyShown = document.getElementById('diary-loops').innerHTML.includes('«Зачем?»');
-  r.noOqMentionInLoops = !document.getElementById('diary-loops').innerHTML.includes('Открытый вопрос');
-  DB.whys = [{ id: 9002, day: '2026-01-05', action: 'Сделать паузу', actionDone: true, symptom: 'усталость' }];
-  goTo('map');
-  r.doneWhyHidden = document.getElementById('diary-loops').innerHTML.trim() === '';
-  // DB.oq непустой ОДНОВРЕМЕННО с завершённым why — секция всё равно пуста.
-  DB.oq = ['Стартовый вопрос'];
-  goTo('map');
-  r.doneWhyHiddenEvenWithOq = document.getElementById('diary-loops').innerHTML.trim() === '';
-  DB.whys = savedWhys; DB.oq = savedOq;
-  return r;
+  return {
+    noLoopsEl: !document.getElementById('diary-loops'),
+    noStateEl: !document.getElementById('diary-state'),
+    hasRecent: !!document.getElementById('diary-recent'),
+  };
 });
-ok(loops4.empty, 'open loops: 0 whys — секция пуста (не декоративная карточка)');
-ok(loops4.oqAloneNoSection, 'open loops: непустые DB.oq сами по себе НЕ создают секцию (это вопросы рефлексии, не незавершённые петли)');
-ok(loops4.openWhyShown && loops4.noOqMentionInLoops, 'open loops: незавершённый разбор «Зачем?» показан, DB.oq landing не упоминает');
-ok(loops4.doneWhyHidden && loops4.doneWhyHiddenEvenWithOq, 'open loops: завершённый (actionDone=true) разбор «Зачем?» НЕ показывается, даже если DB.oq непуст');
+ok(noLegacyBlocks4.noLoopsEl && noLegacyBlocks4.noStateEl && noLegacyBlocks4.hasRecent,
+  'Дневник сужен до записей: #diary-loops/#diary-state удалены из landing, #diary-recent на месте');
 
-// 5) Моменты и check-ins читаются без изменения исходных объектов.
+// 5) «Последние записи» и check-ins/insights читаются без изменения исходных объектов.
 const noMutate5 = await page.evaluate(() => {
-  DB.moments = [{ id: 9101, day: '2026-01-05', createdAt: '2026-01-05T10:00:00.000Z', valence: 60, activation: 40 }];
+  DB.insights = [{ id: 9101, tag: 'personal', title: 'Тест', body: 'текст', createdAt: '2026-01-05T10:00:00.000Z', day: '2026-01-05' }];
   DB.checkins = [{ id: 9102, date: '2026-01-05', cl: 6, mv: 7, st: 4 }];
-  const beforeM = JSON.stringify(DB.moments);
+  const beforeI = JSON.stringify(DB.insights);
   const beforeC = JSON.stringify(DB.checkins);
   goTo('map');
-  return { unchangedMoments: JSON.stringify(DB.moments) === beforeM, unchangedCheckins: JSON.stringify(DB.checkins) === beforeC };
+  return { unchangedInsights: JSON.stringify(DB.insights) === beforeI, unchangedCheckins: JSON.stringify(DB.checkins) === beforeC };
 });
-ok(noMutate5.unchangedMoments && noMutate5.unchangedCheckins, 'landing читает Моменты/Check-ins без изменения исходных объектов');
+ok(noMutate5.unchangedInsights && noMutate5.unchangedCheckins, 'landing читает Инсайты/Check-ins без изменения исходных объектов');
 
-// 5b) «Последний Момент» выбирается по реальной свежести (createdAt), а не
-// по позиции в массиве — два Момента в НЕхронологическом порядке (владелец, PR #142).
-const recency5b = await page.evaluate(() => {
-  const savedMoments = DB.moments;
-  DB.moments = [
-    { id: 9111, day: '2026-01-10', createdAt: '2026-01-10T09:00:00.000Z', valence: 20, activation: 20 }, // новее, но ПЕРВЫЙ в массиве
-    { id: 9110, day: '2026-01-01', createdAt: '2026-01-01T09:00:00.000Z', valence: 80, activation: 80 }, // старше, но ВТОРОЙ (последний по индексу)
-  ];
-  const before = JSON.stringify(DB.moments);
-  goTo('map');
-  const text = document.getElementById('diary-state').textContent;
-  const unchanged = JSON.stringify(DB.moments) === before;
-  DB.moments = savedMoments;
-  return { showsNewer: text.includes('01-10'), notOlder: !text.includes('01-01'), unchanged };
-});
-ok(recency5b.showsNewer && recency5b.notOlder,
-  'landing показывает Момент по РЕАЛЬНОЙ свежести (createdAt), а не последний по индексу массива');
-ok(recency5b.unchanged, 'выбор самого свежего Момента не переупорядочивает и не мутирует исходный массив');
-
-// 6) Переход «История» открывает существующий ov-history.
+// 6) Статичный список «Все разделы Дневника»: История/Поиск открывают
+// существующие overlay напрямую (без промежуточного msub-подраздела).
 const hist6 = await page.evaluate(() => {
   goTo('map');
-  document.querySelector('#diary-state button').click();
+  const histBtn = [...document.querySelectorAll('#ms-overview button')].find(b => b.getAttribute('onclick') === "openOv('ov-history')");
+  histBtn.click();
   return document.getElementById('ov-history').classList.contains('on');
 });
-ok(hist6, '«Посмотреть историю» открывает существующий ov-history');
+ok(hist6, '«История» в списке Дневника открывает существующий ov-history');
 await page.evaluate(() => closeOv('ov-history'));
+const search6 = await page.evaluate(() => {
+  goTo('map');
+  const searchBtn = [...document.querySelectorAll('#ms-overview button')].find(b => b.getAttribute('onclick') === "openOv('ov-search')");
+  searchBtn.click();
+  return document.getElementById('ov-search').classList.contains('on');
+});
+ok(search6, '«Поиск» в списке Дневника открывает существующий ov-search');
+await page.evaluate(() => closeOv('ov-search'));
 
-// 7) Карточки коллекций ведут в правильные msub.
+// 7) Карточки коллекций ведут в правильные msub/overlay (список сужен до
+// записей: Инсайты/Сны/Диалоги/Книга остаются в Дневнике; Паттерны/
+// Духовное/Эволюция/Граф переехали в Психология — не дублируются здесь).
 const cards7 = await page.evaluate(() => {
   const results = {};
-  const checks = [
-    ['insights', 'ms-insights'], ['dreams', 'ms-dreams'], ['patterns', 'ms-patterns'],
-    ['spiritual', 'ms-spiritual'], ['evolution', 'ms-evolution'],
-    ['chats', 'ms-chats'], ['graph', 'ms-graph'], ['book', 'ms-book'],
-  ];
+  const checks = [['insights', 'ms-insights'], ['dreams', 'ms-dreams'], ['chats', 'ms-chats'], ['book', 'ms-book']];
   checks.forEach(([coll, msId]) => {
     goTo('map');
     const btn = [...document.querySelectorAll('#ms-overview button')].find(b => b.getAttribute('onclick') === `msub('${coll}')`);
@@ -185,7 +156,7 @@ const cards7 = await page.evaluate(() => {
   });
   return results;
 });
-ok(Object.values(cards7).every(Boolean), `все карточки landing ведут в правильный msub (${JSON.stringify(cards7)})`);
+ok(Object.values(cards7).every(Boolean), `карточки landing (Инсайты/Сны/Диалоги/Книга) ведут в правильный msub (${JSON.stringify(cards7)})`);
 
 // 8) Dock landing содержит ровно три заявленных действия и открывает правильные формы.
 await page.evaluate(() => goTo('map'));
@@ -307,8 +278,7 @@ await ipad.close();
 const a11yPage = await boot();
 await setShell(a11yPage, true);
 await a11yPage.evaluate(() => {
-  DB.whys = [{ id: 9201, day: '2026-01-05', action: 'Позвонить другу', actionDone: false, symptom: 'тревога' }];
-  DB.oq = ['О чём я молчу?'];
+  DB.insights = [{ id: 9201, tag: 'personal', title: 'Тест', body: 'текст', createdAt: '2026-01-05T10:00:00.000Z', day: '2026-01-05' }];
   goTo('home'); goTo('map');
 });
 const a11y13 = await a11yPage.evaluate(() => {
@@ -318,14 +288,13 @@ const a11y13 = await a11yPage.evaluate(() => {
   const tapOk = els.every(e => { const r = e.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; });
   return { n: els.length, allButtons, named, tapOk };
 });
-ok(a11y13.n >= 10 && a11y13.allButtons && a11y13.named && a11y13.tapOk,
-  `landing a11y: ${a11y13.n} интерактивных элементов — настоящие button, доступные имена, tap ≥44×44`);
-const firstLoopBtn = a11yPage.locator('#diary-loops button').first();
-await firstLoopBtn.focus();
+ok(a11y13.n >= 6 && a11y13.allButtons && a11y13.named && a11y13.tapOk,
+  `landing a11y: ${a11y13.n} интерактивных элементов (записи-сужены) — настоящие button, доступные имена, tap ≥44×44`);
+const firstRecentBtn = a11yPage.locator('#diary-recent button').first();
+await firstRecentBtn.focus();
 await a11yPage.keyboard.press('Enter');
-const kbOpened = await a11yPage.evaluate(() => document.getElementById('ov-why-det').classList.contains('on'));
-ok(kbOpened, 'landing: Enter с клавиатуры активирует открытую петлю «Зачем?» (openWhy)');
-await a11yPage.evaluate(() => closeOv('ov-why-det'));
+const kbOpened = await a11yPage.evaluate(() => getComputedStyle(document.getElementById('ms-insights')).display !== 'none');
+ok(kbOpened, 'landing: Enter с клавиатуры активирует карточку «Последние записи» (Инсайты)');
 await a11yPage.close();
 
 // 14) Новый пункт subnav «Обзор» — семантика/клавиатура/доступное активное
