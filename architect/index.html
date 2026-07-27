@@ -544,6 +544,7 @@
   <div class="subnav" id="subnav">
     <div class="sn-grp"><span class="sn-glbl">Записи</span>
       <div class="sn-row">
+        <div class="snpill" data-sub="overview" onclick="msub('overview',this)"><i data-lucide="layout-dashboard" style="width:13px;height:13px"></i>Обзор</div>
         <div class="snpill on" data-sub="insights" onclick="msub('insights',this)"><i data-lucide="sparkles" style="width:13px;height:13px"></i>Инсайты</div>
         <div class="snpill" data-sub="dreams" onclick="msub('dreams',this)"><i data-lucide="moon" style="width:13px;height:13px"></i>Сны</div>
         <div class="snpill" data-sub="chats" onclick="msub('chats',this)"><i data-lucide="message-circle" style="width:13px;height:13px"></i>Диалоги</div>
@@ -559,6 +560,26 @@
         <div class="snpill" data-sub="spiritual" onclick="msub('spiritual',this)"><i data-lucide="sparkles" style="width:13px;height:13px"></i>Духовное</div>
         <div class="snpill" data-sub="evolution" onclick="msub('evolution',this)"><i data-lucide="trending-up" style="width:13px;height:13px"></i>Эволюция</div>
       </div></div>
+  </div>
+  <!-- ══ Дневник — агрегатор-landing (issue #141; canonical вход #/diary
+       при arch_nav_v2=ON). Только маршрутизация в существующие экраны/msub,
+       без новых данных. При OFF — недостижимо (goTo('map') зовёт rIns()). ══ -->
+  <div id="ms-overview" style="display:none">
+    <div id="diary-loops"></div>
+    <div id="diary-state"></div>
+    <div id="diary-recent"></div>
+    <div class="sec-lbl">Все разделы Дневника</div>
+    <div class="more-list mx mb">
+      <button type="button" class="srow" onclick="msub('insights')"><span class="sic" style="background:var(--blue-l)"><i data-lucide="sparkles" style="color:var(--blue-t)"></i></span><span class="sl2">Инсайты</span><span class="sv2">Мысли и наблюдения</span></button>
+      <button type="button" class="srow" onclick="msub('dreams')"><span class="sic" style="background:var(--purple-l)"><i data-lucide="moon" style="color:var(--purple)"></i></span><span class="sl2">Сны</span><span class="sv2">Дневник сновидений</span></button>
+      <button type="button" class="srow" onclick="msub('chats')"><span class="sic" style="background:var(--teal-l)"><i data-lucide="message-circle" style="color:var(--teal)"></i></span><span class="sl2">Диалоги</span><span class="sv2">Разговоры с ИИ вглубь</span></button>
+      <button type="button" class="srow" onclick="msub('graph')"><span class="sic" style="background:var(--green-l)"><i data-lucide="share-2" style="color:var(--green)"></i></span><span class="sl2">Карта</span><span class="sv2">Связи и темы</span></button>
+      <button type="button" class="srow" onclick="msub('patterns')"><span class="sic" style="background:var(--gold-l)"><i data-lucide="git-branch" style="color:var(--gold)"></i></span><span class="sl2">Паттерны</span><span class="sv2">Повторяющееся</span></button>
+      <button type="button" class="srow" onclick="msub('book')"><span class="sic" style="background:var(--blue-l)"><i data-lucide="book-open" style="color:var(--blue-t)"></i></span><span class="sl2">Книга</span><span class="sv2">Главы</span></button>
+      <button type="button" class="srow" onclick="msub('spiritual')"><span class="sic" style="background:var(--purple-l)"><i data-lucide="sparkles" style="color:var(--purple)"></i></span><span class="sl2">Духовное</span><span class="sv2">Практика и путь</span></button>
+      <button type="button" class="srow" onclick="msub('evolution')"><span class="sic" style="background:var(--green-l)"><i data-lucide="trending-up" style="color:var(--green)"></i></span><span class="sl2">Эволюция</span><span class="sv2">Журнал развития</span></button>
+    </div>
+    <div style="height:5rem"></div>
   </div>
   <div id="ms-insights">
     <div class="fstrip" id="iflt">

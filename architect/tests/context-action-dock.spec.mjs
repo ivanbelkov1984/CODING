@@ -25,6 +25,17 @@ async function boot(width = 390, height = 844) {
     document.querySelectorAll('.ov.on').forEach(element => element.classList.remove('on'));
     document.body.style.overflow = '';
   });
+  // Pre-existing flake (unrelated to context dock): checkOnboard() schedules
+  // openOv('ov-onboard') exactly 500ms after load whenever CFG.userName is
+  // empty (always true on a fresh page). That timer is armed before this
+  // script gets a chance to intervene, so it fires mid-test and steals
+  // .ov.on, hiding the dock. Wait it out once here and dismiss it, instead
+  // of racing it throughout the whole suite.
+  await p.waitForTimeout(650);
+  await p.evaluate(() => {
+    document.querySelectorAll('.ov.on').forEach(element => element.classList.remove('on'));
+    document.body.style.overflow = '';
+  });
   return p;
 }
 

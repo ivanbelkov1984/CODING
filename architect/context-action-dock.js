@@ -5,6 +5,13 @@
 // existing actions belonging to the currently visible section/subsection.
 (() => {
   const ACTIONS = {
+    // Дневник — landing (issue #141): ровно три действия, отдельно от
+    // глобального FAB «Записать». Существующие обработчики, ничего нового.
+    'map:overview': [
+      { id: 'landing-insight', label: 'Новый инсайт', icon: 'plus', primary: true, run: () => openOv('ov-add') },
+      { id: 'landing-dream', label: 'Записать сон', icon: 'moon', run: () => openOv('ov-drm') },
+      { id: 'landing-why', label: 'Разбор «Зачем?»', icon: 'help-circle', run: () => openOv('ov-why') },
+    ],
     'map:insights': [
       { id: 'insight', label: 'Новый инсайт', icon: 'plus', primary: true, run: () => openOv('ov-add') },
     ],

@@ -502,7 +502,7 @@ function goTo(tab, el) {
   hpt();
   if (tab==='vit') { rSpheres(); rVit(); }
   if (tab==='sys') { rLivingMap('livingmap-out'); rDig(); rReview(30); }
-  if (tab==='map') rIns();
+  if (tab==='map') { if (document.body.classList.contains('navshell')) msub('overview'); else rIns(); }
   if (tab==='health') rHealth();
   if (tab==='astro') asub('menu');
   if (tab==='settings') { rProfileRow(); checkApiStatus(); rPushStatus(); const kc=$('keys-cnt'); if (kc) kc.textContent = KEY_SERVICES.filter(s=>getAiKeyFor(s.p)).length + ' из ' + KEY_SERVICES.length; }
@@ -524,6 +524,7 @@ function msub(tab, el) {
   if (tab==='spiritual') rSpi();
   if (tab==='graph')     rMap();
   if (tab==='chats')     rChats();
+  if (tab==='overview')  rDiaryOverview();
 }
 
 // ─── ОВЕРЛЕИ ────────────────────────────────────────────────────
@@ -2356,6 +2357,81 @@ function deleteWhyDet() {
   closeOv('ov-why-det');
   delUndo('whys', id, () => { try { rWhys(); } catch (e) {} }, 'Разбор удалён');
   STATE.whyDetId = null;
+}
+
+// ═══ ДНЕВНИК: агрегатор-landing (issue #141; только при arch_nav_v2=ON) ═══
+// Аддитивный read-only слой поверх уже существующих коллекций/экранов —
+// ничего не считает заново, не создаёт новых полей и не хранится отдельно.
+// «Открытые петли»: разбор «Зачем?» с невыполненным действием (то же поле
+// actionDone, что и в openWhy/markWhyAction) + собственные открытые вопросы
+// DB.oq (без динамических промптов PROMPT_BANK — те не данные пользователя).
+// Полностью пустое состояние — секция не рендерится вовсе: это и есть
+// спокойное обращение с пустотой (см. landing-иерархию ниже), а не
+// декоративная пустая карточка.
+function rDiaryLoops() {
+  const el = $('diary-loops'); if (!el) return;
+  const whys = projAll('whys').filter(w => w && w.action && String(w.action).trim() && w.actionDone !== true);
+  const oq = (DB.oq || []).map((q, i) => ({ q, i })).filter(x => x.q && String(x.q).trim());
+  if (!whys.length && !oq.length) { el.innerHTML = ''; return; }
+  const whyRows = whys.slice(0, 5).map(w => {
+    const d = esc((w.day || '').slice(5));
+    const head = esc(w.symptom || w.need || w.action || 'Разбор');
+    return `<button type="button" class="srow" onclick="openWhy(${w.id})"><span class="sic" style="background:var(--teal-l)"><i data-lucide="help-circle" style="color:var(--teal)"></i></span><span class="sl2">«Зачем?» · ${d}</span><span class="sv2">${head}</span></button>`;
+  }).join('');
+  const oqRows = oq.slice(0, 5).map(x => `<button type="button" class="srow" onclick="reflectOn(${x.i})"><span class="sic" style="background:var(--orange-l,#FDEDD3)"><i data-lucide="circle-help" style="color:var(--orange,#D97706)"></i></span><span class="sl2">Открытый вопрос</span><span class="sv2">${esc(x.q.slice(0, 60))}</span></button>`).join('');
+  el.innerHTML = `<div class="sec-lbl">Открытые петли</div><div class="more-list mx mb">${whyRows}${oqRows}</div>`;
+}
+// «Состояния и моменты»: краткая read-only сводка последних Момента и
+// Check-in. momentLabel/dayComposite — существующие функции (никакой новой
+// медицинской/психологической оценки). Коллекции не объединяются.
+function rDiaryState() {
+  const el = $('diary-state'); if (!el) return;
+  const moments = projAll('moments');
+  const lastMom = moments.length ? moments[moments.length - 1] : null;
+  const cis = DB.checkins || [];
+  const lastCi = cis.length ? [...cis].sort((a, b) => (a.date || '') < (b.date || '') ? 1 : -1)[0] : null;
+  const momTxt = lastMom
+    ? `Момент · ${esc((lastMom.day || '').slice(5))} — приятность ${momentLabel(lastMom.valence)}, энергия ${momentLabel(lastMom.activation)}`
+    : 'Моментов пока нет';
+  const comp = lastCi ? dayComposite(lastCi) : null;
+  const ciTxt = lastCi
+    ? `Check-in · ${esc(lastCi.date)}${comp != null ? ' — ' + comp.toFixed(1) + '/10' : ''}`
+    : 'Check-in пока нет';
+  el.innerHTML = `<div class="sec-lbl">Состояния и моменты</div>
+    <div class="card mx mb" style="padding:.85rem 1rem">
+      <div class="si-text">${momTxt}</div>
+      <div class="si-text" style="margin-top:.3rem">${ciTxt}</div>
+    </div>
+    <div class="mx mb"><button type="button" class="btn btn-s" onclick="openOv('ov-history')"><i data-lucide="history"></i>Посмотреть историю</button></div>`;
+}
+// «Последние записи»: счётчик за неделю + дата последней по 5 коллекциям.
+// У DB.patterns нет createdAt/day — id уже несёт Date.now() (тот же приём,
+// что и в остальном коде, напр. uid()/mkDig), поэтому используем его как есть.
+const DIARY_RECENT_GROUPS = [
+  ['insights', 'Инсайты', 'sparkles'],
+  ['dreams', 'Сны', 'moon'],
+  ['patterns', 'Паттерны', 'git-branch'],
+  ['spiritual', 'Духовное', 'sparkles'],
+  ['evolution', 'Эволюция', 'trending-up'],
+];
+function rDiaryRecent() {
+  const el = $('diary-recent'); if (!el) return;
+  const now = Date.now(), wk = 7 * 864e5;
+  const ts = (coll, r) => coll === 'patterns' ? (r.id || 0) : (Date.parse(r.createdAt) || r.id || 0);
+  el.innerHTML = '<div class="sec-lbl">Последние записи</div><div class="more-list mx mb">' + DIARY_RECENT_GROUPS.map(([coll, label, ico]) => {
+    const list = DB[coll] || [];
+    const weekN = list.filter(r => r && now - ts(coll, r) <= wk).length;
+    const last = list.length ? list.reduce((a, b) => ts(coll, a) > ts(coll, b) ? a : b) : null;
+    const lastTxt = last ? new Date(ts(coll, last)).toLocaleDateString('ru') : 'записей нет';
+    return `<button type="button" class="srow" onclick="msub('${coll}')"><span class="sic"><i data-lucide="${ico}"></i></span><span class="sl2">${label}</span><span class="sv2">${weekN} за неделю · ${esc(lastTxt)}</span></button>`;
+  }).join('') + '</div>';
+}
+// Landing целиком: порядок блоков строго по контракту issue #141 (§7):
+// открытые петли (если есть) → состояния/моменты → последние записи →
+// (статический в HTML) полный список разделов Дневника.
+function rDiaryOverview() {
+  rDiaryLoops(); rDiaryState(); rDiaryRecent();
+  icons();
 }
 
 // ─── ЗДОРОВЬЕ: «Тяга» — лог импульса + микро-интервенция ─────────
