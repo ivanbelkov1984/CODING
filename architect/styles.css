@@ -1357,6 +1357,10 @@ button.srow{display:flex;width:100%;background:none;border:0;border-bottom:1px s
    настоящий button.snpill; тап-зона ≥44×44 без изменения старых .snpill-div. */
 #subnav .snpill[data-sub="overview"]{min-height:44px}
 button.srow:last-child{border-bottom:none}
+/* Обзор — landing (issue #143): «‹ К обзору недели» только при ON,
+   вернуться из подробного экрана (30/365) обратно на landing. */
+#sys-back{display:none}
+body.navshell #sys-back{display:flex;align-items:center;gap:.3rem;min-height:44px}
 .nsh-tabbar{display:none}
 .nsh-cap-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;padding:0 var(--s4) var(--s2)}
 .nsh-cap{display:flex;flex-direction:column;align-items:flex-start;gap:.3rem;padding:.85rem;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r12);text-align:left;min-height:44px}

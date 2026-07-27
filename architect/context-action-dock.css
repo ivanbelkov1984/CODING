@@ -75,3 +75,21 @@
     transform: none;
   }
 }
+
+/* Точечное устранение визуальных дублей (issue #143 — интеграционная
+   стабилизация): эти кнопки открывают ТУ ЖЕ форму, что и действие dock,
+   видимое рядом на том же экране. .nsh-context-on выставляется только
+   когда dock реально показан с действиями (только телефон + ON) — поэтому
+   правило само по себе уже точечное. Сам обработчик/workflow НЕ удалён:
+   при arch_nav_v2=OFF и на iPad/desktop (где dock не появляется) кнопки
+   остаются на месте и работают как раньше. */
+body.nsh-context-on #pat-add-btn,
+body.nsh-context-on #spi-add-btn,
+body.nsh-context-on #evo-add-btn,
+body.nsh-context-on #vit-new-sphere-btn,
+body.nsh-context-on #health-symptom-btn,
+body.nsh-context-on #health-measure-btn,
+body.nsh-context-on #sys-mkdig-btn,
+body.nsh-context-on #astro-natal-wheel-btn {
+  display: none;
+}
