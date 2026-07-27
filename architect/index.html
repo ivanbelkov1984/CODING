@@ -884,7 +884,13 @@
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Отчёт для врача</div>
-    <div class="be-note" style="margin:0 1rem .5rem">Факты за 30 дней без интерпретации. Покажи с экрана или отправь.</div>
+    <div class="be-note" style="margin:0 1rem .5rem">Факты за выбранный период без интерпретации. Покажи с экрана или отправь.</div>
+    <div id="doc-report-period" style="padding:0 1rem .5rem;display:flex;gap:.4rem;flex-wrap:wrap">
+      <button type="button" class="btn btn-s btn-xs" data-days="7" onclick="setDoctorReportPeriod(7)">7 дн.</button>
+      <button type="button" class="btn btn-s btn-xs" data-days="30" onclick="setDoctorReportPeriod(30)">30 дн.</button>
+      <button type="button" class="btn btn-s btn-xs" data-days="90" onclick="setDoctorReportPeriod(90)">90 дн.</button>
+      <button type="button" class="btn btn-s btn-xs" data-days="180" onclick="setDoctorReportPeriod(180)">180 дн.</button>
+    </div>
     <div style="padding:0 1rem 1rem">
       <textarea class="field" id="doc-report-text" rows="12" readonly style="font-size:.8rem;line-height:1.45"></textarea>
       <div style="height:.75rem"></div>
@@ -932,6 +938,95 @@
       <div><div class="f-lbl">Доза и график (свободный текст)</div><input class="field" id="med-dose" placeholder="Например: 2000 МЕ · утром после еды"></div>
       <button class="btn btn-p btn-full" onclick="saveMed()"><i data-lucide="check"></i>Добавить</button>
     </div>
+  </div>
+</div>
+<!-- Wave 2 (issue #150): Health Organizer — «Сегодня» (деталь плана/фактов) -->
+<div class="ov" id="ov-med-detail" onclick="if(event.target===this)closeOv('ov-med-detail')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">План приёма</div>
+    <div style="padding:0 1rem 1rem" id="med-detail-body"></div>
+  </div>
+</div>
+<!-- Wave 2: лабораторные результаты — создание/редактирование -->
+<div class="ov" id="ov-lab-add" onclick="if(event.target===this)closeOv('ov-lab-add')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Результат анализа</div>
+    <div class="be-note" style="margin:0 1rem .5rem">Личная запись — то, что указано в бланке. Не диагноз и не медицинская рекомендация.</div>
+    <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.75rem">
+      <div><div class="f-lbl">Название показателя</div><input class="field" id="lab-testname" placeholder="Например: Гемоглобин"></div>
+      <div style="display:flex;gap:.5rem">
+        <div style="flex:2"><div class="f-lbl">Значение</div><input class="field" id="lab-value" placeholder="Например: 145"></div>
+        <div style="flex:1"><div class="f-lbl">Ед. изм.</div><input class="field" id="lab-unit" placeholder="г/л…"></div>
+      </div>
+      <div><div class="f-lbl">Референс лаборатории (как в бланке)</div><input class="field" id="lab-ref" placeholder="Например: 130–160"></div>
+      <div style="display:flex;gap:.5rem">
+        <div style="flex:1"><div class="f-lbl">Дата забора</div><input class="field" type="date" id="lab-collected"></div>
+        <div style="flex:1"><div class="f-lbl">Лаборатория</div><input class="field" id="lab-lab" placeholder="Название"></div>
+      </div>
+      <div><div class="f-lbl">Заметка (необязательно)</div><input class="field" id="lab-note" placeholder="Контекст"></div>
+      <div>
+        <div class="f-lbl">Вложение (фото/скан/PDF)</div>
+        <div id="lab-add-media" class="add-media"></div>
+        <label class="btn btn-s btn-sm" style="display:inline-flex;margin-top:.4rem">
+          <input type="file" accept="image/*,application/pdf" style="display:none" onchange="addLabPhoto(this)">
+          <i data-lucide="paperclip"></i>Прикрепить файл
+        </label>
+      </div>
+      <button class="btn btn-p btn-full" onclick="saveLab()"><i data-lucide="check"></i>Сохранить</button>
+    </div>
+  </div>
+</div>
+<!-- Wave 2: лабораторные результаты — деталь/тренд/удаление -->
+<div class="ov" id="ov-lab-det" onclick="if(event.target===this)closeOv('ov-lab-det')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Результат анализа</div>
+    <div style="padding:0 1rem 1rem" id="lab-det-body"></div>
+  </div>
+</div>
+<!-- Wave 2: документы здоровья — создание/редактирование -->
+<div class="ov" id="ov-doc-add" onclick="if(event.target===this)closeOv('ov-doc-add')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Документ здоровья</div>
+    <div class="be-note" style="margin:0 1rem .5rem">Рецепт, выписка, снимок, заключение — метаданные и вложение. Личный архив, не медицинский документ.</div>
+    <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.75rem">
+      <div><div class="f-lbl">Название</div><input class="field" id="doc-title" placeholder="Например: Выписка из поликлиники"></div>
+      <div><div class="f-lbl">Тип</div>
+        <select class="field" id="doc-kind">
+          <option value="lab_report">Результат анализа</option>
+          <option value="prescription">Рецепт</option>
+          <option value="discharge">Выписка</option>
+          <option value="imaging">Снимок/визуализация</option>
+          <option value="doctor_note">Заключение врача</option>
+          <option value="other">Другое</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:.5rem">
+        <div style="flex:1"><div class="f-lbl">Дата документа</div><input class="field" type="date" id="doc-date"></div>
+        <div style="flex:1"><div class="f-lbl">Учреждение/врач</div><input class="field" id="doc-provider" placeholder="Название"></div>
+      </div>
+      <div><div class="f-lbl">Заметка (необязательно)</div><input class="field" id="doc-note" placeholder="Контекст"></div>
+      <div>
+        <div class="f-lbl">Вложения (фото/скан/PDF)</div>
+        <div id="doc-add-media" class="add-media"></div>
+        <label class="btn btn-s btn-sm" style="display:inline-flex;margin-top:.4rem">
+          <input type="file" accept="image/*,application/pdf" style="display:none" onchange="addDocFile(this)">
+          <i data-lucide="paperclip"></i>Прикрепить файл
+        </label>
+      </div>
+      <button class="btn btn-p btn-full" onclick="saveDoc()"><i data-lucide="check"></i>Сохранить</button>
+    </div>
+  </div>
+</div>
+<!-- Wave 2: документы здоровья — деталь/удаление -->
+<div class="ov" id="ov-doc-det" onclick="if(event.target===this)closeOv('ov-doc-det')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Документ здоровья</div>
+    <div style="padding:0 1rem 1rem" id="doc-det-body"></div>
   </div>
 </div>
 <!-- «Мои записи»: просмотр и индивидуальное удаление любой пользовательской записи -->
