@@ -515,6 +515,9 @@ function msub(tab, el) {
   if (t) t.style.display = 'block';
   if (!el) el = document.querySelector(`#subnav .snpill[data-sub="${tab}"]`);  // программный переход тоже подсвечивает
   if (el) el.classList.add('on');
+  // Активное состояние landing доступно не только через CSS-класс (issue #141/#142).
+  const ovPill = document.querySelector('#subnav .snpill[data-sub="overview"]');
+  if (ovPill) { if (tab === 'overview') ovPill.setAttribute('aria-current', 'page'); else ovPill.removeAttribute('aria-current'); }
   hpt();
   if (tab==='evolution') rEvoList($('evo-more'));
   if (tab==='insights')  rIns();
@@ -2362,24 +2365,27 @@ function deleteWhyDet() {
 // ═══ ДНЕВНИК: агрегатор-landing (issue #141; только при arch_nav_v2=ON) ═══
 // Аддитивный read-only слой поверх уже существующих коллекций/экранов —
 // ничего не считает заново, не создаёт новых полей и не хранится отдельно.
-// «Открытые петли»: разбор «Зачем?» с невыполненным действием (то же поле
-// actionDone, что и в openWhy/markWhyAction) + собственные открытые вопросы
-// DB.oq (без динамических промптов PROMPT_BANK — те не данные пользователя).
+// «Открытые петли»: ТОЛЬКО разбор «Зачем?» с непустым action и
+// actionDone !== true (то же поле, что и в openWhy/markWhyAction) — это
+// единственная сущность с однозначным незавершённым статусом. DB.oq — это
+// вопросы для рефлексии (reflectOn(i) открывает НОВЫЙ инсайт с этим
+// вопросом), у них нет признака «незавершено», и свежий профиль уже несёт
+// два стартовых вопроса — включение их сюда ложно помечало бы почти любой
+// профиль как «есть незавершённое». DB.oq остаётся только в существующей
+// рефлексии на Today (rPrompts/reflectOn), landing его не трогает.
 // Полностью пустое состояние — секция не рендерится вовсе: это и есть
 // спокойное обращение с пустотой (см. landing-иерархию ниже), а не
 // декоративная пустая карточка.
 function rDiaryLoops() {
   const el = $('diary-loops'); if (!el) return;
   const whys = projAll('whys').filter(w => w && w.action && String(w.action).trim() && w.actionDone !== true);
-  const oq = (DB.oq || []).map((q, i) => ({ q, i })).filter(x => x.q && String(x.q).trim());
-  if (!whys.length && !oq.length) { el.innerHTML = ''; return; }
+  if (!whys.length) { el.innerHTML = ''; return; }
   const whyRows = whys.slice(0, 5).map(w => {
     const d = esc((w.day || '').slice(5));
     const head = esc(w.symptom || w.need || w.action || 'Разбор');
     return `<button type="button" class="srow" onclick="openWhy(${w.id})"><span class="sic" style="background:var(--teal-l)"><i data-lucide="help-circle" style="color:var(--teal)"></i></span><span class="sl2">«Зачем?» · ${d}</span><span class="sv2">${head}</span></button>`;
   }).join('');
-  const oqRows = oq.slice(0, 5).map(x => `<button type="button" class="srow" onclick="reflectOn(${x.i})"><span class="sic" style="background:var(--orange-l,#FDEDD3)"><i data-lucide="circle-help" style="color:var(--orange,#D97706)"></i></span><span class="sl2">Открытый вопрос</span><span class="sv2">${esc(x.q.slice(0, 60))}</span></button>`).join('');
-  el.innerHTML = `<div class="sec-lbl">Открытые петли</div><div class="more-list mx mb">${whyRows}${oqRows}</div>`;
+  el.innerHTML = `<div class="sec-lbl">Открытые петли</div><div class="more-list mx mb">${whyRows}</div>`;
 }
 // «Состояния и моменты»: краткая read-only сводка последних Момента и
 // Check-in. momentLabel/dayComposite — существующие функции (никакой новой
@@ -2387,7 +2393,12 @@ function rDiaryLoops() {
 function rDiaryState() {
   const el = $('diary-state'); if (!el) return;
   const moments = projAll('moments');
-  const lastMom = moments.length ? moments[moments.length - 1] : null;
+  // Позиция в массиве — не контракт свежести (sync/restore/corrections могут
+  // её не сохранять). Настоящая свежесть: createdAt → day → id (timestamp-
+  // fallback, тот же приём, что и для DB.patterns в rDiaryRecent). Чтение,
+  // без сортировки/мутации исходного массива и записей.
+  const momentTs = m => Date.parse(m.createdAt) || Date.parse((m.day || '') + 'T00:00:00') || m.id || 0;
+  const lastMom = moments.length ? moments.reduce((a, b) => momentTs(b) > momentTs(a) ? b : a) : null;
   const cis = DB.checkins || [];
   const lastCi = cis.length ? [...cis].sort((a, b) => (a.date || '') < (b.date || '') ? 1 : -1)[0] : null;
   const momTxt = lastMom

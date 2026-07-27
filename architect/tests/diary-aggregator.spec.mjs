@@ -96,31 +96,38 @@ const old3 = await page.evaluate(() => {
 });
 ok(old3.dreamsOn && old3.patternsOn, 'старые прямые переходы msub(...) продолжают открывать соответствующие подразделы');
 
-// 4) Open loops: 0 элементов; только oq; незавершённый why; завершённый why не показывается.
+// 4) Open loops: только whys с однозначным незавершённым статусом.
+// DB.oq — вопросы для рефлексии (reflectOn открывает НОВЫЙ инсайт), у них
+// нет признака незавершённости, и свежий профиль несёт стартовые вопросы —
+// непустые DB.oq сами по себе НЕ должны создавать секцию (владелец, PR #142).
 const loops4 = await page.evaluate(() => {
   const savedWhys = DB.whys, savedOq = DB.oq;
   const r = {};
   DB.whys = []; DB.oq = [];
   goTo('map');
   r.empty = document.getElementById('diary-loops').innerHTML.trim() === '';
-  DB.oq = ['Что мне сейчас важно понять?'];
+  DB.oq = ['Что мне сейчас важно понять?', 'Второй стартовый вопрос'];
   goTo('map');
-  r.onlyOq = document.getElementById('diary-loops').innerHTML.includes('Открытый вопрос')
-    && !document.getElementById('diary-loops').innerHTML.includes('«Зачем?»');
+  r.oqAloneNoSection = document.getElementById('diary-loops').innerHTML.trim() === '';
   DB.oq = [];
   DB.whys = [{ id: 9001, day: '2026-01-05', action: 'Сделать паузу', actionDone: false, symptom: 'усталость' }];
   goTo('map');
   r.openWhyShown = document.getElementById('diary-loops').innerHTML.includes('«Зачем?»');
+  r.noOqMentionInLoops = !document.getElementById('diary-loops').innerHTML.includes('Открытый вопрос');
   DB.whys = [{ id: 9002, day: '2026-01-05', action: 'Сделать паузу', actionDone: true, symptom: 'усталость' }];
   goTo('map');
   r.doneWhyHidden = document.getElementById('diary-loops').innerHTML.trim() === '';
+  // DB.oq непустой ОДНОВРЕМЕННО с завершённым why — секция всё равно пуста.
+  DB.oq = ['Стартовый вопрос'];
+  goTo('map');
+  r.doneWhyHiddenEvenWithOq = document.getElementById('diary-loops').innerHTML.trim() === '';
   DB.whys = savedWhys; DB.oq = savedOq;
   return r;
 });
-ok(loops4.empty, 'open loops: 0 элементов — секция пуста (не декоративная карточка)');
-ok(loops4.onlyOq, 'open loops: только DB.oq — показан открытый вопрос, без «Зачем?»');
-ok(loops4.openWhyShown, 'open loops: незавершённый разбор «Зачем?» показан');
-ok(loops4.doneWhyHidden, 'open loops: завершённый (actionDone=true) разбор «Зачем?» НЕ показывается');
+ok(loops4.empty, 'open loops: 0 whys — секция пуста (не декоративная карточка)');
+ok(loops4.oqAloneNoSection, 'open loops: непустые DB.oq сами по себе НЕ создают секцию (это вопросы рефлексии, не незавершённые петли)');
+ok(loops4.openWhyShown && loops4.noOqMentionInLoops, 'open loops: незавершённый разбор «Зачем?» показан, DB.oq landing не упоминает');
+ok(loops4.doneWhyHidden && loops4.doneWhyHiddenEvenWithOq, 'open loops: завершённый (actionDone=true) разбор «Зачем?» НЕ показывается, даже если DB.oq непуст');
 
 // 5) Моменты и check-ins читаются без изменения исходных объектов.
 const noMutate5 = await page.evaluate(() => {
@@ -132,6 +139,25 @@ const noMutate5 = await page.evaluate(() => {
   return { unchangedMoments: JSON.stringify(DB.moments) === beforeM, unchangedCheckins: JSON.stringify(DB.checkins) === beforeC };
 });
 ok(noMutate5.unchangedMoments && noMutate5.unchangedCheckins, 'landing читает Моменты/Check-ins без изменения исходных объектов');
+
+// 5b) «Последний Момент» выбирается по реальной свежести (createdAt), а не
+// по позиции в массиве — два Момента в НЕхронологическом порядке (владелец, PR #142).
+const recency5b = await page.evaluate(() => {
+  const savedMoments = DB.moments;
+  DB.moments = [
+    { id: 9111, day: '2026-01-10', createdAt: '2026-01-10T09:00:00.000Z', valence: 20, activation: 20 }, // новее, но ПЕРВЫЙ в массиве
+    { id: 9110, day: '2026-01-01', createdAt: '2026-01-01T09:00:00.000Z', valence: 80, activation: 80 }, // старше, но ВТОРОЙ (последний по индексу)
+  ];
+  const before = JSON.stringify(DB.moments);
+  goTo('map');
+  const text = document.getElementById('diary-state').textContent;
+  const unchanged = JSON.stringify(DB.moments) === before;
+  DB.moments = savedMoments;
+  return { showsNewer: text.includes('01-10'), notOlder: !text.includes('01-01'), unchanged };
+});
+ok(recency5b.showsNewer && recency5b.notOlder,
+  'landing показывает Момент по РЕАЛЬНОЙ свежести (createdAt), а не последний по индексу массива');
+ok(recency5b.unchanged, 'выбор самого свежего Момента не переупорядочивает и не мутирует исходный массив');
 
 // 6) Переход «История» открывает существующий ov-history.
 const hist6 = await page.evaluate(() => {
@@ -301,6 +327,44 @@ const kbOpened = await a11yPage.evaluate(() => document.getElementById('ov-why-d
 ok(kbOpened, 'landing: Enter с клавиатуры активирует открытую петлю «Зачем?» (openWhy)');
 await a11yPage.evaluate(() => closeOv('ov-why-det'));
 await a11yPage.close();
+
+// 14) Новый пункт subnav «Обзор» — семантика/клавиатура/доступное активное
+// состояние (владелец, PR #142: тот же класс дефекта, что чинился в #137).
+const pillPage = await boot();
+await setShell(pillPage, true);
+const pillBase = await pillPage.evaluate(() => {
+  goTo('home'); goTo('map'); msub('insights'); // не landing — проверяем aria-current сброшен
+  const btn = document.querySelector('#subnav .snpill[data-sub="overview"]');
+  const r = btn.getBoundingClientRect();
+  return {
+    isButton: btn.tagName === 'BUTTON' && btn.getAttribute('type') === 'button',
+    named: btn.textContent.trim().length > 0,
+    tapOk: r.width >= 44 && r.height >= 44,
+    currentWhenInactive: btn.getAttribute('aria-current'),
+  };
+});
+ok(pillBase.isButton && pillBase.named && pillBase.tapOk,
+  '«Обзор» в subnav — настоящий <button type=button> с доступным именем, tap ≥44×44');
+ok(pillBase.currentWhenInactive === null, '«Обзор»: aria-current отсутствует, пока landing не активен');
+
+await pillPage.evaluate(() => { document.querySelector('#subnav .snpill[data-sub="overview"]').focus(); });
+await pillPage.keyboard.press('Enter');
+const pillEnter = await pillPage.evaluate(() => ({
+  overviewOn: getComputedStyle(document.getElementById('ms-overview')).display !== 'none',
+  current: document.querySelector('#subnav .snpill[data-sub="overview"]').getAttribute('aria-current'),
+}));
+ok(pillEnter.overviewOn && pillEnter.current === 'page',
+  '«Обзор»: Enter с клавиатуры открывает landing и выставляет aria-current="page"');
+
+await pillPage.evaluate(() => msub('dreams'));
+const pillAfterLeave = await pillPage.evaluate(() => document.querySelector('#subnav .snpill[data-sub="overview"]').getAttribute('aria-current'));
+ok(pillAfterLeave === null, '«Обзор»: aria-current снимается при переходе на другой подраздел');
+
+await pillPage.evaluate(() => { document.querySelector('#subnav .snpill[data-sub="overview"]').focus(); });
+await pillPage.keyboard.press('Space');
+const pillSpace = await pillPage.evaluate(() => getComputedStyle(document.getElementById('ms-overview')).display !== 'none');
+ok(pillSpace, '«Обзор»: Space с клавиатуры тоже активирует переход (нативная семантика button)');
+await pillPage.close();
 
 ok(errors.length === 0, `JS-ошибок нет (${errors.length}${errors.length ? ': ' + errors[0] : ''})`);
 await page.close();
