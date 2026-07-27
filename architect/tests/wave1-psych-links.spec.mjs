@@ -337,6 +337,83 @@ ok(sync.unionOk, 'sync merge: psyLinks объединяются union по id м
 ok(sync.newestWins, 'sync merge: relationshipContexts — новейшая версия по _u побеждает');
 ok(sync.tombstoneWins, 'sync merge: надгробие (_del) удаляет psyLink на обеих сторонах после слияния');
 
+// ── 10b) Cross-collection tombstone collision (owner review, PR #149) ──
+// `DB._del` — ОДИН общий tombstone-объект, применяемый mergeDB()/mergeById()
+// одинаково ко ВСЕМ коллекциям IDCOLS по сырому id. Если бы psyLinks/
+// relationshipContexts генерировались голым Date.now() (как остальные
+// legacy-коллекции), удаление/отвязка psyLink с id=X могло бы при синке
+// удалить ЧУЖУЮ запись другой коллекции с тем же числовым id=X. Фикс —
+// namespaced строковый id (psyUid()): структурно не может совпасть ни с одним
+// числовым id ни в одной другой коллекции. Тесты ниже используют РЕАЛЬНЫЙ
+// createPsyLink()/psyUid() и реальный mergeDB(), не переписывают tombstone-
+// архитектуру остальных (legacy) коллекций.
+const collision = await page.evaluate(() => {
+  const now = Date.now();
+  const sharedNumericId = 777777777777;   // «круглый» id, который БЫ мог совпасть при голом Date.now()
+  DB.moments = [{ id: sharedNumericId, valence: 50, activation: 50, createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: now - 5000 }];
+  DB.whys = [{ id: sharedNumericId + 1, action: 'test', createdAt: nowISO(), day: todayKey() }];
+  DB.psyLinks = [];
+  const r = createPsyLink({ fromColl: 'moments', fromId: sharedNumericId, toColl: 'whys', toId: sharedNumericId + 1, relation: 'moment_to_why', source: 'user' });
+  const realLinkId = r.link.id;
+  const idsNeverCollide = typeof realLinkId === 'string' && realLinkId !== sharedNumericId && realLinkId !== String(sharedNumericId);
+  const local = { ...DEFAULT_DB, moments: DB.moments, whys: DB.whys, psyLinks: [{ ...r.link }], _del: {}, __ts: now - 3000 };
+  // Удалённая сторона тombstone'ит именно psyLink (по его реальному id) — НЕ Момент/«Зачем?».
+  const remote = { ...DEFAULT_DB, moments: DB.moments, whys: DB.whys, psyLinks: [{ ...r.link }], _del: { [realLinkId]: now }, __ts: now - 1000 };
+  const merged = mergeDB(local, remote);
+  const linkDeleted = !merged.psyLinks.some(l => l.id === realLinkId);
+  const momentSurvived = merged.moments.some(m => m.id === sharedNumericId);
+  const whySurvived = merged.whys.some(w => w.id === sharedNumericId + 1);
+  return { idsNeverCollide, linkDeleted, momentSurvived, whySurvived };
+});
+ok(collision.idsNeverCollide, 'psyLink id (namespaced строка psyUid()) структурно не может совпасть с числовым id другой коллекции');
+ok(collision.linkDeleted, 'tombstone удаляет ИМЕННО psyLink...');
+ok(collision.momentSurvived && collision.whySurvived, '...и НЕ задевает Момент/«Зачем?» с «похожим» числовым id — общий _del между коллекциями больше не опасен');
+
+const collisionCtx = await page.evaluate(() => {
+  const now = Date.now();
+  const sharedNumericId = 888888888888;
+  DB.insights = [{ id: sharedNumericId, title: 't', body: 'b', createdAt: nowISO(), day: todayKey() }];
+  DB.relationshipContexts = [{ id: psyUid('relctx'), label: 'X', status: 'active', privacyClass: 'sensitive', createdAt: nowISO(), sv: SCHEMA_VERSION, _u: now - 4000 }];
+  const ctxId = DB.relationshipContexts[0].id;
+  const idsNeverCollide = typeof ctxId === 'string' && ctxId !== sharedNumericId && ctxId !== String(sharedNumericId);
+  const local = { ...DEFAULT_DB, insights: DB.insights, relationshipContexts: [{ ...DB.relationshipContexts[0] }], _del: {}, __ts: now - 3000 };
+  const remote = { ...DEFAULT_DB, insights: DB.insights, relationshipContexts: [{ ...DB.relationshipContexts[0] }], _del: { [ctxId]: now }, __ts: now - 1000 };
+  const merged = mergeDB(local, remote);
+  const ctxDeleted = !merged.relationshipContexts.some(c => c.id === ctxId);
+  const insightSurvived = merged.insights.some(i => i.id === sharedNumericId);
+  return { idsNeverCollide, ctxDeleted, insightSurvived };
+});
+ok(collisionCtx.idsNeverCollide, 'relationshipContext id (namespaced строка) структурно не может совпасть с числовым id другой коллекции');
+ok(collisionCtx.ctxDeleted && collisionCtx.insightSurvived, 'tombstone удаляет ИМЕННО relationshipContext, не задевает Инсайт с «похожим» числовым id');
+
+// «Два устройства создают запись в ОДНУ и ту же миллисекунду» — не должно
+// давать одинаковый id (иначе одна запись молча перекрыла бы другую при merge).
+const uniqueness = await page.evaluate(() => {
+  const linkIds = new Set(), ctxIds = new Set();
+  for (let i = 0; i < 300; i++) { linkIds.add(psyUid('psyLink')); ctxIds.add(psyUid('relctx')); }
+  return { linksUnique: linkIds.size === 300, ctxUnique: ctxIds.size === 300 };
+});
+ok(uniqueness.linksUnique && uniqueness.ctxUnique, 'psyUid(): 300 id подряд (в т.ч. в одну и ту же миллисекунду, симулируя два устройства) — все уникальны');
+
+// Регрессия конкретно на parseInt()-баг из ревью: пикер контекста через
+// РЕАЛЬНЫЙ <select onchange="..."> (не прямой JS-вызов) не должен терять
+// строковый id relationshipContext.
+const pickerUi = await page.evaluate(() => {
+  DB.moments = [{ id: 6101, valence: 50, activation: 50, createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now() }];
+  DB.relationshipContexts = [{ id: psyUid('relctx'), label: 'UI-тест', status: 'active', privacyClass: 'sensitive', createdAt: nowISO(), sv: SCHEMA_VERSION, _u: Date.now() }];
+  const ctxId = DB.relationshipContexts[0].id;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = relContextPickerHTML('moments', 6101);
+  document.body.appendChild(wrap);
+  const sel = wrap.querySelector('select');
+  sel.value = ctxId;
+  sel.dispatchEvent(new Event('change'));
+  const linked = relationshipContextOf('moments', 6101);
+  wrap.remove();
+  return { linkedOk: !!linked && linked.id === ctxId };
+});
+ok(pickerUi.linkedOk, 'пикер контекста через реальный <select onchange>: строковый id relationshipContext не теряется (parseInt-регрессия из ревью)');
+
 // ── 11) Обычный (plain) export/import roundtrip ───────────────────────
 const plainRoundtrip = await page.evaluate(() => {
   DB.psyLinks = [{ id: 1, fromColl: 'moments', fromId: 1, toColl: 'whys', toId: 2, relation: 'moment_to_why', createdAt: nowISO(), day: todayKey(), sv: 3, _u: 1, source: 'user', acceptedAt: nowISO() }];

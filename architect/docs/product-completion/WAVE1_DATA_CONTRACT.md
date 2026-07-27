@@ -10,7 +10,8 @@
 Долговечная ссылка между двумя уже существующими записями. Ничего не переписывает в исходных записях.
 
 ```text
-id                integer  — Date.now()-based, как у остальных коллекций
+id                string   — namespaced: 'psyLink:' + Date.now().toString(36) + '-' + случайные
+                             base36-суффиксы (psyUid('psyLink')), НЕ integer
 fromColl          string   — 'moments' | 'whys' | 'insights' | психологические записи вообще
 fromId            integer
 toColl            string   — 'whys' | 'insights' | 'patterns' | 'relationshipContexts'
@@ -35,7 +36,7 @@ confidenceLabel   string | null — 'low' | 'medium' | 'high'; НИКОГДА н
 (астрологический партнёр карты ≠ психологический контекст отношений).
 
 ```text
-id             integer
+id             string   — namespaced: 'relctx:' + ... (psyUid('relctx')), НЕ integer
 label          string   — имя/обозначение, введённое пользователем
 roleOrRelation string   — свободный текст («родитель», «партнёр»…), необязателен
 status         string   — 'active' | 'archived'
@@ -58,6 +59,48 @@ _u             integer
 
 Отдельное согласие для AI-помощи по психологическим данным — **не переиспользует** согласие
 астрологии. Отзывается в любой момент (`on:false` немедленно блокирует следующий вызов).
+
+### Collision-safety id (owner review, PR #149)
+
+`tomb(id)` пишет надгробие в ОДИН общий `DB._del`, ключ — сырой `id` без указания коллекции;
+`mergeDB()`/`mergeById()` применяет этот же общий `del` идентично ко всем коллекциям из `IDCOLS`.
+Первая версия этой волны давала `psyLinks`/`relationshipContexts` обычные числовые `Date.now()`-id —
+то же id-пространство, что и у всех остальных коллекций (`moments`, `whys`, ...). При многолетнем
+использовании миллисекундные id из разных коллекций могут совпасть: надгробие от удаления одной
+связи могло бы на следующем sync-слиянии ошибочно «стереть»/скрыть чужую запись другой коллекции с
+тем же сырым числовым id — это реальный (не гипотетический) риск потери данных, найденный владельцем
+в code review.
+
+Исправление: `psyLinks`/`relationshipContexts` получают id через `psyUid(prefix)` —
+`prefix + ':' + Date.now().toString(36) + '-' + Math.random()…` (`app.js`) — namespaced-строка,
+которая структурно не может численно совпасть ни с одним integer-id любой другой коллекции (`+id`
+даёт `NaN` для нечисловой строки). `mergeById()`'s `const key = map.has(+id) ? +id : id;` уже
+корректно проваливается на строковый ключ при `NaN` — сам `tomb()`/`mergeById()`/`mergeDB()` менять
+не потребовалось, только слой генерации id у этих двух новых коллекций. Не является рефакторингом
+общего tombstone-механизма (сознательно не трогали, по прямому указанию владельца).
+
+Каждая запись `psyLinks`/`relationshipContexts` всегда явно задаёт числовой `_u` (не полагается на
+`id` в LWW-резолюции `_ru(r) = r._u || r.id || 0`), поэтому смена типа `id` на строку не создаёт
+number/string сравнений в этой резолюции.
+
+UI-регрессия, найденная и исправленная тем же ревью: `relationshipContexts.id` — строка, любые
+`parseInt()`/невставленные-в-кавычки использования этого id в `onclick="..."` HTML-атрибутах либо
+молча теряли связь (`NaN`), либо давали синтаксически невалидный JS (голое двоеточие внутри
+`onclick`). Исправлены: `relContextPickerHTML()`'s `<select onchange>`, `rRelationshipContexts()`'s
+кнопки «Переим./Архив», `rInsightPsyLinks()`'s кнопка «Отвязать» — везде id теперь передаётся как
+экранированная строка (`esc(c.id)`), не сырым числом. **`patterns`-id остаётся числовым** (не
+затронут этим фиксом) — `linkInsightToExistingPattern()`'s `parseInt(sel.value, 10)` для выбора
+паттерна корректен как был.
+
+Regression-тесты (`tests/wave1-psych-links.spec.mjs`, раздел «10b»): создание `psyLink`/`insight` с
+одинаковым сырым числовым id → unlink/tombstone → merge на двух «устройствах» удаляет только
+целевую связь, исходная/целевая запись и чужая запись с тем же старым числовым id в другой коллекции
+выживают; тот же сценарий для `relationshipContext` vs `insight`; 300× `psyUid()` для каждого
+префикса — все уникальны; DOM-регрессия реального `<select onchange>` подтверждает, что строковый id
+не теряется через `parseInt()`. Отдельно (`tests/wave1-backup-roundtrip.test.mjs`): реальный
+production `restoreBackup()` (не только `buildBundle()+decryptEnvelope()`) подтверждает, что
+`psyLinks`/`relationshipContexts`/`psyAiConsent` со строковыми id корректно попадают в восстановленный
+профиль, и что restore с неверным паролем не мутирует существующий целевой профиль.
 
 ## 2. Enum отношений и допустимые пары коллекций
 
@@ -105,8 +148,15 @@ record_to_relationship   {moments|whys|insights|patterns} → relationshipContex
   сериализуют/восстанавливают весь `DB`/`CFG` целиком.
 - Зашифрованный portable backup (`backup-core.mjs`/`backup-adapter.mjs`) — тоже ничего менять не
   потребовалось: `buildBundle()` читает `DB` как есть, без allowlist имён коллекций; подтверждено
-  отдельным тестом `tests/wave1-backup-roundtrip.test.mjs` (encrypt→decrypt round-trip
-  byte-идентичен, wrong password fails closed, живой DB не мутируется при сборке bundle).
+  тестом `tests/wave1-backup-roundtrip.test.mjs` (16/16): encrypt→decrypt round-trip byte-идентичен,
+  wrong password fails closed, живой DB не мутируется при сборке bundle, и (owner review, PR #149)
+  реальный production `restoreBackup()` (не только `buildBundle()+decryptEnvelope()`) — восстановление
+  в новый профиль корректно приносит `psyLinks`(3)/`relationshipContexts`(1, строковый id)/
+  `psyAiConsent`, а restore с неверным паролем в существующий профиль не мутирует его данные и не
+  создаёт «осиротевший» профиль.
+- Id-collision fix (см. «Collision-safety id» в §1) не требует изменений ни в одном из перечисленных
+  здесь sync/backup-путей — они уже трактуют `DB`/коллекции полностью генерично по значению, без
+  предположений о типе `id`.
 
 ## 5. Provenance и AI-контракт
 

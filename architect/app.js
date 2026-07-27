@@ -1851,7 +1851,7 @@ function rInsightPsyLinks(ins) {
   const toPattern = psyLinksFrom('insights', ins.id, 'insight_to_pattern')[0];
   if (toPattern) {
     const p = (DB.patterns || []).find(x => x && x.id === toPattern.toId);
-    if (p) html += `<div class="srow" style="padding-left:0"><span class="sl2">→ Паттерн</span><span class="sv2">${esc((p.text || '').slice(0, 60))}</span><button type="button" class="btn btn-s btn-xs" style="flex:none" onclick="unlinkPsyLink(${toPattern.id},()=>rInsightPsyLinks(DB.insights.find(x=>x&&x.id===${ins.id})))">Отвязать</button></div>`;
+    if (p) html += `<div class="srow" style="padding-left:0"><span class="sl2">→ Паттерн</span><span class="sv2">${esc((p.text || '').slice(0, 60))}</span><button type="button" class="btn btn-s btn-xs" style="flex:none" onclick="unlinkPsyLink('${esc(toPattern.id)}',()=>rInsightPsyLinks(DB.insights.find(x=>x&&x.id===${ins.id})))">Отвязать</button></div>`;
   } else {
     const existing = (DB.patterns || []).slice(0, 8);
     const picker = existing.length ? `<select class="field" id="det-pat-pick"><option value="">Выбери паттерн…</option>${existing.map(p => `<option value="${p.id}">${esc((p.text || '').slice(0, 50))}</option>`).join('')}</select>` : '';
@@ -2544,6 +2544,23 @@ function findPsyLink({ fromColl, fromId, toColl, toId, relation }) {
   return (DB.psyLinks || []).find(l => l && l.fromColl === fromColl && l.fromId === fromId &&
     l.toColl === toColl && l.toId === toId && l.relation === relation);
 }
+// Collision-proof id для новых коллекций (owner review, PR #149): tombstone
+// (`DB._del`) и merge (`mergeDB`/`mergeById`) в этом приложении общие для ВСЕХ
+// коллекций `IDCOLS` — один `del`-объект применяется к каждой коллекции по
+// сырому `id`. Остальные коллекции исторически используют голый
+// `Date.now()`-id; если бы psyLinks/relationshipContexts делали так же, тень
+// от удаления/отвязки ОДНОЙ psyLink могла бы (при коллизии числового id, пусть
+// и маловероятной, но ненулевой между устройствами/коллекциями) удалить
+// ЧУЖУЮ запись другой коллекции с тем же id при следующей синхронизации.
+// Решение — namespaced строковый id (`psyLink:...`/`relctx:...`): такой id
+// структурно не может совпасть ни с одним числовым id ни в одной другой
+// коллекции, поэтому общий tombstone-механизм остаётся глобальным, но
+// коллизия между коллекциями становится невозможной, не переписывая
+// tombstone-архитектуру остальных (legacy) коллекций — это выходит за scope
+// этого PR и остаётся Волне 5.
+function psyUid(prefix) {
+  return prefix + ':' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
+}
 // source: 'user' (обычное явное действие) | 'deterministic' (внутренняя
 // эвристика без ИИ) | 'ai_suggested' (требует acceptedAt ДО того, как ссылка
 // станет действующей связью — до принятия она не создаётся вовсе, см.
@@ -2553,7 +2570,7 @@ function createPsyLink({ fromColl, fromId, toColl, toId, relation, source, confi
   if (err) return { error: err };
   if (findPsyLink({ fromColl, fromId, toColl, toId, relation })) return { error: 'duplicate' };
   const rec = {
-    id: Date.now() + Math.floor(Math.random() * 1000), fromColl, fromId, toColl, toId, relation,
+    id: psyUid('psyLink'), fromColl, fromId, toColl, toId, relation,
     createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
     source: source || 'user',
     acceptedAt: nowISO(),   // все ссылки, создаваемые этой функцией, уже приняты
@@ -2590,7 +2607,7 @@ function saveRelationshipContext() {
   const note = ($('relctx-note') || {}).value?.trim() || '';
   if (!label) { toast('Укажи имя или обозначение контекста', 'warn'); return; }
   const rec = {
-    id: Date.now(), label, roleOrRelation: role, status: 'active', note,
+    id: psyUid('relctx'), label, roleOrRelation: role, status: 'active', note,
     privacyClass: 'sensitive', createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
   };
   if (!Array.isArray(DB.relationshipContexts)) DB.relationshipContexts = [];
@@ -2644,9 +2661,12 @@ function relContextPickerHTML(coll, id) {
   const cur = relationshipContextOf(coll, id);
   const active = (DB.relationshipContexts || []).filter(c => c && c.status !== 'archived');
   const opts = ['<option value="">Без контекста</option>']
-    .concat(active.map(c => `<option value="${c.id}"${cur && cur.id === c.id ? ' selected' : ''}>${esc(c.label)}</option>`));
+    .concat(active.map(c => `<option value="${esc(c.id)}"${cur && cur.id === c.id ? ' selected' : ''}>${esc(c.label)}</option>`));
+  // ВАЖНО (owner review, PR #149): relationshipContexts.id — строка вида
+  // "relctx:...", НЕ число. parseInt() на таком id даёт NaN и молча теряет
+  // связь. Передаём this.value как есть (пустая строка → null).
   return `<div style="margin-top:.6rem"><div class="f-lbl">Контекст отношений</div>
-    <select class="field" onchange="assignRelationshipContext('${coll}',${id},this.value?parseInt(this.value,10):null)">${opts.join('')}</select></div>`;
+    <select class="field" onchange="assignRelationshipContext('${coll}',${id},this.value||null)">${opts.join('')}</select></div>`;
 }
 
 // ─── НЕЗАВЕРШЁННЫЕ ДЕЙСТВИЯ + ПОВТОРЯЮЩИЕСЯ ТРИГГЕРЫ (Wave 1) ────
@@ -2735,8 +2755,8 @@ function rRelationshipContexts() {
   const active = all.filter(c => c && c.status !== 'archived');
   const archived = all.filter(c => c && c.status === 'archived');
   const row = c => `<div class="srow"><div class="bk-info"><span class="sl2">${esc(c.label)}</span><span class="sv2">${esc(c.roleOrRelation || '')}${c.note ? ' · ' + esc(c.note) : ''}</span></div>
-    <button type="button" class="btn btn-s btn-xs" style="flex:none" onclick="renameRelationshipContext(${c.id})">Переим.</button>
-    <button type="button" class="btn btn-s btn-xs" style="flex:none" onclick="toggleArchiveRelationshipContext(${c.id})">${c.status === 'archived' ? 'Восстановить' : 'Архив'}</button>
+    <button type="button" class="btn btn-s btn-xs" style="flex:none" onclick="renameRelationshipContext('${esc(c.id)}')">Переим.</button>
+    <button type="button" class="btn btn-s btn-xs" style="flex:none" onclick="toggleArchiveRelationshipContext('${esc(c.id)}')">${c.status === 'archived' ? 'Восстановить' : 'Архив'}</button>
   </div>`;
   el.innerHTML = `<div class="sec-lbl">Контексты отношений</div>
     <div class="more-list mx mb">${active.length ? active.map(row).join('') : '<div class="si-text" style="color:var(--t3);padding:.5rem 0">Пока нет контекстов — добавь человека или ситуацию, чтобы привязывать к ней записи.</div>'}</div>

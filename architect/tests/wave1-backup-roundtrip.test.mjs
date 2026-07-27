@@ -6,11 +6,16 @@
 //  Synthetic data only. Run: node tests/wave1-backup-roundtrip.test.mjs
 // ─────────────────────────────────────────────────────────────────────────
 
-import { encryptPayload, decryptEnvelope } from '../backup/backup-core.mjs';
+import { BackupError, encryptPayload, decryptEnvelope, serializeEnvelope } from '../backup/backup-core.mjs';
 import { createBackupAdapter, KEYS } from '../backup/backup-adapter.mjs';
+import { restoreBackup } from '../backup/backup-restore.mjs';
 
 let pass = 0, fail = 0; const out = [];
 function ok(c, n) { if (c) { pass++; out.push('  ✓ ' + n); } else { fail++; out.push('  ✗ ' + n); } }
+async function throwsCode(fn, code, n) {
+  try { await fn(); ok(false, n + ' (не бросил, ожидался ' + code + ')'); return null; }
+  catch (e) { ok(e instanceof BackupError && e.code === code, n + (e && e.code !== code ? ' (код ' + (e && e.code) + '/' + (e && e.message) + ')' : '')); return e; }
+}
 
 function makeStorage(init = {}) {
   const m = new Map(Object.entries(init).map(([k, v]) => [k, String(v)]));
@@ -22,14 +27,20 @@ function makeMedia() {
 }
 const NOW = '2026-07-27T12:00:00.000Z';
 
+// id — namespaced строки (psyLink:.../relctx:...), как их реально генерирует
+// psyUid() в app.js (owner review, PR #149: голый Date.now() id для этих двух
+// коллекций рисковал коллизией с raw-id любой другой коллекции в общем
+// tombstone-механизме `DB._del`). Числовые id ниже (100/200/300) принадлежат
+// НЕЗАТРОНУТЫМ этим фиксом legacy-коллекциям (moments/whys/insights).
 const psyLinks = [
-  { id: 1, fromColl: 'moments', fromId: 100, toColl: 'whys', toId: 200, relation: 'moment_to_why', createdAt: NOW, day: '2026-07-27', sv: 3, _u: 1, source: 'user', acceptedAt: NOW, confidenceLabel: null },
-  { id: 2, fromColl: 'whys', fromId: 200, toColl: 'insights', toId: 300, relation: 'why_to_insight', createdAt: NOW, day: '2026-07-27', sv: 3, _u: 2, source: 'user', acceptedAt: NOW, confidenceLabel: null },
-  { id: 3, fromColl: 'insights', fromId: 300, toColl: 'relationshipContexts', toId: 400, relation: 'record_to_relationship', createdAt: NOW, day: '2026-07-27', sv: 3, _u: 3, source: 'user', acceptedAt: NOW, confidenceLabel: 'medium' },
+  { id: 'psyLink:m1', fromColl: 'moments', fromId: 100, toColl: 'whys', toId: 200, relation: 'moment_to_why', createdAt: NOW, day: '2026-07-27', sv: 3, _u: 1, source: 'user', acceptedAt: NOW, confidenceLabel: null },
+  { id: 'psyLink:m2', fromColl: 'whys', fromId: 200, toColl: 'insights', toId: 300, relation: 'why_to_insight', createdAt: NOW, day: '2026-07-27', sv: 3, _u: 2, source: 'user', acceptedAt: NOW, confidenceLabel: null },
+  { id: 'psyLink:m3', fromColl: 'insights', fromId: 300, toColl: 'relationshipContexts', toId: 'relctx:m1', relation: 'record_to_relationship', createdAt: NOW, day: '2026-07-27', sv: 3, _u: 3, source: 'user', acceptedAt: NOW, confidenceLabel: 'medium' },
 ];
 const relationshipContexts = [
-  { id: 400, label: 'Мама', roleOrRelation: 'родитель', status: 'active', note: '', privacyClass: 'sensitive', createdAt: NOW, day: '2026-07-27', sv: 3, _u: 1 },
+  { id: 'relctx:m1', label: 'Мама', roleOrRelation: 'родитель', status: 'active', note: '', privacyClass: 'sensitive', createdAt: NOW, day: '2026-07-27', sv: 3, _u: 1 },
 ];
+const psyAiConsent = { on: true, acceptedAt: NOW, version: 'psy-ai-consent-v1', sv: 3, _u: 1 };
 
 function seed() {
   const storage = makeStorage({
@@ -39,7 +50,7 @@ function seed() {
       moments: [{ id: 100, valence: 60, activation: 40, createdAt: NOW, day: '2026-07-27' }],
       whys: [{ id: 200, symptom: 'тест', action: 'сделать паузу', createdAt: NOW, day: '2026-07-27' }],
       insights: [{ id: 300, title: 'x', body: 'y', createdAt: NOW, day: '2026-07-27' }],
-      psyLinks, relationshipContexts,
+      psyLinks, relationshipContexts, psyAiConsent,
       __ts: 123,
     }),
     [KEYS.cfg('pA')]: JSON.stringify({ userName: 'Alice', domainLabel: 'Книга', aiModel: 'claude-opus-4-8' }),
@@ -81,6 +92,59 @@ async function main() {
   //    are sensitive collections.
   const text = JSON.stringify(payload);
   ok(!text.includes('apiUrl') && !text.includes('spaceKey'), 'bundle with psyLinks/relationshipContexts excludes device-local connection fields');
+
+  // 6) Owner review (PR #149, point 4): real production restore orchestrator
+  //    (restoreBackup + createBackupAdapter), not just buildBundle+decrypt.
+  //    Restore into a FRESH destination ("new" mode) — psyLinks/
+  //    relationshipContexts/psyAiConsent must land intact in the newly
+  //    activated profile, without touching whatever else exists at the
+  //    destination.
+  {
+    const dest = { storage: makeStorage({ [KEYS.PKEY]: '[]', [KEYS.AKEY]: '' }), media: makeMedia() };
+    const destAdapter = createBackupAdapter({ storage: dest.storage, media: dest.media, now: () => NOW });
+    const file = { size: 0, text: async () => serializeEnvelope(env) };
+    file.size = (await file.text()).length;
+    let hydrated = null;
+    const result = await restoreBackup({
+      adapter: destAdapter, file, password, mode: 'new',
+      genProfileId: () => 'pNew1', now: () => NOW,
+      onActivated: async ({ profileId, mode: m }) => { hydrated = { profileId, mode: m }; },
+    });
+    ok(result.ok && result.activated && result.committed, 'restoreBackup (production adapter, mode=new): commit успешен');
+    const restoredDb = JSON.parse(dest.storage.getItem(KEYS.db('pNew1')));
+    ok(Array.isArray(restoredDb.psyLinks) && restoredDb.psyLinks.length === 3, 'production restore: psyLinks (3) в восстановленном профиле');
+    ok(Array.isArray(restoredDb.relationshipContexts) && restoredDb.relationshipContexts.length === 1 && restoredDb.relationshipContexts[0].id === 'relctx:m1', 'production restore: relationshipContexts в восстановленном профиле');
+    ok(restoredDb.psyAiConsent && restoredDb.psyAiConsent.on === true, 'production restore: psyAiConsent (скаляр) в восстановленном профиле');
+    ok(hydrated && hydrated.profileId === 'pNew1' && hydrated.mode === 'new', 'production restore: onActivated-гидратация вызвана с корректным profileId/mode');
+  }
+
+  // 7) Restore failure (wrong password) BEFORE any mutation — leaves any
+  //    existing target profile completely untouched (no partial/corrupted
+  //    profile with half-restored Wave 1 data).
+  {
+    const dest = {
+      storage: makeStorage({
+        [KEYS.PKEY]: JSON.stringify([{ id: 'pOld', name: 'Old', color: '#1056CC' }]),
+        [KEYS.AKEY]: 'pOld',
+        [KEYS.db('pOld')]: JSON.stringify({ insights: [{ id: 999, title: 'untouched' }], psyLinks: [], relationshipContexts: [] }),
+        [KEYS.cfg('pOld')]: JSON.stringify({ userName: 'Old' }),
+      }),
+      media: makeMedia(),
+    };
+    const destAdapter = createBackupAdapter({ storage: dest.storage, media: dest.media, now: () => NOW });
+    const beforeDb = dest.storage.getItem(KEYS.db('pOld'));
+    const file = { size: 0, text: async () => serializeEnvelope(env) };
+    file.size = (await file.text()).length;
+    await throwsCode(
+      () => restoreBackup({ adapter: destAdapter, file, password: 'WRONG-password', mode: 'new', now: () => NOW }),
+      'DECRYPT_FAILED',
+      'production restore: неверный пароль — DECRYPT_FAILED до любой мутации',
+    );
+    const afterDb = dest.storage.getItem(KEYS.db('pOld'));
+    ok(beforeDb === afterDb, 'production restore: неудачный restore (wrong password) не изменил существующий профиль pOld (без частично восстановленных psyLinks)');
+    const profiles = JSON.parse(dest.storage.getItem(KEYS.PKEY));
+    ok(profiles.length === 1 && profiles[0].id === 'pOld', 'production restore: не создан «осиротевший» новый профиль после ошибки');
+  }
 
   console.log(out.join('\n'));
   console.log(`\nWave 1 backup roundtrip: ${pass}/${pass + fail} passed`);
