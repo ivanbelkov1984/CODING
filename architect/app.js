@@ -501,7 +501,7 @@ function goTo(tab, el) {
   if (typeof rSidebar === 'function') rSidebar();
   hpt();
   if (tab==='vit') { rSpheres(); rVit(); }
-  if (tab==='sys') { rLivingMap('livingmap-out'); rDig(); rReview(30); }
+  if (tab==='sys') { rLivingMap('livingmap-out'); rDig(); rReview(30); if (document.body.classList.contains('navshell')) sysGo('overview'); }
   if (tab==='map') { if (document.body.classList.contains('navshell')) msub('overview'); else rIns(); }
   if (tab==='health') rHealth();
   if (tab==='astro') asub('menu');
@@ -2445,6 +2445,126 @@ function rDiaryOverview() {
   icons();
 }
 
+// ═══ ОБЗОР: агрегатор-landing (issue #143; только при arch_nav_v2=ON) ═══
+// Аддитивный read-only слой поверх уже существующих функций/данных —
+// periodReview/sphereStats/rLivingMap/DB.digests переиспользуются как
+// есть, ничего не пересчитывается заново и не хранится отдельно. При OFF
+// sys-detail виден как раньше (goTo('sys') не трогает display вообще).
+// Переключение landing ↔ подробный экран (30/365, живая карта, дайджесты)
+// внутри той же вкладки — аналог msub() у Дневника, но без subnav-полосы
+// (у «Обзора» её никогда не было).
+function sysGo(sub) {
+  const overview = $('sys-overview'), detail = $('sys-detail');
+  if (sub === 'detail') {
+    if (overview) overview.style.display = 'none';
+    if (detail) detail.style.display = 'block';
+  } else {
+    if (overview) overview.style.display = 'block';
+    if (detail) detail.style.display = 'none';
+    rOverviewLanding();
+  }
+}
+// «Что изменилось за неделю»: periodReview(7) — та же функция, что уже
+// считает 30/365 обзор (см. rReview), просто с окном 7 дней. Честная
+// подача при нехватке данных — тот же порог (<3 чек-инов), что и в rReview.
+function rOverviewWeek(r7) {
+  const el = $('ov-week'); if (!el) return;
+  if (r7.n < 3) {
+    el.innerHTML = `<div class="sec-lbl">Что изменилось за неделю</div>
+      <div class="card mx mb" style="padding:.85rem 1rem"><div class="si-text">Мало данных за неделю (${r7.n} ${pl(r7.n, 'чек-ин', 'чек-ина', 'чек-инов')}). Отмечай состояние — здесь появится честная картина.</div></div>`;
+    return;
+  }
+  const dTxt = r7.delta == null ? ''
+    : r7.delta >= 0 ? ` <span style="color:var(--green)">↑ ${r7.delta.toFixed(1)}</span> к прошлой неделе`
+    : ` <span style="color:var(--orange)">↓ ${Math.abs(r7.delta).toFixed(1)}</span> к прошлой неделе`;
+  // Новые записи за неделю по тем же коллекциям и тем же приёмом отсчёта
+  // времени, что и в блоке «Последние записи» Дневника (issue #141) —
+  // локальная копия helper'а: Дневник не трогаем (issue #143, «не менять 1.3A»).
+  const now = Date.now(), wk = 7 * 864e5;
+  const collTs = (coll, r) => coll === 'patterns' ? (r.id || 0) : (Date.parse(r.createdAt) || r.id || 0);
+  const newEntries = DIARY_RECENT_GROUPS.reduce((sum, [coll]) => sum + (DB[coll] || []).filter(r => r && now - collTs(coll, r) <= wk).length, 0);
+  el.innerHTML = `<div class="sec-lbl">Что изменилось за неделю</div>
+    <div class="card mx mb" style="padding:.85rem 1rem">
+      <div class="si-text"><b>Среднее состояние ${r7.avg.toFixed(1)}/10</b>${dTxt}</div>
+      <div class="si-text" style="margin-top:.3rem">${r7.adherence}% дней отмечено · ${newEntries} ${pl(newEntries, 'новая запись', 'новые записи', 'новых записей')} за неделю</div>
+    </div>`;
+}
+// «Сферы жизни»: до 5 сфер с их существующей метрикой (sphereStats, тот же
+// расчёт, что и в rReview) — без нового score/weight/ranking поля.
+function rOverviewSpheres(r7) {
+  const el = $('ov-spheres'); if (!el) return;
+  const list = (r7.spheres || []).slice(0, 5).filter(({ st }) => st);
+  if (!list.length) { el.innerHTML = ''; return; }
+  const rows = list.map(({ s, st }) => {
+    let val;
+    if (s.type === 'habit') val = (st.consistency || 0) + '% постоянство';
+    else if (s.type === 'counter') val = (st.sum || 0) + ' ' + esc(s.unit || '');
+    else if (s.type === 'goal') val = (st.progress != null ? st.progress + '% к цели' : '—');
+    else if (s.type === 'score') val = (st.avg != null ? 'ср. ' + st.avg.toFixed(1) : '—');
+    else val = ((st.entries || []).length || 0) + ' записей';
+    return `<button type="button" class="srow" onclick="goTo('vit')"><span class="sic" style="background:${s.color}22"><span>${esc(s.icon || '●')}</span></span><span class="sl2">${esc(s.name)}</span><span class="sv2">${val}</span></button>`;
+  }).join('');
+  el.innerHTML = `<div class="sec-lbl">Сферы жизни</div><div class="more-list mx mb">${rows}</div>`;
+}
+// «Здоровье»: только существующие данные (симптомы/измерения/приём/тяга),
+// прямой CTA «Отчёт врачу» → существующий openDoctorReport(). Полный
+// раздел Здоровья не переделывается, остаётся в «Ещё».
+function rOverviewHealth() {
+  const el = $('ov-health'); if (!el) return;
+  const sym = projAll('symptoms'), mea = projAll('measures');
+  const ts = r => Date.parse(r.createdAt) || r.id || 0;
+  const lastSym = sym.length ? sym.reduce((a, b) => ts(b) > ts(a) ? b : a) : null;
+  const lastMea = mea.length ? mea.reduce((a, b) => ts(b) > ts(a) ? b : a) : null;
+  const crav = DB.cravings || [];
+  const cravWeek = crav.filter(c => rcDay(c) > dayAgo(7));
+  const meds = projAll('meds').filter(m => m && m.active !== false);
+  const today = todayKey();
+  const takenToday = meds.filter(m => (DB.medIntakes || []).some(i => i && i.medId === m.id && i.day === today && i.status === 'taken')).length;
+  const rows = [];
+  rows.push(lastSym
+    ? `Симптом · ${esc((lastSym.day || '').slice(5))} — ${esc(lastSym.name)} (${lastSym.severity}/10)`
+    : 'Симптомов пока нет');
+  rows.push(lastMea
+    ? `Измерение · ${esc((lastMea.day || '').slice(5))} — ${esc(lastMea.name)}: ${esc(lastMea.value)}${lastMea.unit ? ' ' + esc(lastMea.unit) : ''}`
+    : 'Измерений пока нет');
+  if (meds.length) rows.push(`Приём сегодня: ${takenToday} из ${meds.length}`);
+  if (crav.length) {
+    const held = crav.filter(c => c.outcome === 'held').length;
+    const rate = Math.round(held / crav.length * 100);
+    rows.push(`Тяга: ${cravWeek.length} за неделю · устоял ${rate}% всего`);
+  }
+  el.innerHTML = `<div class="sec-lbl">Здоровье</div>
+    <div class="card mx mb" style="padding:.85rem 1rem">${rows.map(r => `<div class="si-text" style="margin-top:.25rem">${r}</div>`).join('')}</div>
+    <div class="mx mb"><button type="button" class="btn btn-p btn-full" onclick="openDoctorReport()"><i data-lucide="file-text"></i>Отчёт врачу</button></div>`;
+}
+// «Живая карта и дайджесты»: живая карта — тот же rLivingMap(), просто в
+// свой контейнер landing; дайджест-превью — из тех же DB.digests (rDig()
+// их готовит/дедуплицирует). Полный список — в «Подробном обзоре»
+// (sysGo('detail')), карта не копируется дважды с полной детализацией.
+function rOverviewLivingDig() {
+  const el = $('ov-livingdig'); if (!el) return;
+  const d = (DB.digests || [])[0];
+  const digTxt = d
+    ? (d.top !== undefined
+        ? `Дайджест · ${esc(d.week)} — ${d.cnt} ${pl(d.cnt, 'инсайт', 'инсайта', 'инсайтов')}${d.stateAvg != null ? ', состояние ' + d.stateAvg + '/10' : ''}`
+        : `Дайджест · ${esc(d.week || '')}`)
+    : 'Дайджеста пока нет — «Собрать обзор недели» в панели действий соберёт первый.';
+  el.innerHTML = `<div class="sec-lbl">Живая карта и дайджесты</div>
+    <div class="card mx mb"><div id="ov-map-preview"></div></div>
+    <div class="card mx mb" style="padding:.85rem 1rem"><div class="si-text">${digTxt}</div></div>`;
+  rLivingMap('ov-map-preview');
+}
+// Landing целиком: порядок блоков строго по контракту issue #143 (§7):
+// неделя → сферы → здоровье → живая карта/дайджесты → ссылка на 30/365.
+function rOverviewLanding() {
+  const r7 = periodReview(7);
+  rOverviewWeek(r7);
+  rOverviewSpheres(r7);
+  rOverviewHealth();
+  rOverviewLivingDig();
+  icons();
+}
+
 // ─── ЗДОРОВЬЕ: «Тяга» — лог импульса + микро-интервенция ─────────
 // Основа (см. HEALTH_BRIEF.md): петля привычки триггер→действие→
 // награда; пик тяги держится 3–5 минут — задача не «победить силой
@@ -2776,8 +2896,8 @@ function bodySectionHTML() {
     ? rows.slice(0, 5).map(r => `<div class="si-row"><div class="si-body"><div class="si-text">${r.txt}</div></div></div>`).join('')
     : `<div style="padding:1rem" class="ai-sp-empty">Записывай симптомы и измерения (вес, давление, пульс…) — соберётся честная картина для тебя и врача.</div>`;
   html += `</div><div class="mx mb" style="display:flex;gap:.5rem;flex-wrap:wrap">
-    <button class="btn btn-s btn-sm" onclick="openOv('ov-symptom')"><i data-lucide="thermometer"></i>Симптом</button>
-    <button class="btn btn-s btn-sm" onclick="openOv('ov-measure')"><i data-lucide="ruler"></i>Измерение</button>
+    <button class="btn btn-s btn-sm" id="health-symptom-btn" onclick="openOv('ov-symptom')"><i data-lucide="thermometer"></i>Симптом</button>
+    <button class="btn btn-s btn-sm" id="health-measure-btn" onclick="openOv('ov-measure')"><i data-lucide="ruler"></i>Измерение</button>
     <button class="btn btn-s btn-sm" onclick="openDoctorReport()"><i data-lucide="file-text"></i>Отчёт врачу</button>
   </div>`;
   return html;
@@ -7945,7 +8065,21 @@ document.addEventListener('DOMContentLoaded', () => {
 // portrait) / глобальное «Записать». Без флага body не получает класс
 // navshell → CSS-правила неактивны, поведение как раньше. Вкладки ведут
 // на СУЩЕСТВУЮЩИЕ destination id — ни один маршрут не теряется.
-function navShellEnabled() { try { return localStorage.getItem('arch_nav_v2') === '1'; } catch (e) { return false; } }
+// Rollout 1.4 (issue #143): новая навигация теперь ВКЛЮЧЕНА по умолчанию —
+// для новых профилей и для уже существующих, которые никогда явно её не
+// выключали. Явное сохранённое решение пользователя всегда уважается в
+// обе стороны: '0' → OFF (аварийный выключатель остаётся рабочим и не
+// удаляется), '1' → ON. Отсутствие значения (новый профиль, либо
+// пользователь никогда не трогал тумблер) → ON. toggleNavShell() всегда
+// пишет явное '1'/'0', так что откат и повторное включение детерминированы.
+function navShellEnabled() {
+  try {
+    const v = localStorage.getItem('arch_nav_v2');
+    if (v === '0') return false;
+    if (v === '1') return true;
+    return true;                 // нет сохранённого значения — новый дефолт ON
+  } catch (e) { return true; }
+}
 // Вкладки shell → существующие id (goTo). «Ещё» открывает drawer со всеми разделами.
 const NSH_MAP = { today: 'home', diary: 'map', overview: 'sys' };
 function navGo(dest) {

@@ -219,7 +219,7 @@
   <div class="sec-lbl">Твои сферы жизни</div>
   <div id="spheres-list" class="mx"></div>
   <div style="padding:var(--s3) var(--s4) 0;display:flex;gap:var(--s2);flex-wrap:wrap">
-    <button class="btn btn-p btn-sm" onclick="openSphereEdit()"><i data-lucide="plus"></i>Новая сфера</button>
+    <button class="btn btn-p btn-sm" id="vit-new-sphere-btn" onclick="openSphereEdit()"><i data-lucide="plus"></i>Новая сфера</button>
     <button class="btn btn-s btn-sm" onclick="openOv('ov-ci')"><i data-lucide="activity"></i>Чек-ин дня</button>
   </div>
   <div class="sec-lbl">Динамика состояния</div>
@@ -236,23 +236,38 @@
 
 <!-- ── СИСТЕМА ─────────────────────────────────────────────────── -->
 <section class="pg" id="pg-sys">
-  <div class="sec-lbl">Живая карта жизни</div>
-  <div class="card mx mb">
-    <div id="livingmap-out"></div>
+  <!-- ══ Обзор — агрегатор-landing (issue #143; canonical вход #/overview
+       при arch_nav_v2=ON). Только маршрутизация в существующие функции/
+       renderers, без новой schema. При OFF — недостижимо (goTo('sys') не
+       трогает display, sys-detail виден как раньше — байт-в-байт). ══ -->
+  <div id="sys-overview" style="display:none">
+    <div id="ov-week"></div>
+    <div id="ov-spheres"></div>
+    <div id="ov-health"></div>
+    <div id="ov-livingdig"></div>
+    <div class="mx mb"><button type="button" class="btn btn-s btn-full" onclick="sysGo('detail')"><i data-lucide="bar-chart-3"></i>Подробный обзор (месяц/год)</button></div>
+    <div style="height:5rem"></div>
   </div>
-  <div class="sec-lbl">Обзор периода</div>
-  <div class="rv-switch mx" id="review-btns">
-    <button class="rv-b on" data-d="30" onclick="rReview(30)">Месяц</button>
-    <button class="rv-b" data-d="365" onclick="rReview(365)">Год</button>
+  <div id="sys-detail">
+    <button type="button" class="btn btn-s" id="sys-back" onclick="sysGo('overview')" style="margin:var(--s3) var(--s4) 0"><i data-lucide="chevron-left"></i>К обзору недели</button>
+    <div class="sec-lbl">Живая карта жизни</div>
+    <div class="card mx mb">
+      <div id="livingmap-out"></div>
+    </div>
+    <div class="sec-lbl">Обзор периода</div>
+    <div class="rv-switch mx" id="review-btns">
+      <button class="rv-b on" data-d="30" onclick="rReview(30)">Месяц</button>
+      <button class="rv-b" data-d="365" onclick="rReview(365)">Год</button>
+    </div>
+    <div class="card mx mb"><div id="review-out"></div></div>
+    <div class="sec-lbl">Дайджесты</div>
+    <div class="card mx"><div id="dg-list"></div></div>
+    <div style="padding:1rem;display:flex;gap:.625rem;flex-wrap:wrap">
+      <button class="btn btn-p btn-sm" id="sys-mkdig-btn" onclick="mkDig()"><i data-lucide="refresh-cw"></i>Собрать обзор недели</button>
+      <button class="btn btn-s btn-sm" onclick="openOv('ov-evo')"><i data-lucide="trending-up"></i>Эволюция</button>
+    </div>
+    <div style="height:5rem"></div>
   </div>
-  <div class="card mx mb"><div id="review-out"></div></div>
-  <div class="sec-lbl">Дайджесты</div>
-  <div class="card mx"><div id="dg-list"></div></div>
-  <div style="padding:1rem;display:flex;gap:.625rem;flex-wrap:wrap">
-    <button class="btn btn-p btn-sm" onclick="mkDig()"><i data-lucide="refresh-cw"></i>Собрать обзор недели</button>
-    <button class="btn btn-s btn-sm" onclick="openOv('ov-evo')"><i data-lucide="trending-up"></i>Эволюция</button>
-  </div>
-  <div style="height:5rem"></div>
 </section>
 
 <!-- ── ЗДОРОВЬЕ: вредные привычки, тяга, что влияет ───────────────
@@ -303,7 +318,7 @@
     <div style="padding:0 1rem" id="astro-persona"></div>
     <div style="padding:0 1rem" id="astro-portrait"></div>
     <div class="astro-wheel-wrap"><div id="astro-wheel"></div>
-      <button class="btn btn-s btn-full" onclick="openFullWheel()"><i data-lucide="maximize-2"></i>Колесо на весь экран</button>
+      <button class="btn btn-s btn-full" id="astro-natal-wheel-btn" onclick="openFullWheel()"><i data-lucide="maximize-2"></i>Колесо на весь экран</button>
       <div id="astro-planet-info"></div></div>
     <div class="be-note" style="color:var(--t3);padding:0 1rem .35rem;line-height:1.5">Ниже — технические детали для тех, кто хочет углубиться. Если термины незнакомы, начните с блока «Кто вы по карте» выше. Строки со значком <span style="color:var(--accent);font-weight:700">›</span> открывают понятное пояснение по тапу.</div>
     <div class="astro-tabs" id="astro-ntabs">
@@ -609,7 +624,7 @@
     <div class="sec-lbl">Паттерны</div>
     <div class="card mx"><div id="pat-list"></div></div>
     <div style="padding:var(--s4);display:flex;gap:var(--s2)">
-      <button class="btn btn-s btn-sm" onclick="openOv('ov-pat-add')"><i data-lucide="plus"></i>Паттерн</button>
+      <button class="btn btn-s btn-sm" id="pat-add-btn" onclick="openOv('ov-pat-add')"><i data-lucide="plus"></i>Паттерн</button>
     </div>
     <div style="height:5rem"></div>
   </div>
@@ -627,7 +642,7 @@
     <div class="sec-lbl">Духовный путь</div>
     <div class="card mx"><div id="spi-list"></div></div>
     <div style="padding:var(--s4);display:flex;gap:var(--s2)">
-      <button class="btn btn-s btn-sm" onclick="openOv('ov-spi-add')"><i data-lucide="plus"></i>Запись</button>
+      <button class="btn btn-s btn-sm" id="spi-add-btn" onclick="openOv('ov-spi-add')"><i data-lucide="plus"></i>Запись</button>
     </div>
     <div style="height:5rem"></div>
   </div>
@@ -649,7 +664,7 @@
     <div class="sec-lbl">Журнал эволюции</div>
     <div class="card mx"><div id="evo-more"></div></div>
     <div style="padding:var(--s4);display:flex;gap:var(--s2)">
-      <button class="btn btn-s btn-sm" onclick="openOv('ov-evo-add')"><i data-lucide="plus"></i>Запись</button>
+      <button class="btn btn-s btn-sm" id="evo-add-btn" onclick="openOv('ov-evo-add')"><i data-lucide="plus"></i>Запись</button>
     </div>
     <div style="height:5rem"></div>
   </div>

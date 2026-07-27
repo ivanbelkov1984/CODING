@@ -3112,13 +3112,16 @@ ok(rectUi.supportMetric && rectUi.noWarnAt3, 'ректификация UI: ме�
 ok(rectUi.warnAt2, 'ректификация UI: при 1–2 событиях — явное «Недостаточно данных для надёжной оценки»');
 ok(rectUi.notOverwritten1 && rectUi.applyFills && rectUi.notOverwritten2, 'ректификация UI: данные рождения не перезаписываются — «применить» лишь подставляет время в форму');
 
-// ── Navigation shell v2 — базовый слой (за флагом arch_nav_v2; аддитивно, OFF по умолчанию) ──
+// ── Navigation shell v2 — базовый слой (за флагом arch_nav_v2) ──
+// Rollout 1.4 (issue #143): нет сохранённого значения → ON по умолчанию
+// (для новых и для существующих профилей, которые никогда явно флаг не
+// трогали). Аварийный выключатель — явное '0' — уважается отдельно ниже.
 const nsh = await page.evaluate(() => {
   const r = {};
-  // По умолчанию OFF: класс не стоит, таб-бар скрыт, ＋ = прежний инсайт.
-  r.offNoClass = !document.body.classList.contains('navshell');
-  r.offHidden = getComputedStyle(document.getElementById('nsh-tabbar')).display === 'none';
-  // Включаем флаг.
+  localStorage.removeItem('arch_nav_v2'); applyNavShell();
+  r.freshProfileOn = document.body.classList.contains('navshell');
+  r.freshTabbarVisible = getComputedStyle(document.getElementById('nsh-tabbar')).display !== 'none';
+  // Включаем флаг явно (как обычно делают остальные тесты этого блока).
   localStorage.setItem('arch_nav_v2', '1'); applyNavShell();
   r.onClass = document.body.classList.contains('navshell');
   r.addLabel = document.getElementById('topbar-add').getAttribute('aria-label');
@@ -3161,7 +3164,7 @@ const nsh = await page.evaluate(() => {
   goTo('home');
   return r;
 });
-ok(nsh.offNoClass && nsh.offHidden, 'nav shell: по умолчанию OFF — класс не стоит, таб-бар скрыт');
+ok(nsh.freshProfileOn && nsh.freshTabbarVisible, 'rollout 1.4: без сохранённого значения (свежий профиль) — новая навигация ON по умолчанию');
 ok(nsh.onClass && nsh.tabs === 4 && nsh.hasFab, 'nav shell ON: body.navshell, 4 вкладки + FAB');
 ok(nsh.addLabel === 'Записать' && nsh.offLabel === 'Новый инсайт', 'nav shell: ＋ = «Записать» при ON, «Новый инсайт» при OFF');
 ok(nsh.diary && nsh.overview && nsh.today, 'nav shell: вкладки ведут на существующие разделы (map/sys/home)');
