@@ -567,6 +567,7 @@ function openOv(id) {
   if (id==='ov-why')      resetWhyForm();
   if (id==='ov-history')  rHistory();
   if (id==='ov-add')      { STATE.addMedia = []; rAddMedia(); }
+  if (id==='ov-med-add')  resetMedAddForm();
 }
 // Собрать ВСЕ media-id, на которые ссылается любая запись любой коллекции db.
 function collectDbMediaRefs(db, out) {
@@ -585,7 +586,10 @@ function collectDbMediaRefs(db, out) {
 // оставить лишнее медиа, чем удалить чужое/нужное из-за ошибки чтения).
 async function gcMedia() {
   try {
-    const ref = new Set(STATE.addMedia || []);
+    // Owner review (PR #151, дефект 4): активные staging-массивы Волны 2
+    // (лаборатория/документы) должны защищать свою media от GC точно так же,
+    // как STATE.addMedia защищает черновик инсайта.
+    const ref = new Set([...(STATE.addMedia || []), ...(STATE.labAddMedia || []), ...(STATE.docAddMedia || [])]);
     collectDbMediaRefs(DB, ref);                          // текущий in-memory профиль
     // Реестр профилей: если повреждён — стоп (иначе чужие медиа примем за мусор).
     const rawReg = localStorage.getItem(PKEY);
@@ -614,6 +618,13 @@ async function gcMedia() {
 function closeOv(id) {
   $(id).classList.remove('on');
   document.body.style.overflow = '';
+  // Owner review (PR #151, дефект 4): закрытие формы лаборатории/документа
+  // (и явной отменой, и после сохранения) снимает staging-защиту и запускает
+  // fail-safe generic gcMedia() — media, ещё используемая только что
+  // сохранённой записью (или другим черновиком/профилем), останется, потому
+  // что gcMedia() считает ссылки по реальному DB, а не по этому staging-массиву.
+  if (id === 'ov-lab-add') { STATE.labAddMedia = []; STATE.labEditId = null; gcMedia(); }
+  if (id === 'ov-doc-add') { STATE.docAddMedia = []; STATE.docEditId = null; gcMedia(); }
 }
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
@@ -3313,17 +3324,41 @@ function toggleEnvFlag(key) {
 // НЕ оценивает взаимодействия и НЕ даёт медицинских рекомендаций (регуляторный
 // карантин). План (medication_plan) и фактический приём (medication_intake) —
 // разные классы записей, чтобы «назначено» никогда не смешивалось с «принято».
+// Owner review (PR #151, дефект 1): расписание — аддитивное опциональное поле
+// самой записи `meds` (НЕ вторая коллекция). Явный выбор пользователя в форме
+// (по умолчанию «По необходимости» — наименее самонадеянный вариант, ничего
+// не подразумевает как «ежедневно» без явного действия).
+function medScheduleModeChanged() {
+  const sel = $('med-schedule'); const wrap = $('med-weekdays-wrap'); const tgtWrap = $('med-target-wrap');
+  if (!sel) return;
+  if (wrap) wrap.style.display = sel.value === 'weekdays' ? '' : 'none';
+  if (tgtWrap) tgtWrap.style.display = sel.value === 'manual' ? 'none' : '';
+}
+function resetMedAddForm() {
+  if ($('med-name')) $('med-name').value = ''; if ($('med-dose')) $('med-dose').value = '';
+  if ($('med-schedule')) $('med-schedule').value = 'manual';
+  document.querySelectorAll('#med-weekdays-wrap input[type=checkbox]').forEach(cb => { cb.checked = false; });
+  if ($('med-target')) $('med-target').value = '1';
+  medScheduleModeChanged();
+}
 function saveMed() {
   const name = ($('med-name') ? $('med-name').value : '').trim();
   const dose = ($('med-dose') ? $('med-dose').value : '').trim();
   if (!name) { toast('Введи название', 'warn'); return; }
+  const scheduleMode = ($('med-schedule') ? $('med-schedule').value : 'manual') || 'manual';
+  const weekdays = scheduleMode === 'weekdays'
+    ? Array.from(document.querySelectorAll('#med-weekdays-wrap input[type=checkbox]:checked')).map(cb => parseInt(cb.value, 10))
+    : undefined;
+  const targetRaw = $('med-target') ? parseInt($('med-target').value, 10) : 1;
+  const dailyTarget = (isFinite(targetRaw) && targetRaw >= 1) ? targetRaw : 1;
   DB.meds.push({
     id: Date.now(), kType: 'medication_plan', privacyClass: 'sensitive',
     name, dose, active: true,
+    scheduleMode, ...(weekdays !== undefined ? { weekdays } : {}), dailyTarget,
     verif: 'user_confirmed', life: 'current',
     createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
   });
-  if ($('med-name')) $('med-name').value = ''; if ($('med-dose')) $('med-dose').value = '';
+  resetMedAddForm();
   closeOv('ov-med-add'); persist(); rHealth();
   hptMed(); toast('Добавлено в план', 'ok');
 }
@@ -3424,37 +3459,86 @@ function bodySectionHTML() {
 // ═════════════════════════════════════════════════════════════════
 
 // ── «Сегодня»: план (meds) × факт (medIntakes) за выбранный день ──
-// day-арифметика по YYYY-MM-DD компонентам через Date.UTC — та же
-// «локальная» UTC-договорённость, что и у todayKey()/day-полей во всём
-// приложении; НЕ проходит через new Date(str).getDate() (частый баг
-// сдвига на день в отрицательных часовых поясах).
+// day-арифметика по YYYY-MM-DD компонентам через Date.UTC — чисто
+// строковая арифметика над уже-локальными компонентами дня, не завязана на
+// часовой пояс момента вызова (owner review, PR #151: оставлено как есть —
+// пригодно и для UTC-, и для локальных day-ключей).
 function shiftDayKey(day, delta) {
   const [y, m, d] = String(day).split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + delta);
   return dt.toISOString().slice(0, 10);
 }
-let _healthDay = todayKey();
+// Owner review (PR #151, дефект 2): общий todayKey() в приложении — намеренно
+// UTC (`new Date().toISOString().slice(0,10)`) и используется как day-ключ во
+// ВСЕХ существующих коллекциях — менять его глобально в этом PR означало бы
+// неконтролируемо расширять Волну 2 на весь app.js. Но «Сегодня»/дефолты дат
+// лаборатории и документов — это то, что пользователь буквально видит как
+// «какой сегодня день у меня», и вокруг местной полуночи todayKey() системно
+// показывает вчера/завтра на весь офсет часового пояса. Поэтому — отдельный
+// health-specific localDayKey() на локальных Y/M/D компонентах, используемый
+// ТОЛЬКО в новом контуре Волны 2 (не в общем `day`-поле записей — оно остаётся
+// той же UTC-конвенцией, что и везде, ради согласованности сортировки/группировки).
+function localDayKey(date = new Date()) {
+  const y = date.getFullYear(), m = date.getMonth() + 1, d = date.getDate();
+  return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+}
+let _healthDay = localDayKey();
 function healthTodayShiftDay(delta) { _healthDay = shiftDayKey(_healthDay, delta); rHealthToday(); }
-function healthTodayGoToday() { _healthDay = todayKey(); rHealthToday(); }
-function medTakenOnDay(medId, day) { return (DB.medIntakes || []).some(i => i && i.medId === medId && i.day === day && i.status === 'taken'); }
-// Один тап = один факт: идемпотентно для уже отмеченного (день, план) —
-// повторный тап НЕ создаёт случайный дубль. Намеренно НЕ трогает
-// logMedIntake() — та функция обслуживает другой, уже работающий контракт
-// («План приёма»: счётчик «сегодня: N ✓», допускает несколько приёмов в
-// день) и не должна менять поведение. Здесь — отдельный бинарный контракт
-// специально для органайзера «Сегодня» (Принято / не отмечено), но тот же
-// класс записи medication_intake, тот же push+persist, что и в logMedIntake().
-function markMedTakenOnDay(medId, day) {
-  if (medTakenOnDay(medId, day)) return;
-  const med = (DB.meds || []).find(m => m && m.id === medId); if (!med) return;
-  const atISO = day === todayKey() ? nowISO() : day + 'T12:00:00.000Z';
+function healthTodayGoToday() { _healthDay = localDayKey(); rHealthToday(); }
+
+// Owner review (PR #151, дефект 1): `meds` несёт только name/dose/active —
+// никакой календарной схемы. Раньше rHealthToday() трактовала ЛЮБУЮ активную
+// запись как «нужно сегодня», что подделывало несуществующий медицинский
+// факт. Теперь — явное, аддитивное, опциональное расписание на самой
+// записи `meds` (НЕ вторая коллекция, старые записи без этих полей не
+// переписываются): scheduleMode: 'daily'|'weekdays'|'manual' (undefined —
+// legacy-запись без расписания вообще). Только явно заданное расписание
+// определяет попадание в чек-лист дня.
+const MED_WEEKDAY_LABELS = [{ v: 1, l: 'Пн' }, { v: 2, l: 'Вт' }, { v: 3, l: 'Ср' }, { v: 4, l: 'Чт' }, { v: 5, l: 'Пт' }, { v: 6, l: 'Сб' }, { v: 0, l: 'Вс' }];
+function medDailyTarget(med) { const t = med && med.dailyTarget; return (typeof t === 'number' && isFinite(t) && t >= 1) ? Math.floor(t) : 1; }
+function medDueOnDay(med, day) {
+  if (!med || !med.scheduleMode || med.scheduleMode === 'manual') return false;
+  if (med.scheduleMode === 'daily') return true;
+  if (med.scheduleMode === 'weekdays') {
+    const [y, m, d] = String(day).split('-').map(Number);
+    const dow = new Date(y, m - 1, d).getDay();   // локальные Y/M/D-компоненты, без парсинга ISO-строки
+    return Array.isArray(med.weekdays) && med.weekdays.includes(dow);
+  }
+  return false;
+}
+function medIntakeCountOnDay(medId, day) { return (DB.medIntakes || []).filter(i => i && i.medId === medId && i.day === day && i.status === 'taken').length; }
+function medTakenOnDay(medId, day) { return medIntakeCountOnDay(medId, day) > 0; }
+function pushMedIntakeRecord(medId, day) {
+  const atISO = day === localDayKey() ? nowISO() : day + 'T12:00:00.000Z';
   DB.medIntakes.push({
     id: Date.now() + Math.floor(Math.random() * 1000), kType: 'medication_intake', privacyClass: 'sensitive',
     medId, status: 'taken',
     verif: 'user_confirmed', life: 'current',
     at: atISO, createdAt: nowISO(), day, sv: SCHEMA_VERSION, _u: Date.now(),
   });
+}
+// Для запланированного (due) пункта: один тап = один факт, ограничено явно
+// заданным дневным target (по умолчанию 1) — несколько фактов в день
+// корректно сопоставляются с target, без схлопывания истории в один бинарный
+// факт, но и без переисполнения цели при повторном тапе (не создаёт
+// случайный дубль сверх target). Намеренно НЕ трогает logMedIntake() — та
+// функция обслуживает другой, уже работающий счётчик «сегодня: N ✓» в
+// «Плане приёма» и не должна менять поведение.
+function markMedTakenOnDay(medId, day) {
+  const med = (DB.meds || []).find(m => m && m.id === medId); if (!med) return;
+  if (medIntakeCountOnDay(medId, day) >= medDailyTarget(med)) return;
+  pushMedIntakeRecord(medId, day);
+  persist(); rHealthToday(); try { rMedReminder(); } catch (e) {}
+  hptMed(); toast(`${med.name}: приём за ${day.slice(5)} отмечен`, 'ok');
+}
+// Для «без расписания» (manual/PRN или вообще без scheduleMode): каждый тап
+// — самостоятельный реальный факт, без дневного target и без cap — иначе
+// PRN-препарат, принимаемый несколько раз в день, был бы искусственно
+// ограничен одной отметкой.
+function logAdHocMedIntake(medId, day) {
+  const med = (DB.meds || []).find(m => m && m.id === medId); if (!med) return;
+  pushMedIntakeRecord(medId, day);
   persist(); rHealthToday(); try { rMedReminder(); } catch (e) {}
   hptMed(); toast(`${med.name}: приём за ${day.slice(5)} отмечен`, 'ok');
 }
@@ -3468,6 +3552,10 @@ function rMedDetail() {
     .sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
   let html = `<div class="si-text" style="font-weight:600">${esc(med.name)}</div>`;
   if (med.dose) html += `<div class="si-text" style="color:var(--t3)">${esc(med.dose)}</div>`;
+  const schedTxt = med.scheduleMode === 'daily' ? `Ежедневно${medDailyTarget(med) > 1 ? ' · ' + medDailyTarget(med) + ' раз/день' : ''}`
+    : med.scheduleMode === 'weekdays' ? `По дням недели: ${(med.weekdays || []).map(v => (MED_WEEKDAY_LABELS.find(w => w.v === v) || {}).l).filter(Boolean).join(', ') || '—'}${medDailyTarget(med) > 1 ? ' · ' + medDailyTarget(med) + ' раз/день' : ''}`
+    : med.scheduleMode === 'manual' ? 'По необходимости' : 'График не задан';
+  html += `<div class="si-text" style="color:var(--t3);font-size:.72rem">${esc(schedTxt)}</div>`;
   html += `<div class="sec-lbl" style="margin-top:.75rem">Приёмы · ${esc(day.slice(5))}</div>`;
   html += intakes.length
     ? intakes.map(i => `<div class="si-row"><div class="si-body"><div class="si-text">${esc(new Date(i.at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' }))}</div></div>
@@ -3480,8 +3568,10 @@ function deleteMedIntake(id) {
 }
 function rHealthToday() {
   const el = $('health-today'); if (!el) return;
-  const day = _healthDay, isToday = day === todayKey();
-  const meds = projAll('meds').filter(m => m && m.active !== false);
+  const day = _healthDay, isToday = day === localDayKey();
+  const allMeds = projAll('meds').filter(m => m && m.active !== false);
+  const due = allMeds.filter(m => medDueOnDay(m, day));
+  const unscheduled = allMeds.filter(m => !medDueOnDay(m, day));
   const label = isToday ? 'Сегодня' : new Date(day + 'T00:00:00Z').toLocaleDateString('ru', { day: 'numeric', month: 'short', timeZone: 'UTC' });
   let html = `<div class="sec-lbl">Сегодня</div><div class="card mx mb">
     <div class="srow" style="padding:.6rem 1rem">
@@ -3489,21 +3579,38 @@ function rHealthToday() {
       <span class="sl2" style="text-align:center;flex:1">${esc(label)}${isToday ? '' : ` <button type="button" class="btn btn-s btn-xs" style="margin-left:.4rem" onclick="healthTodayGoToday()">Сегодня</button>`}</span>
       <button type="button" class="btn btn-s btn-xs" style="min-width:44px;min-height:44px" onclick="healthTodayShiftDay(1)" aria-label="Следующий день">→</button>
     </div>`;
-  if (!meds.length) {
-    html += `<div style="padding:1rem" class="ai-sp-empty">Добавь план приёма ниже — здесь появится чек-лист на каждый день.</div>`;
+  if (!allMeds.length) {
+    html += `<div style="padding:1rem" class="ai-sp-empty">Добавь план приёма ниже и укажи расписание — здесь появится чек-лист на каждый день.</div>`;
+  } else if (!due.length) {
+    html += `<div style="padding:1rem" class="ai-sp-empty">На этот день нет позиций с явно заданным ежедневным расписанием.</div>`;
   } else {
-    html += meds.map(m => {
-      const taken = medTakenOnDay(m.id, day);
+    html += due.map(m => {
+      const target = medDailyTarget(m), takenN = medIntakeCountOnDay(m.id, day), full = takenN >= target;
+      const statusTxt = target > 1 ? `${takenN} из ${target}${full ? ' ✓' : ''}` : (full ? '✓ Принято' : 'По плану · не отмечено');
       return `<div class="si-row">
         <button type="button" class="si-body" style="background:none;border:0;padding:0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:44px;display:flex;flex-direction:column;justify-content:center" onclick="openMedDetail(${m.id})" aria-label="Открыть план: ${esc(m.name)}">
           <div class="si-text">${esc(m.name)}${m.dose ? ` <span style="color:var(--t3)">· ${esc(m.dose)}</span>` : ''}</div>
-          <div class="si-text" style="color:${taken ? 'var(--green-t)' : 'var(--t3)'};font-size:.72rem">${taken ? '✓ Принято' : 'По плану · не отмечено'}</div>
+          <div class="si-text" style="color:${full ? 'var(--green-t)' : 'var(--t3)'};font-size:.72rem">${esc(statusTxt)}</div>
         </button>
-        ${taken ? '' : `<button type="button" class="btn btn-s btn-xs" style="flex:none;min-width:44px;min-height:44px" onclick="event.stopPropagation();markMedTakenOnDay(${m.id},'${day}')">Принял</button>`}
+        ${full ? '' : `<button type="button" class="btn btn-s btn-xs" style="flex:none;min-width:44px;min-height:44px" onclick="event.stopPropagation();markMedTakenOnDay(${m.id},'${day}')">Принял</button>`}
       </div>`;
     }).join('');
   }
-  html += `</div><div class="be-note mx mb" style="color:var(--t3)">Отметка факта приёма — твой личный учёт. Приложение не проверяет дозы, сочетания и не даёт медицинских рекомендаций.</div>`;
+  if (unscheduled.length) {
+    html += `<div class="sec-lbl" style="margin-top:.5rem">Без ежедневного графика</div>`;
+    html += unscheduled.map(m => {
+      const takenN = medIntakeCountOnDay(m.id, day);
+      const schedTxt = m.scheduleMode === 'manual' ? 'По необходимости' : 'График не задан';
+      return `<div class="si-row">
+        <button type="button" class="si-body" style="background:none;border:0;padding:0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:44px;display:flex;flex-direction:column;justify-content:center" onclick="openMedDetail(${m.id})" aria-label="Открыть план: ${esc(m.name)}">
+          <div class="si-text">${esc(m.name)}${m.dose ? ` <span style="color:var(--t3)">· ${esc(m.dose)}</span>` : ''}</div>
+          <div class="si-text" style="color:var(--t3);font-size:.72rem">${esc(schedTxt)}${takenN ? ` · отмечено раз: ${takenN}` : ''}</div>
+        </button>
+        <button type="button" class="btn btn-s btn-xs" style="flex:none;min-width:44px;min-height:44px" onclick="event.stopPropagation();logAdHocMedIntake(${m.id},'${day}')">Отметить приём</button>
+      </div>`;
+    }).join('');
+  }
+  html += `</div><div class="be-note mx mb" style="color:var(--t3)">Отметка факта приёма — твой личный учёт. Приложение не проверяет дозы, сочетания и не даёт медицинских рекомендаций. Ежедневный чек-лист учитывает только явно заданное тобой расписание.</div>`;
   el.innerHTML = html;
   icons();
 }
@@ -3565,7 +3672,7 @@ function openLabAdd(editId) {
   const fields = {
     'lab-testname': rec ? rec.testName : '', 'lab-value': rec ? rec.valueText : '',
     'lab-unit': rec ? rec.unit : '', 'lab-ref': rec ? rec.referenceText : '',
-    'lab-collected': rec ? (rec.collectedAt || '').slice(0, 10) : todayKey(),
+    'lab-collected': rec ? (rec.collectedAt || '').slice(0, 10) : localDayKey(),
     'lab-lab': rec ? rec.laboratory : '', 'lab-note': rec ? rec.note : '',
   };
   Object.entries(fields).forEach(([id, v]) => { if ($(id)) $(id).value = v || ''; });
@@ -3579,7 +3686,7 @@ function saveLab() {
   if (!testName || !valueText) { toast('Нужны название показателя и значение', 'warn'); return; }
   const unit = ($('lab-unit') ? $('lab-unit').value : '').trim();
   const referenceText = ($('lab-ref') ? $('lab-ref').value : '').trim();
-  const collectedAt = ($('lab-collected') ? $('lab-collected').value : '').trim() || todayKey();
+  const collectedAt = ($('lab-collected') ? $('lab-collected').value : '').trim() || localDayKey();
   const laboratory = ($('lab-lab') ? $('lab-lab').value : '').trim();
   const note = ($('lab-note') ? $('lab-note').value : '').trim();
   // Числовое значение — только если запись однозначно числовая (запятая
@@ -3602,7 +3709,11 @@ function saveLab() {
   closeOv('ov-lab-add'); persist(); rLabList();
   hptMed(); toast('Результат сохранён', 'ok');
 }
-function deleteLab(id) { delUndo('labObservations', id, () => { rLabList(); }, 'Результат удалён'); }
+// Owner review (PR #151, дефект 4): production-safe уборка media запускается
+// ПОСЛЕ реального окна отмены delUndo() (6500мс), а не немедленно и не вручную
+// из тестов — если пользователь нажмёт «Отменить», запись (и её media-ссылка)
+// вернутся до того, как этот таймер сработает.
+function deleteLab(id) { delUndo('labObservations', id, () => { rLabList(); }, 'Результат удалён'); setTimeout(gcMedia, 7000); }
 function openLabDet(id) { STATE.labDetId = id; rLabDet(); openOv('ov-lab-det'); }
 // Read-only тренд: только совпадающие testName+unit и однозначно числовые
 // значения — НЕ смешивает разные единицы, не интерпретирует медицинский
@@ -3668,7 +3779,7 @@ function openDocAdd(editId) {
   const rec = editId != null ? (DB.healthDocuments || []).find(r => r && r.id === editId) : null;
   if ($('doc-title')) $('doc-title').value = rec ? rec.title : '';
   if ($('doc-kind')) $('doc-kind').value = rec ? rec.kind : 'other';
-  if ($('doc-date')) $('doc-date').value = rec ? (rec.documentDate || '').slice(0, 10) : todayKey();
+  if ($('doc-date')) $('doc-date').value = rec ? (rec.documentDate || '').slice(0, 10) : localDayKey();
   if ($('doc-provider')) $('doc-provider').value = rec ? rec.provider : '';
   if ($('doc-note')) $('doc-note').value = rec ? rec.note : '';
   STATE.docAddMedia = rec ? (rec.media || []).slice() : [];
@@ -3679,7 +3790,7 @@ function saveDoc() {
   const title = ($('doc-title') ? $('doc-title').value : '').trim();
   if (!title) { toast('Введи название документа', 'warn'); return; }
   const kind = HEALTH_DOC_KINDS[($('doc-kind') ? $('doc-kind').value : '')] ? $('doc-kind').value : 'other';
-  const documentDate = ($('doc-date') ? $('doc-date').value : '').trim() || todayKey();
+  const documentDate = ($('doc-date') ? $('doc-date').value : '').trim() || localDayKey();
   const provider = ($('doc-provider') ? $('doc-provider').value : '').trim();
   const note = ($('doc-note') ? $('doc-note').value : '').trim();
   const media = (STATE.docAddMedia || []).slice();
@@ -3696,7 +3807,7 @@ function saveDoc() {
   closeOv('ov-doc-add'); persist(); rHealthDocs();
   hptMed(); toast('Документ сохранён', 'ok');
 }
-function deleteDoc(id) { delUndo('healthDocuments', id, () => { rHealthDocs(); }, 'Документ удалён'); }
+function deleteDoc(id) { delUndo('healthDocuments', id, () => { rHealthDocs(); }, 'Документ удалён'); setTimeout(gcMedia, 7000); }
 function openDocDet(id) { STATE.docDetId = id; rDocDet(); openOv('ov-doc-det'); }
 async function rDocDet() {
   const el = $('doc-det-body'); if (!el) return;
@@ -3737,11 +3848,15 @@ function rHealthDocs() {
 // НЕ копирует записи в новую коллекцию — на каждый рендер строит временный
 // массив ссылок {kind,coll,id,at,text} поверх уже существующих коллекций
 // через projAll (проекция, оригиналы не мутируются).
+// Owner review (PR #151, дефект 3): период — обязательный путь Wave 2,
+// не только внутренняя функция; ниже — реальные кнопки с aria-pressed,
+// меняющие видимую выдачу (см. rHealthTimeline()).
+const HEALTH_TL_PERIODS = [{ v: 7, l: '7 дн.' }, { v: 30, l: '30 дн.' }, { v: 90, l: '90 дн.' }, { v: 180, l: '180 дн.' }, { v: null, l: 'Всё' }];
 let _tlFilter = 'all', _tlDays = 90;
 function healthTimelineFilter(kind) { _tlFilter = kind; rHealthTimeline(); }
 function healthTimelineWindow(days) { _tlDays = days; rHealthTimeline(); }
 function healthTimelineItems() {
-  const from = Date.now() - _tlDays * 864e5;
+  const from = _tlDays == null ? -Infinity : Date.now() - _tlDays * 864e5;
   const items = [];
   projAll('medIntakes').forEach(r => { const at = Date.parse(r.at || r.createdAt) || 0; if (at >= from) { const m = (DB.meds || []).find(x => x && x.id === r.medId); items.push({ kind: 'med', coll: 'medIntakes', id: r.id, at, text: `Приём: ${m ? m.name : 'препарат'}` }); } });
   projAll('symptoms').forEach(r => { const at = Date.parse(r.createdAt) || 0; if (at >= from) items.push({ kind: 'symptom', coll: 'symptoms', id: r.id, at, text: `Симптом: ${r.name} (${r.severity ?? '—'}/10)` }); });
@@ -3764,7 +3879,8 @@ function rHealthTimeline() {
   const list = _tlFilter === 'all' ? all : all.filter(it => it.kind === _tlFilter);
   const kinds = ['all', 'med', 'symptom', 'measure', 'lab', 'doc', 'craving'];
   let html = `<div class="sec-lbl">Хронология здоровья</div><div class="card mx mb">`;
-  html += `<div style="padding:.5rem 1rem;display:flex;gap:.4rem;flex-wrap:wrap">` + kinds.map(k => `<button type="button" class="btn btn-s btn-xs${_tlFilter === k ? ' on' : ''}" onclick="healthTimelineFilter('${k}')">${k === 'all' ? 'Всё' : esc(HEALTH_TL_LABELS[k])}</button>`).join('') + `</div>`;
+  html += `<div style="padding:.5rem 1rem 0;display:flex;gap:.4rem;flex-wrap:wrap">` + HEALTH_TL_PERIODS.map(p => `<button type="button" class="btn btn-s btn-xs${_tlDays === p.v ? ' on' : ''}" aria-pressed="${_tlDays === p.v}" onclick="healthTimelineWindow(${p.v === null ? 'null' : p.v})">${esc(p.l)}</button>`).join('') + `</div>`;
+  html += `<div style="padding:.5rem 1rem;display:flex;gap:.4rem;flex-wrap:wrap">` + kinds.map(k => `<button type="button" class="btn btn-s btn-xs${_tlFilter === k ? ' on' : ''}" aria-pressed="${_tlFilter === k}" onclick="healthTimelineFilter('${k}')">${k === 'all' ? 'Всё' : esc(HEALTH_TL_LABELS[k])}</button>`).join('') + `</div>`;
   html += list.length
     ? list.slice(0, 200).map(it => `<button type="button" class="si-row tap" style="width:100%;background:none;border:0;padding:var(--s3) 0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:44px" onclick="healthTimelineOpen('${it.coll}',${JSON.stringify(it.id)})">
         <div class="si-body"><div class="si-text">${esc(it.text)}</div>

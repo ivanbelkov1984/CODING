@@ -935,7 +935,31 @@
     <div class="be-note" style="margin:0 1rem .5rem">Лекарство, витамин или добавка — как назначено тебе или как ты решил принимать. Это твой учёт, не рекомендация.</div>
     <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.75rem">
       <div><div class="f-lbl">Название</div><input class="field" id="med-name" placeholder="Например: Витамин D"></div>
-      <div><div class="f-lbl">Доза и график (свободный текст)</div><input class="field" id="med-dose" placeholder="Например: 2000 МЕ · утром после еды"></div>
+      <div><div class="f-lbl">Доза (свободный текст)</div><input class="field" id="med-dose" placeholder="Например: 2000 МЕ"></div>
+      <div>
+        <div class="f-lbl">Расписание (для чек-листа «Сегодня»)</div>
+        <select class="field" id="med-schedule" onchange="medScheduleModeChanged()">
+          <option value="manual" selected>По необходимости (без ежедневного чек-листа)</option>
+          <option value="daily">Ежедневно</option>
+          <option value="weekdays">По дням недели</option>
+        </select>
+      </div>
+      <div id="med-weekdays-wrap" style="display:none">
+        <div class="f-lbl">Дни недели</div>
+        <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+          <label class="btn btn-s btn-xs"><input type="checkbox" value="1" style="margin-right:.3rem">Пн</label>
+          <label class="btn btn-s btn-xs"><input type="checkbox" value="2" style="margin-right:.3rem">Вт</label>
+          <label class="btn btn-s btn-xs"><input type="checkbox" value="3" style="margin-right:.3rem">Ср</label>
+          <label class="btn btn-s btn-xs"><input type="checkbox" value="4" style="margin-right:.3rem">Чт</label>
+          <label class="btn btn-s btn-xs"><input type="checkbox" value="5" style="margin-right:.3rem">Пт</label>
+          <label class="btn btn-s btn-xs"><input type="checkbox" value="6" style="margin-right:.3rem">Сб</label>
+          <label class="btn btn-s btn-xs"><input type="checkbox" value="0" style="margin-right:.3rem">Вс</label>
+        </div>
+      </div>
+      <div id="med-target-wrap">
+        <div class="f-lbl">Приёмов в день</div>
+        <input class="field" type="number" id="med-target" min="1" step="1" value="1" style="max-width:6rem">
+      </div>
       <button class="btn btn-p btn-full" onclick="saveMed()"><i data-lucide="check"></i>Добавить</button>
     </div>
   </div>

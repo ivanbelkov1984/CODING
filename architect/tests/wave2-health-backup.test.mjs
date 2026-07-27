@@ -32,12 +32,16 @@ const NOW = '2026-07-27T12:00:00.000Z';
 // id — namespaced строки (lab:.../healthDoc:...), как их реально генерирует
 // psyUid() в app.js (тот же collision-safety принцип, что и psyLinks/
 // relationshipContexts в Wave 1, issue #148/#149).
-// 1×1 PNG (валидный base64), чтобы canonicalMediaBytes/sha256 отработали на
-// реальных байтах, не на фиктивной строке.
+// 1×1 PNG (валидный base64) — image-вложение; owner review (PR #151, дефект
+// 4) также требует доказательство для НЕ-image вложений (application/pdf),
+// которые в production идут через blobToDataURL() БЕЗ canvas-реэнкода —
+// поэтому второе media-вложение ниже — синтетический PDF (type:'file').
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+const PDF_BYTES_B64 = Buffer.from('%PDF-1.4\n%%EOF').toString('base64');
 const mediaKey = 'm_lab_scan_1';
+const mediaKeyPdf = 'm_lab_scan_2_pdf';
 const labObservations = [
-  { id: 'lab:m1', testName: 'Гемоглобин', valueText: '145', valueNumber: 145, unit: 'г/л', referenceText: '130-160', collectedAt: '2026-07-20', resultedAt: null, laboratory: 'Инвитро', note: '', media: [mediaKey], privacyClass: 'sensitive', createdAt: NOW, day: '2026-07-20', sv: 4, _u: 1 },
+  { id: 'lab:m1', testName: 'Гемоглобин', valueText: '145', valueNumber: 145, unit: 'г/л', referenceText: '130-160', collectedAt: '2026-07-20', resultedAt: null, laboratory: 'Инвитро', note: '', media: [mediaKey, mediaKeyPdf], privacyClass: 'sensitive', createdAt: NOW, day: '2026-07-20', sv: 4, _u: 1 },
 ];
 const healthDocuments = [
   { id: 'healthDoc:m1', title: 'Выписка', kind: 'discharge', documentDate: '2026-07-15', provider: 'Поликлиника №1', note: '', media: [mediaKey], privacyClass: 'sensitive', createdAt: NOW, day: '2026-07-15', sv: 4, _u: 1 },
@@ -54,7 +58,10 @@ function seed() {
     }),
     [KEYS.cfg('pA')]: JSON.stringify({ userName: 'Alice', domainLabel: 'Книга', aiModel: 'claude-opus-4-8' }),
   });
-  const media = makeMedia({ [mediaKey]: { data: 'data:image/png;base64,' + PNG_1PX, type: 'image', createdAt: NOW } });
+  const media = makeMedia({
+    [mediaKey]: { data: 'data:image/png;base64,' + PNG_1PX, type: 'image', createdAt: NOW },
+    [mediaKeyPdf]: { data: 'data:application/pdf;base64,' + PDF_BYTES_B64, type: 'file', createdAt: NOW },
+  });
   return { storage, media };
 }
 
@@ -70,12 +77,17 @@ async function main() {
   ok(Array.isArray(dataOnlyPayload.db.healthDocuments) && dataOnlyPayload.db.healthDocuments.length === 1, 'data-only bundle carries healthDocuments');
   ok(!('media' in dataOnlyPayload.db.labObservations[0]), 'data-only bundle strips media refs from labObservations (по контракту)');
 
-  // 2) complete bundle несёт canonical media bytes/MIME (реальный PNG).
+  // 2) complete bundle несёт canonical media bytes/MIME — и для image (PNG),
+  //    и для file/PDF (owner review, PR #151, дефект 4: PDF идёт через
+  //    blobToDataURL() без canvas-реэнкода, поэтому его bytes ДОЛЖНЫ остаться
+  //    точными на всём пути backup/restore).
   const { payload } = await adapter.buildBundle({ id: 'pA', mode: 'complete' });
-  ok(Array.isArray(payload.media) && payload.media.length === 1, 'complete bundle carries exactly 1 media item');
-  const mediaItem = payload.media[0];
-  ok(mediaItem.id === mediaKey && mediaItem.mime === 'image/png', 'complete bundle: media id/MIME сохранены как есть (image/png)');
-  ok(payload.db.labObservations[0].media[0] === mediaKey && payload.db.healthDocuments[0].media[0] === mediaKey, 'complete bundle: labObservations/healthDocuments сохраняют media-ссылку на тот же id');
+  ok(Array.isArray(payload.media) && payload.media.length === 2, 'complete bundle carries exactly 2 media items (PNG + PDF)');
+  const pngItem = payload.media.find(m => m.id === mediaKey);
+  const pdfItem = payload.media.find(m => m.id === mediaKeyPdf);
+  ok(pngItem && pngItem.mime === 'image/png', 'complete bundle: PNG media id/MIME сохранены как есть (image/png)');
+  ok(pdfItem && pdfItem.mime === 'application/pdf', 'complete bundle: PDF media id/MIME сохранены как есть (application/pdf)');
+  ok(payload.db.labObservations[0].media.includes(mediaKey) && payload.db.labObservations[0].media.includes(mediaKeyPdf) && payload.db.healthDocuments[0].media[0] === mediaKey, 'complete bundle: labObservations/healthDocuments сохраняют media-ссылки на те же id');
 
   // 3) Encrypt → decrypt roundtrip (PBKDF2 600k + AES-GCM-256) сохраняет
   //    новые коллекции и media байты без потерь.
@@ -117,12 +129,17 @@ async function main() {
     const restoredDb = JSON.parse(dest.storage.getItem(KEYS.db('pNew1')));
     ok(Array.isArray(restoredDb.labObservations) && restoredDb.labObservations.length === 1 && restoredDb.labObservations[0].id === 'lab:m1', 'production restore: labObservations в восстановленном профиле (string id сохранён)');
     ok(Array.isArray(restoredDb.healthDocuments) && restoredDb.healthDocuments.length === 1 && restoredDb.healthDocuments[0].id === 'healthDoc:m1', 'production restore: healthDocuments в восстановленном профиле (string id сохранён)');
-    const restoredMediaKey = restoredDb.labObservations[0].media[0];
-    const restoredMedia = await dest.media.get(restoredMediaKey);
-    ok(!!restoredMedia, 'production restore: media blob присутствует в целевом IndexedDB-store');
-    ok(restoredMedia && restoredMedia.data === 'data:image/png;base64,' + PNG_1PX, 'production restore: media bytes точно совпадают с исходным PNG (exact bytes)');
-    ok(restoredMedia && /^data:image\/png;base64,/.test(restoredMedia.data), 'production restore: MIME сохранён (image/png)');
-    ok(restoredDb.healthDocuments[0].media[0] === restoredMediaKey, 'production restore: labObservations и healthDocuments после restore по-прежнему ссылаются на ОДНУ и ту же media (reuse, не дублирование)');
+    const restoredPngKey = restoredDb.healthDocuments[0].media[0];
+    const restoredPngMedia = await dest.media.get(restoredPngKey);
+    ok(!!restoredPngMedia, 'production restore: PNG media blob присутствует в целевом IndexedDB-store');
+    ok(restoredPngMedia && restoredPngMedia.data === 'data:image/png;base64,' + PNG_1PX, 'production restore: PNG media bytes точно совпадают с исходником (exact bytes)');
+    ok(restoredPngMedia && /^data:image\/png;base64,/.test(restoredPngMedia.data), 'production restore: PNG MIME сохранён (image/png)');
+    ok(restoredDb.labObservations[0].media.includes(restoredPngKey), 'production restore: labObservations и healthDocuments после restore по-прежнему ссылаются на ОДНУ и ту же PNG-media (reuse, не дублирование)');
+    const restoredPdfKey = restoredDb.labObservations[0].media.find(k => k !== restoredPngKey);
+    const restoredPdfMedia = await dest.media.get(restoredPdfKey);
+    ok(!!restoredPdfMedia, 'production restore: PDF media blob присутствует в целевом IndexedDB-store');
+    ok(restoredPdfMedia && restoredPdfMedia.data === 'data:application/pdf;base64,' + PDF_BYTES_B64, 'production restore: PDF (не-image, type=file) bytes точно совпадают с исходником — без canvas-реэнкода');
+    ok(restoredPdfMedia && restoredPdfMedia.type === 'file', 'production restore: PDF сохранён с type="file" (не image/audio)');
     ok(hydrated && hydrated.profileId === 'pNew1' && hydrated.mode === 'new', 'production restore: onActivated-гидратация вызвана с корректным profileId/mode');
   }
 
