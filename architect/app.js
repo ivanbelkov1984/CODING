@@ -11,7 +11,7 @@ const dateRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:
 const dateFullRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:'long',year:'numeric'});
 const todayKey = () => new Date().toISOString().slice(0,10);
 const nowISO = () => new Date().toISOString();            // UTC ISO 8601 — источник истины для времени
-const SCHEMA_VERSION = 3;   // Wave 1 (issue #148): psyLinks/relationshipContexts add-only bump
+const SCHEMA_VERSION = 4;   // Wave 2 (issue #150): labObservations/healthDocuments add-only bump
 // Красивая дата из ISO createdAt (с откатом на legacy-строку date/dt)
 const dispDate = (rec, full=false) => {
   if (rec && rec.createdAt) return (full?dateFullRU:dateRU)(new Date(rec.createdAt));
@@ -63,6 +63,13 @@ const DEFAULT_DB = {
   medIntakes: [],     // Health Organizer: ФАКТ приёма (отдельный класс — план ≠ факт)
   symptoms: [],       // Health Organizer: симптомы как отдельные события (наблюдение, не диагноз)
   measures: [],       // Health Organizer: измерения (вес/давление/пульс… — ручной ввод)
+  // Wave 2 (issue #150): «Здоровье как органайзер». Личные факты, не диагностика.
+  // Namespaced string id (lab:.../healthDoc:...) — тот же collision-safety
+  // принцип, что и psyLinks/relationshipContexts (Wave 1, issue #148/#149):
+  // общий DB._del индексирован сырым id, поэтому новые коллекции не должны
+  // использовать числовое id-пространство существующих коллекций.
+  labObservations: [],   // лабораторные результаты: {testName, valueText, valueNumber, unit, referenceText, collectedAt, laboratory, media, ...}
+  healthDocuments: [],   // медицинские документы/вложения: {title, kind, documentDate, provider, media, ...}
   astroBirth: null,   // Астрология: OriginalBirthEvidence (immutable; правки — коррекциями)
   astroCharts: [],    // Астрология: SymbolicAstrologyAnnotation — рассчитанные карты (versioned)
   astroTexts: [],     // Астрология: кэш собранных текстов (ruleIds+promptVersion для аудита)
@@ -174,7 +181,7 @@ const bakKey = id => 'arch5_bak_' + id;
 function dbCount(db) {
   if (!db || typeof db !== 'object') return 0;
   let n = 0;
-  ['insights','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings','psyLinks','relationshipContexts']
+  ['insights','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments']
     .forEach(c => { if (Array.isArray(db[c])) n += db[c].length; });
   return n;
 }
@@ -560,6 +567,7 @@ function openOv(id) {
   if (id==='ov-why')      resetWhyForm();
   if (id==='ov-history')  rHistory();
   if (id==='ov-add')      { STATE.addMedia = []; rAddMedia(); }
+  if (id==='ov-med-add')  resetMedAddForm();
 }
 // Собрать ВСЕ media-id, на которые ссылается любая запись любой коллекции db.
 function collectDbMediaRefs(db, out) {
@@ -578,7 +586,10 @@ function collectDbMediaRefs(db, out) {
 // оставить лишнее медиа, чем удалить чужое/нужное из-за ошибки чтения).
 async function gcMedia() {
   try {
-    const ref = new Set(STATE.addMedia || []);
+    // Owner review (PR #151, дефект 4): активные staging-массивы Волны 2
+    // (лаборатория/документы) должны защищать свою media от GC точно так же,
+    // как STATE.addMedia защищает черновик инсайта.
+    const ref = new Set([...(STATE.addMedia || []), ...(STATE.labAddMedia || []), ...(STATE.docAddMedia || [])]);
     collectDbMediaRefs(DB, ref);                          // текущий in-memory профиль
     // Реестр профилей: если повреждён — стоп (иначе чужие медиа примем за мусор).
     const rawReg = localStorage.getItem(PKEY);
@@ -607,6 +618,13 @@ async function gcMedia() {
 function closeOv(id) {
   $(id).classList.remove('on');
   document.body.style.overflow = '';
+  // Owner review (PR #151, дефект 4): закрытие формы лаборатории/документа
+  // (и явной отменой, и после сохранения) снимает staging-защиту и запускает
+  // fail-safe generic gcMedia() — media, ещё используемая только что
+  // сохранённой записью (или другим черновиком/профилем), останется, потому
+  // что gcMedia() считает ссылки по реальному DB, а не по этому staging-массиву.
+  if (id === 'ov-lab-add') { STATE.labAddMedia = []; STATE.labEditId = null; gcMedia(); }
+  if (id === 'ov-doc-add') { STATE.docAddMedia = []; STATE.docEditId = null; gcMedia(); }
 }
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
@@ -1484,6 +1502,8 @@ const REC_COLLS = {
   astroPartners: { ru: 'Партнёры (синастрия)', sum: r => r.label || 'партнёр' },
   psyLinks: { ru: 'Связи (доказательная цепочка)', sum: r => `${PSY_LINK_RELATION_LABELS[r.relation] || r.relation}` },
   relationshipContexts: { ru: 'Контексты отношений', sum: r => `${r.label || ''}${r.status === 'archived' ? ' (архив)' : ''}` },
+  labObservations: { ru: 'Лабораторные результаты', sum: r => `${(r.collectedAt || '').slice(0, 10)} · ${r.testName || ''}: ${r.valueText || ''}${r.unit ? ' ' + r.unit : ''}` },
+  healthDocuments: { ru: 'Документы здоровья', sum: r => `${(r.documentDate || '').slice(0, 10)} · ${r.title || 'документ'}` },
 };
 function openRecords() {
   const sel = $('rec-coll');
@@ -3304,17 +3324,41 @@ function toggleEnvFlag(key) {
 // НЕ оценивает взаимодействия и НЕ даёт медицинских рекомендаций (регуляторный
 // карантин). План (medication_plan) и фактический приём (medication_intake) —
 // разные классы записей, чтобы «назначено» никогда не смешивалось с «принято».
+// Owner review (PR #151, дефект 1): расписание — аддитивное опциональное поле
+// самой записи `meds` (НЕ вторая коллекция). Явный выбор пользователя в форме
+// (по умолчанию «По необходимости» — наименее самонадеянный вариант, ничего
+// не подразумевает как «ежедневно» без явного действия).
+function medScheduleModeChanged() {
+  const sel = $('med-schedule'); const wrap = $('med-weekdays-wrap'); const tgtWrap = $('med-target-wrap');
+  if (!sel) return;
+  if (wrap) wrap.style.display = sel.value === 'weekdays' ? '' : 'none';
+  if (tgtWrap) tgtWrap.style.display = sel.value === 'manual' ? 'none' : '';
+}
+function resetMedAddForm() {
+  if ($('med-name')) $('med-name').value = ''; if ($('med-dose')) $('med-dose').value = '';
+  if ($('med-schedule')) $('med-schedule').value = 'manual';
+  document.querySelectorAll('#med-weekdays-wrap input[type=checkbox]').forEach(cb => { cb.checked = false; });
+  if ($('med-target')) $('med-target').value = '1';
+  medScheduleModeChanged();
+}
 function saveMed() {
   const name = ($('med-name') ? $('med-name').value : '').trim();
   const dose = ($('med-dose') ? $('med-dose').value : '').trim();
   if (!name) { toast('Введи название', 'warn'); return; }
+  const scheduleMode = ($('med-schedule') ? $('med-schedule').value : 'manual') || 'manual';
+  const weekdays = scheduleMode === 'weekdays'
+    ? Array.from(document.querySelectorAll('#med-weekdays-wrap input[type=checkbox]:checked')).map(cb => parseInt(cb.value, 10))
+    : undefined;
+  const targetRaw = $('med-target') ? parseInt($('med-target').value, 10) : 1;
+  const dailyTarget = (isFinite(targetRaw) && targetRaw >= 1) ? targetRaw : 1;
   DB.meds.push({
     id: Date.now(), kType: 'medication_plan', privacyClass: 'sensitive',
     name, dose, active: true,
+    scheduleMode, ...(weekdays !== undefined ? { weekdays } : {}), dailyTarget,
     verif: 'user_confirmed', life: 'current',
     createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
   });
-  if ($('med-name')) $('med-name').value = ''; if ($('med-dose')) $('med-dose').value = '';
+  resetMedAddForm();
   closeOv('ov-med-add'); persist(); rHealth();
   hptMed(); toast('Добавлено в план', 'ok');
 }
@@ -3403,6 +3447,448 @@ function bodySectionHTML() {
     <button class="btn btn-s btn-sm" onclick="openDoctorReport()"><i data-lucide="file-text"></i>Отчёт врачу</button>
   </div>`;
   return html;
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  HEALTH ORGANIZER Wave 2 (issue #150): «Сегодня», лаборатория,
+//  документы, единая хронология здоровья. Личные факты пользователя —
+//  НЕ диагностика, НЕ рекомендации, НЕ ИИ. Слой поверх уже существующих
+//  сущностей meds/medIntakes/symptoms/measures/cravings — план и факт
+//  здесь не переизобретаются, только читаются и (для medIntakes) через
+//  существующий production-путь push+persist дополняются day-таргетингом.
+// ═════════════════════════════════════════════════════════════════
+
+// ── «Сегодня»: план (meds) × факт (medIntakes) за выбранный день ──
+// day-арифметика по YYYY-MM-DD компонентам через Date.UTC — чисто
+// строковая арифметика над уже-локальными компонентами дня, не завязана на
+// часовой пояс момента вызова (owner review, PR #151: оставлено как есть —
+// пригодно и для UTC-, и для локальных day-ключей).
+function shiftDayKey(day, delta) {
+  const [y, m, d] = String(day).split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return dt.toISOString().slice(0, 10);
+}
+// Owner review (PR #151, дефект 2): общий todayKey() в приложении — намеренно
+// UTC (`new Date().toISOString().slice(0,10)`) и используется как day-ключ во
+// ВСЕХ существующих коллекциях — менять его глобально в этом PR означало бы
+// неконтролируемо расширять Волну 2 на весь app.js. Но «Сегодня»/дефолты дат
+// лаборатории и документов — это то, что пользователь буквально видит как
+// «какой сегодня день у меня», и вокруг местной полуночи todayKey() системно
+// показывает вчера/завтра на весь офсет часового пояса. Поэтому — отдельный
+// health-specific localDayKey() на локальных Y/M/D компонентах, используемый
+// ТОЛЬКО в новом контуре Волны 2 (не в общем `day`-поле записей — оно остаётся
+// той же UTC-конвенцией, что и везде, ради согласованности сортировки/группировки).
+function localDayKey(date = new Date()) {
+  const y = date.getFullYear(), m = date.getMonth() + 1, d = date.getDate();
+  return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+}
+let _healthDay = localDayKey();
+function healthTodayShiftDay(delta) { _healthDay = shiftDayKey(_healthDay, delta); rHealthToday(); }
+function healthTodayGoToday() { _healthDay = localDayKey(); rHealthToday(); }
+
+// Owner review (PR #151, дефект 1): `meds` несёт только name/dose/active —
+// никакой календарной схемы. Раньше rHealthToday() трактовала ЛЮБУЮ активную
+// запись как «нужно сегодня», что подделывало несуществующий медицинский
+// факт. Теперь — явное, аддитивное, опциональное расписание на самой
+// записи `meds` (НЕ вторая коллекция, старые записи без этих полей не
+// переписываются): scheduleMode: 'daily'|'weekdays'|'manual' (undefined —
+// legacy-запись без расписания вообще). Только явно заданное расписание
+// определяет попадание в чек-лист дня.
+const MED_WEEKDAY_LABELS = [{ v: 1, l: 'Пн' }, { v: 2, l: 'Вт' }, { v: 3, l: 'Ср' }, { v: 4, l: 'Чт' }, { v: 5, l: 'Пт' }, { v: 6, l: 'Сб' }, { v: 0, l: 'Вс' }];
+function medDailyTarget(med) { const t = med && med.dailyTarget; return (typeof t === 'number' && isFinite(t) && t >= 1) ? Math.floor(t) : 1; }
+function medDueOnDay(med, day) {
+  if (!med || !med.scheduleMode || med.scheduleMode === 'manual') return false;
+  if (med.scheduleMode === 'daily') return true;
+  if (med.scheduleMode === 'weekdays') {
+    const [y, m, d] = String(day).split('-').map(Number);
+    const dow = new Date(y, m - 1, d).getDay();   // локальные Y/M/D-компоненты, без парсинга ISO-строки
+    return Array.isArray(med.weekdays) && med.weekdays.includes(dow);
+  }
+  return false;
+}
+function medIntakeCountOnDay(medId, day) { return (DB.medIntakes || []).filter(i => i && i.medId === medId && i.day === day && i.status === 'taken').length; }
+function medTakenOnDay(medId, day) { return medIntakeCountOnDay(medId, day) > 0; }
+function pushMedIntakeRecord(medId, day) {
+  const atISO = day === localDayKey() ? nowISO() : day + 'T12:00:00.000Z';
+  DB.medIntakes.push({
+    id: Date.now() + Math.floor(Math.random() * 1000), kType: 'medication_intake', privacyClass: 'sensitive',
+    medId, status: 'taken',
+    verif: 'user_confirmed', life: 'current',
+    at: atISO, createdAt: nowISO(), day, sv: SCHEMA_VERSION, _u: Date.now(),
+  });
+}
+// Для запланированного (due) пункта: один тап = один факт, ограничено явно
+// заданным дневным target (по умолчанию 1) — несколько фактов в день
+// корректно сопоставляются с target, без схлопывания истории в один бинарный
+// факт, но и без переисполнения цели при повторном тапе (не создаёт
+// случайный дубль сверх target). Намеренно НЕ трогает logMedIntake() — та
+// функция обслуживает другой, уже работающий счётчик «сегодня: N ✓» в
+// «Плане приёма» и не должна менять поведение.
+function markMedTakenOnDay(medId, day) {
+  const med = (DB.meds || []).find(m => m && m.id === medId); if (!med) return;
+  if (medIntakeCountOnDay(medId, day) >= medDailyTarget(med)) return;
+  pushMedIntakeRecord(medId, day);
+  persist(); rHealthToday(); try { rMedReminder(); } catch (e) {}
+  hptMed(); toast(`${med.name}: приём за ${day.slice(5)} отмечен`, 'ok');
+}
+// Для «без расписания» (manual/PRN или вообще без scheduleMode): каждый тап
+// — самостоятельный реальный факт, без дневного target и без cap — иначе
+// PRN-препарат, принимаемый несколько раз в день, был бы искусственно
+// ограничен одной отметкой.
+function logAdHocMedIntake(medId, day) {
+  const med = (DB.meds || []).find(m => m && m.id === medId); if (!med) return;
+  pushMedIntakeRecord(medId, day);
+  persist(); rHealthToday(); try { rMedReminder(); } catch (e) {}
+  hptMed(); toast(`${med.name}: приём за ${day.slice(5)} отмечен`, 'ok');
+}
+function openMedDetail(medId) { STATE.medDetailId = medId; rMedDetail(); openOv('ov-med-detail'); }
+function rMedDetail() {
+  const el = $('med-detail-body'); if (!el) return;
+  const med = (DB.meds || []).find(m => m && m.id === STATE.medDetailId);
+  if (!med) { el.innerHTML = ''; return; }
+  const day = _healthDay;
+  const intakes = (DB.medIntakes || []).filter(i => i && i.medId === med.id && i.day === day)
+    .sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
+  let html = `<div class="si-text" style="font-weight:600">${esc(med.name)}</div>`;
+  if (med.dose) html += `<div class="si-text" style="color:var(--t3)">${esc(med.dose)}</div>`;
+  const schedTxt = med.scheduleMode === 'daily' ? `Ежедневно${medDailyTarget(med) > 1 ? ' · ' + medDailyTarget(med) + ' раз/день' : ''}`
+    : med.scheduleMode === 'weekdays' ? `По дням недели: ${(med.weekdays || []).map(v => (MED_WEEKDAY_LABELS.find(w => w.v === v) || {}).l).filter(Boolean).join(', ') || '—'}${medDailyTarget(med) > 1 ? ' · ' + medDailyTarget(med) + ' раз/день' : ''}`
+    : med.scheduleMode === 'manual' ? 'По необходимости' : 'График не задан';
+  html += `<div class="si-text" style="color:var(--t3);font-size:.72rem">${esc(schedTxt)}</div>`;
+  html += `<div class="sec-lbl" style="margin-top:.75rem">Приёмы · ${esc(day.slice(5))}</div>`;
+  html += intakes.length
+    ? intakes.map(i => `<div class="si-row"><div class="si-body"><div class="si-text">${esc(new Date(i.at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' }))}</div></div>
+        <button class="prof-act" onclick="deleteMedIntake(${i.id})" aria-label="Убрать приём"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:14px;height:14px;color:var(--t3)"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>`).join('')
+    : `<div class="ai-sp-empty">Нет отметок приёма за этот день.</div>`;
+  el.innerHTML = html;
+}
+function deleteMedIntake(id) {
+  delUndo('medIntakes', id, () => { rMedDetail(); rHealthToday(); try { rMedReminder(); } catch (e) {} }, 'Приём убран');
+}
+function rHealthToday() {
+  const el = $('health-today'); if (!el) return;
+  const day = _healthDay, isToday = day === localDayKey();
+  const allMeds = projAll('meds').filter(m => m && m.active !== false);
+  const due = allMeds.filter(m => medDueOnDay(m, day));
+  const unscheduled = allMeds.filter(m => !medDueOnDay(m, day));
+  const label = isToday ? 'Сегодня' : new Date(day + 'T00:00:00Z').toLocaleDateString('ru', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  let html = `<div class="sec-lbl">Сегодня</div><div class="card mx mb">
+    <div class="srow" style="padding:.6rem 1rem">
+      <button type="button" class="btn btn-s btn-xs" style="min-width:44px;min-height:44px" onclick="healthTodayShiftDay(-1)" aria-label="Предыдущий день">←</button>
+      <span class="sl2" style="text-align:center;flex:1">${esc(label)}${isToday ? '' : ` <button type="button" class="btn btn-s btn-xs" style="margin-left:.4rem" onclick="healthTodayGoToday()">Сегодня</button>`}</span>
+      <button type="button" class="btn btn-s btn-xs" style="min-width:44px;min-height:44px" onclick="healthTodayShiftDay(1)" aria-label="Следующий день">→</button>
+    </div>`;
+  if (!allMeds.length) {
+    html += `<div style="padding:1rem" class="ai-sp-empty">Добавь план приёма ниже и укажи расписание — здесь появится чек-лист на каждый день.</div>`;
+  } else if (!due.length) {
+    html += `<div style="padding:1rem" class="ai-sp-empty">На этот день нет позиций с явно заданным ежедневным расписанием.</div>`;
+  } else {
+    html += due.map(m => {
+      const target = medDailyTarget(m), takenN = medIntakeCountOnDay(m.id, day), full = takenN >= target;
+      const statusTxt = target > 1 ? `${takenN} из ${target}${full ? ' ✓' : ''}` : (full ? '✓ Принято' : 'По плану · не отмечено');
+      return `<div class="si-row">
+        <button type="button" class="si-body" style="background:none;border:0;padding:0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:44px;display:flex;flex-direction:column;justify-content:center" onclick="openMedDetail(${m.id})" aria-label="Открыть план: ${esc(m.name)}">
+          <div class="si-text">${esc(m.name)}${m.dose ? ` <span style="color:var(--t3)">· ${esc(m.dose)}</span>` : ''}</div>
+          <div class="si-text" style="color:${full ? 'var(--green-t)' : 'var(--t3)'};font-size:.72rem">${esc(statusTxt)}</div>
+        </button>
+        ${full ? '' : `<button type="button" class="btn btn-s btn-xs" style="flex:none;min-width:44px;min-height:44px" onclick="event.stopPropagation();markMedTakenOnDay(${m.id},'${day}')">Принял</button>`}
+      </div>`;
+    }).join('');
+  }
+  if (unscheduled.length) {
+    html += `<div class="sec-lbl" style="margin-top:.5rem">Без ежедневного графика</div>`;
+    html += unscheduled.map(m => {
+      const takenN = medIntakeCountOnDay(m.id, day);
+      const schedTxt = m.scheduleMode === 'manual' ? 'По необходимости' : 'График не задан';
+      return `<div class="si-row">
+        <button type="button" class="si-body" style="background:none;border:0;padding:0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:44px;display:flex;flex-direction:column;justify-content:center" onclick="openMedDetail(${m.id})" aria-label="Открыть план: ${esc(m.name)}">
+          <div class="si-text">${esc(m.name)}${m.dose ? ` <span style="color:var(--t3)">· ${esc(m.dose)}</span>` : ''}</div>
+          <div class="si-text" style="color:var(--t3);font-size:.72rem">${esc(schedTxt)}${takenN ? ` · отмечено раз: ${takenN}` : ''}</div>
+        </button>
+        <button type="button" class="btn btn-s btn-xs" style="flex:none;min-width:44px;min-height:44px" onclick="event.stopPropagation();logAdHocMedIntake(${m.id},'${day}')">Отметить приём</button>
+      </div>`;
+    }).join('');
+  }
+  html += `</div><div class="be-note mx mb" style="color:var(--t3)">Отметка факта приёма — твой личный учёт. Приложение не проверяет дозы, сочетания и не даёт медицинских рекомендаций. Ежедневный чек-лист учитывает только явно заданное тобой расписание.</div>`;
+  el.innerHTML = html;
+  icons();
+}
+
+// ── Медиа для лаборатории/документов: тот же IndexedDB media-store и формат
+// {data,type,createdAt}, что и у остальных вложений приложения (addPhoto/
+// idbPut выше) — отдельный staging-массив в STATE, поддержка произвольных
+// файлов (не только изображений) для сканов/PDF результатов и документов.
+async function addHealthMedia(input, stateKey, rerenderFn) {
+  const file = input.files && input.files[0]; input.value = '';
+  if (!file) return;
+  const isImage = /^image\//.test(file.type);
+  try {
+    const data = isImage ? await compressImage(file) : await blobToDataURL(file);
+    const key = 'm' + uid();
+    await idbPut(key, { data, type: isImage ? 'image' : 'file', createdAt: nowISO() });
+    STATE[stateKey] = STATE[stateKey] || []; STATE[stateKey].push(key);
+    rerenderFn();
+  } catch (e) { toast('Не удалось прикрепить файл', 'warn'); }
+}
+// Снять вложение из формы. НЕ удаляет blob из IndexedDB здесь: та же media
+// могла уже использоваться сохранённой записью (документ редактируется не с
+// нуля) — окончательную уборку осиротевших media делает общий generic
+// gcMedia() (см. выше в файле), который безопасно считает ссылки по ВСЕМ
+// коллекциям и профилям, а не только по этой форме.
+function removeHealthMediaStaged(id, stateKey, rerenderFn) {
+  STATE[stateKey] = (STATE[stateKey] || []).filter(x => x !== id);
+  rerenderFn();
+}
+async function addLabPhoto(input) { await addHealthMedia(input, 'labAddMedia', rLabAddMedia); }
+async function rLabAddMedia() {
+  const el = $('lab-add-media'); if (!el) return;
+  const ids = STATE.labAddMedia || [];
+  if (!ids.length) { el.innerHTML = ''; return; }
+  const items = await Promise.all(ids.map(async id => ({ id, m: await idbGet(id).catch(() => null) })));
+  el.innerHTML = items.map(({ id, m }) => {
+    if (!m) return '';
+    const inner = m.type === 'image' ? `<img src="${m.data}" alt="">` : `<span class="mth-a-ic">📄</span>`;
+    return `<div class="mth">${inner}<button class="mth-x" onclick="removeHealthMediaStaged('${id}','labAddMedia',rLabAddMedia)" aria-label="Убрать">✕</button></div>`;
+  }).join('');
+}
+async function addDocFile(input) { await addHealthMedia(input, 'docAddMedia', rDocAddMedia); }
+async function rDocAddMedia() {
+  const el = $('doc-add-media'); if (!el) return;
+  const ids = STATE.docAddMedia || [];
+  if (!ids.length) { el.innerHTML = ''; return; }
+  const items = await Promise.all(ids.map(async id => ({ id, m: await idbGet(id).catch(() => null) })));
+  el.innerHTML = items.map(({ id, m }) => {
+    if (!m) return '';
+    const inner = m.type === 'image' ? `<img src="${m.data}" alt="">` : `<span class="mth-a-ic">📄</span>`;
+    return `<div class="mth">${inner}<button class="mth-x" onclick="removeHealthMediaStaged('${id}','docAddMedia',rDocAddMedia)" aria-label="Убрать">✕</button></div>`;
+  }).join('');
+}
+
+// ── Лабораторные результаты ──
+function openLabAdd(editId) {
+  STATE.labEditId = editId != null ? editId : null;
+  const rec = editId != null ? (DB.labObservations || []).find(r => r && r.id === editId) : null;
+  const fields = {
+    'lab-testname': rec ? rec.testName : '', 'lab-value': rec ? rec.valueText : '',
+    'lab-unit': rec ? rec.unit : '', 'lab-ref': rec ? rec.referenceText : '',
+    'lab-collected': rec ? (rec.collectedAt || '').slice(0, 10) : localDayKey(),
+    'lab-lab': rec ? rec.laboratory : '', 'lab-note': rec ? rec.note : '',
+  };
+  Object.entries(fields).forEach(([id, v]) => { if ($(id)) $(id).value = v || ''; });
+  STATE.labAddMedia = rec ? (rec.media || []).slice() : [];
+  rLabAddMedia();
+  openOv('ov-lab-add');
+}
+function saveLab() {
+  const testName = ($('lab-testname') ? $('lab-testname').value : '').trim();
+  const valueText = ($('lab-value') ? $('lab-value').value : '').trim();
+  if (!testName || !valueText) { toast('Нужны название показателя и значение', 'warn'); return; }
+  const unit = ($('lab-unit') ? $('lab-unit').value : '').trim();
+  const referenceText = ($('lab-ref') ? $('lab-ref').value : '').trim();
+  const collectedAt = ($('lab-collected') ? $('lab-collected').value : '').trim() || localDayKey();
+  const laboratory = ($('lab-lab') ? $('lab-lab').value : '').trim();
+  const note = ($('lab-note') ? $('lab-note').value : '').trim();
+  // Числовое значение — только если запись однозначно числовая (запятая
+  // приведена к точке), иначе null: «120/80» или текстовые результаты не
+  // подгоняются под число (никакой интерпретации/нормы/риска).
+  const normalized = valueText.replace(',', '.');
+  const valueNumber = /^-?\d+(\.\d+)?$/.test(normalized) ? parseFloat(normalized) : null;
+  const media = (STATE.labAddMedia || []).slice();
+  if (STATE.labEditId != null) {
+    const rec = (DB.labObservations || []).find(r => r && r.id === STATE.labEditId);
+    if (rec) { Object.assign(rec, { testName, valueText, valueNumber, unit, referenceText, laboratory, note, media, collectedAt }); touch(rec); }
+  } else {
+    DB.labObservations.push({
+      id: psyUid('lab'), testName, valueText, valueNumber, unit, referenceText,
+      collectedAt, resultedAt: null, laboratory, note, media,
+      privacyClass: 'sensitive', createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+    });
+  }
+  STATE.labEditId = null; STATE.labAddMedia = [];
+  closeOv('ov-lab-add'); persist(); rLabList();
+  hptMed(); toast('Результат сохранён', 'ok');
+}
+// Owner review (PR #151, дефект 4): production-safe уборка media запускается
+// ПОСЛЕ реального окна отмены delUndo() (6500мс), а не немедленно и не вручную
+// из тестов — если пользователь нажмёт «Отменить», запись (и её media-ссылка)
+// вернутся до того, как этот таймер сработает.
+function deleteLab(id) { delUndo('labObservations', id, () => { rLabList(); }, 'Результат удалён'); setTimeout(gcMedia, 7000); }
+function openLabDet(id) { STATE.labDetId = id; rLabDet(); openOv('ov-lab-det'); }
+// Read-only тренд: только совпадающие testName+unit и однозначно числовые
+// значения — НЕ смешивает разные единицы, не интерпретирует медицинский
+// смысл, никогда не строится по нечисловым результатам.
+function labTrendFor(testName, unit) {
+  return projAll('labObservations')
+    .filter(r => r && r.testName === testName && (r.unit || '') === (unit || '') && typeof r.valueNumber === 'number' && isFinite(r.valueNumber))
+    .sort((a, b) => (Date.parse(a.collectedAt) || 0) - (Date.parse(b.collectedAt) || 0));
+}
+async function rLabDet() {
+  const el = $('lab-det-body'); if (!el) return;
+  const rec = projAll('labObservations').find(r => r && r.id === STATE.labDetId);
+  if (!rec) { el.innerHTML = ''; return; }
+  let html = `<div class="si-text" style="font-weight:600">${esc(rec.testName)}</div>
+    <div class="si-text" style="font-size:1.1rem;margin-top:.2rem">${esc(rec.valueText)}${rec.unit ? ' ' + esc(rec.unit) : ''}</div>`;
+  if (rec.referenceText) html += `<div class="si-text" style="color:var(--t3)">Референс лаборатории: ${esc(rec.referenceText)}</div>`;
+  html += `<div class="si-text" style="color:var(--t3);margin-top:.4rem">Забор: ${esc((rec.collectedAt || '').slice(0, 10))}${rec.laboratory ? ' · ' + esc(rec.laboratory) : ''}</div>`;
+  if (rec.note) html += `<div class="si-text" style="margin-top:.4rem">${esc(rec.note)}</div>`;
+  if (rec.media && rec.media.length) {
+    const items = await Promise.all(rec.media.map(id => idbGet(id).catch(() => null)));
+    html += `<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.6rem">` + items.map(m => !m ? '' : (m.type === 'image' ? `<img class="det-photo" src="${m.data}" alt="">` : `<a class="btn btn-s btn-xs" href="${m.data}" target="_blank" rel="noopener">📄 Открыть файл</a>`)).join('') + `</div>`;
+  }
+  const trend = labTrendFor(rec.testName, rec.unit);
+  if (trend.length >= 2) {
+    html += `<div class="sec-lbl" style="margin-top:.75rem">Динамика (тот же показатель и единица)</div>
+      <div class="be-note" style="color:var(--t3)">Личные записи, не диагноз и не медицинская рекомендация.</div>`;
+    html += trend.map(t => `<div class="si-row"><div class="si-body"><div class="si-text">${esc((t.collectedAt || '').slice(0, 10))}: ${t.valueNumber}${rec.unit ? ' ' + esc(rec.unit) : ''}</div></div></div>`).join('');
+  }
+  html += `<div style="display:flex;gap:var(--s2);margin-top:.75rem">
+    <button class="btn btn-s" style="flex:1" onclick="closeOv('ov-lab-det');openLabAdd('${esc(rec.id)}')">Изменить</button>
+    <button class="btn btn-s" style="flex:1" onclick="closeOv('ov-lab-det');deleteLab('${esc(rec.id)}')">Удалить</button>
+  </div>`;
+  el.innerHTML = html;
+  icons();
+}
+let _labSearch = '';
+function healthLabSearch(q) { _labSearch = String(q || '').trim().toLowerCase(); rLabList(); }
+function rLabList() {
+  const el = $('health-lab'); if (!el) return;
+  const all = projAll('labObservations').sort((a, b) => (Date.parse(b.collectedAt) || 0) - (Date.parse(a.collectedAt) || 0));
+  const list = _labSearch ? all.filter(r => (r.testName || '').toLowerCase().includes(_labSearch)) : all;
+  let html = `<div class="sec-lbl">Лаборатория</div><div class="card mx mb">`;
+  if (!all.length) {
+    html += `<div style="padding:1rem" class="ai-sp-empty">Сохраняй результаты анализов — дата, значение, единицы и референс лаборатории как указано в бланке. Личные записи, не диагноз.</div>`;
+  } else {
+    html += `<div style="padding:.6rem 1rem"><input class="field" placeholder="Поиск по названию показателя" value="${esc(_labSearch)}" oninput="healthLabSearch(this.value)"></div>`;
+    html += list.length
+      ? list.slice(0, 100).map(r => `<button type="button" class="si-row tap" style="width:100%;background:none;border:0;padding:var(--s3) 0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:44px" onclick="openLabDet('${esc(r.id)}')">
+          <div class="si-body"><div class="si-text">${esc(r.testName)}: <b>${esc(r.valueText)}${r.unit ? ' ' + esc(r.unit) : ''}</b></div>
+          <div class="si-text" style="color:var(--t3);font-size:.72rem">${esc((r.collectedAt || '').slice(0, 10))}${r.laboratory ? ' · ' + esc(r.laboratory) : ''}</div></div>
+        </button>`).join('')
+      : `<div style="padding:1rem" class="ai-sp-empty">Ничего не найдено по «${esc(_labSearch)}».</div>`;
+  }
+  html += `</div><div class="mx mb"><button class="btn btn-s btn-sm" onclick="openLabAdd()"><i data-lucide="flask-conical"></i>Добавить результат</button></div>`;
+  el.innerHTML = html;
+  icons();
+}
+
+// ── Документы здоровья ──
+const HEALTH_DOC_KINDS = { lab_report: 'Результат анализа', prescription: 'Рецепт', discharge: 'Выписка', imaging: 'Снимок/визуализация', doctor_note: 'Заключение врача', other: 'Другое' };
+function openDocAdd(editId) {
+  STATE.docEditId = editId != null ? editId : null;
+  const rec = editId != null ? (DB.healthDocuments || []).find(r => r && r.id === editId) : null;
+  if ($('doc-title')) $('doc-title').value = rec ? rec.title : '';
+  if ($('doc-kind')) $('doc-kind').value = rec ? rec.kind : 'other';
+  if ($('doc-date')) $('doc-date').value = rec ? (rec.documentDate || '').slice(0, 10) : localDayKey();
+  if ($('doc-provider')) $('doc-provider').value = rec ? rec.provider : '';
+  if ($('doc-note')) $('doc-note').value = rec ? rec.note : '';
+  STATE.docAddMedia = rec ? (rec.media || []).slice() : [];
+  rDocAddMedia();
+  openOv('ov-doc-add');
+}
+function saveDoc() {
+  const title = ($('doc-title') ? $('doc-title').value : '').trim();
+  if (!title) { toast('Введи название документа', 'warn'); return; }
+  const kind = HEALTH_DOC_KINDS[($('doc-kind') ? $('doc-kind').value : '')] ? $('doc-kind').value : 'other';
+  const documentDate = ($('doc-date') ? $('doc-date').value : '').trim() || localDayKey();
+  const provider = ($('doc-provider') ? $('doc-provider').value : '').trim();
+  const note = ($('doc-note') ? $('doc-note').value : '').trim();
+  const media = (STATE.docAddMedia || []).slice();
+  if (STATE.docEditId != null) {
+    const rec = (DB.healthDocuments || []).find(r => r && r.id === STATE.docEditId);
+    if (rec) { Object.assign(rec, { title, kind, documentDate, provider, note, media }); touch(rec); }
+  } else {
+    DB.healthDocuments.push({
+      id: psyUid('healthDoc'), title, kind, documentDate, provider, note, media,
+      privacyClass: 'sensitive', createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+    });
+  }
+  STATE.docEditId = null; STATE.docAddMedia = [];
+  closeOv('ov-doc-add'); persist(); rHealthDocs();
+  hptMed(); toast('Документ сохранён', 'ok');
+}
+function deleteDoc(id) { delUndo('healthDocuments', id, () => { rHealthDocs(); }, 'Документ удалён'); setTimeout(gcMedia, 7000); }
+function openDocDet(id) { STATE.docDetId = id; rDocDet(); openOv('ov-doc-det'); }
+async function rDocDet() {
+  const el = $('doc-det-body'); if (!el) return;
+  const rec = projAll('healthDocuments').find(r => r && r.id === STATE.docDetId);
+  if (!rec) { el.innerHTML = ''; return; }
+  let html = `<div class="si-text" style="font-weight:600">${esc(rec.title)}</div>
+    <div class="si-text" style="color:var(--t3)">${esc(HEALTH_DOC_KINDS[rec.kind] || rec.kind)} · ${esc((rec.documentDate || '').slice(0, 10))}${rec.provider ? ' · ' + esc(rec.provider) : ''}</div>`;
+  if (rec.note) html += `<div class="si-text" style="margin-top:.4rem">${esc(rec.note)}</div>`;
+  if (rec.media && rec.media.length) {
+    const items = await Promise.all(rec.media.map(id => idbGet(id).catch(() => null)));
+    html += `<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.6rem">` + items.map(m => !m ? '' : (m.type === 'image' ? `<img class="det-photo" src="${m.data}" alt="">` : `<a class="btn btn-s btn-xs" href="${m.data}" target="_blank" rel="noopener">📄 Открыть файл</a>`)).join('') + `</div>`;
+  } else {
+    html += `<div class="si-text" style="color:var(--t3);margin-top:.4rem">Без вложений.</div>`;
+  }
+  html += `<div style="display:flex;gap:var(--s2);margin-top:.75rem">
+    <button class="btn btn-s" style="flex:1" onclick="closeOv('ov-doc-det');openDocAdd('${esc(rec.id)}')">Изменить</button>
+    <button class="btn btn-s" style="flex:1" onclick="closeOv('ov-doc-det');deleteDoc('${esc(rec.id)}')">Удалить</button>
+  </div>`;
+  el.innerHTML = html;
+  icons();
+}
+function rHealthDocs() {
+  const el = $('health-docs'); if (!el) return;
+  const all = projAll('healthDocuments').sort((a, b) => (Date.parse(b.documentDate) || 0) - (Date.parse(a.documentDate) || 0));
+  let html = `<div class="sec-lbl">Документы</div><div class="card mx mb">`;
+  html += all.length
+    ? all.slice(0, 100).map(r => `<button type="button" class="si-row tap" style="width:100%;background:none;border:0;padding:var(--s3) 0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:44px" onclick="openDocDet('${esc(r.id)}')">
+        <div class="si-body"><div class="si-text">${esc(r.title)}</div>
+        <div class="si-text" style="color:var(--t3);font-size:.72rem">${esc(HEALTH_DOC_KINDS[r.kind] || r.kind)} · ${esc((r.documentDate || '').slice(0, 10))}${r.media && r.media.length ? ' · 📎 ' + r.media.length : ''}</div></div>
+      </button>`).join('')
+    : `<div style="padding:1rem" class="ai-sp-empty">Прикрепляй сканы рецептов, выписок, снимков — со ссылкой на дату и учреждение.</div>`;
+  html += `</div><div class="mx mb"><button class="btn btn-s btn-sm" onclick="openDocAdd()"><i data-lucide="file-plus"></i>Добавить документ</button></div>`;
+  el.innerHTML = html;
+  icons();
+}
+
+// ── Единая хронология здоровья (read-only агрегатор) ──
+// НЕ копирует записи в новую коллекцию — на каждый рендер строит временный
+// массив ссылок {kind,coll,id,at,text} поверх уже существующих коллекций
+// через projAll (проекция, оригиналы не мутируются).
+// Owner review (PR #151, дефект 3): период — обязательный путь Wave 2,
+// не только внутренняя функция; ниже — реальные кнопки с aria-pressed,
+// меняющие видимую выдачу (см. rHealthTimeline()).
+const HEALTH_TL_PERIODS = [{ v: 7, l: '7 дн.' }, { v: 30, l: '30 дн.' }, { v: 90, l: '90 дн.' }, { v: 180, l: '180 дн.' }, { v: null, l: 'Всё' }];
+let _tlFilter = 'all', _tlDays = 90;
+function healthTimelineFilter(kind) { _tlFilter = kind; rHealthTimeline(); }
+function healthTimelineWindow(days) { _tlDays = days; rHealthTimeline(); }
+function healthTimelineItems() {
+  const from = _tlDays == null ? -Infinity : Date.now() - _tlDays * 864e5;
+  const items = [];
+  projAll('medIntakes').forEach(r => { const at = Date.parse(r.at || r.createdAt) || 0; if (at >= from) { const m = (DB.meds || []).find(x => x && x.id === r.medId); items.push({ kind: 'med', coll: 'medIntakes', id: r.id, at, text: `Приём: ${m ? m.name : 'препарат'}` }); } });
+  projAll('symptoms').forEach(r => { const at = Date.parse(r.createdAt) || 0; if (at >= from) items.push({ kind: 'symptom', coll: 'symptoms', id: r.id, at, text: `Симптом: ${r.name} (${r.severity ?? '—'}/10)` }); });
+  projAll('measures').forEach(r => { const at = Date.parse(r.createdAt) || 0; if (at >= from) items.push({ kind: 'measure', coll: 'measures', id: r.id, at, text: `Измерение: ${r.name} — ${r.value}${r.unit ? ' ' + r.unit : ''}` }); });
+  projAll('labObservations').forEach(r => { const at = Date.parse(r.collectedAt || r.createdAt) || 0; if (at >= from) items.push({ kind: 'lab', coll: 'labObservations', id: r.id, at, text: `Анализ: ${r.testName} — ${r.valueText}${r.unit ? ' ' + r.unit : ''}` }); });
+  projAll('healthDocuments').forEach(r => { const at = Date.parse(r.documentDate || r.createdAt) || 0; if (at >= from) items.push({ kind: 'doc', coll: 'healthDocuments', id: r.id, at, text: `Документ: ${r.title}` }); });
+  projAll('cravings').forEach(r => { const at = Date.parse(r.createdAt) || 0; if (r.createdAt && at >= from) items.push({ kind: 'craving', coll: 'cravings', id: r.id, at, text: `Тяга: сила ${r.intensity ?? '—'}, ${r.outcome === 'held' ? 'пережил' : 'уступил'}` }); });
+  return items.sort((a, b) => b.at - a.at);
+}
+function healthTimelineOpen(coll, id) {
+  if (coll === 'medIntakes') { const i = (DB.medIntakes || []).find(x => x && x.id === id); if (i) openMedDetail(i.medId); return; }
+  if (coll === 'labObservations') { openLabDet(id); return; }
+  if (coll === 'healthDocuments') { openDocDet(id); return; }
+  goTo('health');   // symptoms/measures/cravings: своих detail-экранов нет — открываем «Здоровье»
+}
+const HEALTH_TL_LABELS = { med: 'Приём', symptom: 'Симптом', measure: 'Измерение', lab: 'Анализ', doc: 'Документ', craving: 'Тяга' };
+function rHealthTimeline() {
+  const el = $('health-timeline'); if (!el) return;
+  const all = healthTimelineItems();
+  const list = _tlFilter === 'all' ? all : all.filter(it => it.kind === _tlFilter);
+  const kinds = ['all', 'med', 'symptom', 'measure', 'lab', 'doc', 'craving'];
+  let html = `<div class="sec-lbl">Хронология здоровья</div><div class="card mx mb">`;
+  html += `<div style="padding:.5rem 1rem 0;display:flex;gap:.4rem;flex-wrap:wrap">` + HEALTH_TL_PERIODS.map(p => `<button type="button" class="btn btn-s btn-xs${_tlDays === p.v ? ' on' : ''}" aria-pressed="${_tlDays === p.v}" onclick="healthTimelineWindow(${p.v === null ? 'null' : p.v})">${esc(p.l)}</button>`).join('') + `</div>`;
+  html += `<div style="padding:.5rem 1rem;display:flex;gap:.4rem;flex-wrap:wrap">` + kinds.map(k => `<button type="button" class="btn btn-s btn-xs${_tlFilter === k ? ' on' : ''}" aria-pressed="${_tlFilter === k}" onclick="healthTimelineFilter('${k}')">${k === 'all' ? 'Всё' : esc(HEALTH_TL_LABELS[k])}</button>`).join('') + `</div>`;
+  html += list.length
+    ? list.slice(0, 200).map(it => `<button type="button" class="si-row tap" style="width:100%;background:none;border:0;padding:var(--s3) 0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:44px" onclick="healthTimelineOpen('${it.coll}',${JSON.stringify(it.id)})">
+        <div class="si-body"><div class="si-text">${esc(it.text)}</div>
+        <div class="si-text" style="color:var(--t3);font-size:.72rem">${it.at ? esc(new Date(it.at).toLocaleDateString('ru', { day: 'numeric', month: 'short' })) : ''} · ${esc(HEALTH_TL_LABELS[it.kind] || it.kind)}</div></div>
+      </button>`).join('')
+    : `<div style="padding:1rem" class="ai-sp-empty">За этот период пока нет событий этого типа.</div>`;
+  html += `</div>`;
+  el.innerHTML = html;
 }
 
 // ─── АСТРОЛОГИЯ (западная тропическая, MVP по Master Spec) ─────────
@@ -6114,18 +6600,48 @@ function buildDoctorReport(days = 30) {
     });
     L.push('');
   }
-  if (!meds.length && !sym.length && !mea.length) L.push('За период нет записей плана, симптомов или измерений.');
+  // Wave 2 (issue #150): лабораторные результаты и приложенные документы за
+  // период — тот же принцип, что и выше: только сохранённые пользователем
+  // факты, без интерпретации/нормы/риска. Границы дат — включительно (>=from,
+  // как и у остальных разделов отчёта).
+  const inWinByCollected = r => r && (Date.parse(r.collectedAt || r.createdAt) || 0) >= from;
+  const labs = projAll('labObservations').filter(inWinByCollected)
+    .sort((a, b) => (Date.parse(a.collectedAt) || 0) - (Date.parse(b.collectedAt) || 0));
+  if (labs.length) {
+    L.push('ЛАБОРАТОРНЫЕ РЕЗУЛЬТАТЫ:');
+    labs.forEach(r => {
+      L.push(`• ${(r.collectedAt || '').slice(0, 10)} — ${r.testName}: ${r.valueText}${r.unit ? ' ' + r.unit : ''}${r.referenceText ? ' (референс: ' + r.referenceText + ')' : ''}${r.laboratory ? ' · ' + r.laboratory : ''}`);
+    });
+    L.push('');
+  }
+  const inWinByDocDate = r => r && (Date.parse(r.documentDate || r.createdAt) || 0) >= from;
+  const docs = projAll('healthDocuments').filter(inWinByDocDate)
+    .sort((a, b) => (Date.parse(a.documentDate) || 0) - (Date.parse(b.documentDate) || 0));
+  if (docs.length) {
+    // Только список названий/дат/типов — без media id и без встраивания
+    // технических blob-данных вложений.
+    L.push('ПРИЛОЖЕННЫЕ ДОКУМЕНТЫ:');
+    docs.forEach(r => { L.push(`• ${(r.documentDate || '').slice(0, 10)} — ${r.title} (${HEALTH_DOC_KINDS[r.kind] || r.kind}${r.provider ? ', ' + r.provider : ''})`); });
+    L.push('');
+  }
+  if (!meds.length && !sym.length && !mea.length && !labs.length && !docs.length) L.push('За период нет записей плана, симптомов, измерений, анализов или документов.');
   L.push('—');
   L.push('Составлено пациентом в личном дневнике «Архитектор». Не является медицинским документом или рекомендацией.');
   return L.join('\n');
 }
-function openDoctorReport() {
-  const txt = buildDoctorReport(30);
+function openDoctorReport(days) {
+  STATE.doctorReportDays = days || STATE.doctorReportDays || 30;
+  const txt = buildDoctorReport(STATE.doctorReportDays);
   const el = $('doc-report-text'); if (el) el.value = txt;
+  const lbl = $('doc-report-period-lbl'); if (lbl) lbl.textContent = STATE.doctorReportDays + ' дн.';
+  document.querySelectorAll('#doc-report-period .btn').forEach(b => b.classList.toggle('on', parseInt(b.dataset.days, 10) === STATE.doctorReportDays));
   openOv('ov-doc-report');
 }
+// Пользователь выбирает период (issue #150, раздел 7) — тот же единственный
+// builder buildDoctorReport(), тот же textarea, тот же share-путь.
+function setDoctorReportPeriod(days) { openDoctorReport(days); }
 function shareDoctorReport() {
-  const txt = ($('doc-report-text') && $('doc-report-text').value) || buildDoctorReport(30);
+  const txt = ($('doc-report-text') && $('doc-report-text').value) || buildDoctorReport(STATE.doctorReportDays || 30);
   if (navigator.share) navigator.share({ title: 'Отчёт для врача', text: txt }).catch(() => {});
   else { try { navigator.clipboard.writeText(txt); toast('Скопировано в буфер', 'ok'); } catch (e) { toast('Выдели и скопируй текст', 'warn'); } }
 }
@@ -6157,8 +6673,10 @@ function rHealth() {
       return `<div class="srow" onclick="openSphereLog(${s.id})" role="button"><div class="sic" style="background:${s.color}22"><span>${esc(s.icon || '●')}</span></div><span class="sl2">${esc(s.name)}</span><span class="sv2">${st.consistency || 0}% за 30д</span></div>`;
     }).join('') + `</div>`;
   }
+  html += `<div id="health-today"></div>`;
   html += medsSectionHTML();
   html += bodySectionHTML();
+  html += `<div id="health-lab"></div><div id="health-docs"></div><div id="health-timeline"></div>`;
   html += `<div class="sec-lbl">Опора</div>
     <div class="mx mb"><button class="btn btn-p btn-full" onclick="openCraving()"><i data-lucide="zap"></i>У меня тяга сейчас</button></div>
     <div class="mx mb"><button class="btn btn-s btn-full" onclick="openTech('')"><i data-lucide="life-buoy"></i>Приёмы под состояние</button></div>`;
@@ -6228,6 +6746,8 @@ function rHealth() {
   html += `<div class="sec-lbl">Витамины и добавки</div>
     <div class="mx" style="margin-bottom:5rem"><button class="btn btn-s btn-full" onclick="addHealthSphere('Витамины','💊')">+ Отслеживать приём</button></div>`;
   el.innerHTML = html;
+  rHealthToday(); rLabList(); rHealthDocs(); rHealthTimeline();
+  icons();
 }
 
 // ─── СОН ─────────────────────────────────────────────────────────
@@ -7776,7 +8296,7 @@ function genRecoveryKey() {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','astroPartners','bots','digests','spheres','sphereLogs','chats','cravings','psyLinks','relationshipContexts'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','astroPartners','bots','digests','spheres','sphereLogs','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments'];
 function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
 function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
 const _ru = r => r._u || r.id || 0;   // «когда обновлено» с откатом на id (id = Date.now())
@@ -7936,6 +8456,7 @@ function renderAfterSync() {
   // тихо перерисовываем экраны после втягивания серверных изменений
   updateDomainLabel(); rHome(); rCompass(); rAxCells(); rKPIs(); rIns();
   rBook(); rBots(); rPats(); rDrms(); rSpi(); rEvoList($('evo-sh')); rDig();
+  try { if (document.getElementById('pg-health').classList.contains('on')) rHealth(); } catch (e) {}
   icons();
   gcMedia();   // подчистить осиротевшие фото (после удалений/черновиков)
 }
