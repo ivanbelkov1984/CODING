@@ -11,7 +11,7 @@ const dateRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:
 const dateFullRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:'long',year:'numeric'});
 const todayKey = () => new Date().toISOString().slice(0,10);
 const nowISO = () => new Date().toISOString();            // UTC ISO 8601 — источник истины для времени
-const SCHEMA_VERSION = 4;   // Wave 2 (issue #150): labObservations/healthDocuments add-only bump
+const SCHEMA_VERSION = 5;   // Wave 4 (issue #152): correlationSettings scalar add-only bump
 // Красивая дата из ISO createdAt (с откатом на legacy-строку date/dt)
 const dispDate = (rec, full=false) => {
   if (rec && rec.createdAt) return (full?dateFullRU:dateRU)(new Date(rec.createdAt));
@@ -104,6 +104,14 @@ const DEFAULT_DB = {
   ],
   vit: {sl:7, sq:7, cl:7, st:4, mv:7, nic:false, caf:true, alc:false, sugar:false, act:'нет', tone:'нейтрально', note:'', ci:false, date:''},
   env: {noSweetsHome:false, noCigsHome:false, ritual:false},   // «Среда»: реструктуризация окружения (BCTTv1)
+  // Wave 4 (issue #152): «Закономерности» — детерминированный движок синтеза
+  // поверх уже существующих коллекций (read-only агрегация, ничего не
+  // копирует). Единственное персистентное состояние — пользовательские
+  // настройки порога/окна и список отклонённых выводов (по стабильной
+  // сигнатуре вывода, не по хранимому id — сами выводы никогда не пишутся
+  // в DB, пересчитываются заново на каждый рендер). Скаляр, сливается как
+  // DB.env/DB.vit — «последний документ по __ts побеждает» (см. mergeDB()).
+  correlationSettings: { minSamples: 3, lagDays: 7, dismissed: [] },
   _del: {},   // «надгробия» удалённых записей: { id: timestamp }
   __ts: 0,    // метка времени документа (для слияния скалярных полей)
 };
@@ -2976,7 +2984,18 @@ function rDiaryOverview() {
 // внутри той же вкладки — аналог msub() у Дневника, но без subnav-полосы
 // (у «Обзора» её никогда не было).
 function sysGo(sub) {
-  const overview = $('sys-overview'), detail = $('sys-detail');
+  const overview = $('sys-overview'), detail = $('sys-detail'), patterns = $('sys-patterns');
+  // Wave 4 (issue #152): третий режим этого же экрана «Итоги» — «Закономерности».
+  // Тот же паттерн переключения видимости, что и overview↔detail, без нового
+  // top-level раздела и без изменения canonical hashes.
+  if (sub === 'patterns') {
+    if (overview) overview.style.display = 'none';
+    if (detail) detail.style.display = 'none';
+    if (patterns) patterns.style.display = 'block';
+    rSynthesis();
+    return;
+  }
+  if (patterns) patterns.style.display = 'none';
   if (sub === 'detail') {
     if (overview) overview.style.display = 'none';
     if (detail) detail.style.display = 'block';
@@ -7348,6 +7367,444 @@ function rCorrelations(elId) {
 }
 
 // ═════════════════════════════════════════════════════════════════
+//  WAVE 4 (issue #152): UNIFIED INTELLIGENCE ENGINE — «Закономерности».
+//  Детерминированный синтез поверх уже существующих коллекций. НЕ ИИ,
+//  НЕ генератор советов, НЕ диагностика — никакого LLM, никакого гадания.
+//  Read-only: события собираются заново на каждый вызов через projAll(),
+//  ничего не копируется в новую коллекцию. Корреляция — классический
+//  association-rule подход (support/confidence/lift), тот же принцип
+//  строгости, что и у уже существующих smartInsights()/correlations()
+//  (см. confLabel() выше) — те функции НЕ трогаются и не дублируются:
+//  они остаются специализированным анализом чек-инов/сфер на «Главном»,
+//  этот контур — общий, поверх ВСЕХ коллекций, с честным отказом от
+//  вывода при недостатке данных на каждом уровне.
+// ═════════════════════════════════════════════════════════════════
+
+// ── 1. Unified Event Engine ──────────────────────────────────────
+// Каждый источник — чистая функция record → {tags[], importance, sphereId?}
+// либо null (запись не даёт события для синтеза). tags использует общий
+// normTrigger() (уже существует, Wave 1) для нормализации свободного текста.
+const EVENT_SOURCES = {
+  moments: rec => {
+    const tags = [];
+    if (rec.emo) tags.push('emo:' + normTrigger(rec.emo));
+    if (rec.valence != null) tags.push('valence:' + (rec.valence >= 60 ? 'high' : rec.valence <= 40 ? 'low' : 'mid'));
+    if (rec.activation != null) tags.push('activation:' + (rec.activation >= 60 ? 'high' : rec.activation <= 40 ? 'low' : 'mid'));
+    return tags.length ? { tags, importance: 1 } : null;
+  },
+  whys: rec => {
+    const tags = [];
+    if (rec.symptom) tags.push('symptom:' + normTrigger(rec.symptom));
+    if (rec.need) tags.push('need:' + normTrigger(rec.need));
+    return tags.length ? { tags, importance: 1 } : null;
+  },
+  insights: rec => (rec.tag ? { tags: ['insight:' + normTrigger(rec.tag)], importance: rec.w || 1 } : null),
+  patterns: rec => (rec.type ? { tags: ['pattern:' + normTrigger(rec.type)], importance: 1 } : null),
+  evolution: rec => ({ tags: ['evolution:milestone'], importance: 1 }),
+  dreams: rec => ({ tags: rec.tone ? ['dream:' + normTrigger(rec.tone)] : ['dream:любой'], importance: 1 }),
+  medIntakes: rec => (rec.status === 'taken' ? { tags: ['med:принят'], importance: 1 } : null),
+  symptoms: rec => (rec.name ? { tags: ['symptom:' + normTrigger(rec.name)], importance: Math.max(0.2, (rec.severity ?? 5) / 5) } : null),
+  measures: rec => (rec.name ? { tags: ['measure:' + normTrigger(rec.name)], importance: 1 } : null),
+  cravings: rec => {
+    const tags = ['craving:' + (rec.outcome === 'held' ? 'устоял' : 'уступил')];
+    if (rec.trigger) tags.push('trigger:' + normTrigger(rec.trigger));
+    return { tags, importance: Math.max(0.2, (rec.intensity ?? 5) / 5) };
+  },
+  labObservations: rec => (rec.testName ? { tags: ['lab:' + normTrigger(rec.testName)], importance: 1 } : null),
+  healthDocuments: rec => (rec.kind ? { tags: ['doc:' + normTrigger(rec.kind)], importance: 1 } : null),
+  relationshipContexts: rec => (rec.status !== 'archived' && rec.label ? { tags: ['context:' + normTrigger(rec.label)], importance: 1 } : null),
+  sphereLogs: rec => {
+    const sphere = (DB.spheres || []).find(s => s && s.id === rec.sphereId);
+    if (!sphere) return null;
+    const onHabit = sphere.type === 'habit' && rec.value;
+    const tag = 'sphere:' + normTrigger(sphere.name) + ':' + (onHabit || sphere.type !== 'habit' ? 'done' : null);
+    if (sphere.type === 'habit' && !rec.value) return null;   // «не сделал» — не событие для синтеза
+    return { tags: [tag], importance: 1, sphereId: sphere.id };
+  },
+};
+// psyLinks — НЕ отдельный тип события (это была бы связь между уже
+// включёнными событиями, двойной учёт); вместо этого используется для
+// обогащения тегов через relationshipContextOf() ниже — тот же источник,
+// что и «Граф отношений» (Relationship Graph), честно задокументировано
+// в WAVE4_UNIFIED_INTELLIGENCE_DATA_CONTRACT.md.
+function eventTimeOf(rec) {
+  const raw = rec.at || rec.collectedAt || rec.documentDate || rec.createdAt || (rec.date ? rec.date + 'T12:00:00.000Z' : null);
+  const t = raw ? Date.parse(raw) : NaN;
+  return isFinite(t) ? t : null;
+}
+function unifiedEvents(days) {
+  const from = days == null ? -Infinity : Date.now() - days * 864e5;
+  const out = [];
+  // Perf: relationshipContextOf() сканирует DB.psyLinks на каждый вызов —
+  // короткое замыкание, если ссылок на контексты вообще нет (частый случай),
+  // без этого 100k+ событий из RELATIONSHIP_LINKABLE_COLLS дают заметный
+  // оверхед на пустом psyLinks. Корректность не меняется: если psyLinks
+  // непустые, вызываем как обычно.
+  const hasPsyLinks = Array.isArray(DB.psyLinks) && DB.psyLinks.length > 0;
+  Object.keys(EVENT_SOURCES).forEach(coll => {
+    const mapper = EVENT_SOURCES[coll];
+    (projAll(coll) || []).forEach(rec => {
+      if (!rec || rec.id == null) return;
+      const t = eventTimeOf(rec);
+      if (t == null || t < from) return;
+      const built = mapper(rec);
+      if (!built || !built.tags || !built.tags.length) return;
+      let tags = built.tags.slice();
+      if (hasPsyLinks && RELATIONSHIP_LINKABLE_COLLS.includes(coll)) {
+        const ctx = relationshipContextOf(coll, rec.id);
+        if (ctx) tags.push('person:' + normTrigger(ctx.label));
+      }
+      out.push({
+        id: coll + ':' + rec.id, type: coll, date: new Date(t).toISOString().slice(0, 10), time: t,
+        importance: built.importance || 1, tags, sphereId: built.sphereId != null ? built.sphereId : null,
+        sourceCollection: coll, referenceId: rec.id,
+      });
+    });
+  });
+  return out.sort((a, b) => a.time - b.time);
+}
+
+// ── 2. Correlation Engine (support/confidence/lift, deterministic) ──
+// Классический association-rule подход, НЕ ML: считает, как часто тег B
+// встречается в течение lagDays после тега A (confidence), сравнивает с
+// базовой частотой B по всему диапазону дней (lift = confidence/baseline).
+// Работает по агрегату «день→теги», поэтому производительность не зависит
+// от числа событий напрямую (только от числа уникальных дней/тегов) —
+// быстро даже на 100 000+ событий.
+const SYN_MIN_SAMPLES_DEFAULT = 3, SYN_LAG_DAYS_DEFAULT = 7, SYN_MAX_TAGS = 200;
+function findCorrelations(events, opts = {}) {
+  const minSamples = opts.minSamples || SYN_MIN_SAMPLES_DEFAULT;
+  const lagDays = opts.lagDays != null ? opts.lagDays : SYN_LAG_DAYS_DEFAULT;
+  const result = { totalDays: 0, pairs: [] };
+  if (!events.length) return result;
+  const dayToTags = new Map();
+  events.forEach(e => {
+    if (!dayToTags.has(e.date)) dayToTags.set(e.date, new Set());
+    e.tags.forEach(t => dayToTags.get(e.date).add(t));
+  });
+  const days = [...dayToTags.keys()].sort();
+  const minMs = Date.parse(days[0] + 'T00:00:00.000Z'), maxMs = Date.parse(days[days.length - 1] + 'T00:00:00.000Z');
+  const totalDays = Math.round((maxMs - minMs) / 864e5) + 1;
+  result.totalDays = totalDays;
+  const tagDays = new Map();
+  dayToTags.forEach((tags, day) => { tags.forEach(t => { if (!tagDays.has(t)) tagDays.set(t, new Set()); tagDays.get(t).add(day); }); });
+  // Ограничиваем кардинальность (fail-safe для очень «рваных» свободных
+  // тегов) — берём самые частые SYN_MAX_TAGS, редкие всё равно не пройдут
+  // minSamples в подавляющем большинстве случаев.
+  const qualifyingTags = [...tagDays.entries()].filter(([, set]) => set.size >= minSamples)
+    .sort((a, b) => b[1].size - a[1].size).slice(0, SYN_MAX_TAGS).map(([t]) => t);
+  const windowHasTag = (startDayKey, tagDaysSet) => {
+    const startMs = Date.parse(startDayKey + 'T00:00:00.000Z');
+    for (let i = 0; i <= lagDays; i++) {
+      if (tagDaysSet.has(new Date(startMs + i * 864e5).toISOString().slice(0, 10))) return true;
+    }
+    return false;
+  };
+  // ВАЖНО: baseline(B) должен быть той же «оконной» метрикой, что и
+  // confidence (P(B встречается в течение lagDays+1 дней), а НЕ «наивная»
+  // P(B в один конкретный день) — иначе lift систематически завышен для
+  // ЛЮБОЙ пары при lagDays>0 просто из-за расширения окна (found via test:
+  // независимые случайные ряды давали lift>1.3 почти всегда до этого фикса).
+  // Считаем по всем календарным дням диапазона (не только дням с событиями).
+  const allDayKeys = []; for (let i = 0; i < totalDays; i++) allDayKeys.push(new Date(minMs + i * 864e5).toISOString().slice(0, 10));
+  const baselineCache = new Map();
+  const baselineOf = b => {
+    if (baselineCache.has(b)) return baselineCache.get(b);
+    const bDays = tagDays.get(b);
+    let windowsWithB = 0;
+    allDayKeys.forEach(dk => { if (windowHasTag(dk, bDays)) windowsWithB++; });
+    const rate = windowsWithB / allDayKeys.length;
+    baselineCache.set(b, rate);
+    return rate;
+  };
+  for (const a of qualifyingTags) {
+    const daysA = [...tagDays.get(a)];
+    for (const b of qualifyingTags) {
+      if (a === b) continue;
+      const daysBSet = tagDays.get(b);
+      let hits = 0;
+      daysA.forEach(dA => { if (windowHasTag(dA, daysBSet)) hits++; });
+      if (hits < minSamples) continue;
+      const confidenceStat = hits / daysA.length;
+      const baseline = baselineOf(b);
+      if (baseline <= 0) continue;
+      const lift = confidenceStat / baseline;
+      if (lift < 1.3 && lift > 0.77) continue;   // недостаточно отличается от базовой частоты — не выводим
+      result.pairs.push({ a, b, supportA: daysA.length, supportB: daysBSet.size, hits, confidenceStat, baseline, lift, totalDays, lagDays });
+    }
+  }
+  result.pairs.sort((x, y) => Math.abs(Math.log(y.lift)) - Math.abs(Math.log(x.lift)));
+  return result;
+}
+const pairSignature = p => p.a + '→' + p.b;
+
+// ── 3. Confidence System ─────────────────────────────────────────
+// Низкая/средняя/высокая — по количеству совпадений И устойчивости связи
+// (насколько lift отличается от 1×). Никогда не «высокая» на малых данных,
+// даже если lift экстремальный — экстремальные lift на n<5 обычно шум.
+function correlationConfidence(pair) {
+  const n = Math.min(pair.supportA, pair.hits);
+  const strongLift = Math.abs(Math.log(pair.lift)) >= Math.log(2);   // ×2 или ÷2 от базовой частоты
+  if (n < 5) return { level: 'low', label: 'Низкая', cls: 'cf-low' };
+  if (n < 12 || !strongLift) return { level: 'medium', label: 'Средняя', cls: 'cf-mid' };
+  return { level: 'high', label: 'Высокая', cls: 'cf-hi' };
+}
+
+// ── 4. Statistics Engine (без ИИ, только вычисления) ─────────────
+function synthesisStats(events) {
+  const byType = {};
+  events.forEach(e => { byType[e.type] = (byType[e.type] || 0) + 1; });
+  const days = new Set(events.map(e => e.date));
+  const tagCounts = {};
+  events.forEach(e => e.tags.forEach(t => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
+  const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  return { totalEvents: events.length, activeDays: days.size, byType, topTags };
+}
+
+// ── 5. Insight Generator (шаблоны, НЕ генеративный ИИ) ────────────
+const TAG_TYPE_LABELS = {
+  emo: 'эмоция', valence: 'приятность момента', activation: 'энергия момента', symptom: 'разбор «Зачем?»',
+  need: 'потребность', insight: 'тема инсайтов', pattern: 'паттерн', dream: 'сон', med: 'приём препарата',
+  measure: 'измерение', craving: 'тяга', trigger: 'триггер тяги', lab: 'лабораторный показатель',
+  doc: 'документ здоровья', context: 'контекст отношений', person: 'контекст отношений', sphere: 'сфера',
+  evolution: 'веха эволюции',
+};
+function tagLabel(tag) {
+  const i = String(tag).indexOf(':');
+  if (i < 0) return tag;
+  const type = tag.slice(0, i), val = tag.slice(i + 1);
+  const typeLabel = TAG_TYPE_LABELS[type] || type;
+  return val && val !== 'true' ? `${typeLabel} «${val}»` : typeLabel;
+}
+function correlationSentence(pair) {
+  const pct = Math.round(pair.confidenceStat * 100), basePct = Math.round(pair.baseline * 100);
+  const a = tagLabel(pair.a), b = tagLabel(pair.b);
+  if (pair.lift > 1) {
+    return `За ${pair.supportA} наблюдений «${a}» сопровождалось «${b}» в ${pct}% случаев в пределах ${pair.lagDays} дн. (обычная частота «${b}» — ${basePct}%).`;
+  }
+  return `После «${a}» «${b}» встречалось реже обычного: ${pct}% случаев против обычных ${basePct}% (в пределах ${pair.lagDays} дн., по ${pair.supportA} наблюдениям).`;
+}
+
+// ── 6. Trigger Engine — фильтрованная проекция Correlation Engine ────
+function triggersFor(pairs, targetTag) {
+  return pairs.filter(p => p.b === targetTag).sort((x, y) => y.lift - x.lift);
+}
+// Топ-целевые теги для блока «Триггеры»: самые частые эмоциональные/
+// поведенческие исходы, для которых вообще нашлись качественные корреляции.
+function topTriggerTargets(pairs, n = 4) {
+  const targets = [...new Set(pairs.map(p => p.b))]
+    .filter(t => /^(emo|craving|symptom|valence|activation):/.test(t));
+  return targets.slice(0, n);
+}
+
+// ── 7. Pattern Engine — повторяющиеся многодневные последовательности ──
+// N-gram по «сигнатуре дня» (полный отсортированный набор тегов дня,
+// join), детерминированно и воспроизводимо — не угадывает смысл, просто
+// считает точные повторения. Дни без тегов исключаются из окон.
+function findRecurringSequences(events, opts = {}) {
+  const minSamples = opts.minSamples || SYN_MIN_SAMPLES_DEFAULT;
+  const seqLen = opts.seqLen || 3;
+  const dayToTags = new Map();
+  events.forEach(e => { if (!dayToTags.has(e.date)) dayToTags.set(e.date, new Set()); e.tags.forEach(t => dayToTags.get(e.date).add(t)); });
+  const days = [...dayToTags.keys()].sort();
+  const sigOf = d => { const s = [...dayToTags.get(d)].sort(); return s.length ? s.join(', ') : null; };
+  const seqCounts = new Map();
+  for (let i = 0; i + seqLen <= days.length; i++) {
+    const window = days.slice(i, i + seqLen);
+    const parts = window.map(sigOf);
+    if (parts.some(p => !p)) continue;
+    const sig = parts.join(' → ');
+    if (!seqCounts.has(sig)) seqCounts.set(sig, { count: 0, examples: [] });
+    const entry = seqCounts.get(sig);
+    entry.count++;
+    if (entry.examples.length < 5) entry.examples.push(window);
+  }
+  return [...seqCounts.entries()].filter(([, v]) => v.count >= minSamples)
+    .map(([sig, v]) => ({ signature: sig, count: v.count, examples: v.examples }))
+    .sort((a, b) => b.count - a.count).slice(0, 10);
+}
+
+// ── 8. Cause Graph — цепочки из уже найденных корреляций (не новый расчёт) ──
+function buildCauseChains(pairs, opts = {}) {
+  const maxDepth = opts.maxDepth || 4;
+  const byA = new Map();
+  pairs.forEach(p => { if (!byA.has(p.a)) byA.set(p.a, []); byA.get(p.a).push(p); });
+  const starts = [...new Set(pairs.map(p => p.a))];
+  const chains = [];
+  starts.forEach(startTag => {
+    const chain = [startTag]; const used = new Set([startTag]); let current = startTag;
+    while (chain.length < maxDepth) {
+      const candidates = (byA.get(current) || []).filter(p => !used.has(p.b)).sort((x, y) => y.lift - x.lift);
+      const next = candidates[0];
+      if (!next) break;
+      chain.push(next.b); used.add(next.b); current = next.b;
+    }
+    if (chain.length >= 3) chains.push({ chain, labels: chain.map(tagLabel) });
+  });
+  return chains.sort((a, b) => b.chain.length - a.chain.length).slice(0, 8);
+}
+
+// ── 9/10. Sphere Influence / Relationship Graph — проекции того же движка ──
+// Отдельных вычислений не требуется: сферы и контексты отношений уже
+// попадают в общий поток тегов (`sphere:...` из sphereLogs, `person:...`
+// через relationshipContextOf()), поэтому это фильтры по уже посчитанным
+// парам, а не второй корреляционный движок.
+const sphereInfluencePairs = pairs => pairs.filter(p => p.a.startsWith('sphere:') || p.b.startsWith('sphere:'));
+const relationshipPairs = pairs => pairs.filter(p => p.a.startsWith('person:') || p.b.startsWith('person:'));
+
+// ── Сборка отчёта для экрана «Закономерности» ─────────────────────
+function synthesisReport(days) {
+  const settings = DB.correlationSettings || DEFAULT_DB.correlationSettings;
+  const events = unifiedEvents(days);
+  const stats = synthesisStats(events);
+  const { pairs, totalDays } = findCorrelations(events, { minSamples: settings.minSamples, lagDays: settings.lagDays });
+  const dismissed = new Set(settings.dismissed || []);
+  const visible = pairs.filter(p => !dismissed.has(pairSignature(p)));
+  return {
+    events, stats, totalDays, settings,
+    pairs: visible,
+    chains: buildCauseChains(visible),
+    sphere: sphereInfluencePairs(visible),
+    relationship: relationshipPairs(visible),
+    sequences: findRecurringSequences(events, { minSamples: settings.minSamples }),
+  };
+}
+function dismissCorrelation(sig) {
+  DB.correlationSettings = { ...(DB.correlationSettings || DEFAULT_DB.correlationSettings) };
+  DB.correlationSettings.dismissed = [...new Set([...(DB.correlationSettings.dismissed || []), sig])];
+  DB.__ts = Date.now(); persist(); try { rSynthesis(); } catch (e) {}
+  toast('Скрыто — можно вернуть кнопкой «Показать скрытые»', 'ok');
+}
+function restoreDismissedCorrelations() {
+  if (!DB.correlationSettings || !(DB.correlationSettings.dismissed || []).length) return;
+  DB.correlationSettings = { ...DB.correlationSettings, dismissed: [] };
+  DB.__ts = Date.now(); persist(); try { rSynthesis(); } catch (e) {}
+  toast('Скрытые закономерности снова видны', 'ok');
+}
+// Открыть исходную запись по одному из тегов пары (первое совпадающее
+// событие в текущем окне) — полная объяснимость: пользователь видит,
+// на каких именно записях основан вывод, а не только текст.
+function openSynEvidence(tag) {
+  const events = unifiedEvents(_synDays || SYN_LAG_DAYS_DEFAULT * 13);
+  const hit = events.slice().reverse().find(e => e.tags.includes(tag));
+  if (!hit) { toast('Исходная запись не найдена (могла быть удалена)', 'warn'); return; }
+  openSourceRecord(hit.sourceCollection, hit.referenceId);
+}
+function openSourceRecord(coll, id) {
+  if (coll === 'labObservations') { openLabDet(id); return; }
+  if (coll === 'healthDocuments') { openDocDet(id); return; }
+  if (coll === 'medIntakes') { const i = (DB.medIntakes || []).find(x => x && x.id === id); if (i) openMedDetail(i.medId); return; }
+  if (coll === 'insights') { showDet(id); return; }
+  if (coll === 'whys') { openWhy(id); return; }
+  if (coll === 'moments') { openMoment(id); return; }
+  if (coll === 'patterns' || coll === 'evolution') { goTo('map'); return; }
+  if (coll === 'sphereLogs') { goTo('vit'); return; }
+  goTo('sys');
+}
+
+// ── UI: экран «Закономерности» (внутри существующего pg-sys, sysGo('patterns')) ──
+let _synDays = 90;
+function synGoDays(days) { _synDays = days; rSynthesis(); }
+function pairRowHtml(p) {
+  const conf = correlationConfidence(p), sig = pairSignature(p);
+  return `<div class="si-row">
+    <div class="si-body"><div class="si-text">${esc(correlationSentence(p))}</div>
+      <div style="display:flex;gap:.4rem;margin-top:.3rem;flex-wrap:wrap">
+        <button type="button" class="btn btn-s btn-xs" onclick="openSynEvidence('${esc(p.a)}')">Записи «${esc(tagLabel(p.a))}»</button>
+        <button type="button" class="btn btn-s btn-xs" onclick="openSynEvidence('${esc(p.b)}')">Записи «${esc(tagLabel(p.b))}»</button>
+        <button type="button" class="btn btn-s btn-xs" onclick="dismissCorrelation('${esc(sig)}')" aria-label="Скрыть этот вывод">Скрыть</button>
+      </div></div>
+    <span class="si-conf ${conf.cls}">${conf.label}</span>
+  </div>`;
+}
+function synPeriodButtonsHtml() {
+  const periods = [{ v: 7, l: '7 дн.' }, { v: 30, l: '30 дн.' }, { v: 90, l: '90 дн.' }, { v: 365, l: '365 дн.' }];
+  return `<div class="mx mb" style="display:flex;gap:.4rem;flex-wrap:wrap">` +
+    periods.map(p => `<button type="button" class="btn btn-s btn-xs${_synDays === p.v ? ' on' : ''}" aria-pressed="${_synDays === p.v}" onclick="synGoDays(${p.v})">${p.l}</button>`).join('') + `</div>`;
+}
+function synStatsBlockHtml(stats) {
+  return `<div class="sec-lbl">Статистика</div><div class="card mx mb" style="padding:1rem">
+    <div class="kgrid">
+      <div class="kc"><span class="kn">${stats.totalEvents}</span><span class="kl">Событий</span></div>
+      <div class="kc"><span class="kn">${stats.activeDays}</span><span class="kl">Активных дней</span></div>
+      <div class="kc"><span class="kn">${Object.keys(stats.byType).length}</span><span class="kl">Типов записей</span></div>
+    </div>
+  </div>`;
+}
+function synCorrelationsBlockHtml(pairs) {
+  let html = `<div class="sec-lbl">Закономерности</div><div class="card mx mb">`;
+  html += pairs.length
+    ? pairs.slice(0, 12).map(pairRowHtml).join('')
+    : `<div style="padding:1rem" class="ai-sp-empty">Недостаточно данных для подтверждённых закономерностей за этот период — честно, не гадаем. Продолжай записывать: мысли, эмоции, здоровье, привычки.</div>`;
+  html += `</div>`;
+  return html;
+}
+function synTriggersBlockHtml(pairs) {
+  const targets = topTriggerTargets(pairs);
+  let html = `<div class="sec-lbl">Триггеры</div><div class="card mx mb">`;
+  if (!targets.length) {
+    html += `<div style="padding:1rem" class="ai-sp-empty">Пока нет подтверждённых триггеров эмоций/состояний за этот период.</div>`;
+  } else {
+    html += targets.map(t => {
+      const list = triggersFor(pairs, t).slice(0, 3);
+      return `<div style="padding:.6rem 1rem;border-top:1px solid var(--bd)"><div class="f-lbl">Что чаще всего предшествует «${esc(tagLabel(t))}»</div>` +
+        list.map(p => `<div class="si-row"><div class="si-body"><div class="si-text">${esc(tagLabel(p.a))} — в ${Math.round(p.confidenceStat * 100)}% случаев</div></div>
+          <span class="si-conf ${correlationConfidence(p).cls}">${correlationConfidence(p).label}</span></div>`).join('') + `</div>`;
+    }).join('');
+  }
+  html += `</div>`;
+  return html;
+}
+function synPatternsBlockHtml(sequences) {
+  let html = `<div class="sec-lbl">Повторяющиеся сценарии</div><div class="card mx mb">`;
+  html += sequences.length
+    ? sequences.slice(0, 6).map(s => `<div class="si-row"><div class="si-body"><div class="si-text">${esc(s.signature)}</div>
+        <div class="si-text" style="color:var(--t3);font-size:.72rem">Повторилось ${s.count} ${pl(s.count, 'раз', 'раза', 'раз')}</div></div></div>`).join('')
+    : `<div style="padding:1rem" class="ai-sp-empty">Повторяющихся многодневных сценариев пока не найдено — нужно больше наблюдений.</div>`;
+  html += `</div>`;
+  return html;
+}
+function synCauseChainsBlockHtml(chains) {
+  let html = `<div class="sec-lbl">Причинные цепочки</div><div class="card mx mb">`;
+  html += chains.length
+    ? chains.map(c => `<div class="si-row"><div class="si-body"><div class="si-text">${c.labels.map(esc).join(' → ')}</div></div></div>`).join('')
+    : `<div style="padding:1rem" class="ai-sp-empty">Пока не набралось цепочек из ≥3 связанных закономерностей.</div>`;
+  html += `</div>`;
+  return html;
+}
+function synSphereBlockHtml(pairs) {
+  let html = `<div class="sec-lbl">Влияние сфер</div><div class="card mx mb">`;
+  html += pairs.length ? pairs.slice(0, 8).map(pairRowHtml).join('') : `<div style="padding:1rem" class="ai-sp-empty">Пока нет подтверждённого влияния сфер друг на друга за этот период.</div>`;
+  html += `</div>`;
+  return html;
+}
+function synRelationshipBlockHtml(pairs) {
+  let html = `<div class="sec-lbl">Граф отношений</div><div class="card mx mb">`;
+  html += pairs.length ? pairs.slice(0, 8).map(pairRowHtml).join('') : `<div style="padding:1rem" class="ai-sp-empty">Контексты отношений пока не привязаны к записям, или совпадений не найдено — привязывай контекст в деталях Момента/«Зачем?»/Инсайта.</div>`;
+  html += `</div>`;
+  return html;
+}
+function rSynthesis() {
+  const el = $('sys-patterns-out'); if (!el) return;
+  const report = synthesisReport(_synDays);
+  let html = `<div class="be-note mx mb" style="color:var(--t3)">Только твои данные, без ИИ. Совпадения по времени между записями — не диагноз, не терапия, не медицинская рекомендация.</div>`;
+  html += synPeriodButtonsHtml();
+  html += synStatsBlockHtml(report.stats);
+  html += synCorrelationsBlockHtml(report.pairs);
+  html += synTriggersBlockHtml(report.pairs);
+  html += synPatternsBlockHtml(report.sequences);
+  html += synCauseChainsBlockHtml(report.chains);
+  html += synSphereBlockHtml(report.sphere);
+  html += synRelationshipBlockHtml(report.relationship);
+  if ((report.settings.dismissed || []).length) {
+    html += `<div class="mx mb"><button type="button" class="btn btn-s btn-sm" onclick="restoreDismissedCorrelations()">Показать скрытые (${report.settings.dismissed.length})</button></div>`;
+  }
+  html += `<div style="height:3rem"></div>`;
+  el.innerHTML = html;
+  icons();
+}
+
+// ═════════════════════════════════════════════════════════════════
 //  СФЕРЫ ЖИЗНИ (ядро): пользователь создаёт свои сферы, каждая — со
 //  своим типом трекера. Умный движок затем работает по любым сферам.
 // ═════════════════════════════════════════════════════════════════
@@ -8328,7 +8785,9 @@ function mergeDB(local, remote) {
   // Wave 1 (issue #148): psyAiConsent — новое скалярное поле, включено в merge
   // с самого начала (в отличие от НЕ исправляемых в этом PR astro-полей, см.
   // PRODUCT_COMPLETION_AUDIT.md §1.11 — тот баг остаётся для Волны 5).
-  ['vit','chapters','oq','env','astroBirth','psyAiConsent'].forEach(k => { if (scal[k] !== undefined) out[k] = scal[k]; });
+  // Wave 4 (issue #152): correlationSettings — новое скалярное поле, включено
+  // в merge с самого начала (тот же принцип, что и psyAiConsent в Wave 1).
+  ['vit','chapters','oq','env','astroBirth','psyAiConsent','correlationSettings'].forEach(k => { if (scal[k] !== undefined) out[k] = scal[k]; });
   out.__ts = Math.max(local.__ts || 0, remote.__ts || 0);
   return out;
 }

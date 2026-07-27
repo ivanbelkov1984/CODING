@@ -58,12 +58,17 @@ Issue №145 утверждает, что Navigation Shell 1.3B+1.4 (смёрж�
 
 ### 1.3 Обзор и аналитика (`pg-sys`)
 
+> **Обновлено Волной 4** (issue #152, ветка `claude/wave-4-unified-intelligence`) —
+> новый экран «Закономерности» (`sysGo('patterns')`). Подробности контракта:
+> `WAVE4_UNIFIED_INTELLIGENCE_DATA_CONTRACT.md`.
+
 | Функция | Статус | Данные | Путь | Примечание |
 |---|---|---|---|---|
 | Landing-аггрегатор (1.3B) | WORKING | реальные `periodReview/sphereStats/rLivingMap` | Обзор (при ON) | новое в `7f4ab05`, не декоративно |
 | Living map | WORKING (AI-gated) | инсайты/чек-ины | Обзор → Living map | честный empty state без AI-ключа |
 | Обзор 30/365 дней | WORKING | `checkins` и др. | Обзор → период | порог-gated «недостаточно данных» |
-| Корреляции (`crossLinks`) | WORKING | `sphereLogs` и др. | Обзор → корреляции | реальная статистика, min-sample gate |
+| Корреляции (`crossLinks`) | WORKING | `sphereLogs` и др. | Обзор → корреляции | реальная статистика, min-sample gate; узкий, чек-ин/сфера-специфичный анализ — НЕ заменён и не тронут Волной 4 (комплементарен, не дублирует) |
+| **«Закономерности» (Unified Intelligence Engine)** | **WORKING (Волна 4)** | read-only агрегатор поверх `moments/whys/insights/patterns/evolution/dreams/medIntakes/symptoms/measures/cravings/labObservations/healthDocuments/relationshipContexts/sphereLogs/psyLinks` | Обзор → «Закономерности» | детерминированный, без ИИ, без сети; association-rule корреляции (support/confidence/lift) + Trigger/Pattern/Cause Graph/Sphere Influence/Relationship Graph как проекции ОДНОГО движка + Confidence System (низкая/средняя/высокая); ничего не персистится, кроме `DB.correlationSettings` (настройки+dismissed) |
 
 ### 1.4 Сферы (`pg-vit`)
 
@@ -235,7 +240,7 @@ Issue №145 утверждает, что Navigation Shell 1.3B+1.4 (смёрж�
 - **Исправление merge-списка для `astroTexts`/`astroAiConsent`/`astroRectify` (найдено в §1.11).** По-прежнему НЕ исправлено — явно вне scope Волны 1 (issue #148: «Do not fix unrelated astro sync fields in this PR; that remains Wave 5»). Остаётся для Волны 5.
 - ~~**Лабораторные результаты со структурой «единицы/референс-диапазон/дата» (Волна 2).**~~ **Реализовано Волной 2** — новая коллекция `labObservations` (namespaced string id, тот же collision-safety принцип, что и `psyLinks`/`relationshipContexts` в Волне 1), аддитивно, без диагностической логики. См. `WAVE2_HEALTH_DATA_CONTRACT.md`.
 - ~~**Отношения как отдельный контекст анализа (Волна 1)**~~ **Реализовано Волной 1** — новая коллекция `relationshipContexts`, НЕ переиспользует `astroPartners`. См. `WAVE1_DATA_CONTRACT.md` §1.
-- **Versioned synthesis-записи (Волна 4)** — новая коллекция с источниками/версиями правил/промптов, датой, домены-исключениями.
+- ~~**Versioned synthesis-записи (Волна 4)** — новая коллекция с источниками/версиями правил/промптов, датой, домены-исключениями.~~ **Реализовано Волной 4, но НЕ как отдельная коллекция записей** — сознательное архитектурное решение (см. `WAVE4_UNIFIED_INTELLIGENCE_DATA_CONTRACT.md` §0/§3): вычисленные закономерности НЕ персистируются вообще (пересчитываются заново при каждом открытии экрана, что исключает риск устаревшего/рассинхронизированного вывода); единственное новое персистентное состояние — скаляр `DB.correlationSettings` (пороги + список скрытых сигнатур), той же формы, что `DB.env`/`DB.vit`/`psyAiConsent`.
 - **НЕ объединять Check-in и Момент на уровне данных** — явное правило issue №145, аудит не нашёл никаких предпосылок это делать, и это правило нужно сохранить дословно в любом будущем PR.
 
 ---
@@ -300,16 +305,28 @@ PR #146 предлагал: вкладку «Психология», hub «Ин�
 - **Focused tests:** существующие golden-тесты не должны сломаться; для новых варг/даш — собственные golden.
 - **Критерии готовности:** зелёный CI+evidence; ноль регрессий в существующих ~150+ астрологических assert'ах.
 
-### Волна 4 — Синтез и сценарное планирование
+### Волна 4 — Unified Intelligence Engine («Закономерности») — **РЕАЛИЗОВАНО** (issue #152, ветка `claude/wave-4-unified-intelligence`)
 
-- **Только фактически отсутствующее:** вся функция — новая (не найдено существующего кросс-доменного синтеза).
-- **Конечный результат:** пользователь выбирает период/домены → видит разделение факты/тренды/интерпретации/гипотезы/сценарии → каждый вывод со ссылкой на источник.
-- **Schema/migration:** новая коллекция `synthesisReports` (версия правил/промптов, источники, дата) — аддитивно.
-- **Затрагиваемые коллекции:** read-only агрегация поверх данных Волн 1–3; запись только в новую `synthesisReports`.
-- **Риски:** самый высокий риск придумывания фактов из всех волн — требует deterministic-валидаторов ДО AI-вызова (даты/диапазоны/пустые данные/противоречия).
-- **Safety boundaries:** сценарии только в форме «если A/B сохранятся, возможен путь C», без процентов; пользователь может исключать домены/данные.
-- **Критерии готовности:** зелёный CI+evidence; ни один синтез-вывод не должен быть без evidence-ссылки в тестах.
-- **Не смешивать:** доработки отдельных доменов (психика/здоровье/астрология) — эта волна только читает их результаты.
+> См. `WAVE4_UNIFIED_INTELLIGENCE_DATA_CONTRACT.md` для полного контракта. Оставлено ниже как
+> исходный план для трассируемости — статусы пунктов обновлены. Реализация ушла от исходного
+> AI-центричного плана («факты/тренды/интерпретации/гипотезы/сценарии», AI-валидаторы) к
+> **полностью детерминированному, безИИ движку** (association-rule корреляции), как явно
+> потребовал финальный issue #152 («NOT an AI chat, NOT an advice generator»).
+>
+> **Не найдено в коде на момент реализации:** источник `astro` (Волна 3 — интеграция
+> астрологии) отсутствует в этой ветке, поэтому событие "астрологические события" из
+> исходного списка issue №152 в Unified Event Engine не включено (см. contract §14) —
+> честно задокументировано, не выдумано.
+
+- ~~**Только фактически отсутствующее**~~ — реализовано: Unified Event Engine (`unifiedEvents()`, read-only агрегатор поверх 14 коллекций); Correlation Engine (support/confidence/lift, association-rule, с исправленным baseline — см. contract §4.1); Trigger/Pattern/Cause Graph/Sphere Influence/Relationship Graph — как единый движок с проекциями/фильтрами, а не 5 отдельных расчётов; Statistics Engine; Insight Generator (только шаблоны, только на статистически подтверждённых данных); Confidence System (низкая/средняя/высокая).
+- **Конечный результат:** пользователь на основе ИСКЛЮЧИТЕЛЬНО своих данных видит подтверждённые связи между событиями/психологией/здоровьем/отношениями/сферами жизни, с явным указанием уверенности и кнопками «Записи «…»», ведущими к исходным записям (полная объяснимость — не «чёрный ящик»).
+- **Schema/migration:** `SCHEMA_VERSION` 4→5, единственное новое состояние — скаляр `DB.correlationSettings` (не новая array-коллекция — осознанное отклонение от исходного плана «versioned synthesis records», см. §4). Аддитивно, покрыто точным migration-тестом (посерийное сравнение с baseline) и идемпотентностью.
+- **Затрагиваемые коллекции:** read-only агрегация поверх `moments/whys/insights/patterns/evolution/dreams/medIntakes/symptoms/measures/cravings/labObservations/healthDocuments/relationshipContexts/sphereLogs/psyLinks` — ни одна не изменена; запись только в новый скаляр `DB.correlationSettings`.
+- **Риски (закрыты):** «придумывание фактов» — устранено самой архитектурой (нет ИИ вообще, только детерминированная статистика с порогами `minSamples`/lift); найден и исправлен реальный баг движка (систематически завышенный lift из-за асимметрии оконного confidence vs наивного baseline, см. contract §4.1) через seeded-PRNG false-positive-avoidance тест.
+- **Safety boundaries:** ни диагнозов, ни психотерапии, ни эзотерики, ни медицинских советов — только шаблонные предложения на статистически подтверждённых числах пользователя; честный отказ («недостаточно данных») вместо пустого экрана или выдумки при малой выборке.
+- **Focused tests:** `tests/wave4-unified-intelligence.spec.mjs` (53 проверки: Event/Correlation/Trigger/Pattern/Cause Graph/Sphere/Relationship/Confidence engines, false-positive avoidance на seeded-независимых случайных данных, честный отказ на малых данных, детерминированность, profile isolation, мобильные вьюпорты/a11y/тема/клавиатура, 120 000-событийный performance-тест) + `tests/wave4-backup-roundtrip.test.mjs` (12 проверок encrypted/plain backup-restore через production adapter/core/restore).
+- **Критерии готовности:** зелёный CI+evidence; `npm test` (438/438, включая новые 53 проверки Волны 4) и `npm run test:backup` (включая новые 12 проверок Волны 4) зелёные; ни один вывод синтеза не показывается без evidence-ссылки на реальную запись — подтверждено тестом.
+- **Не смешивалось:** доработки отдельных доменов (психика/здоровье/астрология), навигация, существующие экраны — не тронуты; движок только читает их результаты через уже существующий Evidence Kernel `projAll()`.
 
 ### Волна 5 — Данные, надёжность и выпуск
 
@@ -336,5 +353,9 @@ DEAD_END_PATHS_LISTED=true
 CONFLICTING_DOCS_LISTED=true
 SCHEMA_CONTRACT_ITEMS_LISTED=true
 EXECUTION_PLAN_WAVES_1_5=drafted
-WAVE_1_NOT_STARTED=true
+WAVE_1_COMPLETE=true (issue #148, PR #149, merged)
+WAVE_2_COMPLETE=true (issue #150, PR #151, merged)
+WAVE_4_COMPLETE=true (issue #152, this PR — Draft, awaiting owner review)
+WAVE_3_NOT_STARTED=true
+WAVE_5_NOT_STARTED=true
 ```
