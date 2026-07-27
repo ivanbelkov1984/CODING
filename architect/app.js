@@ -11,7 +11,7 @@ const dateRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:
 const dateFullRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:'long',year:'numeric'});
 const todayKey = () => new Date().toISOString().slice(0,10);
 const nowISO = () => new Date().toISOString();            // UTC ISO 8601 — источник истины для времени
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;   // Wave 1 (issue #148): psyLinks/relationshipContexts add-only bump
 // Красивая дата из ISO createdAt (с откатом на legacy-строку date/dt)
 const dispDate = (rec, full=false) => {
   if (rec && rec.createdAt) return (full?dateFullRU:dateRU)(new Date(rec.createdAt));
@@ -71,6 +71,15 @@ const DEFAULT_DB = {
   astroRectify: null, // Ректификация: анкета событий + последний результат (sensitive, только локально)
   spheres: [],        // пользовательские сферы жизни (тип трекера у каждой)
   sphereLogs: [],     // дневные записи по сферам: {sphereId, date, value, note}
+  // Wave 1 (issue #148): доказательная цепочка Момент→«Зачем?»→Инсайт→Паттерн.
+  // Долговечные ссылки между уже существующими записями — см. PSY_LINK_RELATIONS/
+  // createPsyLink/validatePsyLink. Оригиналы записей не мутируются и не переписываются.
+  psyLinks: [],
+  // Wave 1: минимальная психологическая relationship-модель (НЕ astroPartners —
+  // это отдельная сущность). Запись = человек/контекст отношений, к которому
+  // можно привязать психологическую запись через psyLinks (record_to_relationship).
+  relationshipContexts: [],
+  psyAiConsent: null, // Wave 1 AI-помощь (Почему?→Инсайт): отдельное согласие, отзываемо в любой момент
   bots: [
     {id:1, title:'Первая задача — добавь свою', prio:'high', done:false},
   ],
@@ -106,6 +115,12 @@ let STATE = {
   evoLv: 2,
   newAxColor: '#1056CC',
   detId: null,
+  // Wave 1 (issue #148): «отложенная связь» — какую цепочку создать после
+  // того, как открытая сейчас форма будет сохранена пользователем.
+  pendingWhyFromMoment: null,   // momentId — saveWhy() создаст moment_to_why
+  pendingInsightFromWhy: null,  // whyId — saveIns() создаст why_to_insight
+  pendingPatternFromInsight: null, // insightId — savePat() создаст insight_to_pattern
+  _psyAiSuggestion: null,       // предложение AI-подсказки в памяти до явного принятия
 };
 
 // ═════════════════════════════════════════════════════════════════
@@ -159,7 +174,7 @@ const bakKey = id => 'arch5_bak_' + id;
 function dbCount(db) {
   if (!db || typeof db !== 'object') return 0;
   let n = 0;
-  ['insights','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings']
+  ['insights','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings','psyLinks','relationshipContexts']
     .forEach(c => { if (Array.isArray(db[c])) n += db[c].length; });
   return n;
 }
@@ -1356,18 +1371,40 @@ function saveIns() {
   const tx = $('add-tx').value.trim();
   if (!tx) { toast('Введи текст инсайта', 'warn'); return; }
   const src = $('add-src').value.trim();
+  const newId = Date.now();
   DB.insights.unshift({
-    id: Date.now(), tag: STATE.addTag, w: STATE.addW,
+    id: newId, tag: STATE.addTag, w: STATE.addW,
     title: titleFrom(tx), body: tx,
     date: dateRU(), createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION,
     src: src||'Вручную', links: extractLinks(tx), media: STATE.addMedia || [],
   });
   STATE.addMedia = []; const am = $('add-media'); if (am) am.innerHTML = '';
   $('add-tx').value=''; $('add-src').value='';
+  // Wave 1 (issue #148): если инсайт создавался из детали разбора «Зачем?» —
+  // создаём долговечную ссылку why_to_insight. Текст уже был отредактирован/
+  // подтверждён пользователем в этой самой форме — никакого автосохранения.
+  const whyId = STATE.pendingInsightFromWhy;
+  STATE.pendingInsightFromWhy = null;
+  if (whyId != null) createPsyLink({ fromColl: 'whys', fromId: whyId, toColl: 'insights', toId: newId, relation: 'why_to_insight', source: 'user' });
   closeOv('ov-add'); persist(); rIns(); rHIns(); rKPIs(); detectPatterns();
-  hptMed(); toast('Инсайт сохранён', 'ok');
+  hptMed(); toast(whyId != null ? 'Инсайт сохранён и связан с разбором' : 'Инсайт сохранён', 'ok');
   reactToInsight(DB.insights[0]);          // живой отклик вместо молчания
   try { rVector(); } catch (e) {}
+}
+// Открыть форму «Новый инсайт» из детали разбора «Зачем?»: превью-текст
+// собран из полей разбора, полностью редактируемый — пользователь должен
+// явно подтвердить (нажать «Сохранить инсайт»), никакого автосохранения.
+function startWhyToInsight(whyId) {
+  const w = projAll('whys').find(x => x && x.id === whyId); if (!w) return;
+  const lines = [];
+  if (w.symptom) lines.push('Симптом: ' + w.symptom);
+  if (w.function) lines.push('Функция: ' + w.function);
+  if (w.need) lines.push('Потребность: ' + w.need);
+  if (w.action) lines.push('Действие: ' + w.action);
+  const ta = $('add-tx'); if (ta) ta.value = lines.join('\n');
+  STATE.pendingInsightFromWhy = whyId;
+  closeOv('ov-why-det');
+  openOv('ov-add');
 }
 function openEdit(id) {
   const ins = DB.insights.find(x=>x.id==id);
@@ -1445,6 +1482,8 @@ const REC_COLLS = {
   spheres:    { ru: 'Сферы (с историей)', sum: r => r.name || 'сфера', cascade: true },
   astroCharts:{ ru: 'Расчёты натальной карты', sum: r => `${(r.createdAt || '').slice(0, 10)} · расчёт карты` },
   astroPartners: { ru: 'Партнёры (синастрия)', sum: r => r.label || 'партнёр' },
+  psyLinks: { ru: 'Связи (доказательная цепочка)', sum: r => `${PSY_LINK_RELATION_LABELS[r.relation] || r.relation}` },
+  relationshipContexts: { ru: 'Контексты отношений', sum: r => `${r.label || ''}${r.status === 'archived' ? ' (архив)' : ''}` },
 };
 function openRecords() {
   const sel = $('rec-coll');
@@ -1794,7 +1833,56 @@ function showDet(id) {
   html += `<div style="margin-top:var(--s3)"><button class="btn btn-s btn-sm" onclick="closeOv('ov-det');openChatFor(${ins.id})">💬 Обсудить глубже</button></div>`;
   $('det-links').innerHTML = html;
   const da = $('det-analysis'); if (da) da.innerHTML = '';
+  try { rInsightPsyLinks(ins); } catch (e) {}
   openOv('ov-det');
+  icons();
+}
+// Wave 1 (issue #148): доказательная цепочка на стороне Инсайта — откуда
+// возник (разбор «Зачем?», если есть), пикер «связать/создать Паттерн»,
+// контекст отношений. Отдельный контейнер от det-links (авто-связи по теме).
+function rInsightPsyLinks(ins) {
+  const el = $('det-psylinks'); if (!el) return;
+  let html = '';
+  const fromWhy = psyLinksTo('insights', ins.id, 'why_to_insight')[0];
+  if (fromWhy) {
+    const w = projAll('whys').find(x => x && x.id === fromWhy.fromId);
+    if (w) html += `<button type="button" class="srow" style="padding-left:0" onclick="closeOv('ov-det');openWhy(${w.id})"><span class="sl2">← «Зачем?»</span><span class="sv2">${esc((w.symptom || w.need || w.action || 'Разбор').slice(0, 60))}</span></button>`;
+  }
+  const toPattern = psyLinksFrom('insights', ins.id, 'insight_to_pattern')[0];
+  if (toPattern) {
+    const p = (DB.patterns || []).find(x => x && x.id === toPattern.toId);
+    if (p) html += `<div class="srow" style="padding-left:0"><span class="sl2">→ Паттерн</span><span class="sv2">${esc((p.text || '').slice(0, 60))}</span><button type="button" class="btn btn-s btn-xs" style="flex:none" onclick="unlinkPsyLink(${toPattern.id},()=>rInsightPsyLinks(DB.insights.find(x=>x&&x.id===${ins.id})))">Отвязать</button></div>`;
+  } else {
+    const existing = (DB.patterns || []).slice(0, 8);
+    const picker = existing.length ? `<select class="field" id="det-pat-pick"><option value="">Выбери паттерн…</option>${existing.map(p => `<option value="${p.id}">${esc((p.text || '').slice(0, 50))}</option>`).join('')}</select>` : '';
+    html += `<div style="margin-top:.5rem;display:flex;flex-direction:column;gap:.4rem">
+      ${picker}
+      <div style="display:flex;gap:var(--s2);flex-wrap:wrap">
+        ${existing.length ? `<button type="button" class="btn btn-s btn-sm" onclick="linkInsightToExistingPattern(${ins.id})"><i data-lucide="git-branch"></i>Связать с паттерном</button>` : ''}
+        <button type="button" class="btn btn-s btn-sm" onclick="startPatternFromInsight(${ins.id})"><i data-lucide="plus"></i>Создать новый паттерн</button>
+      </div>
+    </div>`;
+  }
+  html += relContextPickerHTML('insights', ins.id);
+  el.innerHTML = html;
+  icons();
+}
+function linkInsightToExistingPattern(insightId) {
+  const sel = $('det-pat-pick');
+  const patId = sel && sel.value ? parseInt(sel.value, 10) : null;
+  if (!patId) { toast('Выбери паттерн из списка', 'warn'); return; }
+  const res = createPsyLink({ fromColl: 'insights', fromId: insightId, toColl: 'patterns', toId: patId, relation: 'insight_to_pattern', source: 'user' });
+  if (res.error) { toast('Не удалось связать (' + res.error + ')', 'warn'); return; }
+  toast('Связано с паттерном', 'ok');
+  const ins = DB.insights.find(x => x && x.id === insightId); if (ins) rInsightPsyLinks(ins);
+}
+// Создать НОВЫЙ паттерн из детали Инсайта: открывает существующую форму
+// «Новый паттерн» (savePat) — после явного сохранения создаётся insight_to_pattern.
+function startPatternFromInsight(insightId) {
+  const ta = $('pat-tx'); if (ta) ta.value = '';
+  STATE.pendingPatternFromInsight = insightId;
+  closeOv('ov-det');
+  openOv('ov-pat-add');
 }
 // ─── АВТОСВЯЗИ ПО ТЕМАМ (без ручных [[…]]) ──────────────────────
 // Стоп-слова + лёгкий стем: находим записи с общими значимыми словами.
@@ -2176,10 +2264,20 @@ function openMoment(id) {
       const orig = (DB.moments || []).find(x => x && x.id === id) || {};
       html += `<div class="si-text" style="color:var(--t3);font-size:.85em">исправлено (${m._corrected}) · оригинал: приятность ${Math.round(orig.valence || 0)}, энергия ${Math.round(orig.activation || 0)}</div>`;
     }
+    // Wave 1 (issue #148): разборы «Зачем?», уже возникшие из этого Момента.
+    html += '<div class="side-div"></div>';
+    const whys = psyLinksFrom('moments', id, 'moment_to_why');
+    whys.forEach(l => {
+      const w = projAll('whys').find(x => x && x.id === l.toId);
+      if (w) html += `<button type="button" class="srow" style="padding-left:0" onclick="closeOv('ov-moment-det');openWhy(${w.id})"><span class="sl2">→ «Зачем?»</span><span class="sv2">${esc((w.symptom || w.need || w.action || 'Разбор').slice(0, 60))}</span></button>`;
+    });
+    html += `<div style="margin-top:.5rem"><button type="button" class="btn btn-s btn-sm" onclick="openWhyFromMoment(${id})"><i data-lucide="help-circle"></i>Разобрать через «Зачем?»</button></div>`;
+    html += relContextPickerHTML('moments', id);
     body.innerHTML = html;
   }
   const dt = $('mom-det-date'); if (dt) dt.textContent = (m.day || '') + ' · ' + hh;
   openOv('ov-moment-det');
+  icons();
 }
 function deleteMomentDet() {
   const id = STATE.momDetId; if (id == null) return;
@@ -2252,9 +2350,31 @@ function saveWhy() {
   if (filled === 0) { toast('Опиши хотя бы, что происходит', 'warn'); return; }
   if (!Array.isArray(DB.whys)) DB.whys = [];
   DB.whys.push(rec);
+  // Wave 1 (issue #148): если разбор открыт из Момента через «Разобрать через
+  // «Зачем?»» — создаём долговечную ссылку moment_to_why. Само содержимое
+  // Момента (valence/activation) в разбор не переносится — только то, что
+  // пользователь написал руками в полях формы выше.
+  const momentId = STATE.pendingWhyFromMoment;
+  STATE.pendingWhyFromMoment = null;
+  if (momentId != null) createPsyLink({ fromColl: 'moments', fromId: momentId, toColl: 'whys', toId: rec.id, relation: 'moment_to_why', source: 'user' });
   closeOv('ov-why'); persist();
   try { rWhys(); } catch (e) {}
-  hptMed(); toast('Разбор сохранён', 'ok');
+  hptMed(); toast(momentId != null ? 'Разбор сохранён и связан с моментом' : 'Разбор сохранён', 'ok');
+}
+// Открыть форму «Зачем?» из детали Момента: переносит ТОЛЬКО введённый
+// пользователем контекст (заметку/эмоцию) в поле «Симптом» как черновик —
+// valence/activation НЕ переносятся и не превращаются в диагноз. Пользователь
+// может стереть/переписать текст перед сохранением.
+function openWhyFromMoment(momentId) {
+  const m = projAll('moments').find(x => x && x.id === momentId); if (!m) return;
+  closeOv('ov-moment-det');
+  openOv('ov-why');   // openOv('ov-why') сбрасывает форму (resetWhyForm) — префилл ставим ПОСЛЕ
+  const parts = [];
+  if (m.emo) parts.push('Эмоция: ' + m.emo);
+  if (m.note) parts.push(m.note);
+  const sym = $('why-symptom');
+  if (sym) sym.value = parts.join(' — ');
+  STATE.pendingWhyFromMoment = momentId;
 }
 function rWhys() {
   const el = $('h-whys'); if (!el) return;
@@ -2291,9 +2411,28 @@ function openWhy(id) {
       html += `<div class="si-text" style="margin-top:.35rem">${st} · <span style="color:var(--accent);cursor:pointer" onclick="markWhyAction(null)">изменить</span></div>`;
     }
   }
+  // Wave 1 (issue #148): доказательная цепочка — откуда возник разбор и что
+  // из него уже создано, плюс действие для следующего шага цепочки.
+  html += '<div class="side-div"></div>';
+  const fromMoment = psyLinksTo('whys', id, 'moment_to_why')[0];
+  if (fromMoment) {
+    const m = projAll('moments').find(x => x && x.id === fromMoment.fromId);
+    if (m) html += `<button type="button" class="srow" style="padding-left:0" onclick="closeOv('ov-why-det');openMoment(${m.id})"><span class="sl2">← Момент</span><span class="sv2">${esc((m.day || '').slice(5))} — приятность ${momentLabel(m.valence)}, энергия ${momentLabel(m.activation)}</span></button>`;
+  }
+  const toInsights = psyLinksFrom('whys', id, 'why_to_insight');
+  toInsights.forEach(l => {
+    const ins = (DB.insights || []).find(x => x && x.id === l.toId);
+    if (ins) html += `<button type="button" class="srow" style="padding-left:0" onclick="closeOv('ov-why-det');showDet(${ins.id})"><span class="sl2">→ Инсайт</span><span class="sv2">${esc((ins.title || '').slice(0, 60))}</span></button>`;
+  });
+  html += `<div style="display:flex;gap:var(--s2);margin-top:.5rem;flex-wrap:wrap">
+    <button type="button" class="btn btn-s btn-sm" onclick="startWhyToInsight(${id})"><i data-lucide="sparkles"></i>Создать связанный инсайт</button>
+    <button type="button" class="btn btn-s btn-sm" onclick="aiSuggestInsightFromWhy(${id})"><i data-lucide="wand-2"></i>AI-подсказка</button>
+  </div>`;
+  html += relContextPickerHTML('whys', id);
   if (body) body.innerHTML = html;
   const dt = $('why-det-date'); if (dt) dt.textContent = w.day || '';
   openOv('ov-why-det');
+  icons();
 }
 // «За неделю»: детерминированная сводка (без ИИ) по моментам и разборам «Зачем?»
 // за 7 дней — понимание с одного взгляда. Только чтение накопленных записей.
@@ -2360,6 +2499,349 @@ function deleteWhyDet() {
   closeOv('ov-why-det');
   delUndo('whys', id, () => { try { rWhys(); } catch (e) {} }, 'Разбор удалён');
   STATE.whyDetId = null;
+}
+
+// ═══ WAVE 1 (issue #148): доказательная цепочка ═══════════════════
+// Момент → «Зачем?» → Инсайт → Паттерн → Действие → Выполнение.
+// psyLinks — единая generic-коллекция долговечных ссылок между уже
+// существующими записями (не переписывает и не мутирует исходные записи).
+// Ссылки profile-local, id-merge через IDCOLS (sync/tombstone/backup —
+// уже добавлены выше), удаляются независимо от исходных записей.
+const PSY_LINK_PAIR = {
+  moment_to_why:      { from: 'moments',  to: 'whys' },
+  why_to_insight:      { from: 'whys',     to: 'insights' },
+  insight_to_pattern:  { from: 'insights', to: 'patterns' },
+};
+const PSY_LINK_RELATIONS = ['moment_to_why', 'why_to_insight', 'insight_to_pattern', 'record_to_relationship'];
+// Записи, которые можно привязать к контексту отношений (record_to_relationship).
+// Паттерны включены в модель на будущее — в этом PR у Паттернов нет отдельного
+// detail-экрана, поэтому UI-привязка для них пока не реализована (см. отчёт).
+const RELATIONSHIP_LINKABLE_COLLS = ['moments', 'whys', 'insights', 'patterns'];
+const PSY_LINK_RELATION_LABELS = {
+  moment_to_why: 'Момент → «Зачем?»', why_to_insight: '«Зачем?» → Инсайт',
+  insight_to_pattern: 'Инсайт → Паттерн', record_to_relationship: 'Запись → контекст отношений',
+};
+function collExists(coll, id) { return Array.isArray(DB[coll]) && DB[coll].some(r => r && r.id === id); }
+// Fail-safe валидация: неизвестное отношение/пара коллекций, отсутствующий id,
+// self-link и orphan (несуществующая запись с любой стороны) — все отклоняются
+// одной и той же явной причиной, без исключений наверх.
+function validatePsyLink({ fromColl, fromId, toColl, toId, relation }) {
+  if (!PSY_LINK_RELATIONS.includes(relation)) return 'invalid_relation';
+  if (relation === 'record_to_relationship') {
+    if (!RELATIONSHIP_LINKABLE_COLLS.includes(fromColl)) return 'invalid_from_collection';
+    if (toColl !== 'relationshipContexts') return 'invalid_to_collection';
+  } else {
+    const pair = PSY_LINK_PAIR[relation];
+    if (!pair || fromColl !== pair.from || toColl !== pair.to) return 'invalid_collection_pair';
+  }
+  if (fromId == null || toId == null) return 'missing_id';
+  if (fromColl === toColl && fromId === toId) return 'self_link';
+  if (!collExists(fromColl, fromId)) return 'orphan_from';
+  if (!collExists(toColl, toId)) return 'orphan_to';
+  return null;
+}
+function findPsyLink({ fromColl, fromId, toColl, toId, relation }) {
+  return (DB.psyLinks || []).find(l => l && l.fromColl === fromColl && l.fromId === fromId &&
+    l.toColl === toColl && l.toId === toId && l.relation === relation);
+}
+// source: 'user' (обычное явное действие) | 'deterministic' (внутренняя
+// эвристика без ИИ) | 'ai_suggested' (требует acceptedAt ДО того, как ссылка
+// станет действующей связью — до принятия она не создаётся вовсе, см.
+// acceptPsyAiSuggestion ниже: предложение живёт только в памяти до подтверждения).
+function createPsyLink({ fromColl, fromId, toColl, toId, relation, source, confidenceLabel }) {
+  const err = validatePsyLink({ fromColl, fromId, toColl, toId, relation });
+  if (err) return { error: err };
+  if (findPsyLink({ fromColl, fromId, toColl, toId, relation })) return { error: 'duplicate' };
+  const rec = {
+    id: Date.now() + Math.floor(Math.random() * 1000), fromColl, fromId, toColl, toId, relation,
+    createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+    source: source || 'user',
+    acceptedAt: nowISO(),   // все ссылки, создаваемые этой функцией, уже приняты
+    confidenceLabel: confidenceLabel || null,
+  };
+  if (!Array.isArray(DB.psyLinks)) DB.psyLinks = [];
+  DB.psyLinks.push(rec);
+  persist();
+  return { ok: true, link: rec };
+}
+// Удаление СВЯЗИ (не исходных записей) — тот же delUndo, что и везде: надгробие
+// для синка + несколько секунд на отмену. Записи по обе стороны не трогаются.
+function unlinkPsyLink(id, renderFn) {
+  delUndo('psyLinks', id, () => { try { if (renderFn) renderFn(); } catch (e) {} }, 'Связь снята');
+}
+// Связи ИЗ записи (по relation, опционально).
+function psyLinksFrom(coll, id, relation) {
+  return (DB.psyLinks || []).filter(l => l && l.fromColl === coll && l.fromId === id && (!relation || l.relation === relation) && collExists(l.toColl, l.toId));
+}
+// Связи В запись (по relation, опционально) — обратный поиск (напр. «из какого
+// Момента возник этот разбор «Зачем?»).
+function psyLinksTo(coll, id, relation) {
+  return (DB.psyLinks || []).filter(l => l && l.toColl === coll && l.toId === id && (!relation || l.relation === relation) && collExists(l.fromColl, l.fromId));
+}
+
+// ─── КОНТЕКСТЫ ОТНОШЕНИЙ (Wave 1) ────────────────────────────────
+// Минимальная психологическая relationship-модель. НЕ astroPartners —
+// это разные сущности (астрологический партнёр карты ≠ психологический
+// контекст отношений). Не выводит мотивы/диагноз/личность другого человека —
+// хранит только то, что ввёл сам пользователь (label/роль/заметка).
+function saveRelationshipContext() {
+  const label = ($('relctx-label') || {}).value?.trim();
+  const role = ($('relctx-role') || {}).value?.trim() || '';
+  const note = ($('relctx-note') || {}).value?.trim() || '';
+  if (!label) { toast('Укажи имя или обозначение контекста', 'warn'); return; }
+  const rec = {
+    id: Date.now(), label, roleOrRelation: role, status: 'active', note,
+    privacyClass: 'sensitive', createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+  };
+  if (!Array.isArray(DB.relationshipContexts)) DB.relationshipContexts = [];
+  DB.relationshipContexts.push(rec);
+  closeOv('ov-relctx'); persist();
+  try { rRelationshipContexts(); } catch (e) {}
+  hptMed(); toast('Контекст отношений создан', 'ok');
+}
+function openRelationshipContextAdd() {
+  const l = $('relctx-label'), r = $('relctx-role'), n = $('relctx-note');
+  if (l) l.value = ''; if (r) r.value = ''; if (n) n.value = '';
+  openOv('ov-relctx');
+}
+function renameRelationshipContext(id) {
+  const c = (DB.relationshipContexts || []).find(x => x && x.id === id); if (!c) return;
+  const next = prompt('Новое имя/обозначение контекста:', c.label);
+  if (next == null) return;
+  const val = next.trim(); if (!val) { toast('Имя не может быть пустым', 'warn'); return; }
+  c.label = val; touch(c); persist();
+  try { rRelationshipContexts(); } catch (e) {}
+  toast('Переименовано', 'ok');
+}
+function toggleArchiveRelationshipContext(id) {
+  const c = (DB.relationshipContexts || []).find(x => x && x.id === id); if (!c) return;
+  c.status = c.status === 'archived' ? 'active' : 'archived';
+  touch(c); persist();
+  try { rRelationshipContexts(); } catch (e) {}
+  toast(c.status === 'archived' ? 'Контекст перенесён в архив' : 'Контекст восстановлен из архива', 'ok');
+}
+// Пикер контекста для любой психологической записи (Момент/«Зачем?»/Инсайт/
+// Паттерн). «Активен ноль или один» — по правилам приложения: назначение
+// нового контекста сначала снимает прежнюю запись record_to_relationship для
+// этой же записи, затем создаёт новую. Отвязка не удаляет саму запись.
+function assignRelationshipContext(coll, id, ctxId) {
+  const existing = psyLinksFrom(coll, id, 'record_to_relationship');
+  existing.forEach(l => { const idx = (DB.psyLinks || []).findIndex(x => x && x.id === l.id); if (idx >= 0) { tomb(l.id); DB.psyLinks.splice(idx, 1); } });
+  if (ctxId != null) {
+    const res = createPsyLink({ fromColl: coll, fromId: id, toColl: 'relationshipContexts', toId: ctxId, relation: 'record_to_relationship', source: 'user' });
+    if (res.error) { persist(); toast('Не удалось привязать контекст', 'warn'); return; }
+  }
+  persist();
+}
+function relationshipContextOf(coll, id) {
+  const l = psyLinksFrom(coll, id, 'record_to_relationship')[0];
+  if (!l) return null;
+  return (DB.relationshipContexts || []).find(c => c && c.id === l.toId) || null;
+}
+// Разметка «Контекст: …» + пикер — переиспользуется в деталях Момента/«Зачем?»/
+// Инсайта. select с активными контекстами + «Без контекста».
+function relContextPickerHTML(coll, id) {
+  const cur = relationshipContextOf(coll, id);
+  const active = (DB.relationshipContexts || []).filter(c => c && c.status !== 'archived');
+  const opts = ['<option value="">Без контекста</option>']
+    .concat(active.map(c => `<option value="${c.id}"${cur && cur.id === c.id ? ' selected' : ''}>${esc(c.label)}</option>`));
+  return `<div style="margin-top:.6rem"><div class="f-lbl">Контекст отношений</div>
+    <select class="field" onchange="assignRelationshipContext('${coll}',${id},this.value?parseInt(this.value,10):null)">${opts.join('')}</select></div>`;
+}
+
+// ─── НЕЗАВЕРШЁННЫЕ ДЕЙСТВИЯ + ПОВТОРЯЮЩИЕСЯ ТРИГГЕРЫ (Wave 1) ────
+// Рендерится ТОЛЬКО внутри существующей вкладки «Психика» (см. rMap()) —
+// никакой новой top-level навигации. Read-only агрегация: не сортирует и
+// не мутирует DB.whys/DB.moments, читает через projAll (учитывает коррекции).
+let _psyShowDoneActions = false;
+function togglePsyShowDone() { _psyShowDoneActions = !_psyShowDoneActions; try { rPsyActions(); } catch (e) {} }
+// Цепочка «откуда возникло действие»: Момент (если разбор пришёл из него) →
+// Инсайт (если создан) → Паттерн (если инсайт с ним связан). Только чтение.
+function psyActionEvidenceChain(why) {
+  const chain = [];
+  const fromMoment = psyLinksTo('whys', why.id, 'moment_to_why')[0];
+  if (fromMoment) {
+    const m = projAll('moments').find(x => x && x.id === fromMoment.fromId);
+    if (m) chain.push('Момент ' + (m.day || '').slice(5));
+  }
+  const toInsight = psyLinksFrom('whys', why.id, 'why_to_insight')[0];
+  if (toInsight) {
+    const ins = (DB.insights || []).find(x => x && x.id === toInsight.toId);
+    if (ins) {
+      chain.push('Инсайт «' + (ins.title || '').slice(0, 30) + '»');
+      const toPattern = psyLinksFrom('insights', ins.id, 'insight_to_pattern')[0];
+      if (toPattern) {
+        const p = (DB.patterns || []).find(x => x && x.id === toPattern.toId);
+        if (p) chain.push('Паттерн «' + (p.text || '').slice(0, 30) + '»');
+      }
+    }
+  }
+  return chain;
+}
+// Отметка выполнения/отмены ИЗ списка действий — та же append-only коррекция,
+// что и markWhyAction (issue #148: «read-only агрегация не мутирует исходные
+// массивы» — сама пометка идёт через Evidence Kernel, не прямой мутацией).
+// В отличие от markWhyAction, не открывает деталь разбора (список остаётся
+// на месте после клика).
+function togglePsyActionDone(id, done) {
+  addCorrection('whys', id, { actionDone: done, checkedAt: done ? nowISO() : '' }, 'проверка результата (список действий)');
+  try { rPsyActions(); } catch (e) {}
+  try { rWhys(); } catch (e) {}
+  hptMed(); toast(done ? 'Отмечено: сделано' : 'Отменено', 'ok');
+}
+function rPsyActions() {
+  const el = $('psy-actions'); if (!el) return;
+  const all = projAll('whys').filter(w => w && w.action && String(w.action).trim());
+  if (!all.length) { el.innerHTML = `<div class="sec-lbl">Незавершённые действия</div><div class="si-text" style="color:var(--t3);padding:.4rem 0 .8rem">Заполни поле «Действие» в разборе «Зачем?» — оно появится здесь.</div>`; return; }
+  const open = all.filter(w => w.actionDone !== true);
+  const done = all.filter(w => w.actionDone === true);
+  const list = (_psyShowDoneActions ? all : open).slice().sort((a, b) => _ru(b) - _ru(a));
+  const rows = list.length ? list.map(w => {
+    const chain = psyActionEvidenceChain(w);
+    const chainHtml = chain.length ? `<div class="si-text" style="color:var(--t3);font-size:.85em;margin-top:.15rem">${chain.map(esc).join(' → ')}</div>` : '';
+    const mk = w.actionDone === true;
+    return `<div class="si-row">
+        <button type="button" class="si-body" style="background:none;border:0;padding:0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:44px;display:flex;flex-direction:column;justify-content:center" onclick="openWhy(${w.id})" aria-label="Открыть разбор «Зачем?»: ${esc(w.action)}"><div class="si-text">${mk ? '<span style="color:var(--green)">✓</span> ' : ''}${esc(w.action)}</div>${chainHtml}</button>
+        <button type="button" class="btn btn-s btn-xs" style="flex:none;min-width:44px;min-height:44px" onclick="event.stopPropagation();togglePsyActionDone(${w.id},${mk ? 'false' : 'true'})">${mk ? 'Отменить' : 'Готово'}</button>
+      </div>`;
+  }).join('') : `<div class="si-text" style="color:var(--t3);padding:.4rem 0">Всё выполнено — новых незавершённых действий нет.</div>`;
+  el.innerHTML = `<div class="sec-lbl">Незавершённые действия${done.length ? ` <span style="font-weight:400;color:var(--t3)">· выполнено ${done.length}</span>` : ''}</div>
+    <div class="card mx mb">${rows}</div>
+    ${done.length ? `<div class="mx mb"><button type="button" class="btn btn-s btn-sm" onclick="togglePsyShowDone()">${_psyShowDoneActions ? 'Скрыть выполненные' : 'Показать выполненные'}</button></div>` : ''}`;
+}
+// Повторяющиеся триггеры: группировка ТОЛЬКО по введённому пользователем полю
+// «Симптом» разбора «Зачем?» — нормализация только для сравнения (регистр/
+// пробелы), исходная формулировка показывается как есть. Минимум наблюдений
+// до вывода о повторении (issue #148: «не объявлять один случай паттерном»).
+// Каждая группа раскрывает исходные записи по тапу.
+const PSY_MIN_TRIGGER_SAMPLE = 3;
+const normTrigger = s => String(s || '').trim().toLowerCase();
+function rPsyTriggers() {
+  const el = $('psy-triggers'); if (!el) return;
+  const whys = projAll('whys').filter(w => w && w.symptom && normTrigger(w.symptom));
+  const groups = {};
+  whys.forEach(w => { const k = normTrigger(w.symptom); (groups[k] = groups[k] || []).push(w); });
+  const repeated = Object.entries(groups).filter(([, l]) => l.length >= PSY_MIN_TRIGGER_SAMPLE).sort((a, b) => b[1].length - a[1].length).slice(0, 5);
+  if (!repeated.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="sec-lbl">Повторяющиеся триггеры</div>' + repeated.map(([, list]) => {
+    const label = list[0].symptom;
+    const recs = list.slice(0, 6).map(w => `<span class="wl" onclick="openWhy(${w.id})">${esc((w.day || '').slice(5))}</span>`).join(' · ');
+    return `<div class="card mx mb" style="padding:.7rem 1rem"><div class="si-text"><b>${esc(label)}</b> — встречалось ${list.length} раз</div><div class="si-text" style="margin-top:.3rem;font-size:.85em">${recs}</div></div>`;
+  }).join('');
+}
+function rRelationshipContexts() {
+  const el = $('psy-relctx'); if (!el) return;
+  const all = DB.relationshipContexts || [];
+  const active = all.filter(c => c && c.status !== 'archived');
+  const archived = all.filter(c => c && c.status === 'archived');
+  const row = c => `<div class="srow"><div class="bk-info"><span class="sl2">${esc(c.label)}</span><span class="sv2">${esc(c.roleOrRelation || '')}${c.note ? ' · ' + esc(c.note) : ''}</span></div>
+    <button type="button" class="btn btn-s btn-xs" style="flex:none" onclick="renameRelationshipContext(${c.id})">Переим.</button>
+    <button type="button" class="btn btn-s btn-xs" style="flex:none" onclick="toggleArchiveRelationshipContext(${c.id})">${c.status === 'archived' ? 'Восстановить' : 'Архив'}</button>
+  </div>`;
+  el.innerHTML = `<div class="sec-lbl">Контексты отношений</div>
+    <div class="more-list mx mb">${active.length ? active.map(row).join('') : '<div class="si-text" style="color:var(--t3);padding:.5rem 0">Пока нет контекстов — добавь человека или ситуацию, чтобы привязывать к ней записи.</div>'}</div>
+    <div class="mx mb"><button type="button" class="btn btn-s btn-sm" onclick="openRelationshipContextAdd()"><i data-lucide="user-plus"></i>Новый контекст</button></div>
+    ${archived.length ? `<div class="sec-lbl">Архив (${archived.length})</div><div class="more-list mx mb">${archived.map(row).join('')}</div>` : ''}`;
+}
+function rPsyWorkflow() {
+  const el = $('psy-workflow'); if (!el) return;
+  el.innerHTML = `<div id="psy-actions"></div><div id="psy-triggers"></div><div id="psy-relctx"></div><div style="height:1rem"></div>`;
+  rPsyActions(); rPsyTriggers(); rRelationshipContexts();
+  icons();
+}
+
+// ─── AI-ПОМОЩЬ «ЗАЧЕМ?» → ИНСАЙТ (Wave 1, необязательно) ──────────
+// Основной контур (Момент→«Зачем?»→Инсайт→Паттерн→Действие) работает
+// полностью БЕЗ ИИ — эта секция добавляет один опциональный AI-помощник по
+// явному нажатию, со своим согласием, кризисным гейтом и честным отказом,
+// если провайдер не поддерживает безопасный структурированный вывод. Никаких
+// фоновых/сетевых вызовов при открытии экрана — только по клику пользователя.
+// Явные, но НЕисчерпывающие маркеры кризисного текста (рус.) — детерминировано,
+// без ИИ; при срабатывании AI-анализ не запускается вовсе.
+const CRISIS_KEYWORDS = [
+  'покончить с собой', 'суицид', 'самоубийств', 'не хочу жить', 'хочу умереть',
+  'убить себя', 'причинить себе вред', 'порезать себя', 'нанести себе вред',
+  'свести счёты с жизнью', 'убить его', 'убить её', 'убить их', 'причинить вред другому',
+];
+function detectCrisisLanguage(text) {
+  const t = String(text || '').toLowerCase();
+  return CRISIS_KEYWORDS.some(k => t.includes(k));
+}
+// Безопасная панель вместо обычного AI-анализа: местные экстренные службы
+// (без захардкоженного номера — страна не настроена), доверенный человек из
+// CFG.trustedContact (если задан), профессиональная помощь. Никакого диагноза.
+function showCrisisSafetyPanel() {
+  const body = $('crisis-safety-body');
+  const contact = (CFG.trustedContact || '').trim();
+  if (body) body.innerHTML = `
+    <div class="be-note">Похоже, речь может идти о серьёзной опасности для тебя или кого-то ещё. Обычный AI-разбор здесь остановлен — это не тот случай, где полезен алгоритм.</div>
+    <div class="si-text" style="margin-top:.75rem"><b>Если есть непосредственная угроза жизни</b> — обратись в местную экстренную службу.</div>
+    ${contact ? `<div class="si-text" style="margin-top:.5rem"><b>Доверенный человек:</b> ${esc(contact)}</div>` : `<div class="si-text" style="margin-top:.5rem;color:var(--t3)">Добавь доверенного человека в Настройках — он будет показан здесь в следующий раз.</div>`}
+    <div class="si-text" style="margin-top:.5rem">Также можно обратиться к специалисту (психотерапевту, психиатру) — это не заменяет разговор с тем, кому доверяешь прямо сейчас.</div>`;
+  openOv('ov-crisis-safety');
+}
+function savePsyAiConsent() {
+  const on = !!($('psy-aic-on') && $('psy-aic-on').classList.contains('on'));
+  DB.psyAiConsent = { on, acceptedAt: on ? nowISO() : null, version: 'psy-ai-consent-v1', sv: SCHEMA_VERSION, _u: Date.now() };
+  persist(); closeOv('ov-psy-ai-consent'); toast('Настройки согласия сохранены', 'ok');
+}
+function openPsyAiConsent() {
+  const c = DB.psyAiConsent || {};
+  const el = $('psy-aic-on'); if (el) el.classList.toggle('on', !!c.on);
+  openOv('ov-psy-ai-consent');
+}
+// AI-подсказка по разбору «Зачем?»: отправляет ТОЛЬКО поля этого разбора
+// (не весь дневник), просит структурированный {hypothesis, sources,
+// limitations}, ничего не сохраняет и не связывает до явного подтверждения
+// пользователем (acceptPsyAiSuggestion). Fail-closed для провайдеров без
+// безопасной поддержки structured output (issue #148: не расширяем
+// AI_PROVIDERS.gemini в этом PR — честно отказываем заранее).
+async function aiSuggestInsightFromWhy(whyId) {
+  const w = projAll('whys').find(x => x && x.id === whyId); if (!w) return;
+  const combinedText = WHY_FIELDS.map(k => w[k]).filter(Boolean).join(' ');
+  if (detectCrisisLanguage(combinedText)) { closeOv('ov-why-det'); showCrisisSafetyPanel(); return; }
+  const consent = DB.psyAiConsent;
+  if (!consent || !consent.on || !consent.acceptedAt) { openPsyAiConsent(); return; }
+  const provName = CFG.aiProvider || 'anthropic';
+  if (!getAiKeyFor(provName)) { toast('Добавь AI-ключ в Настройках', 'warn'); return; }
+  if (provName === 'gemini') { toast('Провайдер Gemini пока не поддерживает безопасный структурированный вывод для этой функции — переключись на Anthropic/OpenAI в Настройках или создай инсайт вручную.', 'warn'); return; }
+  const schema = { type: 'object', additionalProperties: false, required: ['hypothesis', 'sources', 'limitations'], properties: {
+    hypothesis: { type: 'string' }, sources: { type: 'array', items: { type: 'string' } }, limitations: { type: 'string' },
+  } };
+  const out = $('why-ai-out'); if (out) out.innerHTML = '<div class="ai-sp-empty">Думаю…</div>';
+  try {
+    const text = await callClaude({
+      task: 'other', maxTokens: 500,
+      system: 'Ты помогаешь превратить разбор «Зачем?» в черновик инсайта. СТРОГО: используй только переданный текст разбора, ничего не выдумывай — ни мотивы, ни диагнозы, ни проценты, ни степень уверенности. В sources перечисли конкретные поля разбора (по дате/id), на которые опираешься. Если текста недостаточно для содержательной гипотезы — честно напиши это в limitations, не додумывай.',
+      user: JSON.stringify({ whyId: w.id, day: w.day, fields: Object.fromEntries(WHY_FIELDS.map(k => [k, w[k] || null])) }),
+      schema,
+    });
+    const parsed = JSON.parse(text);
+    STATE._psyAiSuggestion = { whyId, hypothesis: parsed.hypothesis || '', sources: parsed.sources || [], limitations: parsed.limitations || '' };
+    if (out) out.innerHTML = `<div class="psy-box"><div class="psy-box-t">AI-гипотеза</div>
+      <div class="si-text">${esc(parsed.hypothesis || '')}</div>
+      <div class="psy-row"><span>Источники</span><div>${(parsed.sources || []).map(esc).join(', ') || ('разбор «Зачем?» от ' + esc(w.day || ''))}</div></div>
+      <div class="psy-row"><span>Ограничения</span><div>${esc(parsed.limitations || '')}</div></div>
+      <div style="margin-top:.5rem"><button type="button" class="btn btn-p btn-sm" onclick="acceptPsyAiSuggestion()">Использовать как черновик</button></div>
+    </div>`;
+  } catch (e) {
+    if (out) out.innerHTML = '';
+    toast(e && e.message ? e.message : 'Не удалось получить AI-подсказку', 'warn');
+  }
+}
+// Принять предложение: заполняет черновик в СУЩЕСТВУЮЩЕЙ форме «Новый инсайт» —
+// пользователь ещё раз видит и редактирует текст перед реальным сохранением
+// (saveIns остаётся единственной точкой сохранения). До этого клика
+// предложение нигде не сохранено и не связано.
+function acceptPsyAiSuggestion() {
+  const s = STATE._psyAiSuggestion; if (!s) return;
+  const ta = $('add-tx'); if (ta) ta.value = s.hypothesis || '';
+  STATE.pendingInsightFromWhy = s.whyId;
+  STATE._psyAiSuggestion = null;
+  const out = $('why-ai-out'); if (out) out.innerHTML = '';
+  closeOv('ov-why-det');
+  openOv('ov-add');
+  toast('Черновик вставлен — проверь и отредактируй перед сохранением', 'ok');
 }
 
 // ═══ ДНЕВНИК: агрегатор-landing (issue #141; только при arch_nav_v2=ON) ═══
@@ -5750,10 +6232,15 @@ function deleteDrm(id) {
 function savePat() {
   const tx = $('pat-tx').value.trim();
   if (!tx) { toast('Опиши паттерн', 'warn'); return; }
-  DB.patterns.push({id:Date.now(), type:STATE.patType, text:tx, cnt:1});
+  const newId = Date.now();
+  DB.patterns.push({id:newId, type:STATE.patType, text:tx, cnt:1});
   $('pat-tx').value='';
+  // Wave 1 (issue #148): паттерн создан из детали Инсайта → insight_to_pattern.
+  const insightId = STATE.pendingPatternFromInsight;
+  STATE.pendingPatternFromInsight = null;
+  if (insightId != null) createPsyLink({ fromColl: 'insights', fromId: insightId, toColl: 'patterns', toId: newId, relation: 'insight_to_pattern', source: 'user' });
   closeOv('ov-pat-add'); persist(); rPats();
-  hptMed(); toast('Паттерн зафиксирован', 'ok');
+  hptMed(); toast(insightId != null ? 'Паттерн создан и связан с инсайтом' : 'Паттерн зафиксирован', 'ok');
 }
 function deletePat(id) {
   delUndo('patterns', id, rPats, 'Паттерн удалён');
@@ -7269,7 +7756,7 @@ function genRecoveryKey() {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','astroPartners','bots','digests','spheres','sphereLogs','chats','cravings'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','astroPartners','bots','digests','spheres','sphereLogs','chats','cravings','psyLinks','relationshipContexts'];
 function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
 function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
 const _ru = r => r._u || r.id || 0;   // «когда обновлено» с откатом на id (id = Date.now())
@@ -7298,7 +7785,10 @@ function mergeDB(local, remote) {
   IDCOLS.forEach(c => { out[c] = mergeById(local[c] || [], remote[c] || [], del); });
   // скалярные поля (состояние/главы/вопросы/данные рождения) — из более свежего документа
   const scal = (remote.__ts || 0) > (local.__ts || 0) ? remote : local;
-  ['vit','chapters','oq','env','astroBirth'].forEach(k => { if (scal[k] !== undefined) out[k] = scal[k]; });
+  // Wave 1 (issue #148): psyAiConsent — новое скалярное поле, включено в merge
+  // с самого начала (в отличие от НЕ исправляемых в этом PR astro-полей, см.
+  // PRODUCT_COMPLETION_AUDIT.md §1.11 — тот баг остаётся для Волны 5).
+  ['vit','chapters','oq','env','astroBirth','psyAiConsent'].forEach(k => { if (scal[k] !== undefined) out[k] = scal[k]; });
   out.__ts = Math.max(local.__ts || 0, remote.__ts || 0);
   return out;
 }
@@ -8937,6 +9427,11 @@ function rMap() {
   if (v === 'themes') rThemeMap('graph-canvas');
   else if (v === 'psy') rPsyView('graph-canvas');
   else { if (ti) ti.innerHTML = ''; rGraph('graph-canvas', 380, false); }
+  // Wave 1 (issue #148): доказательная цепочка рендерится ТОЛЬКО во вкладке
+  // «Психика» (v==='psy') — не новый top-level раздел, существующий subroute.
+  const pw = $('psy-workflow');
+  if (v === 'psy') { try { rPsyWorkflow(); } catch (e) {} }
+  else if (pw) pw.innerHTML = '';
 }
 let _tmSel = null;
 function tmSelect(enc) {
