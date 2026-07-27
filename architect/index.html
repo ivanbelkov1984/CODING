@@ -658,6 +658,10 @@
     <div class="card mx"><div id="graph-canvas" class="graph-wrap"></div></div>
     <div id="theme-insights"></div>
     <div class="graph-hint mx" id="graph-hint">Карта строится сама из твоих записей: размер — как часто тема встречается, цвет — группа связанных тем, линия — темы появляются вместе.</div>
+    <!-- Wave 1 (issue #148): доказательная цепочка — только внутри существующей
+         вкладки «Психика», без новой top-level навигации. Рендерится rPsyWorkflow()
+         только при STATE.mapView==='psy' (см. rMap()). -->
+    <div id="psy-workflow"></div>
     <div style="height:5rem"></div>
   </div>
   <div id="ms-evolution" style="display:none">
@@ -970,6 +974,7 @@
     <div class="sh-title">Разбор «Зачем?»</div>
     <div class="be-note" id="why-det-date" style="margin:0 1rem .5rem;color:var(--t3)"></div>
     <div id="why-det-body" style="padding:0 1rem 1rem"></div>
+    <div id="why-ai-out" style="padding:0 1rem 1rem"></div>
     <div style="padding:0 1rem 1rem;display:flex;gap:var(--s2)">
       <button class="btn btn-s" style="flex:1" onclick="closeOv('ov-why-det')">Закрыть</button>
       <button class="btn btn-d" style="flex:1" onclick="deleteWhyDet()"><i data-lucide="trash-2"></i>Удалить</button>
@@ -1196,6 +1201,44 @@
   </div>
 </div>
 
+<!-- Wave 1 (issue #148): контекст отношений — новый человек/контекст -->
+<div class="ov" id="ov-relctx" onclick="if(event.target===this)closeOv('ov-relctx')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Новый контекст отношений</div>
+    <div class="be-note" style="margin:0 1rem .5rem">Обозначение человека или контекста для твоих собственных записей. Мы не делаем выводов о другом человеке — только то, что напишешь сам.</div>
+    <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.75rem">
+      <div><div class="f-lbl">Имя или обозначение</div><input class="field" id="relctx-label" placeholder="Например: Мама, Партнёр, Коллега N"></div>
+      <div><div class="f-lbl">Роль/тип отношений (необязательно)</div><input class="field" id="relctx-role" placeholder="Например: родитель, партнёр, друг"></div>
+      <div><div class="f-lbl">Заметка (необязательно)</div><textarea class="field" id="relctx-note" rows="2"></textarea></div>
+      <button class="btn btn-p btn-full" onclick="saveRelationshipContext()"><i data-lucide="check"></i>Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- Wave 1 (issue #148): кризисная безопасная панель — вместо обычного AI-анализа -->
+<div class="ov" id="ov-crisis-safety" onclick="if(event.target===this)closeOv('ov-crisis-safety')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Сначала о безопасности</div>
+    <div style="padding:0 1rem 1rem" id="crisis-safety-body"></div>
+    <div style="padding:0 1rem 1rem"><button class="btn btn-s btn-full" onclick="closeOv('ov-crisis-safety')">Закрыть</button></div>
+  </div>
+</div>
+
+<!-- Wave 1 (issue #148): согласие на AI-помощь по психологическим данным -->
+<div class="ov" id="ov-psy-ai-consent" onclick="if(event.target===this)closeOv('ov-psy-ai-consent')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">AI-подсказка · согласие</div>
+    <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.5rem">
+      <div class="be-note">AI-подсказка отправляет провайдеру ТОЛЬКО текст выбранного разбора «Зачем?» (поля, которые ты сам заполнил) — без остальных записей дневника. Результат — гипотеза с источниками и ограничениями, она не сохраняется, пока ты явно не подтвердишь. Согласие можно отозвать здесь в любой момент.</div>
+      <div class="tog-row" style="border-bottom:none"><span class="tog-lbl">Разрешить AI-подсказку по психологическим данным</span><div class="tog" id="psy-aic-on" onclick="this.classList.toggle('on')" role="switch"></div></div>
+      <button class="btn btn-p btn-full" onclick="savePsyAiConsent()"><i data-lucide="check"></i>Сохранить выбор</button>
+    </div>
+  </div>
+</div>
+
 <!-- СОЗДАТЬ/ПРАВИТЬ СФЕРУ -->
 <div class="ov" id="ov-sphere-edit" onclick="if(event.target===this)closeOv('ov-sphere-edit')">
   <div class="sheet">
@@ -1306,6 +1349,7 @@
       <div id="det-body" style="font-size:var(--tx5);color:var(--t2);line-height:1.65;white-space:pre-wrap;margin-bottom:1.25rem"></div>
       <div id="det-media" class="det-media"></div>
       <div id="det-links" style="font-size:var(--tx3);color:var(--t3)"></div>
+      <div id="det-psylinks" style="margin-top:.75rem"></div>
       <div id="det-analysis"></div>
     </div>
     <div style="padding:1rem;display:flex;gap:.625rem">
