@@ -1353,6 +1353,9 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 /* Строка настроек как настоящий <button> (семантика + клавиатура):
    вид полностью как у div.srow, сбрасываются только UA-стили кнопки. */
 button.srow{display:flex;width:100%;background:none;border:0;border-bottom:1px solid var(--bd);font:inherit;color:inherit;text-align:left;min-height:44px;-webkit-appearance:none;appearance:none}
+/* Единственный новый пункт subnav «Обзор» (landing Дневника, issue #141/#142) —
+   настоящий button.snpill; тап-зона ≥44×44 без изменения старых .snpill-div. */
+#subnav .snpill[data-sub="overview"]{min-height:44px}
 button.srow:last-child{border-bottom:none}
 .nsh-tabbar{display:none}
 .nsh-cap-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;padding:0 var(--s4) var(--s2)}
