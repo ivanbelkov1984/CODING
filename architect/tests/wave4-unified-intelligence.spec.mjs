@@ -104,6 +104,44 @@ ok(eventsTest.windowExcludesOld, 'Unified Event Engine: событие вне о
 ok(eventsTest.noMutation, 'Unified Event Engine: агрегация не мутирует исходные коллекции (read-only projAll)');
 ok(eventsTest.idFormat, 'Unified Event Engine: id события — стабильный синтетический `coll:refId`, не пишется в DB');
 
+// ── 3b) eventTimeOf(): семантический день (date/day) ПОБЕЖДАЕТ createdAt ──
+// Owner review (PR #153, дефект 4): раньше `createdAt` шёл ПЕРВЫМ в приоритете
+// и никогда не давал дойти до `rec.date`/`rec.day` — backdated sphereLogs
+// анализировались по дню СОЗДАНИЯ записи, а не по дню, который пользователь
+// явно указал (`logSphere(sphereId,value,note,date)` поддерживает backdating).
+const timeSemantics = await page.evaluate(() => {
+  const now = Date.now();
+  const backdatedDay = new Date(now - 10 * 864e5).toISOString().slice(0, 10);
+  const createdToday = new Date(now).toISOString().slice(0, 10);
+  DB.spheres = [{ id: 500, name: 'Чтение', type: 'habit' }];
+  // Реальный сценарий: пользователь отмечает привычку ЗАДНИМ ЧИСЛОМ (date=10
+  // дней назад), но физически сохраняет запись СЕЙЧАС (createdAt=сегодня).
+  DB.sphereLogs = [{ id: 900001, sphereId: 500, date: backdatedDay, value: true, createdAt: new Date(now).toISOString(), sv: SCHEMA_VERSION, _u: now }];
+  const events = unifiedEvents(365);
+  const sphereEvent = events.find(e => e.sourceCollection === 'sphereLogs' && e.referenceId === 900001);
+
+  // Прямая проверка контракта eventTimeOf(): `day` обязан победить `createdAt`,
+  // даже если они указывают на РАЗНЫЕ дни (синтетически расходящиеся поля —
+  // проверяем именно приоритет функции, а не воспроизводим конкретную форму).
+  const dayVsCreatedAt = eventTimeOf({ day: '2026-03-15', createdAt: '2026-03-20T23:00:00.000Z' });
+  const dayWins = new Date(dayVsCreatedAt).toISOString().slice(0, 10) === '2026-03-15';
+
+  // Полдень-UTC якорь: день не должен «съехать» для дней рядом с границами
+  // года/месяца (сериализация через toISOString().slice(0,10) в unifiedEvents()).
+  const boundaryT = eventTimeOf({ day: '2026-01-01', createdAt: '2025-12-31T02:00:00.000Z' });
+  const boundaryDayOk = new Date(boundaryT).toISOString().slice(0, 10) === '2026-01-01';
+
+  return {
+    sphereEventDay: sphereEvent && sphereEvent.date,
+    backdatedDay, createdToday,
+    dayWins, boundaryDayOk,
+  };
+});
+ok(timeSemantics.sphereEventDay === timeSemantics.backdatedDay && timeSemantics.sphereEventDay !== timeSemantics.createdToday,
+  'eventTimeOf(): backdated sphereLog анализируется по указанному дню (`date`), а НЕ по дню физического создания записи (`createdAt`)');
+ok(timeSemantics.dayWins, 'eventTimeOf(): `day` побеждает `createdAt` в приоритете, когда они расходятся (контракт функции)');
+ok(timeSemantics.boundaryDayOk, 'eventTimeOf(): день не «съезжает» на границе года при полдень-UTC якоре, даже если `createdAt` — из другого календарного дня');
+
 // ── 4) Correlation Engine: точная математика на известном синтетическом входе ──
 const corrMath = await page.evaluate(() => {
   const now = Date.now();
@@ -129,6 +167,10 @@ const corrMath = await page.evaluate(() => {
     hits: pair && pair.hits,
     confidenceStat: pair && +pair.confidenceStat.toFixed(4),
     lift: pair && +pair.lift.toFixed(4),
+    significant: pair && pair.significant,
+    hasPValue: pair && typeof pair.pValue === 'number' && pair.pValue >= 0 && pair.pValue <= 1,
+    hasQValue: pair && typeof pair.qValue === 'number' && pair.qValue >= 0 && pair.qValue <= 1,
+    precedes: pair && pair.precedes,
     // ручной расчёт: supportA=10, hits=10 (каждый конфликт → бессонница на след. день, окно 7 дней захватывает),
     // baseline = supportB(10) / totalDays; lift = confidence(1.0) / baseline
     expectedConfidence: 1,
@@ -138,39 +180,92 @@ ok(corrMath.found, 'Correlation Engine: находит инженерную ко
 ok(corrMath.supportA === 10 && corrMath.hits === 10, 'Correlation Engine: support(A)=10, hits=10 — точное совпадение с синтетическим входом');
 ok(corrMath.confidenceStat === corrMath.expectedConfidence, 'Correlation Engine: confidence = hits/supportA = 1.0 (100% случаев)');
 ok(corrMath.lift > 1.3, 'Correlation Engine: lift существенно выше 1 (событие B значимо чаще обычного после A)');
+// Owner review (PR #153, дефект 2): пара обязана нести доказательство статистической
+// значимости (точный тест Фишера + BH-FDR), а не только эвристику lift.
+ok(corrMath.hasPValue && corrMath.hasQValue && corrMath.significant, 'Correlation Engine: пара несёт p-value/q-value и прошла FDR-скорректированный гейт значимости (significant=true)');
+// Owner review, дефект 3: конфликт→бессонница на СЛЕДУЮЩИЙ день — реальное
+// предшествование (lag≥1), не совпадение в тот же день.
+ok(corrMath.precedes === true, 'Correlation Engine: «предшествование» (precedes) корректно true для реального next-day совпадения (lag≥1)');
+
+// ── 4b) Same-record tautology: одна запись не может «коррелировать сама с
+//    собой» через свои же поля ────────────────────────────────────────
+// Owner review (PR #153, дефект 1): moments даёт emo+valence+activation ИЗ
+// ОДНОЙ записи; без provenance это структурное совпадение полей выглядит
+// как межсобытийная закономерность. 10 identical moments (одна и та же
+// запись повторена 10 раз, каждая на своём, далеко разнесённом дне) не
+// должны дать НИ ОДНОЙ пары — все совпадения emo↔valence/activation
+// поддержаны ИСКЛЮЧИТЕЛЬНО тем же самым source record в тот же день (lag=0).
+const sameRecordTautology = await page.evaluate(() => {
+  const now = Date.now();
+  DB.moments = []; DB.symptoms = []; DB.whys = []; DB.cravings = []; DB.medIntakes = []; DB.dreams = []; DB.patterns = []; DB.insights = []; DB.evolution = []; DB.labObservations = []; DB.healthDocuments = []; DB.relationshipContexts = []; DB.sphereLogs = []; DB.measures = [];
+  for (let i = 0; i < 10; i++) {
+    const d = new Date(now - (i * 30 + 2) * 864e5);
+    DB.moments.push({ id: 50000 + i, valence: 20, activation: 70, emo: 'злость', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+  }
+  const report = synthesisReport(365);
+  return { pairsCount: report.pairs.length };
+});
+ok(sameRecordTautology.pairsCount === 0, '10 одинаковых moments (одна и та же emo+valence+activation) НЕ дают emo↔valence/activation как межсобытийную закономерность — same-record hits исключены');
+
+// ── 4c) Но НЕЗАВИСИМЫЕ записи в тот же день (разные records) — легитимное
+//    same-day совпадение, НЕ исключается ─────────────────────────────
+const independentSameDay = await page.evaluate(() => {
+  const now = Date.now();
+  DB.moments = []; DB.cravings = [];
+  for (let i = 0; i < 8; i++) {
+    const d = new Date(now - (i * 16 + 2) * 864e5);
+    DB.moments.push({ id: 60000 + i, valence: 20, activation: 70, emo: 'тревога', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+    // Независимая запись ДРУГОЙ коллекции, В ТОТ ЖЕ день (не через провенанс общего record'а).
+    DB.cravings.push({ id: 61000 + i, outcome: 'gave_in', trigger: 'тревога', intensity: 8, createdAt: new Date(d.getTime() + 3600e3).toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+  }
+  const report = synthesisReport(365);
+  const pair = report.pairs.find(p => p.a === 'emo:тревога' && p.b === 'craving:уступил');
+  return { found: !!pair, sameDayOnly: pair && pair.sameDayOnly, precedes: pair && pair.precedes, significant: pair && pair.significant };
+});
+ok(independentSameDay.found && independentSameDay.significant, 'независимые записи разных коллекций в тот же день ДАЮТ значимую same-day корреляцию (не отбрасываются как тавтология)');
+ok(independentSameDay.sameDayOnly === true && independentSameDay.precedes === false, 'такая same-day (независимая) пара честно помечена sameDayOnly=true/precedes=false — видна в общем списке, но не в Триггерах/Цепочках совпадений');
 
 // ── 5) False-positive avoidance: равномерно перемешанные, НЕ коррелирующие
 //    теги на разумном масштабе — движок не выдумывает связи из шума ────
+// Owner review (PR #153, дефект 2): нужен настоящий статистический гейт
+// (Fisher exact + Benjamini-Hochberg FDR), не эвристический порог lift.
+// Owner review, дефект 1 (косвенно): день↔запись НЕ 1:1 — независимо
+// рандомизированы И количество записей в день (0/1/несколько), И день
+// каждой записи, И её тег — иначе «ровно 1 запись на день» создаёт
+// структурную (не шумовую) антикорреляцию между значениями ОДНОГО
+// категориального поля («если сегодня «скука», то НЕ «интерес» — тем же
+// record'ом»), что не является настоящим ложноположительным срабатыванием
+// движка, а тем же артефактом, что и дефект 1 (см. §1), только в форме
+// отрицательного, а не положительного lift.
 const noFalsePositives = await page.evaluate(() => {
   const now = Date.now();
   DB.moments = []; DB.symptoms = [];
   const emos = ['радость', 'грусть', 'интерес', 'скука'];
   const syms = ['насморк', 'зуд', 'жажда', 'зевота'];
-  // Seeded PRNG (mulberry32) — детерминированный ПОВТОРЯЕМЫЙ прогон теста, но
-  // статистически независимое присвоение тегов A и B на каждый день (НЕ
-  // модульная арифметика от одного и того же индекса — та была бы идеально
-  // периодической и создавала бы настоящую, хоть и искусственную, корреляцию).
+  // Seeded PRNG (mulberry32) — детерминированный ПОВТОРЯЕМЫЙ прогон, но
+  // статистически независимые потоки: день И тег генерируются НЕЗАВИСИМО
+  // для A и для B, с числом записей (450) БОЛЬШИМ числа дней (300) — так
+  // что дни получают 0/1/несколько записей каждой коллекции независимо,
+  // как в реальном дневнике, а не ровно одну запись на день.
   function mulberry32(seed) { return function () { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
-  const rndA = mulberry32(12345), rndB = mulberry32(987654321);
-  for (let i = 0; i < 300; i++) {
-    const d = new Date(now - i * 864e5);
-    DB.moments.push({ id: 40000 + i, valence: 50, activation: 50, emo: emos[Math.floor(rndA() * 4)], createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
-    DB.symptoms.push({ id: 50000 + i, name: syms[Math.floor(rndB() * 4)], severity: 3, createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
-  }
+  const RANGE_DAYS = 300, N = 450;
+  const rndDayA = mulberry32(111), rndTagA = mulberry32(12345);
+  const rndDayB = mulberry32(222), rndTagB = mulberry32(987654321);
+  DB.moments = Array.from({ length: N }, (_, i) => {
+    const off = Math.floor(rndDayA() * RANGE_DAYS);
+    const d = new Date(now - off * 864e5);
+    return { id: 40000 + i, valence: 50, activation: 50, emo: emos[Math.floor(rndTagA() * 4)], createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now };
+  });
+  DB.symptoms = Array.from({ length: N }, (_, i) => {
+    const off = Math.floor(rndDayB() * RANGE_DAYS);
+    const d = new Date(now - off * 864e5);
+    return { id: 50000 + i, name: syms[Math.floor(rndTagB() * 4)], severity: 3, createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now };
+  });
   const events = unifiedEvents(365);
   const { pairs } = findCorrelations(events, { minSamples: 3, lagDays: 3 });
-  // разрешаем единичные пограничные случаи: при ~56 проверяемых упорядоченных
-  // парах тегов (4×3 внутри emo + 4×3 внутри symptom + 4×4×2 между семьями)
-  // немного пересечений порога [0.77,1.3] статистически ожидаемо (проблема
-  // множественных сравнений), а не баг движка. Кроме того, emo/symptom —
-  // категориальные (один тег в день), поэтому у пар ВНУТРИ одной семьи есть
-  // слабая структурная антикорреляция «выбран один → не выбран другой в тот
-  // же день», а не выдумка. Важна не точная цифра, а то, что все находки
-  // остаются пограничными (allWeak) — движок не рисует из шума сильных связей.
-  return { pairsCount: pairs.length, allWeak: pairs.every(p => p.lift < 2.5), pairs: pairs.map(p => ({ a: p.a, b: p.b, lift: +p.lift.toFixed(2) })) };
+  return { pairsCount: pairs.length, pairs: pairs.map(p => ({ a: p.a, b: p.b, lift: +p.lift.toFixed(2), q: p.qValue })) };
 });
-ok(noFalsePositives.pairsCount <= 6, `false-positive avoidance: на равномерно несвязанных данных находится лишь несколько пограничных шумовых пар (найдено: ${noFalsePositives.pairsCount})`);
-ok(noFalsePositives.allWeak, 'false-positive avoidance: даже случайный шум не даёт экстремально сильных (lift≥2.5) ложных корреляций');
+ok(noFalsePositives.pairsCount === 0, `false-positive avoidance: на РЕАЛИСТИЧНО независимых данных (независимые дни И теги, переменное число записей в день) FDR-гейт не находит НИ ОДНОЙ значимой пары (найдено: ${noFalsePositives.pairsCount}${noFalsePositives.pairsCount ? ', ' + JSON.stringify(noFalsePositives.pairs) : ''})`);
 
 // ── 6) Честный отказ при недостатке данных ────────────────────────────
 const thinData = await page.evaluate(() => {
@@ -192,30 +287,46 @@ ok(thinData.pairsEmpty && thinData.sequencesEmpty && thinData.chainsEmpty, 'на
 ok(thinData.htmlHonest, 'UI честно показывает «недостаточно данных», а не пустой экран или выдуманный вывод');
 
 // ── 7) Confidence System: границы низкая/средняя/высокая ─────────────
+// Owner review (PR #153, дефект 2): «Средняя»/«Высокая» ТЕПЕРЬ требуют
+// significant=true (прошедший FDR-гейт) — размер выборки/lift сами по себе
+// недостаточны. significant:true явно проставлен в фикстурах ниже, кроме
+// специального теста notSignificant.
 const confidence = await page.evaluate(() => {
-  const mk = (supportA, hits, lift) => ({ supportA, hits, lift });
+  const mk = (supportA, hits, lift, significant) => ({ supportA, hits, lift, significant });
   return {
-    low: correlationConfidence(mk(4, 4, 5)).level,       // n<5 → низкая, даже при экстремальном lift
-    medium: correlationConfidence(mk(8, 8, 1.35)).level, // n>=5, слабый lift → средняя
-    high: correlationConfidence(mk(15, 15, 3)).level,    // n>=12 и сильный lift(≥2×) → высокая
+    low: correlationConfidence(mk(4, 4, 5, true)).level,        // n<5 → низкая, даже при экстремальном lift
+    medium: correlationConfidence(mk(8, 8, 1.35, true)).level,  // n>=5, слабый lift → средняя
+    high: correlationConfidence(mk(15, 15, 3, true)).level,     // n>=12 и сильный lift(≥2×) → высокая
+    notSignificant: correlationConfidence(mk(15, 15, 3, false)).level,   // тот же n/lift, но significant=false → низкая
   };
 });
 ok(confidence.low === 'low', 'Confidence System: n<5 всегда «низкая», даже при сильном lift — не переоценивает малые данные');
 ok(confidence.medium === 'medium', 'Confidence System: достаточно наблюдений, но слабый lift → «средняя»');
 ok(confidence.high === 'high', 'Confidence System: много наблюдений И сильный lift (≥2×) → «высокая»');
+ok(confidence.notSignificant === 'low', 'Confidence System: даже большая выборка И сильный lift не дают «Среднюю»/«Высокую», если пара НЕ прошла FDR-гейт значимости (significant=false)');
 
 // ── 8) Trigger Engine ──────────────────────────────────────────────────
+// Owner review (PR #153, дефект 3): «что предшествует» обязано означать
+// РЕАЛЬНОЕ предшествование (pair.precedes, lag≥1) И положительную связь
+// (lift>1) — не любое отклонение lift и не совпадения в тот же день (lag=0,
+// pair.precedes=false). Ниже добавлены ДВЕ ловушки: сильный, но same-day-only
+// (precedes=false) кандидат и сильный, но отрицательный (lift<1) кандидат —
+// оба должны быть исключены, несмотря на больший |lift|, чем у настоящих триггеров.
 const triggerEngine = await page.evaluate(() => {
   const pairs = [
-    { a: 'trigger:стресс', b: 'craving:уступил', lift: 3, confidenceStat: 0.8 },
-    { a: 'trigger:скука', b: 'craving:уступил', lift: 1.5, confidenceStat: 0.5 },
-    { a: 'trigger:стресс', b: 'emo:тревога', lift: 2, confidenceStat: 0.6 },
+    { a: 'trigger:стресс', b: 'craving:уступил', lift: 3, confidenceStat: 0.8, precedes: true },
+    { a: 'trigger:скука', b: 'craving:уступил', lift: 1.5, confidenceStat: 0.5, precedes: true },
+    { a: 'trigger:стресс', b: 'emo:тревога', lift: 2, confidenceStat: 0.6, precedes: true },
+    { a: 'trigger:совпадение', b: 'craving:уступил', lift: 5, confidenceStat: 0.9, precedes: false },   // sameDay-only ловушка
+    { a: 'trigger:защита', b: 'craving:уступил', lift: 0.2, confidenceStat: 0.1, precedes: true },      // отрицательный lift ловушка
   ];
   const list = triggersFor(pairs, 'craving:уступил');
-  return { count: list.length, topIsStrongest: list[0] && list[0].a === 'trigger:стресс' };
+  return { count: list.length, topIsStrongest: list[0] && list[0].a === 'trigger:стресс', noSameDayOnly: !list.some(p => p.a === 'trigger:совпадение'), noNegativeLift: !list.some(p => p.a === 'trigger:защита') };
 });
-ok(triggerEngine.count === 2, 'Trigger Engine: находит все триггеры конкретного целевого тега (2 из 3 пар)');
+ok(triggerEngine.count === 2, 'Trigger Engine: находит все триггеры конкретного целевого тега (2 из 5 пар — исключая same-day-only и отрицательный lift)');
 ok(triggerEngine.topIsStrongest, 'Trigger Engine: сортирует по убыванию lift (сильнейший триггер первым)');
+ok(triggerEngine.noSameDayOnly, 'Trigger Engine: same-day-only совпадение (precedes=false), несмотря на больший lift, НЕ считается «предшествующим» триггером');
+ok(triggerEngine.noNegativeLift, 'Trigger Engine: отрицательная связь (lift<1) не считается триггером, даже если precedes=true');
 
 // ── 9) Pattern Engine: повторяющиеся многодневные сценарии ────────────
 const patternEngine = await page.evaluate(() => {
@@ -236,7 +347,13 @@ const patternEngine = await page.evaluate(() => {
 ok(patternEngine.found3, 'Pattern Engine: находит повторяющийся 3-дневный сценарий ровно с тем количеством повторов, что и в данных (4)');
 ok(patternEngine.notFound5, 'Pattern Engine: честно не находит сценарий, если требуемый minSamples выше реального числа повторов');
 
-// ── 10) Cause Graph: цепочки строятся из уже найденных корреляций ─────
+// ── 10) Цепочки совпадений: строятся из уже найденных корреляций ──────
+// Owner review (PR #153, дефект 3): переименовано из «Cause Graph»/«цепочки
+// причин→следствий» — association/lift НЕ доказывает причинность. Тест
+// проверяет только порядок ОБХОДА ГРАФА (жадный обход рёбер по убыванию
+// lift), не причинно-следственную семантику. Реальная интеграция
+// (synthesisReport) вдобавок передаёт сюда ТОЛЬКО пары с precedes=true —
+// см. тест §3b ниже.
 const causeGraph = await page.evaluate(() => {
   const pairs = [
     { a: 'A', b: 'B', lift: 3 }, { a: 'B', b: 'C', lift: 2.5 }, { a: 'C', b: 'D', lift: 2 },
@@ -246,8 +363,29 @@ const causeGraph = await page.evaluate(() => {
   const longest = chains.find(c => c.chain[0] === 'A');
   return { longestFound: !!longest, longestLen: longest && longest.chain.length, longestPath: longest && longest.chain.join('>') };
 });
-ok(causeGraph.longestFound && causeGraph.longestLen === 4, 'Cause Graph: строит цепочку A→B→C→D (глубина 4) из отдельных найденных корреляций, без пересчёта');
-ok(causeGraph.longestPath === 'A>B>C>D', 'Cause Graph: цепочка идёт в правильном порядке причин→следствий');
+ok(causeGraph.longestFound && causeGraph.longestLen === 4, 'Цепочки совпадений: строит цепочку A→B→C→D (глубина 4) из отдельных найденных association-пар, без пересчёта');
+ok(causeGraph.longestPath === 'A>B>C>D', 'Цепочки совпадений: обход графа идёт по убыванию lift на каждом шаге (не утверждение причинности)');
+
+// ── 10b) Цепочки совпадений: интеграция строит их ТОЛЬКО из precedes=true ──
+const causeGraphIntegration = await page.evaluate(() => {
+  const now = Date.now();
+  DB.moments = []; DB.symptoms = []; DB.whys = []; DB.cravings = []; DB.medIntakes = []; DB.dreams = []; DB.patterns = []; DB.insights = []; DB.evolution = []; DB.labObservations = []; DB.healthDocuments = []; DB.relationshipContexts = []; DB.sphereLogs = []; DB.measures = [];
+  // Настоящая ЦЕПОЧКА (не только пара — buildCauseChains требует ≥3 тегов,
+  // т.е. ≥2 связанных рёбер): паника → спазм (день+1) → тяга (день+2), все
+  // с реальным next-day предшествованием (precedes=true).
+  for (let i = 0; i < 8; i++) {
+    const d = new Date(now - (i * 16 + 3) * 864e5);
+    DB.moments.push({ id: 200000 + i, valence: 20, activation: 75, emo: 'паника', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+    DB.symptoms.push({ id: 201000 + i, name: 'спазм', severity: 7, createdAt: new Date(d.getTime() + 864e5).toISOString(), day: new Date(d.getTime() + 864e5).toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+    DB.cravings.push({ id: 202000 + i, outcome: 'gave_in', trigger: 'спазм-тяга', intensity: 7, createdAt: new Date(d.getTime() + 2 * 864e5).toISOString(), day: new Date(d.getTime() + 2 * 864e5).toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+  }
+  const report = synthesisReport(365);
+  const target = report.pairs.find(p => p.a === 'emo:паника' && p.b === 'symptom:спазм');
+  const inChains = report.chains.some(c => c.chain.includes('emo:паника') && c.chain.includes('symptom:спазм'));
+  return { targetPrecedes: target && target.precedes, targetSig: target && target.significant, inChains };
+});
+ok(causeGraphIntegration.targetPrecedes && causeGraphIntegration.targetSig, 'интеграция: реальная next-day корреляция помечена precedes=true и significant=true');
+ok(causeGraphIntegration.inChains, 'интеграция: precedes=true пара действительно попадает в «Цепочки совпадений» (synthesisReport фильтрует по precedes перед buildCauseChains)');
 
 // ── 11) Sphere Influence: sphereLogs корректно дают `sphere:` тег ─────
 const sphereInfluence = await page.evaluate(() => {
@@ -273,23 +411,32 @@ ok(sphereInfluence.sphereIdOk, 'Sphere Influence: событие несёт sphe
 ok(sphereInfluence.influenceFound, 'Sphere Influence: корреляция сферы с настроением находится тем же общим Correlation Engine (не отдельный расчёт)');
 
 // ── 12) Relationship Graph: psyLinks record_to_relationship → `person:` тег ──
+// Owner review (PR #153, дефект 1): `person:` тег добавляется на ТОТ ЖЕ
+// event/record, что и его `emo:`/`valence:`/`activation:` теги (см.
+// unifiedEvents()) — значит emo:обида↔person:мама сами по себе НИКОГДА не
+// смогут набрать независимый hit (тот же record, тот же день, каждый раз).
+// Честная проверка Relationship Graph — независимая запись из ДРУГОЙ
+// коллекции (symptom на следующий день), которая коррелирует с `person:`
+// тегом, а не с самим собой.
 const relationshipGraph = await page.evaluate(() => {
   const now = Date.now();
-  DB.moments = []; DB.psyLinks = []; DB.relationshipContexts = [{ id: psyUid('relctx'), label: 'Мама', status: 'active', privacyClass: 'sensitive', createdAt: nowISO(), sv: SCHEMA_VERSION, _u: now }];
+  DB.moments = []; DB.symptoms = []; DB.psyLinks = []; DB.relationshipContexts = [{ id: psyUid('relctx'), label: 'Мама', status: 'active', privacyClass: 'sensitive', createdAt: nowISO(), sv: SCHEMA_VERSION, _u: now }];
   const ctxId = DB.relationshipContexts[0].id;
   for (let i = 0; i < 6; i++) {
-    const d = new Date(now - (i * 10 + 3) * 864e5);
+    const d = new Date(now - (i * 16 + 3) * 864e5);
     const rec = { id: 90000 + i, valence: 25, activation: 75, emo: 'обида', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now };
     DB.moments.push(rec);
     createPsyLink({ fromColl: 'moments', fromId: rec.id, toColl: 'relationshipContexts', toId: ctxId, relation: 'record_to_relationship', source: 'user' });
+    const dSym = new Date(d.getTime() + 864e5);
+    DB.symptoms.push({ id: 91000 + i, name: 'напряжение в теле', severity: 6, createdAt: dSym.toISOString(), day: dSym.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
   }
   const events = unifiedEvents(365);
   const momentEvent = events.find(e => e.sourceCollection === 'moments' && e.referenceId === 90000);
-  const { pairs } = findCorrelations(events, { minSamples: 3, lagDays: 1 });
+  const { pairs } = findCorrelations(events, { minSamples: 3, lagDays: 7 });
   const rel = relationshipPairs(pairs);
   return {
     personTag: momentEvent && momentEvent.tags.some(t => t === 'person:мама'),
-    relFound: rel.some(p => p.a.startsWith('person:') || p.b.startsWith('person:')),
+    relFound: rel.some(p => (p.a.startsWith('person:') || p.b.startsWith('person:')) && p.significant),
   };
 });
 ok(relationshipGraph.personTag, 'Relationship Graph: psyLinks record_to_relationship (Wave 1) корректно добавляет тег `person:<label>` к событию');
@@ -300,7 +447,7 @@ const dismissTest = await page.evaluate(() => {
   const now = Date.now();
   DB.moments = []; DB.symptoms = [];
   for (let i = 0; i < 6; i++) {
-    const d = new Date(now - (i * 3 + 5) * 864e5);
+    const d = new Date(now - (i * 16 + 5) * 864e5);
     DB.moments.push({ id: 95000 + i, valence: 20, activation: 70, emo: 'стресс', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
     DB.symptoms.push({ id: 96000 + i, name: 'мигрень', severity: 8, createdAt: new Date(d.getTime() + 864e5).toISOString(), day: new Date(d.getTime() + 864e5).toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
   }
@@ -328,7 +475,7 @@ const determinism = await page.evaluate(() => {
   const now = Date.now();
   DB.moments = []; DB.symptoms = [];
   for (let i = 0; i < 8; i++) {
-    const d = new Date(now - (i * 4 + 2) * 864e5);
+    const d = new Date(now - (i * 16 + 2) * 864e5);
     DB.moments.push({ id: 97000 + i, valence: 30, activation: 65, emo: 'усталость', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
     DB.symptoms.push({ id: 98000 + i, name: 'слабость', severity: 5, createdAt: new Date(d.getTime() + 864e5).toISOString(), day: new Date(d.getTime() + 864e5).toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
   }
@@ -438,10 +585,11 @@ const themeCheck = await themePage.evaluate(() => {
   const now = Date.now();
   DB.moments = []; DB.symptoms = [];
   for (let i = 0; i < 6; i++) {
-    // 30-дневный шаг: узкое 8-дневное окно (lagDays=7) редко попадает в него
-    // случайно, поэтому baseline(symptom) низкий, а lift для этой пары —
-    // настоящий, не артефакт ширины окна (см. фикс baseline в findCorrelations).
-    const d = new Date(now - (i * 30 + 2) * 864e5);
+    // 16-дневный шаг: укладывается в дефолтный 90-дневный период (макс.
+    // смещение 82 дн.) и при этом достаточно узкое 8-дневное окно
+    // (lagDays=7) даёт статистически значимый (FDR-скорректированный) lift,
+    // не артефакт ширины окна (см. фикс baseline в findCorrelations).
+    const d = new Date(now - (i * 16 + 3) * 864e5);
     DB.moments.push({ id: 41000 + i, valence: 20, activation: 70, emo: 'злость', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
     DB.symptoms.push({ id: 41100 + i, name: 'напряжение в шее', severity: 6, createdAt: new Date(d.getTime() + 864e5).toISOString(), day: new Date(d.getTime() + 864e5).toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
   }
@@ -460,6 +608,84 @@ await themePage.waitForTimeout(150);
 const kbActivated = await themePage.evaluate(() => document.querySelectorAll('.ov.on').length > 0 || document.querySelector('.pg.on')?.id !== undefined);
 ok(kbActivated, 'клавиатура: Enter на кнопке доказательства («Записи «…»») активирует переход (реальный button, не div)');
 await themePage.close();
+
+// ── 19b) Evidence provenance: pair.evidence указывает на РЕАЛЬНЫЕ записи,
+//    поддержавшие КОНКРЕТНОЕ совпадение, а не на любую запись с тем же тегом ──
+// Owner review (PR #153, дефект 5): раньше «Записи «A»»/«Записи «B»»
+// открывали ПОСЛЕДНЮЮ запись с этим тегом — она могла вообще не входить ни
+// в один из hits, на которых рассчитан вывод. distractor ниже — запись с
+// тем же тегом, НО вне окна совпадения (500 дней назад) — не должна
+// попасть в evidence вообще.
+const evidenceProvenancePage = await bootAt(390, 844);
+const evidenceProvenance = await evidenceProvenancePage.evaluate(() => {
+  const now = Date.now();
+  DB.moments = []; DB.symptoms = [];
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now - (i * 16 + 3) * 864e5);
+    DB.moments.push({ id: 300000 + i, valence: 20, activation: 70, emo: 'паника', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+    DB.symptoms.push({ id: 301000 + i, name: 'тремор', severity: 7, createdAt: new Date(d.getTime() + 864e5).toISOString(), day: new Date(d.getTime() + 864e5).toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+  }
+  const distractorDay = new Date(now - 500 * 864e5);
+  DB.moments.push({ id: 399999, valence: 20, activation: 70, emo: 'паника', createdAt: distractorDay.toISOString(), day: distractorDay.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+  const report = synthesisReport(null);
+  const pair = report.pairs.find(p => p.a === 'emo:паника' && p.b === 'symptom:тремор');
+  const aRecIds = new Set(); const bRecIds = new Set();
+  (pair?.evidence || []).forEach(ev => { ev.aRecs.forEach(r => aRecIds.add(r.id)); ev.bRecs.forEach(r => bRecIds.add(r.id)); });
+  return {
+    found: !!pair,
+    evidenceNonEmpty: pair && pair.evidence.length > 0,
+    hasRealRecords: pair && pair.evidence.every(ev => ev.aRecs.length && ev.bRecs.length && ev.aDay && ev.bDay),
+    excludesDistractor: !aRecIds.has(399999),
+    includesRealHit: [...aRecIds].some(id => id >= 300000 && id <= 300005),
+    bRecsAreSymptoms: [...bRecIds].every(id => id >= 301000 && id <= 301005),
+  };
+});
+ok(evidenceProvenance.found && evidenceProvenance.evidenceNonEmpty, 'findCorrelations(): пара несёт непустой evidence[] — точные supporting день/записи для конкретного совпадения');
+ok(evidenceProvenance.hasRealRecords, 'evidence[]: каждая запись несёт реальные aRecs/bRecs и день (aDay/bDay), не заглушки');
+ok(evidenceProvenance.excludesDistractor, 'evidence[]: НЕ включает запись с тем же тегом, которая не участвовала ни в одном реальном hit (не «любая последняя запись»)');
+ok(evidenceProvenance.includesRealHit && evidenceProvenance.bRecsAreSymptoms, 'evidence[]: включает именно те записи A/B, которые действительно поддержали найденное совпадение');
+await evidenceProvenancePage.close();
+
+// ── 19c) Inline onclick injection: пользовательский текст тега/сигнатуры
+//    больше не вставляется в JS-атрибут — используется числовой индекс ──
+// Owner review (PR #153, дефект 6): esc() экранирует только &lt;&gt;, не
+// кавычки — апостроф/кавычка в свободном тексте эмоции/триггера мог сломать
+// inline onclick или исполнить внедрённый код. Кнопки теперь ссылаются на
+// пару по числовому индексу (p._i), не по строке тега.
+const injectionPage = await bootAt(390, 844);
+const injectionCheck = await injectionPage.evaluate(() => {
+  window.__pwned = false;
+  const now = Date.now();
+  DB.moments = []; DB.cravings = [];
+  const evilTrigger = `x'"<script>window.__pwned=true</script>`;
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now - (i * 16 + 2) * 864e5);
+    DB.moments.push({ id: 320000 + i, valence: 20, activation: 70, emo: 'триггертест', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+    DB.cravings.push({ id: 321000 + i, outcome: 'gave_in', trigger: evilTrigger, intensity: 8, createdAt: new Date(d.getTime() + 864e5).toISOString(), day: new Date(d.getTime() + 864e5).toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+  }
+  goTo('sys'); sysGo('patterns');
+  const onclicks = [...document.querySelectorAll('#sys-patterns-out button')].map(b => b.getAttribute('onclick')).filter(Boolean);
+  // Единственные легитимные кавычки в onclick теперь — литеральные константы
+  // 'a'/'b' (сторона пары), НЕ пользовательский текст: проверяем именно
+  // отсутствие внедрённого текста, а не отсутствие кавычек вообще.
+  const noRawTextInOnclick = onclicks.every(o => !o.includes(evilTrigger));
+  const evidenceButtonsUseIndex = onclicks.filter(o => o.startsWith('synEvidenceAt') || o.startsWith('synDismissAt')).every(o => /^syn(EvidenceAt\(\d+,'[ab]'\)|DismissAt\(\d+\))$/.test(o));
+  return {
+    rendered: document.getElementById('sys-patterns-out').innerHTML.length > 0,
+    pwnedAfterRender: window.__pwned === true,
+    noRawTextInOnclick, evidenceButtonsUseIndex,
+    hasEvidenceButtons: onclicks.some(o => o.startsWith('synEvidenceAt')),
+  };
+});
+ok(injectionCheck.rendered, 'inline onclick injection: рендер с вредоносным текстом (кавычки/`<script>`) в свободном поле триггера не ломает страницу');
+ok(!injectionCheck.pwnedAfterRender, 'inline onclick injection: внедрённый `<script>` не исполняется при рендере');
+ok(injectionCheck.hasEvidenceButtons && injectionCheck.evidenceButtonsUseIndex, 'inline onclick injection: кнопки «Записи»/«Скрыть» ссылаются на пару по числовому индексу (synEvidenceAt(i,side)/synDismissAt(i)), не по строке тега');
+ok(injectionCheck.noRawTextInOnclick, 'inline onclick injection: ни один onclick-атрибут не содержит внедрённый пользовательский текст напрямую');
+const evBtn2 = injectionPage.locator('#sys-patterns-out button').filter({ hasText: 'Записи' }).first();
+if (await evBtn2.count()) { await evBtn2.click(); await injectionPage.waitForTimeout(150); }
+const pwnedAfterClick = await injectionPage.evaluate(() => window.__pwned === true);
+ok(!pwnedAfterClick, 'inline onclick injection: клик по кнопке «Записи» с вредоносным тегом-триггером не исполняет внедрённый script');
+await injectionPage.close();
 
 // ── 20) Большой synthetic dataset: производительность (100 000+ событий) ──
 const bigPage = await bootAt(390, 844);

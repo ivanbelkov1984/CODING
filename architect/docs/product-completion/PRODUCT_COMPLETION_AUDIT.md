@@ -68,7 +68,7 @@ Issue №145 утверждает, что Navigation Shell 1.3B+1.4 (смёрж�
 | Living map | WORKING (AI-gated) | инсайты/чек-ины | Обзор → Living map | честный empty state без AI-ключа |
 | Обзор 30/365 дней | WORKING | `checkins` и др. | Обзор → период | порог-gated «недостаточно данных» |
 | Корреляции (`crossLinks`) | WORKING | `sphereLogs` и др. | Обзор → корреляции | реальная статистика, min-sample gate; узкий, чек-ин/сфера-специфичный анализ — НЕ заменён и не тронут Волной 4 (комплементарен, не дублирует) |
-| **«Закономерности» (Unified Intelligence Engine)** | **WORKING (Волна 4)** | read-only агрегатор поверх `moments/whys/insights/patterns/evolution/dreams/medIntakes/symptoms/measures/cravings/labObservations/healthDocuments/relationshipContexts/sphereLogs/psyLinks` | Обзор → «Закономерности» | детерминированный, без ИИ, без сети; association-rule корреляции (support/confidence/lift) + Trigger/Pattern/Cause Graph/Sphere Influence/Relationship Graph как проекции ОДНОГО движка + Confidence System (низкая/средняя/высокая); ничего не персистится, кроме `DB.correlationSettings` (настройки+dismissed) |
+| **«Закономерности» (Unified Intelligence Engine)** | **WORKING (Волна 4, после owner review PR #153)** | read-only агрегатор поверх `moments/whys/insights/patterns/evolution/dreams/medIntakes/symptoms/measures/cravings/labObservations/healthDocuments/relationshipContexts/sphereLogs/psyLinks` | Обзор → «Закономерности» | детерминированный, без ИИ, без сети; association-rule корреляции (support/confidence/lift) + точный тест Фишера с Benjamini-Hochberg FDR-коррекцией (значимость, не только эвристика lift) + Trigger/«Цепочки совпадений» (было «Cause Graph»)/Sphere Influence/Relationship Graph как проекции ОДНОГО движка + Confidence System (низкая/средняя/высокая, требует significant=true); same-record provenance исключает тавтологии одной записи; evidence[] указывает на реальные supporting записи; ничего не персистится, кроме `DB.correlationSettings` (настройки+dismissed). См. `WAVE4_UNIFIED_INTELLIGENCE_DATA_CONTRACT.md` §4.1-4.3 для полного описания 6 дефектов и фиксов |
 
 ### 1.4 Сферы (`pg-vit`)
 
@@ -317,6 +317,20 @@ PR #146 предлагал: вкладку «Психология», hub «Ин�
 > астрологии) отсутствует в этой ветке, поэтому событие "астрологические события" из
 > исходного списка issue №152 в Unified Event Engine не включено (см. contract §14) —
 > честно задокументировано, не выдумано.
+>
+> **Update после независимого владельческого review PR #153:** первый проход
+> содержал 6 контрактных дефектов — (1) same-record тавтологии (10 одинаковых
+> `moments` давали «подтверждённую» `emo↔valence/activation`), (2) отсутствие
+> статистического гейта значимости при ~40 000 проверяемых упорядоченных парах
+> (только эвристика lift), (3) переобещанная причинность («Cause Graph»/
+> Trigger Engine не различали same-day совпадение от реального
+> предшествования), (4) `createdAt` заслонял семантический день записи
+> (`day`/`date`) — backdated `sphereLogs` анализировались по дню создания,
+> (5) evidence-кнопки открывали произвольную запись с тем же тегом, а не
+> доказательство конкретной пары, (6) пользовательский текст небезопасно
+> вставлялся в inline `onclick` (esc() не экранирует кавычки). Все 6
+> исправлены в этом же PR без расширения объёма — см.
+> `WAVE4_UNIFIED_INTELLIGENCE_DATA_CONTRACT.md` §4.1-4.3, §7, §9, §13.
 
 - ~~**Только фактически отсутствующее**~~ — реализовано: Unified Event Engine (`unifiedEvents()`, read-only агрегатор поверх 14 коллекций); Correlation Engine (support/confidence/lift, association-rule, с исправленным baseline — см. contract §4.1); Trigger/Pattern/Cause Graph/Sphere Influence/Relationship Graph — как единый движок с проекциями/фильтрами, а не 5 отдельных расчётов; Statistics Engine; Insight Generator (только шаблоны, только на статистически подтверждённых данных); Confidence System (низкая/средняя/высокая).
 - **Конечный результат:** пользователь на основе ИСКЛЮЧИТЕЛЬНО своих данных видит подтверждённые связи между событиями/психологией/здоровьем/отношениями/сферами жизни, с явным указанием уверенности и кнопками «Записи «…»», ведущими к исходным записям (полная объяснимость — не «чёрный ящик»).
@@ -324,8 +338,8 @@ PR #146 предлагал: вкладку «Психология», hub «Ин�
 - **Затрагиваемые коллекции:** read-only агрегация поверх `moments/whys/insights/patterns/evolution/dreams/medIntakes/symptoms/measures/cravings/labObservations/healthDocuments/relationshipContexts/sphereLogs/psyLinks` — ни одна не изменена; запись только в новый скаляр `DB.correlationSettings`.
 - **Риски (закрыты):** «придумывание фактов» — устранено самой архитектурой (нет ИИ вообще, только детерминированная статистика с порогами `minSamples`/lift); найден и исправлен реальный баг движка (систематически завышенный lift из-за асимметрии оконного confidence vs наивного baseline, см. contract §4.1) через seeded-PRNG false-positive-avoidance тест.
 - **Safety boundaries:** ни диагнозов, ни психотерапии, ни эзотерики, ни медицинских советов — только шаблонные предложения на статистически подтверждённых числах пользователя; честный отказ («недостаточно данных») вместо пустого экрана или выдумки при малой выборке.
-- **Focused tests:** `tests/wave4-unified-intelligence.spec.mjs` (53 проверки: Event/Correlation/Trigger/Pattern/Cause Graph/Sphere/Relationship/Confidence engines, false-positive avoidance на seeded-независимых случайных данных, честный отказ на малых данных, детерминированность, profile isolation, мобильные вьюпорты/a11y/тема/клавиатура, 120 000-событийный performance-тест) + `tests/wave4-backup-roundtrip.test.mjs` (12 проверок encrypted/plain backup-restore через production adapter/core/restore).
-- **Критерии готовности:** зелёный CI+evidence; `npm test` (438/438, включая новые 53 проверки Волны 4) и `npm run test:backup` (включая новые 12 проверок Волны 4) зелёные; ни один вывод синтеза не показывается без evidence-ссылки на реальную запись — подтверждено тестом.
+- **Focused tests:** `tests/wave4-unified-intelligence.spec.mjs` (74 проверки, после owner review PR #153: Event/Correlation/Trigger/Pattern/«Цепочки совпадений»/Sphere/Relationship/Confidence engines, same-record тавтология и её легитимный same-day контр-пример, false-positive avoidance на реалистично-независимых данных, статистический FDR-гейт (pValue/qValue/significant), eventTimeOf() day-vs-createdAt приоритет, evidence provenance (точные supporting записи, не произвольные), inline onclick injection-safety, честный отказ на малых данных, детерминированность, profile isolation, мобильные вьюпорты/a11y/тема/клавиатура, 120 000-событийный performance-тест) + `tests/wave4-backup-roundtrip.test.mjs` (12 проверок encrypted/plain backup-restore через production adapter/core/restore).
+- **Критерии готовности:** зелёный CI+evidence; `npm test` (438/438, включая 74 проверки Волны 4) и `npm run test:backup` (включая 12 проверок Волны 4) зелёные; ни один вывод синтеза не показывается без evidence-ссылки на реальную поддерживающую запись — подтверждено тестом evidence provenance.
 - **Не смешивалось:** доработки отдельных доменов (психика/здоровье/астрология), навигация, существующие экраны — не тронуты; движок только читает их результаты через уже существующий Evidence Kernel `projAll()`.
 
 ### Волна 5 — Данные, надёжность и выпуск

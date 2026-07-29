@@ -7427,8 +7427,23 @@ const EVENT_SOURCES = {
 // обогащения тегов через relationshipContextOf() ниже — тот же источник,
 // что и «Граф отношений» (Relationship Graph), честно задокументировано
 // в WAVE4_UNIFIED_INTELLIGENCE_DATA_CONTRACT.md.
+// Owner review (PR #153): семантический день записи (`date`/`day` — то, к
+// какому дню запись ОТНОСИТСЯ, напр. backdated sphereLogs через
+// logSphere(sphereId,value,note,date)) должен побеждать `createdAt` (когда
+// запись физически СОЗДАНА), а не наоборот. Раньше `createdAt` шёл первым в
+// приоритете и НИКОГДА не давал дойти до `rec.date`/`rec.day`, т.к. `createdAt`
+// почти всегда присутствует — backdated sphereLogs анализировались по дню
+// создания записи, а не по дню, который пользователь явно указал. Якорим на
+// T12:00:00.000Z (полдень UTC), чтобы день не «съехал» при конвертации через
+// toISOString().slice(0,10) в unifiedEvents() ни для одного часового пояса в
+// пределах ±12ч (тот же приём, что уже использовался для `rec.date` до этого
+// фикса — теперь применён последовательно и для `rec.day`, и с правильным
+// приоритетом).
 function eventTimeOf(rec) {
-  const raw = rec.at || rec.collectedAt || rec.documentDate || rec.createdAt || (rec.date ? rec.date + 'T12:00:00.000Z' : null);
+  const raw = rec.at || rec.collectedAt || rec.documentDate ||
+    (rec.day ? rec.day + 'T12:00:00.000Z' : null) ||
+    (rec.date ? rec.date + 'T12:00:00.000Z' : null) ||
+    rec.createdAt || null;
   const t = raw ? Date.parse(raw) : NaN;
   return isFinite(t) ? t : null;
 }
@@ -7471,16 +7486,84 @@ function unifiedEvents(days) {
 // Работает по агрегату «день→теги», поэтому производительность не зависит
 // от числа событий напрямую (только от числа уникальных дней/тегов) —
 // быстро даже на 100 000+ событий.
-const SYN_MIN_SAMPLES_DEFAULT = 3, SYN_LAG_DAYS_DEFAULT = 7, SYN_MAX_TAGS = 200;
+const SYN_MIN_SAMPLES_DEFAULT = 3, SYN_LAG_DAYS_DEFAULT = 7, SYN_MAX_TAGS = 200, SYN_EVIDENCE_CAP = 5, SYN_FDR_ALPHA = 0.05;
+
+// Owner review (PR #153, дефект 2): порог lift 1.3/0.77 сам по себе не
+// контролирует множественные сравнения (до SYN_MAX_TAGS² упорядоченных пар
+// проверяется за один вызов) и не является тестом значимости. Точный тест
+// Фишера (через гипергеометрическое распределение) даёт p-value: насколько
+// маловероятно случайно получить `hits` пересечений (или больше, при
+// lift≥1; или меньше, при lift<1) между supportA-подмножеством дней и
+// B-окно-подмножеством дней из totalDays дней, если бы A и B были
+// независимы. Benjamini-Hochberg (BH-FDR) затем контролирует долю ложных
+// находок среди ВСЕЙ протестированной семьи пар — p-value считается для
+// каждой качественной пары ДО финальной фильтрации по lift/minSamples,
+// иначе FDR-коррекция была бы предвзятой (тестировали бы только то, что
+// уже «прошло» практический порог).
+function logFactorialTable(n) {
+  const t = new Float64Array(n + 1);
+  for (let i = 1; i <= n; i++) t[i] = t[i - 1] + Math.log(i);
+  return t;
+}
+function makeLogChoose(logFact) {
+  return (n, k) => (k < 0 || k > n) ? -Infinity : logFact[n] - logFact[k] - logFact[n - k];
+}
+function hypergeomPmf(logChoose, N, m, n, x) {
+  if (x < 0 || x > n || x > m || (n - x) > (N - m)) return 0;
+  return Math.exp(logChoose(m, x) + logChoose(N - m, n - x) - logChoose(N, n));
+}
+// Односторонний точный тест Фишера через гипергеометрическое распределение:
+// N=totalDays (генеральная совокупность дней), m=bWindowCount (дней, где
+// B-окно истинно), n=supportA (дней с A), k=hits (пересечение). direction
+// 'ge' — тест на обогащение (lift≥1): P(X≥k); 'le' — тест на обеднение
+// (lift<1): P(X≤k).
+function fisherPValue(logChoose, N, m, n, k, direction) {
+  const minX = Math.max(0, n - (N - m)), maxX = Math.min(n, m);
+  let p = 0;
+  if (direction === 'ge') { for (let x = k; x <= maxX; x++) p += hypergeomPmf(logChoose, N, m, n, x); }
+  else { for (let x = minX; x <= k; x++) p += hypergeomPmf(logChoose, N, m, n, x); }
+  return Math.min(1, p);
+}
+// Benjamini-Hochberg step-up: возвращает {qValues[], significant[]} той же
+// длины/порядка, что и вход pValues. qValue — наименьший FDR-порог, при
+// котором эта гипотеза ещё была бы отвергнута; significant = qValue≤alpha.
+function benjaminiHochberg(pValues, alpha) {
+  const m = pValues.length;
+  if (!m) return { qValues: [], significant: [] };
+  const order = pValues.map((_, i) => i).sort((x, y) => pValues[x] - pValues[y]);
+  const qValues = new Array(m);
+  let prevQ = 1;
+  for (let rank = m; rank >= 1; rank--) {
+    const i = order[rank - 1];
+    const q = Math.min(prevQ, pValues[i] * m / rank);
+    qValues[i] = q; prevQ = q;
+  }
+  return { qValues, significant: qValues.map(q => q <= alpha) };
+}
+
 function findCorrelations(events, opts = {}) {
-  const minSamples = opts.minSamples || SYN_MIN_SAMPLES_DEFAULT;
+  const minSamples = Math.max(1, opts.minSamples || SYN_MIN_SAMPLES_DEFAULT);
   const lagDays = opts.lagDays != null ? opts.lagDays : SYN_LAG_DAYS_DEFAULT;
   const result = { totalDays: 0, pairs: [] };
   if (!events.length) return result;
-  const dayToTags = new Map();
+  // Owner review (PR #153, дефект 1): один record может дать НЕСКОЛЬКО
+  // тегов (moments: emo+valence+activation; cravings: outcome+trigger) —
+  // без provenance это структурное совпадение полей ОДНОЙ записи выглядит
+  // как межсобытийная закономерность. dayTagRecords хранит, КАКИЕ записи
+  // дали каждый тег в каждый день, чтобы hits, поддержанные ИСКЛЮЧИТЕЛЬНО
+  // тем же самым record'ом (в тот же день, lag=0), не засчитывались.
+  const dayToTags = new Map();          // day -> Set(tag) — существование, для support/baseline
+  const dayTagRecords = new Map();      // day -> Map(tag -> Map(recKey -> {coll,id}))
   events.forEach(e => {
     if (!dayToTags.has(e.date)) dayToTags.set(e.date, new Set());
-    e.tags.forEach(t => dayToTags.get(e.date).add(t));
+    if (!dayTagRecords.has(e.date)) dayTagRecords.set(e.date, new Map());
+    const tagRecMap = dayTagRecords.get(e.date);
+    const recKey = e.sourceCollection + ':' + e.referenceId;
+    e.tags.forEach(t => {
+      dayToTags.get(e.date).add(t);
+      if (!tagRecMap.has(t)) tagRecMap.set(t, new Map());
+      tagRecMap.get(t).set(recKey, { coll: e.sourceCollection, id: e.referenceId });
+    });
   });
   const days = [...dayToTags.keys()].sort();
   const minMs = Date.parse(days[0] + 'T00:00:00.000Z'), maxMs = Date.parse(days[days.length - 1] + 'T00:00:00.000Z');
@@ -7500,6 +7583,17 @@ function findCorrelations(events, opts = {}) {
     }
     return false;
   };
+  // recsForTagOnDay: записи, давшие `tag` в день `dayKey`, ИСКЛЮЧАЯ recKey из
+  // excludeRecKeys (используется только для lag=0 — исключаем тот же record,
+  // что уже дал тег A в этот день; для lag≥1 excludeRecKeys не нужен, т.к.
+  // это уже другой календарный день => другой record по построению).
+  const recsForTagOnDay = (dayKey, tag, excludeRecKeys) => {
+    const tagRecMap = dayTagRecords.get(dayKey);
+    if (!tagRecMap || !tagRecMap.has(tag)) return [];
+    const out = [];
+    tagRecMap.get(tag).forEach((v, k) => { if (!excludeRecKeys || !excludeRecKeys.has(k)) out.push(v); });
+    return out;
+  };
   // ВАЖНО: baseline(B) должен быть той же «оконной» метрикой, что и
   // confidence (P(B встречается в течение lagDays+1 дней), а НЕ «наивная»
   // P(B в один конкретный день) — иначе lift систематически завышен для
@@ -7513,26 +7607,52 @@ function findCorrelations(events, opts = {}) {
     const bDays = tagDays.get(b);
     let windowsWithB = 0;
     allDayKeys.forEach(dk => { if (windowHasTag(dk, bDays)) windowsWithB++; });
-    const rate = windowsWithB / allDayKeys.length;
-    baselineCache.set(b, rate);
-    return rate;
+    const out = { rate: windowsWithB / allDayKeys.length, count: windowsWithB };
+    baselineCache.set(b, out);
+    return out;
   };
+  const logFact = logFactorialTable(totalDays);
+  const logChoose = makeLogChoose(logFact);
+  const candidates = [];
   for (const a of qualifyingTags) {
     const daysA = [...tagDays.get(a)];
     for (const b of qualifyingTags) {
       if (a === b) continue;
-      const daysBSet = tagDays.get(b);
-      let hits = 0;
-      daysA.forEach(dA => { if (windowHasTag(dA, daysBSet)) hits++; });
-      if (hits < minSamples) continue;
-      const confidenceStat = hits / daysA.length;
-      const baseline = baselineOf(b);
+      let hits = 0, precedeHits = 0;
+      const evidence = [];
+      daysA.forEach(dA => {
+        const aRecMap = dayTagRecords.get(dA).get(a);
+        const aRecKeys = new Set(aRecMap.keys());
+        const startMs = Date.parse(dA + 'T00:00:00.000Z');
+        for (let i = 0; i <= lagDays; i++) {
+          const dayKey = new Date(startMs + i * 864e5).toISOString().slice(0, 10);
+          const bRecs = recsForTagOnDay(dayKey, b, i === 0 ? aRecKeys : null);
+          if (bRecs.length) {
+            hits++;
+            if (i >= 1) precedeHits++;
+            if (evidence.length < SYN_EVIDENCE_CAP) {
+              evidence.push({ aDay: dA, aRecs: [...aRecMap.values()], bDay: dayKey, bRecs, sameDay: i === 0 });
+            }
+            break;
+          }
+        }
+      });
+      const { rate: baseline, count: bWindowCount } = baselineOf(b);
       if (baseline <= 0) continue;
+      const confidenceStat = hits / daysA.length;
       const lift = confidenceStat / baseline;
-      if (lift < 1.3 && lift > 0.77) continue;   // недостаточно отличается от базовой частоты — не выводим
-      result.pairs.push({ a, b, supportA: daysA.length, supportB: daysBSet.size, hits, confidenceStat, baseline, lift, totalDays, lagDays });
+      const direction = lift >= 1 ? 'ge' : 'le';
+      const pValue = fisherPValue(logChoose, totalDays, bWindowCount, daysA.length, hits, direction);
+      candidates.push({
+        a, b, supportA: daysA.length, supportB: tagDays.get(b).size, hits, precedeHits,
+        precedes: precedeHits >= minSamples, sameDayOnly: hits > 0 && precedeHits === 0,
+        confidenceStat, baseline, lift, totalDays, lagDays, pValue, evidence,
+      });
     }
   }
+  const { qValues, significant } = benjaminiHochberg(candidates.map(c => c.pValue), SYN_FDR_ALPHA);
+  candidates.forEach((c, i) => { c.qValue = qValues[i]; c.significant = significant[i]; });
+  result.pairs = candidates.filter(c => c.hits >= minSamples && (c.lift >= 1.3 || c.lift <= 0.77) && c.significant);
   result.pairs.sort((x, y) => Math.abs(Math.log(y.lift)) - Math.abs(Math.log(x.lift)));
   return result;
 }
@@ -7542,7 +7662,12 @@ const pairSignature = p => p.a + '→' + p.b;
 // Низкая/средняя/высокая — по количеству совпадений И устойчивости связи
 // (насколько lift отличается от 1×). Никогда не «высокая» на малых данных,
 // даже если lift экстремальный — экстремальные lift на n<5 обычно шум.
+// Owner review (PR #153, дефект 2): «Средняя»/«Высокая» ТОЛЬКО если пара уже
+// прошла статистический гейт значимости (FDR-скорректированный тест Фишера,
+// см. findCorrelations) — размер выборки/сила lift сами по себе, без
+// проверки значимости, не дают права на эти метки.
 function correlationConfidence(pair) {
+  if (!pair.significant) return { level: 'low', label: 'Низкая', cls: 'cf-low' };
   const n = Math.min(pair.supportA, pair.hits);
   const strongLift = Math.abs(Math.log(pair.lift)) >= Math.log(2);   // ×2 или ÷2 от базовой частоты
   if (n < 5) return { level: 'low', label: 'Низкая', cls: 'cf-low' };
@@ -7576,9 +7701,18 @@ function tagLabel(tag) {
   const typeLabel = TAG_TYPE_LABELS[type] || type;
   return val && val !== 'true' ? `${typeLabel} «${val}»` : typeLabel;
 }
+// Owner review (PR #153, дефект 3): если ВСЕ подтверждающие совпадения —
+// только в тот же день (lag=0, `sameDayOnly`), формулировка не должна
+// звучать как «после A» (это подразумевало бы, что A предшествует B) — это
+// честное совпадение в один день, не установленная последовательность.
 function correlationSentence(pair) {
   const pct = Math.round(pair.confidenceStat * 100), basePct = Math.round(pair.baseline * 100);
   const a = tagLabel(pair.a), b = tagLabel(pair.b);
+  if (pair.sameDayOnly) {
+    return pair.lift > 1
+      ? `В те же дни, что и «${a}», «${b}» отмечалось чаще обычного: ${pct}% случаев против обычных ${basePct}% (по ${pair.supportA} наблюдениям; совпадение в тот же день — не установлено, что «${a}» предшествует).`
+      : `В те же дни, что и «${a}», «${b}» отмечалось реже обычного: ${pct}% случаев против обычных ${basePct}% (по ${pair.supportA} наблюдениям).`;
+  }
   if (pair.lift > 1) {
     return `За ${pair.supportA} наблюдений «${a}» сопровождалось «${b}» в ${pct}% случаев в пределах ${pair.lagDays} дн. (обычная частота «${b}» — ${basePct}%).`;
   }
@@ -7586,8 +7720,12 @@ function correlationSentence(pair) {
 }
 
 // ── 6. Trigger Engine — фильтрованная проекция Correlation Engine ────
+// Owner review (PR #153, дефект 3): «что предшествует» обязано означать
+// реальное предшествование (совпадение хотя бы на lag≥1 набрало minSamples,
+// см. pair.precedes в findCorrelations) и положительную связь (lift>1) — не
+// любое отклонение lift, и не совпадения в тот же день (lag=0).
 function triggersFor(pairs, targetTag) {
-  return pairs.filter(p => p.b === targetTag).sort((x, y) => y.lift - x.lift);
+  return pairs.filter(p => p.b === targetTag && p.lift > 1 && p.precedes).sort((x, y) => y.lift - x.lift);
 }
 // Топ-целевые теги для блока «Триггеры»: самые частые эмоциональные/
 // поведенческие исходы, для которых вообще нашлись качественные корреляции.
@@ -7624,7 +7762,13 @@ function findRecurringSequences(events, opts = {}) {
     .sort((a, b) => b.count - a.count).slice(0, 10);
 }
 
-// ── 8. Cause Graph — цепочки из уже найденных корреляций (не новый расчёт) ──
+// ── 8. Цепочки совпадений — из уже найденных корреляций (не новый расчёт) ──
+// Owner review (PR #153, дефект 3): раньше называлось «Cause Graph»/
+// «Причинные цепочки» — association/lift НЕ доказывает причинность, а
+// buildCauseChains() лишь склеивает уже найденные association-рёбра.
+// Переименовано в нейтральное «цепочки совпадений»; вызывающая сторона
+// (synthesisReport) передаёт сюда ТОЛЬКО пары с pair.precedes===true —
+// т.е. с реальным совпадением на lag≥1, а не только в тот же день.
 function buildCauseChains(pairs, opts = {}) {
   const maxDepth = opts.maxDepth || 4;
   const byA = new Map();
@@ -7660,10 +7804,18 @@ function synthesisReport(days) {
   const { pairs, totalDays } = findCorrelations(events, { minSamples: settings.minSamples, lagDays: settings.lagDays });
   const dismissed = new Set(settings.dismissed || []);
   const visible = pairs.filter(p => !dismissed.has(pairSignature(p)));
+  // Owner review (PR #153, дефект 6): стабильный индекс в РАМКАХ ЭТОГО
+  // рендера — позволяет UI ссылаться на конкретную пару по числовому
+  // индексу (безопасно для inline onclick) вместо вставки пользовательского
+  // текста тега/сигнатуры в JS-атрибут (см. _synLastPairs/synEvidenceAt).
+  visible.forEach((p, i) => { p._i = i; });
   return {
     events, stats, totalDays, settings,
     pairs: visible,
-    chains: buildCauseChains(visible),
+    // Owner review, дефект 3: цепочки строятся ТОЛЬКО из пар с реальным
+    // предшествованием (lag≥1, см. pair.precedes) — не из совпадений в
+    // тот же день.
+    chains: buildCauseChains(visible.filter(p => p.precedes)),
     sphere: sphereInfluencePairs(visible),
     relationship: relationshipPairs(visible),
     sequences: findRecurringSequences(events, { minSamples: settings.minSamples }),
@@ -7681,14 +7833,59 @@ function restoreDismissedCorrelations() {
   DB.__ts = Date.now(); persist(); try { rSynthesis(); } catch (e) {}
   toast('Скрытые закономерности снова видны', 'ok');
 }
-// Открыть исходную запись по одному из тегов пары (первое совпадающее
-// событие в текущем окне) — полная объяснимость: пользователь видит,
-// на каких именно записях основан вывод, а не только текст.
-function openSynEvidence(tag) {
-  const events = unifiedEvents(_synDays || SYN_LAG_DAYS_DEFAULT * 13);
-  const hit = events.slice().reverse().find(e => e.tags.includes(tag));
-  if (!hit) { toast('Исходная запись не найдена (могла быть удалена)', 'warn'); return; }
-  openSourceRecord(hit.sourceCollection, hit.referenceId);
+// Owner review (PR #153, дефект 5): раньше «Записи «A»»/«Записи «B»»
+// открывали ЛЮБУЮ (последнюю) запись с этим тегом — она могла вообще не
+// входить ни в один из hits, на которых рассчитан конкретный вывод A→B.
+// Теперь findCorrelations() возвращает pair.evidence — точные supporting
+// день/записи для КАЖДОГО реального совпадения этой пары (см. §2) — и
+// кнопки открывают именно их, без персистирования (только в памяти,
+// пересчитывается на каждый рендер).
+const SYN_COLL_LABELS = {
+  moments: 'Момент', whys: '«Зачем?»', insights: 'Инсайт', patterns: 'Паттерн', evolution: 'Эволюция',
+  dreams: 'Сон', medIntakes: 'Приём препарата', symptoms: 'Симптом', measures: 'Измерение', cravings: 'Тяга',
+  labObservations: 'Лабораторный результат', healthDocuments: 'Документ здоровья',
+  relationshipContexts: 'Контекст отношений', sphereLogs: 'Запись сферы',
+};
+let _synEvidenceRecs = [];
+function synEvidenceAt(i, side) {
+  const p = _synLastPairs[i];
+  if (!p) { toast('Данные устарели — обновите экран', 'warn'); return; }
+  const seen = new Set(); const recs = [];
+  (p.evidence || []).forEach(ev => {
+    const day = side === 'a' ? ev.aDay : ev.bDay;
+    (side === 'a' ? ev.aRecs : ev.bRecs).forEach(r => {
+      const k = r.coll + ':' + r.id;
+      if (!seen.has(k)) { seen.add(k); recs.push({ coll: r.coll, id: r.id, day }); }
+    });
+  });
+  if (!recs.length) {
+    if (side === 'a') {
+      // A реально происходил (supportA>0) — это может быть пара «B ни разу
+      // не встречалось после A» (депрессия/depletion); честно покажем
+      // реальную запись A, а не молчим.
+      const hit = unifiedEvents(_synDays || SYN_LAG_DAYS_DEFAULT * 13).slice().reverse().find(e => e.tags.includes(p.a));
+      if (hit) { openSourceRecord(hit.sourceCollection, hit.referenceId); return; }
+    }
+    toast('Записи, поддерживающие именно эту закономерность, не найдены — либо удалены, либо это находка об отсутствии совпадения', 'warn');
+    return;
+  }
+  if (recs.length === 1) { openSourceRecord(recs[0].coll, recs[0].id); return; }
+  _synEvidenceRecs = recs;
+  const el = $('syn-evidence-list');
+  if (el) {
+    el.innerHTML = recs.map((r, idx) => `<button type="button" class="btn btn-s btn-full mb" style="text-align:left" onclick="synOpenEvidenceRec(${idx})">${esc(SYN_COLL_LABELS[r.coll] || r.coll)} · ${esc(r.day)}</button>`).join('');
+  }
+  openOv('ov-syn-evidence');
+}
+function synOpenEvidenceRec(i) {
+  const r = _synEvidenceRecs[i]; if (!r) return;
+  closeOv('ov-syn-evidence');
+  openSourceRecord(r.coll, r.id);
+}
+function synDismissAt(i) {
+  const p = _synLastPairs[i];
+  if (!p) { toast('Данные устарели — обновите экран', 'warn'); return; }
+  dismissCorrelation(pairSignature(p));
 }
 function openSourceRecord(coll, id) {
   if (coll === 'labObservations') { openLabDet(id); return; }
@@ -7704,15 +7901,23 @@ function openSourceRecord(coll, id) {
 
 // ── UI: экран «Закономерности» (внутри существующего pg-sys, sysGo('patterns')) ──
 let _synDays = 90;
+// Owner review (PR #153, дефект 6): _synLastPairs — единственный источник
+// правды о ТЕКУЩЕМ рендере (в памяти, никогда не персистируется — сбрасывается
+// каждым rSynthesis()). Кнопки ссылаются на пары по числовому индексу
+// (p._i, безопасен в inline onclick без какого-либо экранирования), а НЕ по
+// пользовательскому тексту тега/сигнатуры — раньше esc() (экранирует только
+// &lt;&gt;) не защищал от кавычек, и апостроф/кавычка в свободном тексте
+// эмоции/триггера мог сломать inline JS-атрибут.
+let _synLastPairs = [];
 function synGoDays(days) { _synDays = days; rSynthesis(); }
 function pairRowHtml(p) {
-  const conf = correlationConfidence(p), sig = pairSignature(p);
+  const conf = correlationConfidence(p);
   return `<div class="si-row">
     <div class="si-body"><div class="si-text">${esc(correlationSentence(p))}</div>
       <div style="display:flex;gap:.4rem;margin-top:.3rem;flex-wrap:wrap">
-        <button type="button" class="btn btn-s btn-xs" onclick="openSynEvidence('${esc(p.a)}')">Записи «${esc(tagLabel(p.a))}»</button>
-        <button type="button" class="btn btn-s btn-xs" onclick="openSynEvidence('${esc(p.b)}')">Записи «${esc(tagLabel(p.b))}»</button>
-        <button type="button" class="btn btn-s btn-xs" onclick="dismissCorrelation('${esc(sig)}')" aria-label="Скрыть этот вывод">Скрыть</button>
+        <button type="button" class="btn btn-s btn-xs" onclick="synEvidenceAt(${p._i},'a')">Записи «${esc(tagLabel(p.a))}»</button>
+        <button type="button" class="btn btn-s btn-xs" onclick="synEvidenceAt(${p._i},'b')">Записи «${esc(tagLabel(p.b))}»</button>
+        <button type="button" class="btn btn-s btn-xs" onclick="synDismissAt(${p._i})" aria-label="Скрыть этот вывод">Скрыть</button>
       </div></div>
     <span class="si-conf ${conf.cls}">${conf.label}</span>
   </div>`;
@@ -7765,10 +7970,15 @@ function synPatternsBlockHtml(sequences) {
   return html;
 }
 function synCauseChainsBlockHtml(chains) {
-  let html = `<div class="sec-lbl">Причинные цепочки</div><div class="card mx mb">`;
+  // Owner review (PR #153, дефект 3): переименовано из «Причинные цепочки» —
+  // association/lift не доказывает причинность; это цепочки повторяющихся
+  // временных совпадений (уже отфильтрованные по pair.precedes в
+  // synthesisReport, т.е. с реальным предшествованием lag≥1, не просто
+  // совпадением в тот же день).
+  let html = `<div class="sec-lbl">Цепочки совпадений</div><div class="card mx mb">`;
   html += chains.length
     ? chains.map(c => `<div class="si-row"><div class="si-body"><div class="si-text">${c.labels.map(esc).join(' → ')}</div></div></div>`).join('')
-    : `<div style="padding:1rem" class="ai-sp-empty">Пока не набралось цепочек из ≥3 связанных закономерностей.</div>`;
+    : `<div style="padding:1rem" class="ai-sp-empty">Пока не набралось цепочек из ≥3 связанных совпадений.</div>`;
   html += `</div>`;
   return html;
 }
@@ -7787,6 +7997,7 @@ function synRelationshipBlockHtml(pairs) {
 function rSynthesis() {
   const el = $('sys-patterns-out'); if (!el) return;
   const report = synthesisReport(_synDays);
+  _synLastPairs = report.pairs;
   let html = `<div class="be-note mx mb" style="color:var(--t3)">Только твои данные, без ИИ. Совпадения по времени между записями — не диагноз, не терапия, не медицинская рекомендация.</div>`;
   html += synPeriodButtonsHtml();
   html += synStatsBlockHtml(report.stats);
