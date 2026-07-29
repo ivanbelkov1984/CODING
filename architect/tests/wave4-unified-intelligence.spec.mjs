@@ -298,27 +298,30 @@ const mixedSameRecordCase = await page.evaluate(() => {
 ok(!mixedSameRecordCase.target0Found, 'блокер 1 (второй проход): смешанный same-record+независимый случай (lagDays=0) НЕ превращается в значимую (ложную) отрицательную связь');
 ok(!mixedSameRecordCase.target7Found, 'блокер 1 (второй проход): та же проверка при lagDays=7 (не только вырожденный lagDays=0 случай)');
 
-// ── 5b2) Внедрённая ГЕНУИННАЯ отрицательная связь (независимые коллекции,
-//    без same-record риска) должна пройти статистический гейт ────────────
-// Owner review (третий проход): нужен позитивный контроль на depletion —
-// не только доказательство, что движок НЕ выдумывает отрицательные связи
-// из шума/тавтологии, но и что он ДЕЙСТВИТЕЛЬНО находит настоящую, когда
-// она есть. `medIntakes`/`symptoms` — разные коллекции, `med:` не входит
-// ни в одну TAG_FAMILY_SETS-группу — никакого same-record риска. 20 дней
-// приёма препарата; симптом «мигрень» происходит на ~1/3 дней ВНЕ окна
-// [приём, приём+lagDays] и НИКОГДА внутри нёе — настоящий, не тавтологичный
-// протективный эффект. Заодно проверяет фикс: `hits>=minSamples` сам по
-// себе неверно требовать для ОБЕДНЕНИЯ — сильный настоящий депрессивный
-// эффект по определению даёт hits≈0, поэтому итоговый гейт использует
-// `(supportA-hits)>=minSamples` для lift<1 (симметрично `hits>=minSamples`
-// для lift≥1).
-const injectedDepletion = await page.evaluate(() => {
+// ── 5b2) Отсутствие symptom-записей НЕ создаёт пользовательскую
+//    «отрицательную» закономерность (regression-тест) ─────────────────────
+// Owner review (третий проход, PR #153): предыдущая версия этого теста
+// называла отсутствие symptom-записей после приёма препарата «настоящим
+// протективным эффектом» и требовала, чтобы движок выводил её пользователю.
+// Это ОШИБОЧНАЯ рамка. `medIntakes`/`symptoms` — event log'и: пользователь
+// пишет запись, когда РЕШИЛ её сделать. День без записи `symptom:X` НЕ
+// доказывает «симптома не было» — он также может означать «был, но не
+// записан», «приложение не открывали», «домен заполнялся нерегулярно».
+// Особенно опасно для health-домена (issue #152 запрещает медицинские
+// выводы): отсутствие записи о симптоме не равно отсутствию симптома.
+// Поэтому findCorrelations() теперь ВСЕГДА исключает lift<1 из итогового
+// вывода (см. фикс в app.js — гейт `hits>=minSamples && lift>=1.3 &&
+// significant`). Этот тест проверяет именно это на ТОЙ ЖЕ фикстуре
+// (регулярный приём + отсутствие symptom-записей в защищённом окне после
+// приёма), что раньше ошибочно трактовалась как «протективный эффект»:
+// движок НЕ должен выдавать пользователю пару med:принят → symptom:мигрень.
+const noDepletionSurfaced = await page.evaluate(() => {
   const now = Date.now();
   DB.moments = []; DB.whys = []; DB.insights = []; DB.patterns = []; DB.evolution = []; DB.dreams = []; DB.medIntakes = []; DB.symptoms = []; DB.measures = []; DB.cravings = []; DB.labObservations = []; DB.healthDocuments = []; DB.relationshipContexts = []; DB.sphereLogs = []; DB.spheres = []; DB.psyLinks = [];
   const lagDays = 5, totalDaysRange = 200;
   const medDays = []; for (let i = 0; i < 20; i++) medDays.push(i * 9 + 30);
-  // Протективное окно вперёд по календарю от дня приёма (offset = «дней назад
-  // от сейчас», поэтому «вперёд по времени» — это МЕНЬШИЙ offset): [m-lagDays, m].
+  // Окно вперёд по календарю от дня приёма (offset = «дней назад от сейчас»,
+  // поэтому «вперёд по времени» — это МЕНЬШИЙ offset): [m-lagDays, m].
   const inProtectedWindow = off => medDays.some(m => off >= (m - lagDays) && off <= m);
   medDays.forEach((m, i) => {
     const d = new Date(now - m * 864e5);
@@ -326,7 +329,7 @@ const injectedDepletion = await page.evaluate(() => {
   });
   let symId = 800000;
   for (let off = 0; off < totalDaysRange; off++) {
-    if (inProtectedWindow(off)) continue;   // симптом НИКОГДА не встречается в защищённом окне
+    if (inProtectedWindow(off)) continue;   // symptom-записи нет в этом окне (не значит «симптома не было»)
     if (off % 3 === 0) {
       const d = new Date(now - off * 864e5);
       DB.symptoms.push({ id: symId++, name: 'мигрень', severity: 5, createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
@@ -334,14 +337,9 @@ const injectedDepletion = await page.evaluate(() => {
   }
   const { pairs } = findCorrelations(unifiedEvents(null), { minSamples: 3, lagDays });
   const target = pairs.find(p => p.a === 'med:принят' && p.b === 'symptom:мигрень');
-  return {
-    found: !!target,
-    hits: target && target.hits, supportA: target && target.supportA,
-    lift: target && target.lift, significant: target && target.significant,
-  };
+  return { found: !!target };
 });
-ok(injectedDepletion.found && injectedDepletion.significant, `внедрённая генуинная отрицательная связь (med:принят → symptom:мигрень, независимые коллекции) проходит двусторонний Fisher+FDR гейт (hits=${injectedDepletion.hits}, supportA=${injectedDepletion.supportA}, lift=${injectedDepletion.lift && +injectedDepletion.lift.toFixed(4)})`);
-ok(injectedDepletion.lift < 0.77, 'внедрённая отрицательная связь: lift действительно за порогом обеднения (<0.77), не пограничный шум');
+ok(!noDepletionSurfaced.found, 'регулярный приём препарата + отсутствие symptom-записей в последующем окне НЕ создаёт пользовательскую закономерность о снижении симптома (findCorrelations() не выводит отрицательные ассоциации из event-log данных)');
 
 // ── 5c) Инвариант: k (hits) ВСЕГДА в допустимых границах гипергеометрического
 //    распределения для КАЖДОЙ пары, попавшей в итоговый результат ────────
@@ -385,22 +383,10 @@ const marginInvariant = await page.evaluate(() => {
     DB.moments.push({ id: 600000 + k, valence: 15, activation: 50, emo: 'нейтральный', createdAt: new Date(d.getTime() + 3600e3).toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
   });
   all.push(...checkPairs(findCorrelations(unifiedEvents(null), { minSamples: 3, lagDays: 7 }).pairs));
-  // (c) внедрённая генуинная отрицательная связь (та же фикстура, что и 5b2) —
-  // hits=0 (депрессивный эффект) должен ТОЖЕ удовлетворять инварианту.
-  DB.medIntakes = []; DB.symptoms = [];
-  const lagDays2 = 5;
-  const medDays = []; for (let i = 0; i < 20; i++) medDays.push(i * 9 + 30);
-  const inProtectedWindow = off => medDays.some(m => off >= (m - lagDays2) && off <= m);
-  medDays.forEach((m, i) => {
-    const d = new Date(now - m * 864e5);
-    DB.medIntakes.push({ id: 700000 + i, medId: 1, status: 'taken', at: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
-  });
-  let symId = 800000;
-  for (let off = 0; off < 200; off++) {
-    if (inProtectedWindow(off)) continue;
-    if (off % 3 === 0) { const d = new Date(now - off * 864e5); DB.symptoms.push({ id: symId++, name: 'мигрень', severity: 5, createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now }); }
-  }
-  all.push(...checkPairs(findCorrelations(unifiedEvents(null), { minSamples: 3, lagDays: lagDays2 }).pairs));
+  // (c) датасет с внедрённой депрессивной (lift<1) связью убран отсюда:
+  // после фикса «третьего прохода» (§5b2 выше) findCorrelations() никогда
+  // не выводит lift<1 в result.pairs, поэтому такой датасет давал бы 0
+  // проверяемых пар — вставлять его в margin-инвариант больше нет смысла.
   return { total: all.length, violations: all.filter(x => !x.ok).length, sample: all.filter(x => !x.ok).slice(0, 3) };
 });
 ok(marginInvariant.total > 0, 'margin invariant test: датасеты действительно дают ≥1 пару для проверки (не тривиально пустой тест)');
