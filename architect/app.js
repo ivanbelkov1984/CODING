@@ -7693,7 +7693,21 @@ function findCorrelations(events, opts = {}) {
   }
   const { qValues, significant } = benjaminiHochberg(candidates.map(c => c.pValue), SYN_FDR_ALPHA);
   candidates.forEach((c, i) => { c.qValue = qValues[i]; c.significant = significant[i]; });
-  result.pairs = candidates.filter(c => c.hits >= minSamples && (c.lift >= 1.3 || c.lift <= 0.77) && c.significant);
+  // Owner review (второй проход, требование к негативным находкам): `hits`
+  // сам по себе — неверная мера «достаточно наблюдений» для ОБЕДНЕНИЯ
+  // (lift<1) — сильный, настоящий депрессивный эффект («после X, Y почти
+  // никогда не встречается») по определению ДАЁТ малый hits, поэтому
+  // `hits>=minSamples` систематически отбрасывал бы даже самые уверенные
+  // depletion-находки. Симметричное правило: для обогащения (lift≥1) нужно
+  // ≥minSamples ПОДТВЕРЖДЁННЫХ совпадений (hits); для обеднения — ≥minSamples
+  // ПОДТВЕРЖДЁННЫХ «ожидали B, но не случилось» (supportA-hits). Оба случая
+  // используют одну и ту же переменную наблюдений (daysA), уже гарантированно
+  // ≥minSamples через qualifyingTags — здесь проверяется именно число
+  // наблюдений, ПОДТВЕРЖДАЮЩИХ заявленное направление связи.
+  result.pairs = candidates.filter(c => {
+    const enoughSamples = c.lift >= 1 ? c.hits >= minSamples : (c.supportA - c.hits) >= minSamples;
+    return enoughSamples && (c.lift >= 1.3 || c.lift <= 0.77) && c.significant;
+  });
   result.pairs.sort((x, y) => Math.abs(Math.log(y.lift)) - Math.abs(Math.log(x.lift)));
   return result;
 }
