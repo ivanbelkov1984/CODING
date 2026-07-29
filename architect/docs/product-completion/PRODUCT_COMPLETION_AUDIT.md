@@ -331,6 +331,20 @@ PR #146 предлагал: вкладку «Психология», hub «Ин�
 > вставлялся в inline `onclick` (esc() не экранирует кавычки). Все 6
 > исправлены в этом же PR без расширения объёма — см.
 > `WAVE4_UNIFIED_INTELLIGENCE_DATA_CONTRACT.md` §4.1-4.3, §7, §9, §13.
+>
+> **Update после ВТОРОГО прохода независимого review:** фикс дефектов 1/2
+> сам оказался статистически некорректен — (a) динамическое same-record
+> исключение меняло наблюдаемое `hits`, но не согласованные с ним
+> baseline/margins, из-за чего Fisher мог получить математически
+> невозможную таблицу (p-value=0 на смешанных same-record+независимых
+> данных); (b) направление одностороннего Fisher выбиралось post-hoc (после
+> просмотра знака lift), что делало заявленный BH-FDR=0.05 необоснованным.
+> Оба исправлены: (a) статическое per-tag-pair исключение дня `lag=0`
+> (`TAG_FAMILY_SETS`) вместо динамического per-record — hits и baseline
+> теперь считаются ОДНОЙ функцией с одним `minLag`, инвариант `hits ∈
+> [minX,maxX]` гарантирован конструкцией; (b) двусторонний точный тест
+> Фишера (`fisherPValueTwoSided`) вместо выбора направления по данным. См.
+> `WAVE4_UNIFIED_INTELLIGENCE_DATA_CONTRACT.md` §4.1-4.2 (обновлены).
 
 - ~~**Только фактически отсутствующее**~~ — реализовано: Unified Event Engine (`unifiedEvents()`, read-only агрегатор поверх 14 коллекций); Correlation Engine (support/confidence/lift, association-rule, с исправленным baseline — см. contract §4.1); Trigger/Pattern/Cause Graph/Sphere Influence/Relationship Graph — как единый движок с проекциями/фильтрами, а не 5 отдельных расчётов; Statistics Engine; Insight Generator (только шаблоны, только на статистически подтверждённых данных); Confidence System (низкая/средняя/высокая).
 - **Конечный результат:** пользователь на основе ИСКЛЮЧИТЕЛЬНО своих данных видит подтверждённые связи между событиями/психологией/здоровьем/отношениями/сферами жизни, с явным указанием уверенности и кнопками «Записи «…»», ведущими к исходным записям (полная объяснимость — не «чёрный ящик»).
@@ -338,8 +352,8 @@ PR #146 предлагал: вкладку «Психология», hub «Ин�
 - **Затрагиваемые коллекции:** read-only агрегация поверх `moments/whys/insights/patterns/evolution/dreams/medIntakes/symptoms/measures/cravings/labObservations/healthDocuments/relationshipContexts/sphereLogs/psyLinks` — ни одна не изменена; запись только в новый скаляр `DB.correlationSettings`.
 - **Риски (закрыты):** «придумывание фактов» — устранено самой архитектурой (нет ИИ вообще, только детерминированная статистика с порогами `minSamples`/lift); найден и исправлен реальный баг движка (систематически завышенный lift из-за асимметрии оконного confidence vs наивного baseline, см. contract §4.1) через seeded-PRNG false-positive-avoidance тест.
 - **Safety boundaries:** ни диагнозов, ни психотерапии, ни эзотерики, ни медицинских советов — только шаблонные предложения на статистически подтверждённых числах пользователя; честный отказ («недостаточно данных») вместо пустого экрана или выдумки при малой выборке.
-- **Focused tests:** `tests/wave4-unified-intelligence.spec.mjs` (74 проверки, после owner review PR #153: Event/Correlation/Trigger/Pattern/«Цепочки совпадений»/Sphere/Relationship/Confidence engines, same-record тавтология и её легитимный same-day контр-пример, false-positive avoidance на реалистично-независимых данных, статистический FDR-гейт (pValue/qValue/significant), eventTimeOf() day-vs-createdAt приоритет, evidence provenance (точные supporting записи, не произвольные), inline onclick injection-safety, честный отказ на малых данных, детерминированность, profile isolation, мобильные вьюпорты/a11y/тема/клавиатура, 120 000-событийный performance-тест) + `tests/wave4-backup-roundtrip.test.mjs` (12 проверок encrypted/plain backup-restore через production adapter/core/restore).
-- **Критерии готовности:** зелёный CI+evidence; `npm test` (438/438, включая 74 проверки Волны 4) и `npm run test:backup` (включая 12 проверок Волны 4) зелёные; ни один вывод синтеза не показывается без evidence-ссылки на реальную поддерживающую запись — подтверждено тестом evidence provenance.
+- **Focused tests:** `tests/wave4-unified-intelligence.spec.mjs` (81 проверка, после ДВУХ проходов owner review PR #153: Event/Correlation/Trigger/Pattern/«Цепочки совпадений»/Sphere/Relationship/Confidence engines, same-record тавтология и её легитимный same-day контр-пример, false-positive avoidance на реалистично-независимых данных, статистический FDR-гейт (pValue/qValue/significant) через ДВУСТОРОННИЙ точный тест Фишера, margin-consistency инвариант (`hits∈[minX,maxX]`) и точный контрпример второго прохода ревью, golden-таблицы для Fisher exact, 25 независимых seeded-прогонов FDR, eventTimeOf() day-vs-createdAt приоритет, evidence provenance (точные supporting записи, не произвольные), inline onclick injection-safety, честный отказ на малых данных, детерминированность, profile isolation, мобильные вьюпорты/a11y/тема/клавиатура, 120 000-событийный performance-тест) + `tests/wave4-backup-roundtrip.test.mjs` (12 проверок encrypted/plain backup-restore через production adapter/core/restore).
+- **Критерии готовности:** зелёный CI+evidence; `npm test` (438/438, включая 81 проверку Волны 4) и `npm run test:backup` (включая 12 проверок Волны 4) зелёные; ни один вывод синтеза не показывается без evidence-ссылки на реальную поддерживающую запись — подтверждено тестом evidence provenance.
 - **Не смешивалось:** доработки отдельных доменов (психика/здоровье/астрология), навигация, существующие экраны — не тронуты; движок только читает их результаты через уже существующий Evidence Kernel `projAll()`.
 
 ### Волна 5 — Данные, надёжность и выпуск

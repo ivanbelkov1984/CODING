@@ -211,7 +211,7 @@ ok(sameRecordTautology.pairsCount === 0, '10 одинаковых moments (од�
 //    same-day совпадение, НЕ исключается ─────────────────────────────
 const independentSameDay = await page.evaluate(() => {
   const now = Date.now();
-  DB.moments = []; DB.cravings = [];
+  DB.moments = []; DB.whys = []; DB.insights = []; DB.patterns = []; DB.evolution = []; DB.dreams = []; DB.medIntakes = []; DB.symptoms = []; DB.measures = []; DB.cravings = []; DB.labObservations = []; DB.healthDocuments = []; DB.relationshipContexts = []; DB.sphereLogs = []; DB.spheres = []; DB.psyLinks = [];
   for (let i = 0; i < 8; i++) {
     const d = new Date(now - (i * 16 + 2) * 864e5);
     DB.moments.push({ id: 60000 + i, valence: 20, activation: 70, emo: 'тревога', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
@@ -266,6 +266,131 @@ const noFalsePositives = await page.evaluate(() => {
   return { pairsCount: pairs.length, pairs: pairs.map(p => ({ a: p.a, b: p.b, lift: +p.lift.toFixed(2), q: p.qValue })) };
 });
 ok(noFalsePositives.pairsCount === 0, `false-positive avoidance: на РЕАЛИСТИЧНО независимых данных (независимые дни И теги, переменное число записей в день) FDR-гейт не находит НИ ОДНОЙ значимой пары (найдено: ${noFalsePositives.pairsCount}${noFalsePositives.pairsCount ? ', ' + JSON.stringify(noFalsePositives.pairs) : ''})`);
+
+// ── 5b) Второй проход owner review (PR #153, блокер 1): смешанный случай —
+//    записи, СОВМЕСТНО порождающие A+B (тот же mapper), ПЛЮС ровно
+//    minSamples независимых B-записей — не должно превращаться в значимую
+//    отрицательную связь. Раньше hits (с исключением same-record) НЕ
+//    согласовывался с margins baseline'а (наивными, без исключения) —
+//    получалась математически невозможная таблица Фишера (k < minX),
+//    p-value=0, BH объявлял пару максимально значимой.
+const mixedSameRecordCase = await page.evaluate(() => {
+  const now = Date.now();
+  DB.moments = []; DB.whys = []; DB.insights = []; DB.patterns = []; DB.evolution = []; DB.dreams = []; DB.medIntakes = []; DB.symptoms = []; DB.measures = []; DB.cravings = []; DB.labObservations = []; DB.healthDocuments = []; DB.relationshipContexts = []; DB.sphereLogs = []; DB.spheres = []; DB.psyLinks = [];
+  // 20 дней — на каждом ОДИН moment, дающий emo:X И valence:low ИЗ ОДНОЙ записи.
+  for (let i = 0; i < 20; i++) {
+    const d = new Date(now - (i * 5 + 2) * 864e5);
+    DB.moments.push({ id: 500000 + i, valence: 20, activation: 50, emo: 'скептицизм', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+  }
+  // Ровно на 3 из этих же дней — НЕЗАВИСИМАЯ вторая запись, тоже дающая
+  // valence:low, но с ДРУГИМ emo (устраняет неоднозначность «та же запись»).
+  [0, 5, 10].forEach((idx, k) => {
+    const d = new Date(now - (idx * 5 + 2) * 864e5);
+    DB.moments.push({ id: 600000 + k, valence: 15, activation: 50, emo: 'нейтральный', createdAt: new Date(d.getTime() + 3600e3).toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+  });
+  const events = unifiedEvents(null);
+  const withLag0 = findCorrelations(events, { minSamples: 3, lagDays: 0 });
+  const withLag7 = findCorrelations(events, { minSamples: 3, lagDays: 7 });
+  const target0 = withLag0.pairs.find(p => p.a === 'emo:скептицизм' && p.b === 'valence:low');
+  const target7 = withLag7.pairs.find(p => p.a === 'emo:скептицизм' && p.b === 'valence:low');
+  return { target0Found: !!target0, target7Found: !!target7 };
+});
+ok(!mixedSameRecordCase.target0Found, 'блокер 1 (второй проход): смешанный same-record+независимый случай (lagDays=0) НЕ превращается в значимую (ложную) отрицательную связь');
+ok(!mixedSameRecordCase.target7Found, 'блокер 1 (второй проход): та же проверка при lagDays=7 (не только вырожденный lagDays=0 случай)');
+
+// ── 5c) Инвариант: k (hits) ВСЕГДА в допустимых границах гипергеометрического
+//    распределения для КАЖДОЙ пары, попавшей в итоговый результат ────────
+// Owner review (PR #153, блокер 1): раньше это могло нарушаться (k<minX),
+// что и создавало бессмысленный p-value=0. Проверяем на нескольких разных
+// по форме датасетах (простой инженерный со значимой находкой, «смешанный»
+// same-record+независимый без значимой находки).
+const marginInvariant = await page.evaluate(() => {
+  const checkPairs = pairs => pairs.map(p => {
+    const m = Math.round(p.baseline * p.totalDays);
+    const minX = Math.max(0, p.supportA - (p.totalDays - m));
+    const maxX = Math.min(p.supportA, m);
+    return { ok: p.hits >= minX && p.hits <= maxX, p, minX, maxX, m };
+  });
+  const now = Date.now();
+  const all = [];
+  // (a) простой инженерный случай (тот же, что в §4 «Correlation Engine» —
+  // включая 20 «нейтральных» padding-записей, расширяющих totalDays и не
+  // трогающих сам conflict/insomnia паттерн, иначе при частом повторе A/B
+  // раз в 3 дня и lagDays=7 почти любое окно ловит B и baseline ≈1).
+  DB.moments = []; DB.symptoms = []; DB.whys = []; DB.cravings = []; DB.medIntakes = []; DB.dreams = []; DB.patterns = []; DB.insights = []; DB.evolution = []; DB.labObservations = []; DB.healthDocuments = []; DB.relationshipContexts = []; DB.sphereLogs = []; DB.measures = []; DB.spheres = []; DB.psyLinks = [];
+  for (let i = 0; i < 10; i++) {
+    const dConflict = new Date(now - (i * 3 + 40) * 864e5);
+    DB.moments.push({ id: 10000 + i, valence: 20, activation: 70, emo: 'конфликт', createdAt: dConflict.toISOString(), day: dConflict.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+    const dSym = new Date(dConflict.getTime() + 864e5);
+    DB.symptoms.push({ id: 20000 + i, name: 'бессонница', severity: 7, createdAt: dSym.toISOString(), day: dSym.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+  }
+  for (let i = 0; i < 20; i++) {
+    const d = new Date(now - (i * 5 + 1) * 864e5);
+    DB.moments.push({ id: 30000 + i, valence: 70, activation: 40, emo: 'спокойствие', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+  }
+  all.push(...checkPairs(findCorrelations(unifiedEvents(365), { minSamples: 3, lagDays: 7 }).pairs));
+  // (b) смешанный same-record+независимый случай (та же фикстура, что и 5b)
+  DB.moments = [];
+  for (let i = 0; i < 20; i++) {
+    const d = new Date(now - (i * 5 + 2) * 864e5);
+    DB.moments.push({ id: 500000 + i, valence: 20, activation: 50, emo: 'скептицизм', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+  }
+  [0, 5, 10].forEach((idx, k) => {
+    const d = new Date(now - (idx * 5 + 2) * 864e5);
+    DB.moments.push({ id: 600000 + k, valence: 15, activation: 50, emo: 'нейтральный', createdAt: new Date(d.getTime() + 3600e3).toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
+  });
+  all.push(...checkPairs(findCorrelations(unifiedEvents(null), { minSamples: 3, lagDays: 7 }).pairs));
+  return { total: all.length, violations: all.filter(x => !x.ok).length, sample: all.filter(x => !x.ok).slice(0, 3) };
+});
+ok(marginInvariant.total > 0, 'margin invariant test: датасеты действительно дают ≥1 пару для проверки (не тривиально пустой тест)');
+ok(marginInvariant.violations === 0, `margin invariant: hits (k) лежит в [minX,maxX] гипергеометрического распределения для ВСЕХ ${marginInvariant.total} итоговых пар (нарушений: ${marginInvariant.violations}${marginInvariant.violations ? ', ' + JSON.stringify(marginInvariant.sample) : ''})`);
+
+// ── 5d) Блокер 2: двусторонний точный тест Фишера — golden reference values
+//    (посчитаны вручную по формуле гипергеометрического распределения, НЕ
+//    тем же кодом, что и под тестом — см. комментарии с расчётом) ────────
+// Случай 1: N=4,m=2,n=2,k=2. pmf(0)=C(2,0)C(2,2)/C(4,2)=1/6; pmf(1)=C(2,1)C(2,1)/C(4,2)=4/6;
+// pmf(2)=C(2,2)C(2,0)/C(4,2)=1/6. Двусторонний p (все x с pmf(x)<=pmf(2)=1/6) = pmf(0)+pmf(2) = 2/6 = 1/3.
+// Случай 2: N=10,m=5,n=5,k=5 (симметричный экстремум). pmf(0)=pmf(5)=C(5,0)C(5,5)/C(10,5)=1/252;
+// остальные x строго больше. Двусторонний p = pmf(0)+pmf(5) = 2/252 ≈ 0.007937.
+const fisherGolden = await page.evaluate(() => {
+  const logFact4 = logFactorialTable(4), logChoose4 = makeLogChoose(logFact4);
+  const logFact10 = logFactorialTable(10), logChoose10 = makeLogChoose(logFact10);
+  return {
+    case1: fisherPValueTwoSided(logChoose4, 4, 2, 2, 2),
+    case2: fisherPValueTwoSided(logChoose10, 10, 5, 5, 5),
+  };
+});
+ok(Math.abs(fisherGolden.case1 - (1 / 3)) < 1e-9, `двусторонний Fisher exact: N=4,m=2,n=2,k=2 → p=${fisherGolden.case1} (эталон 1/3=${1 / 3}, вручную посчитано по гипергеометрической pmf)`);
+ok(Math.abs(fisherGolden.case2 - (2 / 252)) < 1e-9, `двусторонний Fisher exact: N=10,m=5,n=5,k=5 (симметричный экстремум) → p=${fisherGolden.case2} (эталон 2/252=${2 / 252})`);
+
+// ── 5e) Блокер 2: множество независимых seeds — эмпирическая проверка FDR,
+//    не один «удачный» seed ────────────────────────────────────────────
+const multiSeedFdr = await page.evaluate(() => {
+  function mulberry32(seed) { return function () { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  const now = Date.now();
+  const emos = ['радость', 'грусть', 'интерес', 'скука'];
+  const syms = ['насморк', 'зуд', 'жажда', 'зевота'];
+  const RANGE_DAYS = 300, N = 450, TRIALS = 25;
+  const perTrial = [];
+  for (let trial = 0; trial < TRIALS; trial++) {
+    const rndDayA = mulberry32(1000 + trial * 7), rndTagA = mulberry32(50000 + trial * 13);
+    const rndDayB = mulberry32(2000 + trial * 17), rndTagB = mulberry32(90000 + trial * 19);
+    DB.moments = Array.from({ length: N }, (_, i) => {
+      const off = Math.floor(rndDayA() * RANGE_DAYS);
+      const d = new Date(now - off * 864e5);
+      return { id: 40000 + i, valence: 50, activation: 50, emo: emos[Math.floor(rndTagA() * 4)], createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now };
+    });
+    DB.symptoms = Array.from({ length: N }, (_, i) => {
+      const off = Math.floor(rndDayB() * RANGE_DAYS);
+      const d = new Date(now - off * 864e5);
+      return { id: 50000 + i, name: syms[Math.floor(rndTagB() * 4)], severity: 3, createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now };
+    });
+    const { pairs } = findCorrelations(unifiedEvents(365), { minSamples: 3, lagDays: 3 });
+    perTrial.push(pairs.length);
+  }
+  return { perTrial, total: perTrial.reduce((a, b) => a + b, 0), trialsWithFindings: perTrial.filter(n => n > 0).length };
+});
+ok(multiSeedFdr.total <= 3, `множество независимых seeds (${multiSeedFdr.perTrial.length} прогонов, разные seed'ы дня/тега для A и B): суммарно ≤3 значимых находки на статистически независимых данных (найдено всего: ${multiSeedFdr.total}, прогонов с находками: ${multiSeedFdr.trialsWithFindings}) — не один удачный seed`);
 
 // ── 6) Честный отказ при недостатке данных ────────────────────────────
 const thinData = await page.evaluate(() => {
@@ -390,7 +515,8 @@ ok(causeGraphIntegration.inChains, 'интеграция: precedes=true пара
 // ── 11) Sphere Influence: sphereLogs корректно дают `sphere:` тег ─────
 const sphereInfluence = await page.evaluate(() => {
   const now = Date.now();
-  DB.moments = []; DB.symptoms = []; DB.sphereLogs = []; DB.spheres = [{ id: 1, name: 'Спорт', type: 'habit' }];
+  DB.moments = []; DB.whys = []; DB.insights = []; DB.patterns = []; DB.evolution = []; DB.dreams = []; DB.medIntakes = []; DB.symptoms = []; DB.measures = []; DB.cravings = []; DB.labObservations = []; DB.healthDocuments = []; DB.relationshipContexts = []; DB.psyLinks = [];
+  DB.sphereLogs = []; DB.spheres = [{ id: 1, name: 'Спорт', type: 'habit' }];
   for (let i = 0; i < 8; i++) {
     const d = new Date(now - (i * 6 + 5) * 864e5);
     DB.sphereLogs.push({ id: 80000 + i, sphereId: 1, date: d.toISOString().slice(0, 10), value: true });
@@ -420,7 +546,8 @@ ok(sphereInfluence.influenceFound, 'Sphere Influence: корреляция сф�
 // тегом, а не с самим собой.
 const relationshipGraph = await page.evaluate(() => {
   const now = Date.now();
-  DB.moments = []; DB.symptoms = []; DB.psyLinks = []; DB.relationshipContexts = [{ id: psyUid('relctx'), label: 'Мама', status: 'active', privacyClass: 'sensitive', createdAt: nowISO(), sv: SCHEMA_VERSION, _u: now }];
+  DB.moments = []; DB.whys = []; DB.insights = []; DB.patterns = []; DB.evolution = []; DB.dreams = []; DB.medIntakes = []; DB.symptoms = []; DB.measures = []; DB.cravings = []; DB.labObservations = []; DB.healthDocuments = []; DB.sphereLogs = []; DB.spheres = [];
+  DB.psyLinks = []; DB.relationshipContexts = [{ id: psyUid('relctx'), label: 'Мама', status: 'active', privacyClass: 'sensitive', createdAt: nowISO(), sv: SCHEMA_VERSION, _u: now }];
   const ctxId = DB.relationshipContexts[0].id;
   for (let i = 0; i < 6; i++) {
     const d = new Date(now - (i * 16 + 3) * 864e5);
@@ -445,7 +572,7 @@ ok(relationshipGraph.relFound, 'Relationship Graph: корреляция с ко
 // ── 13) Dismiss / restore ──────────────────────────────────────────────
 const dismissTest = await page.evaluate(() => {
   const now = Date.now();
-  DB.moments = []; DB.symptoms = [];
+  DB.moments = []; DB.whys = []; DB.insights = []; DB.patterns = []; DB.evolution = []; DB.dreams = []; DB.medIntakes = []; DB.symptoms = []; DB.measures = []; DB.cravings = []; DB.labObservations = []; DB.healthDocuments = []; DB.relationshipContexts = []; DB.sphereLogs = []; DB.spheres = []; DB.psyLinks = [];
   for (let i = 0; i < 6; i++) {
     const d = new Date(now - (i * 16 + 5) * 864e5);
     DB.moments.push({ id: 95000 + i, valence: 20, activation: 70, emo: 'стресс', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
@@ -473,7 +600,7 @@ ok(dismissTest.persistedInSettings, 'dismiss/restore корректно хран
 // ── 14) Deterministic output ────────────────────────────────────────────
 const determinism = await page.evaluate(() => {
   const now = Date.now();
-  DB.moments = []; DB.symptoms = [];
+  DB.moments = []; DB.whys = []; DB.insights = []; DB.patterns = []; DB.evolution = []; DB.dreams = []; DB.medIntakes = []; DB.symptoms = []; DB.measures = []; DB.cravings = []; DB.labObservations = []; DB.healthDocuments = []; DB.relationshipContexts = []; DB.sphereLogs = []; DB.spheres = []; DB.psyLinks = [];
   for (let i = 0; i < 8; i++) {
     const d = new Date(now - (i * 16 + 2) * 864e5);
     DB.moments.push({ id: 97000 + i, valence: 30, activation: 65, emo: 'усталость', createdAt: d.toISOString(), day: d.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });
@@ -517,7 +644,7 @@ ok(plainRoundtrip.restored, 'обычный export/import (JSON): correlationSet
 // ── 17) UI: период — реальные кнопки (owner-review lesson из Wave 2, дефект 3) ──
 const periodUi = await page.evaluate(() => {
   const now = Date.now();
-  DB.moments = []; DB.symptoms = [];
+  DB.moments = []; DB.whys = []; DB.insights = []; DB.patterns = []; DB.evolution = []; DB.dreams = []; DB.medIntakes = []; DB.symptoms = []; DB.measures = []; DB.cravings = []; DB.labObservations = []; DB.healthDocuments = []; DB.relationshipContexts = []; DB.sphereLogs = []; DB.spheres = []; DB.psyLinks = [];
   for (let i = 0; i < 6; i++) {
     const dRecent = new Date(now - (i * 1 + 2) * 864e5);
     DB.moments.push({ id: 99000 + i, valence: 20, activation: 70, emo: 'раздражение', createdAt: dRecent.toISOString(), day: dRecent.toISOString().slice(0, 10), sv: SCHEMA_VERSION, _u: now });

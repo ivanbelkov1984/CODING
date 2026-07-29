@@ -7488,18 +7488,51 @@ function unifiedEvents(days) {
 // быстро даже на 100 000+ событий.
 const SYN_MIN_SAMPLES_DEFAULT = 3, SYN_LAG_DAYS_DEFAULT = 7, SYN_MAX_TAGS = 200, SYN_EVIDENCE_CAP = 5, SYN_FDR_ALPHA = 0.05;
 
-// Owner review (PR #153, дефект 2): порог lift 1.3/0.77 сам по себе не
-// контролирует множественные сравнения (до SYN_MAX_TAGS² упорядоченных пар
-// проверяется за один вызов) и не является тестом значимости. Точный тест
-// Фишера (через гипергеометрическое распределение) даёт p-value: насколько
-// маловероятно случайно получить `hits` пересечений (или больше, при
-// lift≥1; или меньше, при lift<1) между supportA-подмножеством дней и
-// B-окно-подмножеством дней из totalDays дней, если бы A и B были
-// независимы. Benjamini-Hochberg (BH-FDR) затем контролирует долю ложных
-// находок среди ВСЕЙ протестированной семьи пар — p-value считается для
-// каждой качественной пары ДО финальной фильтрации по lift/minSamples,
-// иначе FDR-коррекция была бы предвзятой (тестировали бы только то, что
-// уже «прошло» практический порог).
+// Owner review (PR #153, второй проход, блокер 1): same-record exclusion
+// должен использовать ОДНУ И ТУ ЖЕ единицу наблюдения для observed hits И
+// для null-модели (baseline/margins) Фишера — иначе k может оказаться вне
+// математически допустимых границ гипергеометрического распределения
+// (contingency table становится невозможной, тест выдаёт бессмысленный
+// p-value=0). Вместо ДИНАМИЧЕСКОГО исключения «тот же record в тот же
+// день» (что меняло k, но не m/n — источник блокера) используем СТАТИЧЕСКОЕ
+// решение per tag-pair: если теги a/b МОГУТ быть совместно порождены одним
+// mapper'ом одной записи (см. TAG_FAMILY_SETS), день lag=0 полностью
+// исключается из ОКНА для этой пары — одинаково и для hits, и для baseline
+// (bWindowCount). Тогда k по построению — это буквально |daysA ∩
+// (окно-с-B)|, что ВСЕГДА лежит в [max(0,n-(N-m)), min(n,m)] математически
+// (пересечение двух подмножеств одной day-вселенной), а Фишер получает
+// корректную, самосогласованную таблицу.
+const TAG_FAMILY_SETS = [
+  new Set(['emo', 'valence', 'activation', 'person']),   // moments (+ person enrichment)
+  new Set(['symptom', 'need', 'person']),                 // whys (+ person enrichment)
+  new Set(['craving', 'trigger']),                         // cravings
+  new Set(['insight', 'person']),                          // insights (+ person enrichment)
+  new Set(['pattern', 'person']),                          // patterns (+ person enrichment)
+];
+function tagPrefix(tag) { const i = String(tag).indexOf(':'); return i < 0 ? tag : tag.slice(0, i); }
+// Консервативно (по umolчанию — «да, риск есть»): если ОДИН mapper МОЖЕТ
+// дать оба префикса на одной записи — считаем риск существующим для ЛЮБЫХ
+// двух тегов с этими префиксами, даже если в конкретном случае они пришли
+// из разных записей/коллекций (напр. `symptom:` также встречается в
+// самостоятельной коллекции `symptoms`, не только в `whys`) — это может
+// излишне убрать честный same-day сигнал в редком случае, но НИКОГДА не
+// создаёт ложную значимую связь, что и требуется.
+function samePossibleRecordFamily(a, b) {
+  const pa = tagPrefix(a), pb = tagPrefix(b);
+  return TAG_FAMILY_SETS.some(set => set.has(pa) && set.has(pb));
+}
+
+// Owner review (PR #153, дефект 2 / второй проход, блокер 2): порог lift
+// 1.3/0.77 сам по себе не контролирует множественные сравнения и не
+// является тестом значимости. Точный тест Фишера (гипергеометрический)
+// даёт p-value — но должен быть ДВУСТОРОННИМ: выбор направления ('ge' при
+// lift≥1, 'le' при lift<1) ПОСЛЕ того, как уже посмотрели на данные —
+// это post-hoc выбор более выгодного одностороннего теста, эффективно
+// удваивающий фактический alpha и делающий заявленный BH-FDR=0.05
+// необоснованным. Двусторонний p-value (стандартное определение: сумма
+// вероятностей ВСЕХ таблиц, не более вероятных, чем наблюдаемая) не требует
+// выбора направления заранее и валиден для проверки И обогащения (lift>1),
+// И обеднения (lift<1) одной и той же, заранее не предвзятой, процедурой.
 function logFactorialTable(n) {
   const t = new Float64Array(n + 1);
   for (let i = 1; i <= n; i++) t[i] = t[i - 1] + Math.log(i);
@@ -7512,16 +7545,22 @@ function hypergeomPmf(logChoose, N, m, n, x) {
   if (x < 0 || x > n || x > m || (n - x) > (N - m)) return 0;
   return Math.exp(logChoose(m, x) + logChoose(N - m, n - x) - logChoose(N, n));
 }
-// Односторонний точный тест Фишера через гипергеометрическое распределение:
-// N=totalDays (генеральная совокупность дней), m=bWindowCount (дней, где
-// B-окно истинно), n=supportA (дней с A), k=hits (пересечение). direction
-// 'ge' — тест на обогащение (lift≥1): P(X≥k); 'le' — тест на обеднение
-// (lift<1): P(X≤k).
-function fisherPValue(logChoose, N, m, n, k, direction) {
+// Двусторонний точный тест Фишера: N=totalDays, m=bWindowCount (той же
+// windowed-метрикой, что и hits — см. TAG_FAMILY_SETS выше), n=supportA,
+// k=hits. p-value = сумма pmf(x) по всем x в допустимом диапазоне
+// [max(0,n-(N-m)), min(n,m)], для которых pmf(x) не больше pmf(k) —
+// стандартное определение двустороннего Fisher exact test (как в
+// scipy.stats.fisher_exact/R fisher.test). eps — относительный допуск для
+// сравнения плавающей точки.
+function fisherPValueTwoSided(logChoose, N, m, n, k) {
   const minX = Math.max(0, n - (N - m)), maxX = Math.min(n, m);
+  const pObserved = hypergeomPmf(logChoose, N, m, n, k);
+  const eps = 1e-9;
   let p = 0;
-  if (direction === 'ge') { for (let x = k; x <= maxX; x++) p += hypergeomPmf(logChoose, N, m, n, x); }
-  else { for (let x = minX; x <= k; x++) p += hypergeomPmf(logChoose, N, m, n, x); }
+  for (let x = minX; x <= maxX; x++) {
+    const px = hypergeomPmf(logChoose, N, m, n, x);
+    if (px <= pObserved * (1 + eps)) p += px;
+  }
   return Math.min(1, p);
 }
 // Benjamini-Hochberg step-up: возвращает {qValues[], significant[]} той же
@@ -7546,12 +7585,10 @@ function findCorrelations(events, opts = {}) {
   const lagDays = opts.lagDays != null ? opts.lagDays : SYN_LAG_DAYS_DEFAULT;
   const result = { totalDays: 0, pairs: [] };
   if (!events.length) return result;
-  // Owner review (PR #153, дефект 1): один record может дать НЕСКОЛЬКО
-  // тегов (moments: emo+valence+activation; cravings: outcome+trigger) —
-  // без provenance это структурное совпадение полей ОДНОЙ записи выглядит
-  // как межсобытийная закономерность. dayTagRecords хранит, КАКИЕ записи
-  // дали каждый тег в каждый день, чтобы hits, поддержанные ИСКЛЮЧИТЕЛЬНО
-  // тем же самым record'ом (в тот же день, lag=0), не засчитывались.
+  // dayTagRecords хранит, КАКИЕ записи дали каждый тег в каждый день —
+  // используется ТОЛЬКО для evidence (§5, показать пользователю реальные
+  // supporting записи), НЕ для решения «считать ли hit» (это решает
+  // статический minLag ниже, см. TAG_FAMILY_SETS — фикс блокера 1).
   const dayToTags = new Map();          // day -> Set(tag) — существование, для support/baseline
   const dayTagRecords = new Map();      // day -> Map(tag -> Map(recKey -> {coll,id}))
   events.forEach(e => {
@@ -7576,39 +7613,37 @@ function findCorrelations(events, opts = {}) {
   // minSamples в подавляющем большинстве случаев.
   const qualifyingTags = [...tagDays.entries()].filter(([, set]) => set.size >= minSamples)
     .sort((a, b) => b[1].size - a[1].size).slice(0, SYN_MAX_TAGS).map(([t]) => t);
-  const windowHasTag = (startDayKey, tagDaysSet) => {
+  // windowHasTag(startDayKey, tagDaysSet, minLag): есть ли тег в окне
+  // [startDayKey+minLag, startDayKey+lagDays] — minLag=1 полностью убирает
+  // день 0 (same-day) из рассмотрения для пар с риском same-record (см.
+  // TAG_FAMILY_SETS). Используется И для hits, И для baseline — та же самая
+  // функция, тот же minLag на пару — гарантирует согласованность margins.
+  const windowHasTag = (startDayKey, tagDaysSet, minLag) => {
     const startMs = Date.parse(startDayKey + 'T00:00:00.000Z');
-    for (let i = 0; i <= lagDays; i++) {
+    for (let i = minLag; i <= lagDays; i++) {
       if (tagDaysSet.has(new Date(startMs + i * 864e5).toISOString().slice(0, 10))) return true;
     }
     return false;
   };
-  // recsForTagOnDay: записи, давшие `tag` в день `dayKey`, ИСКЛЮЧАЯ recKey из
-  // excludeRecKeys (используется только для lag=0 — исключаем тот же record,
-  // что уже дал тег A в этот день; для lag≥1 excludeRecKeys не нужен, т.к.
-  // это уже другой календарный день => другой record по построению).
-  const recsForTagOnDay = (dayKey, tag, excludeRecKeys) => {
+  const recsForTagOnDay = (dayKey, tag) => {
     const tagRecMap = dayTagRecords.get(dayKey);
     if (!tagRecMap || !tagRecMap.has(tag)) return [];
-    const out = [];
-    tagRecMap.get(tag).forEach((v, k) => { if (!excludeRecKeys || !excludeRecKeys.has(k)) out.push(v); });
-    return out;
+    return [...tagRecMap.get(tag).values()];
   };
-  // ВАЖНО: baseline(B) должен быть той же «оконной» метрикой, что и
-  // confidence (P(B встречается в течение lagDays+1 дней), а НЕ «наивная»
-  // P(B в один конкретный день) — иначе lift систематически завышен для
-  // ЛЮБОЙ пары при lagDays>0 просто из-за расширения окна (found via test:
-  // независимые случайные ряды давали lift>1.3 почти всегда до этого фикса).
-  // Считаем по всем календарным дням диапазона (не только дням с событиями).
+  // baseline(B) — та же «оконная» метрика, что и confidence (см. выше),
+  // теперь параметризована по minLag: два независимых кэша (0 и 1), т.к.
+  // для family-risk пар нужна оконная статистика БЕЗ дня 0, а для
+  // независимых семейств — обычная (с днём 0).
   const allDayKeys = []; for (let i = 0; i < totalDays; i++) allDayKeys.push(new Date(minMs + i * 864e5).toISOString().slice(0, 10));
-  const baselineCache = new Map();
-  const baselineOf = b => {
-    if (baselineCache.has(b)) return baselineCache.get(b);
+  const baselineCache = [new Map(), new Map()];   // [minLag=0], [minLag=1]
+  const baselineOf = (b, minLag) => {
+    const cache = baselineCache[minLag];
+    if (cache.has(b)) return cache.get(b);
     const bDays = tagDays.get(b);
     let windowsWithB = 0;
-    allDayKeys.forEach(dk => { if (windowHasTag(dk, bDays)) windowsWithB++; });
+    allDayKeys.forEach(dk => { if (windowHasTag(dk, bDays, minLag)) windowsWithB++; });
     const out = { rate: windowsWithB / allDayKeys.length, count: windowsWithB };
-    baselineCache.set(b, out);
+    cache.set(b, out);
     return out;
   };
   const logFact = logFactorialTable(totalDays);
@@ -7618,15 +7653,15 @@ function findCorrelations(events, opts = {}) {
     const daysA = [...tagDays.get(a)];
     for (const b of qualifyingTags) {
       if (a === b) continue;
+      const minLag = samePossibleRecordFamily(a, b) ? 1 : 0;
       let hits = 0, precedeHits = 0;
       const evidence = [];
       daysA.forEach(dA => {
         const aRecMap = dayTagRecords.get(dA).get(a);
-        const aRecKeys = new Set(aRecMap.keys());
         const startMs = Date.parse(dA + 'T00:00:00.000Z');
-        for (let i = 0; i <= lagDays; i++) {
+        for (let i = minLag; i <= lagDays; i++) {
           const dayKey = new Date(startMs + i * 864e5).toISOString().slice(0, 10);
-          const bRecs = recsForTagOnDay(dayKey, b, i === 0 ? aRecKeys : null);
+          const bRecs = recsForTagOnDay(dayKey, b);
           if (bRecs.length) {
             hits++;
             if (i >= 1) precedeHits++;
@@ -7637,12 +7672,18 @@ function findCorrelations(events, opts = {}) {
           }
         }
       });
-      const { rate: baseline, count: bWindowCount } = baselineOf(b);
+      // ВАЖНО (фикс блокера 1): bWindowCount считается той же windowHasTag()
+      // с ТЕМ ЖЕ minLag, что и hits выше — k=hits гарантированно лежит в
+      // [max(0,n-(N-m)), min(n,m)], т.к. оба — буквальные пересечения
+      // подмножеств одной day-вселенной (daysA ⊆ allDayKeys) по ОДНОМУ и
+      // тому же предикату «B в окне [minLag,lagDays]».
+      const { rate: baseline, count: bWindowCount } = baselineOf(b, minLag);
       if (baseline <= 0) continue;
       const confidenceStat = hits / daysA.length;
       const lift = confidenceStat / baseline;
-      const direction = lift >= 1 ? 'ge' : 'le';
-      const pValue = fisherPValue(logChoose, totalDays, bWindowCount, daysA.length, hits, direction);
+      // Фикс блокера 2: двусторонний тест — направление НЕ выбирается по
+      // наблюдённому lift (было бы post-hoc выбором более выгодной стороны).
+      const pValue = fisherPValueTwoSided(logChoose, totalDays, bWindowCount, daysA.length, hits);
       candidates.push({
         a, b, supportA: daysA.length, supportB: tagDays.get(b).size, hits, precedeHits,
         precedes: precedeHits >= minSamples, sameDayOnly: hits > 0 && precedeHits === 0,
