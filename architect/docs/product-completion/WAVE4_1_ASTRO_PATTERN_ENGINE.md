@@ -1,6 +1,6 @@
 # Wave 4.1 — Astrology × Pattern Engine Integration
 
-> issue [#157](https://github.com/ivanbelkov1984/CODING/issues/157). База — `MAIN`
+> issue [#156](https://github.com/ivanbelkov1984/CODING/issues/156). База — `MAIN`
 > `72315e81a049316afe3be68aaec84590f2f39277` (merge-commit Волны 3, PR #155).
 >
 > Это **не новая астрологическая волна**. Расчёты завершены Волной 3 и там же
