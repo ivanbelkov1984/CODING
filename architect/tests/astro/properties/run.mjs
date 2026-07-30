@@ -163,24 +163,67 @@ await forAllBirths('каждая планета отнесена ровно к �
   return c.houses.length === c.planets.length ? null : `домов ${c.houses.length} против планет ${c.planets.length}`;
 }, { timeKnown: true });
 
-// ── 10. Tropical и sidereal не смешиваются ───────────────────────────
-// Разница долгот тропической и сидерической карты обязана быть РОВНО
-// аянамшей — одинаковой для всех тел. Если где-то смешались школы,
-// разброс между телами это покажет.
-await forAllBirths('сидерические долготы = тропические − аянамша (единая для всех тел)', async birth => {
-  const r = await h.evalIn(x => {
-    const c = computeNatalChart(x);
-    const A = window.Astronomy;
-    const utc = new Date(Date.parse(x.date + 'T' + (x.timeKnown ? x.time : '12:00') + ':00Z') - (x.utcOffset || 0) * 3600e3);
-    const ay = ayanamsha('lahiri', A.MakeTime(utc));
-    return c.planets.map(p => ({ body: p.body, delta: ((p.lon - (((p.lon - ay) % 360 + 360) % 360)) % 360 + 360) % 360, ay }));
-  }, birth);
-  const ay = r[0].ay;
-  for (const x of r) if (Math.abs(((x.delta - ay + 180) % 360 + 360) % 360 - 180) > 1e-9) {
-    return `${x.body}: сдвиг ${x.delta} ≠ аянамша ${ay}`;
+// ── 10. Tropical → sidereal: РЕАЛЬНЫЙ production-путь (ревью п.2) ────
+// Прежняя версия вычисляла `p.lon − (p.lon − ay)` и сверяла с `ay` — это
+// тождество самого теста, а не проверка production: сидерический вывод
+// приложения вообще не вызывался. Теперь прогоняется настоящий рендер
+// ведической карты rJyotish(), который и выполняет конверсию, а ожидаемые
+// раши/накшатра считаются независимо из тропической долготы и аянамши.
+{
+  const NAK = ['Ашвини', 'Бхарани', 'Криттика', 'Рохини', 'Мригашира', 'Ардра', 'Пунарвасу', 'Пушья', 'Ашлеша', 'Магха', 'Пурва-Пхалгуни', 'Уттара-Пхалгуни', 'Хаста', 'Читра', 'Свати', 'Вишакха', 'Анурадха', 'Джьештха', 'Мула', 'Пурва-Ашадха', 'Уттара-Ашадха', 'Шравана', 'Дхаништха', 'Шатабхиша', 'Пурва-Бхадрапада', 'Уттара-Бхадрапада', 'Ревати'];
+  const RASHI = ['Меша (Овен)', 'Вришабха (Телец)', 'Митхуна (Близнецы)', 'Карка (Рак)', 'Симха (Лев)', 'Канья (Дева)', 'Тула (Весы)', 'Вришчика (Скорпион)', 'Дхану (Стрелец)', 'Макара (Козерог)', 'Кумбха (Водолей)', 'Мина (Рыбы)'];
+  // Две даты: обычная и подобранная так, что сидерическая Луна оказывается
+  // рядом с границей 0°/360° — проверка нормализации на стыке круга.
+  const BIRTHS = [
+    { date: '1984-06-15', time: '14:30', timeKnown: true, utcOffset: 4, lat: 55.75, lon: 37.62, houseSystem: 'whole' },
+    { date: '1993-04-23', time: '05:05', timeKnown: true, utcOffset: 3, lat: 41.0, lon: 29.0, houseSystem: 'whole' },
+  ];
+  for (const birth of BIRTHS) {
+    for (const key of ['lahiri', 'raman', 'kp', 'fagan', 'yukteshwar']) {
+      const r = await h.evalIn(async ({ b, k }) => {
+        DB.astroBirth = { ...b };
+        const chart = computeNatalChart(DB.astroBirth);
+        DB.astroCharts = [{ chart, at: new Date().toISOString() }];
+        const sel = document.getElementById('astro-aya');
+        if (sel) sel.value = k;
+        await rJyotish();                                  // ← реальный production-путь
+        const A = window.Astronomy;
+        const t = A.MakeTime(birthUTCDate(DB.astroBirth));
+        return {
+          rendered: (document.getElementById('astro-jyo') || {}).innerText || '',
+          tropMoon: chart.planets.find(p => p.body === 'Moon').lon,
+          aya: ayanamsha(k, t),
+        };
+      }, { b: birth, k: key });
+
+      // Независимый пересчёт ожидаемых раши и накшатры.
+      const sidMoon = norm360(r.tropMoon - r.aya);
+      const expRashi = RASHI[Math.floor(sidMoon / 30)];
+      const expNak = NAK[Math.floor(sidMoon / (360 / 27))];
+      const okRashi = r.rendered.includes(expRashi);
+      const okNak = r.rendered.includes(expNak);
+      R.ok(okRashi && okNak,
+        `production-путь rJyotish(${key}, ${birth.date}): сидерическая Луна ${sidMoon.toFixed(3)}° → раши «${expRashi}», накшатра «${expNak}» присутствуют в выводе`,
+        (okRashi && okNak) ? null
+          : `раши найдено: ${okRashi}, накшатра найдено: ${okNak}\nтроп. Луна=${r.tropMoon.toFixed(4)} аянамша=${r.aya.toFixed(4)} сид.=${sidMoon.toFixed(4)}\nвывод: ${r.rendered.slice(0, 260)}`);
+    }
   }
-  return null;
-});
+  // Граница круга: сидерическая долгота обязана нормализоваться в [0,360).
+  const wrap = await h.evalIn(() => {
+    const A = window.Astronomy;
+    const out = [];
+    for (const k of ['lahiri', 'raman', 'kp', 'fagan', 'yukteshwar']) {
+      for (const trop of [0, 0.5, 23.8, 24.9, 359.9]) {
+        const t = A.MakeTime(new Date(Date.UTC(2000, 0, 1, 12)));
+        const sid = ((trop - ayanamsha(k, t)) % 360 + 360) % 360;
+        if (!(sid >= 0 && sid < 360)) out.push({ k, trop, sid });
+      }
+    }
+    return out;
+  });
+  R.ok(wrap.length === 0, 'сидерическая конверсия нормализована в [0,360) на границе круга для всех 5 аянамш',
+    wrap.length === 0 ? null : JSON.stringify(wrap));
+}
 
 // ── 11. Круговая арифметика корректна на границе 0°/360° ─────────────
 {
@@ -300,6 +343,110 @@ await forAllBirths('birth → JSON → birth даёт идентичную ка�
     return before === after;
   });
   R.ok(pure, 'проекция read-only: DB не изменилась после вызова (ничего не персистируется и не дублируется)');
+
+  // ── 14f–14i. Отдельные прохождения, а не схлопывание (ревью п.5) ────
+  const BIRTH = { date: '1984-06-15', time: '14:30', timeKnown: true, utcOffset: 4, lat: 55.75, lon: 37.62, houseSystem: 'whole' };
+  const project = (days, at) => h.evalIn(({ b, d, a }) => {
+    const saved = DB.astroBirth;
+    DB.astroBirth = { ...b };
+    const evs = astroEventProjection({ days: d, at: a });
+    DB.astroBirth = saved;
+    return evs.map(e => ({ id: e.id, date: e.date, tags: e.tags, from: e.provenance.episodeFrom, to: e.provenance.episodeTo }));
+  }, { b: BIRTH, d: days, a: at });
+
+  // 14f. Медленная пара в большом окне обязана дать НЕСКОЛЬКО отдельных
+  // прохождений (direct → retrograde → direct), а не одно схлопнутое.
+  const wide = await project(400, '2026-01-01T00:00:00Z');
+  const byPair = new Map();
+  for (const e of wide) {
+    const pair = e.tags.join('|');
+    byPair.set(pair, (byPair.get(pair) || 0) + 1);
+  }
+  const multi = [...byPair.entries()].filter(([, n]) => n > 1);
+  R.ok(multi.length > 0,
+    `проекция: в окне 400 дней есть пары с НЕСКОЛЬКИМИ отдельными прохождениями (${multi.length} пар; максимум ${Math.max(0, ...byPair.values())} прохождений) — ретроградные повторы не схлопнуты`,
+    multi.length > 0 ? null : 'ни одна пара не дала более одного события — прохождения по-прежнему схлопываются');
+
+  // Эпизоды одной пары не пересекаются по датам и разделены разрывом.
+  let overlap = null;
+  for (const [pair] of multi) {
+    const eps = wide.filter(e => e.tags.join('|') === pair).sort((a, b) => a.from < b.from ? -1 : 1);
+    for (let i = 1; i < eps.length; i++) if (eps[i].from <= eps[i - 1].to) { overlap = `${pair}: ${eps[i - 1].from}..${eps[i - 1].to} и ${eps[i].from}..${eps[i].to}`; break; }
+    if (overlap) break;
+  }
+  R.ok(!overlap, 'проекция: отдельные прохождения одной пары не пересекаются по датам (каждое — самостоятельный вход в орбис)', overlap);
+
+  // 14g. Одно и то же прохождение имеет ОДИН И ТОТ ЖЕ id в перекрывающихся окнах.
+  const w1 = await project(120, '2026-01-01T00:00:00Z');
+  const w2 = await project(120, '2026-02-15T00:00:00Z');
+  const ids1 = new Set(w1.map(e => e.id)), ids2 = new Set(w2.map(e => e.id));
+  const shared = [...ids1].filter(x => ids2.has(x));
+  R.ok(shared.length > 0, `проекция: перекрывающиеся окна разделяют ${shared.length} одинаковых id — прохождение опознаётся стабильно`);
+  // Совпадающие id обязаны нести совпадающую дату пика.
+  const dateMismatch = shared.map(id => {
+    const a = w1.find(e => e.id === id), b = w2.find(e => e.id === id);
+    return a.date === b.date ? null : `${id}: ${a.date} vs ${b.date}`;
+  }).filter(Boolean);
+  R.ok(dateMismatch.length === 0, 'проекция: у одинаковых id совпадает дата пика в обоих окнах', dateMismatch.slice(0, 3).join('\n'));
+
+  // 14h. Расширение окна не уничтожает уже найденное прохождение.
+  const narrow = await project(60, '2026-01-01T00:00:00Z');
+  const widened = await project(200, '2026-01-01T00:00:00Z');
+  const widenedIds = new Set(widened.map(e => e.id));
+  // Берём только эпизоды, целиком лежащие внутри узкого окна: у обрезанных
+  // границей пик законно может сместиться при расширении.
+  const narrowFrom = new Date(Date.UTC(2026, 0, 1) - 59 * 864e5).toISOString().slice(0, 10);
+  const inner = narrow.filter(e => e.from > narrowFrom);
+  const lost = inner.filter(e => !widenedIds.has(e.id));
+  R.ok(lost.length === 0,
+    `проекция: расширение окна 60 → 200 дней сохранило все ${inner.length} прохождений, целиком попавших в узкое окно`,
+    lost.length === 0 ? null : `потеряны: ${JSON.stringify(lost.slice(0, 3))}`);
+
+  // 14i. id уникальны в пределах одного вызова даже при нескольких эпизодах.
+  R.ok(new Set(wide.map(e => e.id)).size === wide.length,
+    `проекция: все ${wide.length} id уникальны в окне 400 дней (эпизоды различаются датой пика)`);
+}
+
+// ── 15. Пояснение к UTC-офсету и валидация диапазона (ревью п.7) ─────
+{
+  const hint = await h.evalIn(() => {
+    const el = document.getElementById('ab-utc-hint');
+    const fld = document.getElementById('ab-utc');
+    return { text: el ? el.innerText.trim() : null, hasField: !!fld, order: !!(el && fld && (fld.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) };
+  });
+  R.ok(!!hint.text, 'рядом с полем UTC-офсета присутствует пояснение (#ab-utc-hint)');
+  R.ok(hint.order, 'пояснение расположено непосредственно рядом с полем ввода офсета');
+  for (const [needle, what] of [
+    ['действовавшее', 'требование указать ДЕЙСТВОВАВШЕЕ смещение'],
+    ['дату', 'привязка к дате рождения'],
+    ['историческое', 'упоминание исторического смещения'],
+    ['декретное', 'упоминание декретного времени'],
+    ['−12', 'нижняя граница диапазона'],
+    ['+14', 'верхняя граница диапазона'],
+  ]) {
+    R.ok((hint.text || '').includes(needle), `пояснение к офсету содержит ${what}`);
+  }
+
+  // Валидация: значение вне [−12, +14] не сохраняется молча.
+  const validation = await h.evalIn(() => {
+    const setv = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
+    const saved = DB.astroBirth;
+    DB.astroBirth = null;
+    setv('ab-date', '1984-06-15'); setv('ab-lat', '55.75'); setv('ab-lon', '37.62'); setv('ab-place', 'test');
+    const tk = document.getElementById('ab-time-known'); if (tk) tk.classList.remove('on');
+    const out = {};
+    setv('ab-utc', '99'); try { saveAstroBirth(); } catch (e) {}
+    out.rejectedHigh = DB.astroBirth == null;
+    setv('ab-utc', '-30'); try { saveAstroBirth(); } catch (e) {}
+    out.rejectedLow = DB.astroBirth == null;
+    setv('ab-utc', '5.5'); try { saveAstroBirth(); } catch (e) {}
+    out.acceptedValid = !!(DB.astroBirth && DB.astroBirth.utcOffset === 5.5);
+    DB.astroBirth = saved;
+    return out;
+  });
+  R.ok(validation.rejectedHigh, 'офсет +99 отклонён, а не принят молча');
+  R.ok(validation.rejectedLow, 'офсет −30 отклонён, а не принят молча');
+  R.ok(validation.acceptedValid, 'корректный дробный офсет 5.5 принимается и сохраняется');
 }
 
 await h.close();

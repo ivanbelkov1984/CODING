@@ -134,31 +134,34 @@ await relation(
     return bad ? `система «${bad}» изменила планеты/углы/аспекты` : null;
   });
 
-// ── M4. Смена системы домов меняет ТОЛЬКО домовые результаты ─────────
-// ОБОСНОВАНИЕ: обратная сторона M3 — если система сменилась и куспиды
-// корректно посчитались, разбиение обязано реально отличаться (иначе
-// селектор — фикция и пользователь получает молчаливую подмену школы).
-// Проверяем на средних широтах, где все системы имеют решение.
-await relation(
-  'на средних широтах разные системы домов действительно дают разные куспиды',
-  'квадрантные системы отличаются способом трисекции; при валидном решении совпадение всех куспидов означало бы фиктивный селектор',
-  async birth => {
-    const b = { ...birth, lat: 45 + (birth.lat % 10), timeKnown: true };
-    const r = await h.evalIn(x => {
-      const out = {};
-      for (const s of ['whole', 'equal', 'placidus', 'koch', 'campanus', 'regiomontanus']) {
-        const c = computeNatalChart({ ...x, houseSystem: s });
-        out[s] = c.housesMeta ? { sys: c.housesMeta.system, c11: c.housesMeta.cusps[11], c12: c.housesMeta.cusps[12] } : null;
-      }
-      return out;
-    }, b);
-    if (!r.placidus || r.placidus.sys !== 'placidus') return null;   // откат — не наш случай
-    // Плацидус и Кампанус на средней широте обязаны различаться по куспиду XI.
-    if (r.campanus && r.campanus.sys === 'campanus' && angularDiff(r.placidus.c11, r.campanus.c11) < 1e-9) {
-      return `Плацидус и Кампанус дали идентичный куспид XI (${r.placidus.c11}) — селектор системы не влияет на расчёт`;
+// ── M4 переведён в ФИКСИРОВАННЫЙ non-degeneracy smoke case ───────────
+// Owner review #4815354882, п.4: «разные системы обязаны дать разный куспид
+// XI» — НЕ универсальный математический закон. Разные функции законно могут
+// совпасть на отдельных входах (например, на экваторе или при вырожденном
+// звёздном времени), поэтому как metamorphic relation для ПРОИЗВОЛЬНЫХ входов
+// это утверждение неверно. Оставлено как фиксированный smoke-кейс на заведомо
+// невырожденных данных: он ловит ровно то, ради чего вводился, — фиктивный
+// селектор системы домов, который молча возвращает одно и то же.
+{
+  const FIXED = { date: '1984-06-15', time: '14:30', timeKnown: true, utcOffset: 4, lat: 50, lon: 30, houseSystem: 'whole' };
+  const r = await h.evalIn(x => {
+    const out = {};
+    for (const s of ['whole', 'equal', 'placidus', 'koch', 'campanus', 'regiomontanus']) {
+      const c = computeNatalChart({ ...x, houseSystem: s });
+      out[s] = c.housesMeta ? { sys: c.housesMeta.system, c11: c.housesMeta.cusps[11], c12: c.housesMeta.cusps[12] } : null;
     }
-    return null;
-  });
+    return out;
+  }, FIXED);
+  const systems = ['whole', 'equal', 'placidus', 'koch', 'campanus', 'regiomontanus'];
+  const allResolved = systems.every(s => r[s] && r[s].sys === s);
+  R.ok(allResolved, `smoke (фиксированный кейс lat=50, 1984-06-15 14:30): все 6 систем домов посчитались без полярного отката`,
+    allResolved ? null : JSON.stringify(r));
+  const c11 = systems.map(s => r[s] && r[s].c11);
+  const distinct = new Set(c11.map(x => x != null && x.toFixed(6))).size;
+  R.ok(distinct >= 5,
+    `smoke non-degeneracy: куспид XI различается минимум у 5 из 6 систем (различных значений: ${distinct}) — селектор системы реально влияет на расчёт`,
+    distinct >= 5 ? null : `куспиды XI: ${JSON.stringify(systems.map((s, i) => `${s}=${c11[i]}`))}`);
+}
 
 // ── M5. Слой интерпретации не влияет на слой расчёта ─────────────────
 // ОБОСНОВАНИЕ: тексты (ASTRO_RULES/astro_texts_*) — символическая надстройка.
@@ -203,29 +206,18 @@ await relation(
     return eq ? null : 'карта изменилась после roundtrip через сериализацию DB';
   });
 
-// ── M7. Порядок тел не влияет на набор аспектов ──────────────────────
-// ОБОСНОВАНИЕ: аспект — симметричное отношение между двумя долготами;
-// порядок обхода — деталь реализации, а не входные данные.
-await relation(
-  'перестановка порядка тел не меняет множество найденных аспектов',
-  'аспект симметричен по определению; порядок обхода — деталь реализации',
-  async birth => {
-    const bad = await h.evalIn(b => {
-      const c = computeNatalChart(b);
-      const setOf = planets => {
-        const s = [];
-        for (let i = 0; i < planets.length; i++) for (let j = i + 1; j < planets.length; j++) {
-          const sep = Math.abs(((planets[i].lon - planets[j].lon + 180) % 360 + 360) % 360 - 180);
-          for (const a of ASTRO_ASPECTS) if (Math.abs(sep - a.angle) <= a.orb) { s.push([planets[i].name, planets[j].name].sort().join('|') + '=' + a.name); break; }
-        }
-        return s.sort().join(',');
-      };
-      const straight = setOf(c.planets);
-      const shuffled = setOf([...c.planets].reverse());
-      return straight === shuffled ? null : { straight, shuffled };
-    }, birth);
-    return bad ? `набор аспектов отличается при обратном порядке тел` : null;
-  });
+// ── M7 УДАЛЁН как ложное покрытие ────────────────────────────────────
+// Owner review #4815354882, п.4: прежний M7 брал одну production-карту, а
+// затем ЛОКАЛЬНАЯ тестовая функция сама пересчитывала аспекты на прямом и
+// развёрнутом массивах. Это проверяло собственный цикл теста, а не aspect
+// engine приложения. Production не предоставляет входа, принимающего
+// переставленный список тел (ASTRO_BODIES — константа модуля), поэтому
+// честного metamorphic-варианта здесь нет.
+//
+// Реальное покрытие аспектов обеспечивает слой golden:
+// checks.mjs → checkAspectsFromProduction() сверяет ФАКТИЧЕСКИЙ chart.aspects
+// с независимым пересчётом (тела, тип аспекта, орбис), а mutation-sanity
+// доказывает, что эта сверка ловит подмену орбиса в production.
 
 // ── M8. Неизвестное время: карта не зависит от «поля времени» ────────
 // ОБОСНОВАНИЕ: при timeKnown=false поле time не должно участвовать вообще

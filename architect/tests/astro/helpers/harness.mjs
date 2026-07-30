@@ -11,12 +11,15 @@ import { dirname, join } from 'path';
 const DIR = dirname(fileURLToPath(import.meta.url));
 const FILE = 'file://' + join(DIR, '..', '..', '..', 'dist', 'app.html');
 
-export async function bootAstro() {
+// customFile — абсолютный путь к альтернативной сборке. Используется
+// mutation-прогоном (golden/mutation.mjs), который поднимает НАМЕРЕННО
+// сломанную копию production, чтобы доказать: golden-проверки её ловят.
+export async function bootAstro(customFile) {
   const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
   const pageErrors = [];
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   page.on('pageerror', e => pageErrors.push(e.message));
-  await page.goto(FILE);
+  await page.goto(customFile ? 'file://' + customFile : FILE);
   await page.waitForSelector('#nsh-tabbar', { state: 'attached' });
   await page.evaluate(() => {
     const splash = document.getElementById('splash');

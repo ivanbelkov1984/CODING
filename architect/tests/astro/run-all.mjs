@@ -13,7 +13,9 @@ import { dirname, join } from 'path';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 const LAYERS = [
+  ['Провенанс движка (SHA-256)', 'engine-provenance.test.mjs'],
   ['Слой 1 — golden reference', 'golden/run.mjs'],
+  ['Слой 1b — mutation sanity', 'golden/mutation.mjs'],
   ['Слой 2 — property-based', 'properties/run.mjs'],
   ['Слой 3 — metamorphic', 'metamorphic/run.mjs'],
 ];
@@ -32,7 +34,7 @@ for (const [name, file] of LAYERS) {
 
 console.log('\n════════════════════════════════════════════');
 console.log(failed === 0
-  ? '  Astro Formula Verification: все 3 слоя зелёные'
-  : `  Astro Formula Verification: провалено слоёв — ${failed}/3`);
+  ? '  Astro Formula Verification: все этапы зелёные (провенанс + 3 слоя + mutation)'
+  : `  Astro Formula Verification: провалено этапов — ${failed}/${LAYERS.length}`);
 console.log('════════════════════════════════════════════');
 process.exit(failed ? 1 : 0);

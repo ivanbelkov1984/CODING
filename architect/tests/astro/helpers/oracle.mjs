@@ -97,3 +97,91 @@ export function ayanamshaLinear(valueAtJ2000, daysFromJ2000) {
 export const MEAN_SYNODIC_MONTH = 29.530588861;
 // Средний тропический год (Meeus, гл. 27): 365.242190 сут.
 export const MEAN_TROPICAL_YEAR = 365.242190;
+
+// ── Видимая долгота Солнца (Meeus, гл. 25, «low accuracy» ~0.01°) ────
+// L0 = 280.46646 + 36000.76983T + 0.0003032T²
+// M  = 357.52911 + 35999.05029T − 0.0001537T²
+// C  = (1.914602 − 0.004817T − 0.000014T²)sinM + (0.019993 − 0.000101T)sin2M + 0.000289 sin3M
+// λ_apparent = L0 + C − 0.00569 − 0.00478 sin Ω,  Ω = 125.04 − 1934.136T
+export function solarApparentLongitude(T) {
+  const L0 = 280.46646 + 36000.76983 * T + 0.0003032 * T * T;
+  const M = (357.52911 + 35999.05029 * T - 0.0001537 * T * T) * DEG;
+  const C = (1.914602 - 0.004817 * T - 0.000014 * T * T) * Math.sin(M)
+          + (0.019993 - 0.000101 * T) * Math.sin(2 * M)
+          + 0.000289 * Math.sin(3 * M);
+  const omega = (125.04 - 1934.136 * T) * DEG;
+  return norm360(L0 + C - 0.00569 - 0.00478 * Math.sin(omega));
+}
+
+// ── Полудиурнальная дуга точки эклиптики (сферическая астрономия) ────
+// SDA = 90° + AD, sin(AD) = tan φ · tan δ. |AD| ограничен (циркумполярность).
+export function semiDiurnalArc(decDeg, latDeg) {
+  const x = Math.tan(latDeg * DEG) * Math.tan(decDeg * DEG);
+  if (Math.abs(x) > 1) return null;          // точка не восходит/не заходит
+  return 90 + Math.asin(x) * RAD;
+}
+
+// ── Асцендент независимым поиском корня ──────────────────────────────
+// Определение: точка эклиптики с нулевой высотой, находящаяся в ВОСХОДЯЩЕЙ
+// полусфере (часовой угол < 0). Никакой замкнутой формулы production здесь
+// не воспроизводится — только определение + бисекция.
+export function ascendantByRootFinding(lstDeg, epsDeg, latDeg) {
+  const altOf = lam => {
+    const { ra, dec } = eclipticToEquatorial(lam, epsDeg);
+    return { alt: altitude(ra, dec, lstDeg, latDeg), H: hourAngle(ra, lstDeg) };
+  };
+  // Эклиптика пересекает горизонт ровно дважды: Asc (восточная полусфера,
+  // часовой угол < 0) и Desc (западная, > 0). Направление изменения высоты
+  // ПО λ признаком не является — критерий именно знак часового угла.
+  let prev = altOf(0);
+  for (let i = 1; i <= 3600; i++) {
+    const lam = i * 0.1;
+    const cur = altOf(lam);
+    const crosses = (prev.alt < 0 && cur.alt >= 0) || (prev.alt >= 0 && cur.alt < 0);
+    if (crosses && cur.H < 0) {
+      let lo = lam - 0.1, hi = lam;
+      const sign0 = Math.sign(altOf(lo).alt) || 1;
+      for (let k = 0; k < 60; k++) {
+        const mid = (lo + hi) / 2;
+        (Math.sign(altOf(mid).alt) === sign0) ? lo = mid : hi = mid;
+      }
+      return norm360((lo + hi) / 2);
+    }
+    prev = cur;
+  }
+  return null;
+}
+
+// ── Параметр «позиционного круга» для квадрантных систем ─────────────
+// И Campanus, и Regiomontanus строят куспиды на больших кругах, проходящих
+// через точки СЕВЕРА и ЮГА горизонта. Такие круги образуют пучок вокруг оси
+// N–S, поэтому каждый однозначно задаётся одним параметром. Нормаль любого
+// такого круга лежит в плоскости первого вертикала (E–зенит).
+// Для точки P (в горизонтальной системе) параметр ψ = atan2(−P_E, P_Z):
+//   ψ = 0°  — плоскость меридиана (содержит MC);
+//   ψ = 90° — плоскость горизонта (содержит Asc).
+// Campanus делит на равные 30° именно ψ (первый вертикал).
+export function positionCircleAngle(lambdaDeg, epsDeg, lstDeg, latDeg) {
+  const { ra, dec } = eclipticToEquatorial(lambdaDeg, epsDeg);
+  const H = (lstDeg - ra) * DEG, d = dec * DEG, phi = latDeg * DEG;
+  // Горизонтальные орты: Z (зенит), E (восток), N (север по горизонту).
+  const pZ = Math.sin(phi) * Math.sin(d) + Math.cos(phi) * Math.cos(d) * Math.cos(H);
+  const pE = -Math.cos(d) * Math.sin(H);
+  return norm360(Math.atan2(-pE, pZ) * RAD);
+}
+
+// Часовой угол пересечения позиционного круга точки с ЭКВАТОРОМ —
+// параметр деления для Regiomontanus (он делит на равные 30° именно экватор).
+//
+// Вывод: плоскость позиционного круга содержит ось N–S горизонта, поэтому её
+// нормаль не имеет N-компоненты: n = a·E + b·Z. Из n·P = 0 следует
+// (a, b) ∝ (p_Z, −p_E). Точка экватора (δ = 0) с часовым углом H₀ имеет
+// p_Z = cos φ · cos H₀ и p_E = −sin H₀. Подставляя в n·P = 0:
+//   −p_Z·sin H₀ − p_E·cos φ·cos H₀ = 0  ⇒  tan H₀ = −p_E · cos φ / p_Z.
+export function positionCircleEquatorHA(lambdaDeg, epsDeg, lstDeg, latDeg) {
+  const { ra, dec } = eclipticToEquatorial(lambdaDeg, epsDeg);
+  const H = (lstDeg - ra) * DEG, d = dec * DEG, phi = latDeg * DEG;
+  const pZ = Math.sin(phi) * Math.sin(d) + Math.cos(phi) * Math.cos(d) * Math.cos(H);
+  const pE = -Math.cos(d) * Math.sin(H);
+  return Math.atan2(-pE * Math.cos(phi), pZ) * RAD;
+}

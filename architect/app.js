@@ -5321,34 +5321,71 @@ function astroEventProjection(opts = {}) {
   const chart = computeNatalChart(birth);
   const timeKnown = !!chart.timeKnown;
 
-  // Транзитные аспекты: суточная выборка в полдень UTC, дедупликация по
-  // (транзитное тело, аспект, натальное тело) с датой ПЕРВОГО попадания в
-  // окно — устойчиво к повторным прохождениям из-за ретроградности.
-  const seen = new Map();
-  for (let d = days - 1; d >= 0; d--) {
-    const at = new Date(Date.UTC(
-      end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate() - d, 12, 0, 0));
-    const tr = computeTransits(chart, at);
-    for (const hit of tr.hits) {
-      const key = `${hit.transit}|${hit.aspect}|${hit.natal}`;
-      if (!seen.has(key)) seen.set(key, { hit, at, orb: parseFloat(hit.exact) });
-      else if (parseFloat(hit.exact) < seen.get(key).orb) {
-        // Более точное схождение внутри окна — уточняем дату пика, но не
-        // создаём второе событие.
-        seen.set(key, { hit, at, orb: parseFloat(hit.exact) });
-      }
+  // Owner review #4815354882, п.5: прежняя версия держала ОДИН ключ
+  // `transit|aspect|natal` на всё окно (до 400 дней) и схлопывала в одно
+  // событие все попадания пары — включая несколько РАЗНЫХ прохождений
+  // (direct → retrograde → direct). Это была не дедупликация, а потеря
+  // событий; вдобавок дата и id одного физического прохождения менялись при
+  // сдвиге окна, если внутри нового окна находилась более точная выборка.
+  //
+  // Теперь схлопываются ТОЛЬКО соседние суточные выборки одного непрерывного
+  // эпизода нахождения в орбисе. Каждый вход/выход из орбиса — отдельное
+  // событие. Чтобы id и дата не зависели от границ окна, эпизоды ищутся с
+  // запасом по обе стороны, а идентификатор строится по МОМЕНТУ ПИКА
+  // (минимального орбиса) эпизода — величине, внутренней для прохождения.
+  const MARGIN_DAYS = 45;
+  const dayMs = 864e5;
+  const endDay = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate(), 12, 0, 0);
+  const windowFrom = endDay - (days - 1) * dayMs;
+  const scanFrom = windowFrom - MARGIN_DAYS * dayMs;
+  const scanTo = endDay + MARGIN_DAYS * dayMs;
+
+  // Суточная выборка орбисов по всем парам на расширенном интервале.
+  const samples = [];
+  for (let ms = scanFrom; ms <= scanTo; ms += dayMs) {
+    const byKey = new Map();
+    for (const hit of computeTransits(chart, new Date(ms)).hits) {
+      byKey.set(`${hit.transit}|${hit.aspect}|${hit.natal}`, { hit, orb: parseFloat(hit.exact) });
     }
+    samples.push({ ms, byKey });
   }
 
-  for (const [key, { hit, at, orb }] of seen) {
-    const day = at.toISOString().slice(0, 10);
+  // Сборка непрерывных эпизодов: пара «в орбисе» на соседних сутках — один
+  // эпизод; разрыв хотя бы на сутки — новое, отдельное прохождение.
+  const open = new Map();      // key → эпизод в процессе накопления
+  const episodes = [];
+  for (const s of samples) {
+    for (const [key, cur] of s.byKey) {
+      const ep = open.get(key);
+      if (ep && s.ms - ep.lastMs <= dayMs) {
+        ep.lastMs = s.ms;
+        if (cur.orb < ep.peakOrb) { ep.peakOrb = cur.orb; ep.peakMs = s.ms; ep.hit = cur.hit; }
+      } else {
+        if (ep) episodes.push(ep);
+        open.set(key, { key, hit: cur.hit, firstMs: s.ms, lastMs: s.ms, peakMs: s.ms, peakOrb: cur.orb });
+      }
+    }
+    // Пары, пропавшие из орбиса на этих сутках, закрывают свой эпизод.
+    for (const [key, ep] of [...open]) {
+      if (!s.byKey.has(key) && ep.lastMs < s.ms) { episodes.push(ep); open.delete(key); }
+    }
+  }
+  for (const ep of open.values()) episodes.push(ep);
+
+  for (const ep of episodes) {
+    // Наружу отдаём только эпизоды, пересекающиеся с запрошенным окном;
+    // запас нужен был лишь чтобы правильно определить границы прохождения.
+    if (ep.lastMs < windowFrom || ep.firstMs > endDay) continue;
+    const peakDay = new Date(ep.peakMs).toISOString().slice(0, 10);
+    const orb = ep.peakOrb;
     out.push({
-      // id стабилен: зависит только от содержания события, не от порядка обхода.
-      id: `astro:transit:${day}:${key}`,
+      // id привязан к пику прохождения — величине, не зависящей от того,
+      // каким окном пользователь смотрит на этот же эпизод.
+      id: `astro:transit:${ep.key}:${peakDay}`,
       type: 'astro_transit_aspect',
-      date: day,
+      date: peakDay,
       time: null,                       // суточная выборка — точное время не заявляем
-      tags: [`astro:transit:${hit.transit}`, `astro:aspect:${hit.aspect}`, `astro:natal:${hit.natal}`],
+      tags: [`astro:transit:${ep.hit.transit}`, `astro:aspect:${ep.hit.aspect}`, `astro:natal:${ep.hit.natal}`],
       importance: orb <= 1 ? 3 : (orb <= 2 ? 2 : 1),
       sourceCollection: 'astroBirth',
       referenceId: 'astroBirth',
@@ -5361,6 +5398,8 @@ function astroEventProjection(opts = {}) {
         projection: ASTRO_PROJECTION_VERSION,
         birthTimeKnown: timeKnown,
         orbDeg: orb,
+        episodeFrom: new Date(ep.firstMs).toISOString().slice(0, 10),
+        episodeTo: new Date(ep.lastMs).toISOString().slice(0, 10),
       },
     });
   }
@@ -5442,6 +5481,13 @@ function saveAstroBirth() {
   const time = ($('ab-time') ? $('ab-time').value : '').trim();
   if (timeKnown && !/^\d{2}:\d{2}$/.test(time)) { toast('Время в формате ЧЧ:ММ', 'warn'); return; }
   const utcOffset = parseFloat($('ab-utc') ? $('ab-utc').value : '0') || 0;
+  // Wave 3 (issue #154, ревью п.7): реальные зоны лежат в [−12, +14].
+  // Значение вне диапазона — почти всегда опечатка, а она молча сдвигает
+  // Asc/MC/дома, и пользователь не поймёт причину. Отказ вместо тихого приёма.
+  if (!(utcOffset >= -12 && utcOffset <= 14)) {
+    toast('UTC-офсет должен быть от −12 до +14 (укажите смещение, действовавшее в дату рождения)', 'warn');
+    return;
+  }
   const lat = parseFloat($('ab-lat') ? $('ab-lat').value : ''); const lon = parseFloat($('ab-lon') ? $('ab-lon').value : '');
   DB.astroBirth = {
     kType: 'birth_evidence', privacyClass: 'sensitive',
