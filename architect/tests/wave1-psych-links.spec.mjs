@@ -358,7 +358,15 @@ const collision = await page.evaluate(() => {
   const idsNeverCollide = typeof realLinkId === 'string' && realLinkId !== sharedNumericId && realLinkId !== String(sharedNumericId);
   const local = { ...DEFAULT_DB, moments: DB.moments, whys: DB.whys, psyLinks: [{ ...r.link }], _del: {}, __ts: now - 3000 };
   // Удалённая сторона тombstone'ит именно psyLink (по его реальному id) — НЕ Момент/«Зачем?».
-  const remote = { ...DEFAULT_DB, moments: DB.moments, whys: DB.whys, psyLinks: [{ ...r.link }], _del: { [realLinkId]: now }, __ts: now - 1000 };
+  // Метка надгробия обязана быть НЕ РАНЬШЕ создания связи: mergeById удаляет
+  // запись только при `dt >= record._u` (корректное LWW — надгробие старше
+  // записи её не убивает). `now` захвачен ДО createPsyLink(), поэтому на
+  // загруженном раннере link._u попадал в следующую миллисекунду, надгробие
+  // становилось «старее» связи и тест падал через раз. Сценарий теста —
+  // «связь удалили ПОСЛЕ того, как она появилась», поэтому берём момент
+  // строго позже её _u.
+  const tombAt = Math.max(now, r.link._u || 0) + 1;
+  const remote = { ...DEFAULT_DB, moments: DB.moments, whys: DB.whys, psyLinks: [{ ...r.link }], _del: { [realLinkId]: tombAt }, __ts: now - 1000 };
   const merged = mergeDB(local, remote);
   const linkDeleted = !merged.psyLinks.some(l => l.id === realLinkId);
   const momentSurvived = merged.moments.some(m => m.id === sharedNumericId);
