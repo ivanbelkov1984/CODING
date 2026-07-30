@@ -344,67 +344,129 @@ await forAllBirths('birth → JSON → birth даёт идентичную ка�
   });
   R.ok(pure, 'проекция read-only: DB не изменилась после вызова (ничего не персистируется и не дублируется)');
 
-  // ── 14f–14i. Отдельные прохождения, а не схлопывание (ревью п.5) ────
+  // ── 14f–14j. Отдельные прохождения по локальным минимумам (ревью
+  //    #4816670495) ──────────────────────────────────────────────────
   const BIRTH = { date: '1984-06-15', time: '14:30', timeKnown: true, utcOffset: 4, lat: 55.75, lon: 37.62, houseSystem: 'whole' };
   const project = (days, at) => h.evalIn(({ b, d, a }) => {
     const saved = DB.astroBirth;
     DB.astroBirth = { ...b };
     const evs = astroEventProjection({ days: d, at: a });
     DB.astroBirth = saved;
-    return evs.map(e => ({ id: e.id, date: e.date, tags: e.tags, from: e.provenance.episodeFrom, to: e.provenance.episodeTo }));
+    return evs.map(e => ({ id: e.id, date: e.date, tags: e.tags, orb: e.provenance.orbDeg }));
   }, { b: BIRTH, d: days, a: at });
 
-  // 14f. Медленная пара в большом окне обязана дать НЕСКОЛЬКО отдельных
-  // прохождений (direct → retrograde → direct), а не одно схлопнутое.
+  // 14f. КЛЮЧЕВОЙ regression: подменяем computeTransits детерминированной
+  // серией, в которой пара НИ ОДНИХ суток не выходит за 3° орбиса, но имеет
+  // два локальных минимума (0.2 и 0.3). Прежняя реализация, резавшая
+  // прохождения только по выходу из орбиса, обязана была бы вернуть ОДНО
+  // событие; корректная — ровно два, с датами пиков.
+  const SERIES = [2.5, 1.0, 0.2, 1.1, 0.3, 1.2, 2.4];
+  const stub = await h.evalIn(({ b, series }) => {
+    const savedBirth = DB.astroBirth, savedFn = window.computeTransits;
+    DB.astroBirth = { ...b };
+    // Окно ровно по длине серии; проекция дополнительно опрашивает ±1 сутки,
+    // на этих опорных сутках пара считается вне орбиса.
+    const at = '2026-01-08T00:00:00Z';
+    const endDay = Date.UTC(2026, 0, 8, 12, 0, 0);
+    const windowFrom = endDay - (series.length - 1) * 864e5;
+    window.computeTransits = (chart, when) => {
+      const idx = Math.round((when.getTime() - windowFrom) / 864e5);
+      const orb = series[idx];
+      return { current: [], hits: (orb === undefined) ? [] : [{ transit: 'Марс', aspect: 'квадрат', natal: 'Луна', exact: orb.toFixed(1) }] };
+    };
+    let evs;
+    try { evs = astroEventProjection({ days: series.length, at }); }
+    finally { window.computeTransits = savedFn; DB.astroBirth = savedBirth; }
+    return evs.map(e => ({ id: e.id, date: e.date, orb: e.provenance.orbDeg }));
+  }, { b: BIRTH, series: SERIES });
+
+  R.ok(stub.length === 2,
+    `проекция: непрерывная серия ${SERIES.join(' → ')} (ни суток вне орбиса) даёт РОВНО 2 события по локальным минимумам`,
+    stub.length === 2 ? null : `получено ${stub.length}: ${JSON.stringify(stub)}\nПрежняя реализация схлопывала такую серию в одно событие.`);
+  if (stub.length === 2) {
+    const orbs = stub.map(e => e.orb).sort((a, b) => a - b);
+    R.ok(orbs[0] === 0.2 && orbs[1] === 0.3,
+      `проекция: пики найдены именно на минимумах 0.2 и 0.3 (получено ${orbs.join(', ')})`);
+    R.ok(stub[0].date !== stub[1].date && stub[0].id !== stub[1].id,
+      `проекция: два прохождения различаются датой пика и id (${stub[0].date} / ${stub[1].date})`);
+  }
+
+  // Вырожденные формы той же подмены: строго убывающая серия — один пик;
+  // плато на минимуме — тоже один (первые сутки плато, детерминированно).
+  const stub2 = await h.evalIn(({ b, series, at, from }) => {
+    const savedBirth = DB.astroBirth, savedFn = window.computeTransits;
+    DB.astroBirth = { ...b };
+    window.computeTransits = (chart, when) => {
+      const idx = Math.round((when.getTime() - from) / 864e5);
+      const orb = series[idx];
+      return { current: [], hits: (orb === undefined) ? [] : [{ transit: 'Марс', aspect: 'квадрат', natal: 'Луна', exact: orb.toFixed(1) }] };
+    };
+    let n;
+    try { n = astroEventProjection({ days: series.length, at }).length; }
+    finally { window.computeTransits = savedFn; DB.astroBirth = savedBirth; }
+    return n;
+  }, { b: BIRTH, series: [2.9, 2.0, 1.0, 0.5, 1.5, 2.6], at: '2026-01-08T00:00:00Z', from: Date.UTC(2026, 0, 8, 12) - 5 * 864e5 });
+  R.ok(stub2 === 1, `проекция: одиночное сближение даёт ровно 1 событие (получено ${stub2})`);
+
+  const stub3 = await h.evalIn(({ b, series, at, from }) => {
+    const savedBirth = DB.astroBirth, savedFn = window.computeTransits;
+    DB.astroBirth = { ...b };
+    window.computeTransits = (chart, when) => {
+      const idx = Math.round((when.getTime() - from) / 864e5);
+      const orb = series[idx];
+      return { current: [], hits: (orb === undefined) ? [] : [{ transit: 'Марс', aspect: 'квадрат', natal: 'Луна', exact: orb.toFixed(1) }] };
+    };
+    let evs;
+    try { evs = astroEventProjection({ days: series.length, at }); }
+    finally { window.computeTransits = savedFn; DB.astroBirth = savedBirth; }
+    return evs.map(e => e.date);
+  }, { b: BIRTH, series: [2.0, 0.4, 0.4, 0.4, 1.7], at: '2026-01-08T00:00:00Z', from: Date.UTC(2026, 0, 8, 12) - 4 * 864e5 });
+  R.ok(stub3.length === 1, `проекция: плато на минимуме даёт ровно 1 событие, а не по одному на каждые сутки (получено ${stub3.length})`);
+
+  // 14g. Реальные данные: несколько прохождений у одной пары сохраняются.
   const wide = await project(400, '2026-01-01T00:00:00Z');
   const byPair = new Map();
-  for (const e of wide) {
-    const pair = e.tags.join('|');
-    byPair.set(pair, (byPair.get(pair) || 0) + 1);
+  for (const e of wide) byPair.set(e.tags.join('|'), (byPair.get(e.tags.join('|')) || 0) + 1);
+  const maxPasses = Math.max(0, ...byPair.values());
+  R.ok(maxPasses > 1,
+    `проекция: на реальных данных у пар до ${maxPasses} отдельных прохождений в окне 400 дней (${wide.length} событий всего)`);
+  R.ok(new Set(wide.map(e => e.id)).size === wide.length,
+    `проекция: все ${wide.length} id уникальны в окне 400 дней`);
+
+  // 14h. КОНКРЕТНОЕ МЕДЛЕННОЕ событие в двух перекрывающихся окнах.
+  // Не «есть хоть какие-то общие id», а: выбираем самое медленное реальное
+  // прохождение (внешняя планета — дольше всех в орбисе) и требуем, чтобы
+  // ИМЕННО ЕГО id и дата пика совпали в обоих окнах.
+  const SLOW = ['Плутон', 'Нептун', 'Уран', 'Сатурн'];
+  const slowEvent = wide.find(e => SLOW.includes(e.tags[0].replace('astro:transit:', '')));
+  R.ok(!!slowEvent, `проекция: в окне найдено медленное прохождение внешней планеты для проверки стабильности id (${slowEvent && slowEvent.id})`);
+  if (slowEvent) {
+    // Два окна разной длины и с разными правыми границами, оба содержат пик.
+    const peakMs = Date.parse(slowEvent.date + 'T12:00:00Z');
+    const wA = await project(90, new Date(peakMs + 30 * 864e5).toISOString());
+    const wB = await project(240, new Date(peakMs + 120 * 864e5).toISOString());
+    const inA = wA.find(e => e.id === slowEvent.id);
+    const inB = wB.find(e => e.id === slowEvent.id);
+    R.ok(!!inA && !!inB,
+      `проекция: медленное событие ${slowEvent.id} присутствует в ОБОИХ перекрывающихся окнах (90 и 240 дней с разными границами)`,
+      (!!inA && !!inB) ? null : `в окне 90 дней: ${!!inA}, в окне 240 дней: ${!!inB}`);
+    if (inA && inB) {
+      R.ok(inA.date === slowEvent.date && inB.date === slowEvent.date,
+        `проекция: дата пика медленного события совпадает во всех трёх окнах (${slowEvent.date})`,
+        `окно 400: ${slowEvent.date}, окно 90: ${inA.date}, окно 240: ${inB.date}`);
+      R.ok(inA.orb === slowEvent.orb && inB.orb === slowEvent.orb,
+        `проекция: орбис пика медленного события идентичен во всех окнах (${slowEvent.orb}°)`);
+    }
   }
-  const multi = [...byPair.entries()].filter(([, n]) => n > 1);
-  R.ok(multi.length > 0,
-    `проекция: в окне 400 дней есть пары с НЕСКОЛЬКИМИ отдельными прохождениями (${multi.length} пар; максимум ${Math.max(0, ...byPair.values())} прохождений) — ретроградные повторы не схлопнуты`,
-    multi.length > 0 ? null : 'ни одна пара не дала более одного события — прохождения по-прежнему схлопываются');
 
-  // Эпизоды одной пары не пересекаются по датам и разделены разрывом.
-  let overlap = null;
-  for (const [pair] of multi) {
-    const eps = wide.filter(e => e.tags.join('|') === pair).sort((a, b) => a.from < b.from ? -1 : 1);
-    for (let i = 1; i < eps.length; i++) if (eps[i].from <= eps[i - 1].to) { overlap = `${pair}: ${eps[i - 1].from}..${eps[i - 1].to} и ${eps[i].from}..${eps[i].to}`; break; }
-    if (overlap) break;
-  }
-  R.ok(!overlap, 'проекция: отдельные прохождения одной пары не пересекаются по датам (каждое — самостоятельный вход в орбис)', overlap);
-
-  // 14g. Одно и то же прохождение имеет ОДИН И ТОТ ЖЕ id в перекрывающихся окнах.
-  const w1 = await project(120, '2026-01-01T00:00:00Z');
-  const w2 = await project(120, '2026-02-15T00:00:00Z');
-  const ids1 = new Set(w1.map(e => e.id)), ids2 = new Set(w2.map(e => e.id));
-  const shared = [...ids1].filter(x => ids2.has(x));
-  R.ok(shared.length > 0, `проекция: перекрывающиеся окна разделяют ${shared.length} одинаковых id — прохождение опознаётся стабильно`);
-  // Совпадающие id обязаны нести совпадающую дату пика.
-  const dateMismatch = shared.map(id => {
-    const a = w1.find(e => e.id === id), b = w2.find(e => e.id === id);
-    return a.date === b.date ? null : `${id}: ${a.date} vs ${b.date}`;
-  }).filter(Boolean);
-  R.ok(dateMismatch.length === 0, 'проекция: у одинаковых id совпадает дата пика в обоих окнах', dateMismatch.slice(0, 3).join('\n'));
-
-  // 14h. Расширение окна не уничтожает уже найденное прохождение.
+  // 14i. Расширение окна не уничтожает уже найденное прохождение.
   const narrow = await project(60, '2026-01-01T00:00:00Z');
   const widened = await project(200, '2026-01-01T00:00:00Z');
   const widenedIds = new Set(widened.map(e => e.id));
-  // Берём только эпизоды, целиком лежащие внутри узкого окна: у обрезанных
-  // границей пик законно может сместиться при расширении.
-  const narrowFrom = new Date(Date.UTC(2026, 0, 1) - 59 * 864e5).toISOString().slice(0, 10);
-  const inner = narrow.filter(e => e.from > narrowFrom);
-  const lost = inner.filter(e => !widenedIds.has(e.id));
+  const lost = narrow.filter(e => !widenedIds.has(e.id));
   R.ok(lost.length === 0,
-    `проекция: расширение окна 60 → 200 дней сохранило все ${inner.length} прохождений, целиком попавших в узкое окно`,
+    `проекция: расширение окна 60 → 200 дней сохранило ВСЕ ${narrow.length} прохождений без исключений (пик определяется тремя сутками, а не границами окна)`,
     lost.length === 0 ? null : `потеряны: ${JSON.stringify(lost.slice(0, 3))}`);
-
-  // 14i. id уникальны в пределах одного вызова даже при нескольких эпизодах.
-  R.ok(new Set(wide.map(e => e.id)).size === wide.length,
-    `проекция: все ${wide.length} id уникальны в окне 400 дней (эпизоды различаются датой пика)`);
 }
 
 // ── 15. Пояснение к UTC-офсету и валидация диапазона (ревью п.7) ─────

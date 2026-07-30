@@ -5321,87 +5321,98 @@ function astroEventProjection(opts = {}) {
   const chart = computeNatalChart(birth);
   const timeKnown = !!chart.timeKnown;
 
-  // Owner review #4815354882, п.5: прежняя версия держала ОДИН ключ
-  // `transit|aspect|natal` на всё окно (до 400 дней) и схлопывала в одно
-  // событие все попадания пары — включая несколько РАЗНЫХ прохождений
-  // (direct → retrograde → direct). Это была не дедупликация, а потеря
-  // событий; вдобавок дата и id одного физического прохождения менялись при
-  // сдвиге окна, если внутри нового окна находилась более точная выборка.
+  // Owner review #4816670495: отдельное прохождение нельзя определять по
+  // ВЫХОДУ пары из орбиса. Ход direct → retrograde → direct даёт несколько
+  // точных сближений, НЕ покидая 3° орбиса ни на сутки, — и такие физически
+  // разные прохождения схлопывались в одно событие. Ряд вида
+  // 2.5 → 1.0 → 0.2 → 1.1 → 0.3 → 1.2 → 2.4 обязан дать ДВА события.
   //
-  // Теперь схлопываются ТОЛЬКО соседние суточные выборки одного непрерывного
-  // эпизода нахождения в орбисе. Каждый вход/выход из орбиса — отдельное
-  // событие. Чтобы id и дата не зависели от границ окна, эпизоды ищутся с
-  // запасом по обе стороны, а идентификатор строится по МОМЕНТУ ПИКА
-  // (минимального орбиса) эпизода — величине, внутренней для прохождения.
-  const MARGIN_DAYS = 45;
+  // Теперь прохождение = ЛОКАЛЬНЫЙ МИНИМУМ абсолютного орбиса. Сутки d
+  // считаются пиком, если orb(d) ≤ orb(d−1) и orb(d) < orb(d+1); сутки вне
+  // орбиса участвуют как +∞, поэтому вход и выход из орбиса обрабатываются
+  // тем же правилом без отдельной ветки. Нестрогое сравнение слева и строгое
+  // справа детерминированно выбирают первые сутки плато при равных орбисах.
+  //
+  // Прежнего произвольного запаса MARGIN_DAYS больше нет: пик полностью
+  // определяется ТРЕМЯ соседними суточными выборками, поэтому окно
+  // расширяется ровно на ±1 сутки — минимальная окрестность, необходимая
+  // чтобы вычислить признак локального минимума на самих краях окна. Ни дата
+  // пика, ни id не зависят от того, каким окном пользователь смотрит на
+  // событие, даже если пара остаётся в орбисе месяцами.
   const dayMs = 864e5;
   const endDay = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate(), 12, 0, 0);
   const windowFrom = endDay - (days - 1) * dayMs;
-  const scanFrom = windowFrom - MARGIN_DAYS * dayMs;
-  const scanTo = endDay + MARGIN_DAYS * dayMs;
 
-  // Суточная выборка орбисов по всем парам на расширенном интервале.
+  // Орбис берём с ПОЛНОЙ точностью, а не из строки `hit.exact`: она округлена
+  // до 0.1° (`toFixed(1)`) для показа пользователю, и на монотонном расхождении
+  // превращает ряд в ступеньки вида 0.7, 0.7, 0.7, 0.8, 0.8… Последняя точка
+  // каждой ступеньки выглядела бы локальным минимумом, и одно плавное
+  // расхождение (например, Плутон в квадрате к своему натальному месту)
+  // порождало бы десятки ложных «прохождений». На полной точности ряд строго
+  // монотонен, и признак локального минимума срабатывает только на настоящих
+  // сближениях. Числа берутся из собственного вывода computeTransits и карты,
+  // эфемерида здесь не пересчитывается.
+  const aspectAngle = {};
+  for (const a of ASTRO_ASPECTS) aspectAngle[a.name] = a.angle;
+  const natalLon = {};
+  for (const p of chart.planets) natalLon[p.name] = p.lon;
+
   const samples = [];
-  for (let ms = scanFrom; ms <= scanTo; ms += dayMs) {
+  for (let ms = windowFrom - dayMs; ms <= endDay + dayMs; ms += dayMs) {
     const byKey = new Map();
-    for (const hit of computeTransits(chart, new Date(ms)).hits) {
-      byKey.set(`${hit.transit}|${hit.aspect}|${hit.natal}`, { hit, orb: parseFloat(hit.exact) });
+    const tr = computeTransits(chart, new Date(ms));
+    const curLon = {};
+    for (const p of (tr.current || [])) curLon[p.name] = p.lon;
+    for (const hit of tr.hits) {
+      const a = curLon[hit.transit], b = natalLon[hit.natal], ang = aspectAngle[hit.aspect];
+      // Точный орбис, если доступны обе долготы; иначе — честный откат на
+      // округлённое значение (используется подменённым computeTransits в тестах).
+      const orb = (a != null && b != null && ang != null)
+        ? Math.abs(Math.abs(((a - b + 180) % 360 + 360) % 360 - 180) - ang)
+        : parseFloat(hit.exact);
+      byKey.set(`${hit.transit}|${hit.aspect}|${hit.natal}`, { hit, orb });
     }
     samples.push({ ms, byKey });
   }
+  const orbAt = (i, key) => {
+    if (i < 0 || i >= samples.length) return Infinity;      // вне интервала выборки
+    const s = samples[i].byKey.get(key);
+    return s ? s.orb : Infinity;                            // вне орбиса
+  };
 
-  // Сборка непрерывных эпизодов: пара «в орбисе» на соседних сутках — один
-  // эпизод; разрыв хотя бы на сутки — новое, отдельное прохождение.
-  const open = new Map();      // key → эпизод в процессе накопления
-  const episodes = [];
-  for (const s of samples) {
+  for (let i = 1; i < samples.length - 1; i++) {
+    const s = samples[i];
+    if (s.ms < windowFrom || s.ms > endDay) continue;        // краевые сутки — только опора
     for (const [key, cur] of s.byKey) {
-      const ep = open.get(key);
-      if (ep && s.ms - ep.lastMs <= dayMs) {
-        ep.lastMs = s.ms;
-        if (cur.orb < ep.peakOrb) { ep.peakOrb = cur.orb; ep.peakMs = s.ms; ep.hit = cur.hit; }
-      } else {
-        if (ep) episodes.push(ep);
-        open.set(key, { key, hit: cur.hit, firstMs: s.ms, lastMs: s.ms, peakMs: s.ms, peakOrb: cur.orb });
-      }
+      // Локальный минимум орбиса ⇒ отдельное точное сближение.
+      if (!(cur.orb <= orbAt(i - 1, key) && cur.orb < orbAt(i + 1, key))) continue;
+      const peakDay = new Date(s.ms).toISOString().slice(0, 10);
+      const orb = cur.orb;
+      out.push({
+        // id = пара + дата пика. Обе составляющие внутренние для самого
+        // прохождения, поэтому одно физическое сближение имеет один и тот же
+        // id в любых перекрывающихся окнах.
+        id: `astro:transit:${key}:${peakDay}`,
+        type: 'astro_transit_aspect',
+        date: peakDay,
+        time: null,                     // суточная дискретизация — точное время не заявляем
+        tags: [`astro:transit:${cur.hit.transit}`, `astro:aspect:${cur.hit.aspect}`, `astro:natal:${cur.hit.natal}`],
+        importance: orb <= 1 ? 3 : (orb <= 2 ? 2 : 1),
+        sourceCollection: 'astroBirth',
+        referenceId: 'astroBirth',
+        methodologyId: `${ASTRO_VERSIONS.ruleset}/transit-orbs-v1(${TRANSIT_ORB})`,
+        // Уверенность честно понижена при неизвестном времени рождения: сама
+        // натальная позиция планет тогда посчитана на полдень.
+        confidence: timeKnown ? 'medium' : 'low',
+        provenance: {
+          engine: ASTRO_VERSIONS.engine,
+          projection: ASTRO_PROJECTION_VERSION,
+          birthTimeKnown: timeKnown,
+          orbDeg: orb,
+          peakRule: 'local-minimum-of-abs-orb(daily)',
+        },
+      });
     }
-    // Пары, пропавшие из орбиса на этих сутках, закрывают свой эпизод.
-    for (const [key, ep] of [...open]) {
-      if (!s.byKey.has(key) && ep.lastMs < s.ms) { episodes.push(ep); open.delete(key); }
-    }
-  }
-  for (const ep of open.values()) episodes.push(ep);
-
-  for (const ep of episodes) {
-    // Наружу отдаём только эпизоды, пересекающиеся с запрошенным окном;
-    // запас нужен был лишь чтобы правильно определить границы прохождения.
-    if (ep.lastMs < windowFrom || ep.firstMs > endDay) continue;
-    const peakDay = new Date(ep.peakMs).toISOString().slice(0, 10);
-    const orb = ep.peakOrb;
-    out.push({
-      // id привязан к пику прохождения — величине, не зависящей от того,
-      // каким окном пользователь смотрит на этот же эпизод.
-      id: `astro:transit:${ep.key}:${peakDay}`,
-      type: 'astro_transit_aspect',
-      date: peakDay,
-      time: null,                       // суточная выборка — точное время не заявляем
-      tags: [`astro:transit:${ep.hit.transit}`, `astro:aspect:${ep.hit.aspect}`, `astro:natal:${ep.hit.natal}`],
-      importance: orb <= 1 ? 3 : (orb <= 2 ? 2 : 1),
-      sourceCollection: 'astroBirth',
-      referenceId: 'astroBirth',
-      methodologyId: `${ASTRO_VERSIONS.ruleset}/transit-orbs-v1(${TRANSIT_ORB})`,
-      // Уверенность честно понижена при неизвестном времени рождения: сама
-      // натальная позиция планет тогда посчитана на полдень.
-      confidence: timeKnown ? 'medium' : 'low',
-      provenance: {
-        engine: ASTRO_VERSIONS.engine,
-        projection: ASTRO_PROJECTION_VERSION,
-        birthTimeKnown: timeKnown,
-        orbDeg: orb,
-        episodeFrom: new Date(ep.firstMs).toISOString().slice(0, 10),
-        episodeTo: new Date(ep.lastMs).toISOString().slice(0, 10),
-      },
-    });
   }
 
   // Детерминированный порядок: дата, затем id — не зависит от порядка Map.
