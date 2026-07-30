@@ -1,4 +1,4 @@
-// Wave 4.1 (issue #157) — интеграция астрологии как ИСТОЧНИКА Pattern Engine.
+// Wave 4.1 (issue #156) — интеграция астрологии как ИСТОЧНИКА Pattern Engine.
 //
 // Астрология здесь — ещё один источник временных совпадений, не более.
 // Ничего не пересчитывается: единственный источник астрособытий —
@@ -243,6 +243,28 @@ ok(calls === 1, `astroEventProjection() вызван РОВНО один раз 
   });
   ok(iso.a > 0 && iso.b === 0 && iso.c === iso.a,
     `изоляция: кэш проекции не переиспользуется между разными данными профиля (${iso.a} → ${iso.b} → ${iso.c})`);
+
+  // Сам ключ кэша обязан нести id активного профиля. Без этого изоляция
+  // держалась бы ТОЛЬКО на явном resetAstroSourceCache() в switchProfile(),
+  // а любой путь смены профиля мимо него отдал бы чужие астрособытия.
+  const keyIso = await page.evaluate(() => {
+    const saved = localStorage.getItem('arch5_active');
+    resetAstroSourceCache();
+    localStorage.setItem('arch5_active', 'profile-alpha');
+    unifiedEvents(120);
+    const keyA = _astroSrcCache && _astroSrcCache.key;
+    // Профиль меняется БЕЗ вызова reset — ключ обязан разойтись сам.
+    localStorage.setItem('arch5_active', 'profile-beta');
+    unifiedEvents(120);
+    const keyB = _astroSrcCache && _astroSrcCache.key;
+    if (saved == null) localStorage.removeItem('arch5_active'); else localStorage.setItem('arch5_active', saved);
+    resetAstroSourceCache();
+    return { keyA, keyB };
+  });
+  ok(!!keyIso.keyA && keyIso.keyA.includes('profile-alpha'),
+    'изоляция: ключ кэша проекции содержит id активного профиля');
+  ok(keyIso.keyA !== keyIso.keyB,
+    'изоляция: смена активного профиля меняет ключ кэша даже без явного сброса');
 }
 
 // ── 12. Нет сети и нет AI во время анализа ──────────────────────────

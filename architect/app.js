@@ -111,7 +111,7 @@ const DEFAULT_DB = {
   // сигнатуре вывода, не по хранимому id — сами выводы никогда не пишутся
   // в DB, пересчитываются заново на каждый рендер). Скаляр, сливается как
   // DB.env/DB.vit — «последний документ по __ts побеждает» (см. mergeDB()).
-  // Wave 4.1 (issue #157): `useAstro` — символический источник «Астрология»
+  // Wave 4.1 (issue #156): `useAstro` — символический источник «Астрология»
   // в «Закономерностях». По умолчанию ВЫКЛЮЧЕН, в том числе для существующих
   // профилей: у них в сохранённом correlationSettings этого ключа нет, и
   // чтение даёт undefined → falsy. Поэтому миграция не нужна и SCHEMA_VERSION
@@ -328,7 +328,7 @@ function resetSyncState() { clearTimeout(_syncTimer); _syncing = false; _dirty =
 function switchProfile(id) {
   if (id === activeId()) { closeOv('ov-profiles'); return; }
   resetSyncState();
-  // Wave 4.1 (issue #157): астропроекция другого профиля не должна
+  // Wave 4.1 (issue #156): астропроекция другого профиля не должна
   // переиспользоваться — кэш анализа сбрасывается вместе с sync-состоянием.
   resetAstroSourceCache();
   setActiveId(id);
@@ -5409,7 +5409,7 @@ function astroEventProjection(opts = {}) {
         importance: orb <= 1 ? 3 : (orb <= 2 ? 2 : 1),
         source: 'astro',
         sourceCollection: 'astroBirth',
-        // Wave 4.1 (issue #157): referenceId обязан быть УНИКАЛЬНЫМ на событие.
+        // Wave 4.1 (issue #156): referenceId обязан быть УНИКАЛЬНЫМ на событие.
         // Раньше он был константой 'astroBirth', и в Pattern Engine ключ записи
         // `sourceCollection:referenceId` совпадал бы у ВСЕХ астрособытий —
         // они выглядели бы одной записью, а evidence схлопывался бы в одну.
@@ -7631,14 +7631,14 @@ function unifiedEvents(days) {
       });
     });
   });
-  // Wave 4.1 (issue #157): астрология — ЕЩЁ ОДИН источник того же потока, без
+  // Wave 4.1 (issue #156): астрология — ЕЩЁ ОДИН источник того же потока, без
   // отдельного пути и без второго движка. Единственный источник астрособытий —
   // astroEventProjection() (Волна 3); здесь ничего не пересчитывается.
   out.push(...astroSourceEvents(days));
   return out.sort((a, b) => a.time - b.time);
 }
 
-// ─── ИСТОЧНИК `astro` ДЛЯ PATTERN ENGINE (Wave 4.1, issue #157) ──────
+// ─── ИСТОЧНИК `astro` ДЛЯ PATTERN ENGINE (Wave 4.1, issue #156) ──────
 // Read-only. Ничего не персистирует, не создаёт коллекций и не трогает
 // backup/sync/schema. Проекция живёт только на время анализа.
 let _astroSrcCache = null;   // { key, events } — НЕ персистируется
@@ -7652,7 +7652,7 @@ function astroSourceEvents(days) {
   if (!window.Astronomy) return [];                       // движок не загружен — молча пусто
   // Ключ кэша включает профиль (изоляция), окно, признак включённости и
   // отпечаток данных рождения: любое расхождение — пересчёт.
-  const pid = (typeof currentProfileId === 'function' ? currentProfileId() : '') || '';
+  const pid = activeId();
   const key = JSON.stringify([pid, days, true, birth.date, birth.time, birth.timeKnown,
     birth.utcOffset, birth.lat, birth.lon, birth.houseSystem]);
   if (_astroSrcCache && _astroSrcCache.key === key) return _astroSrcCache.events;
@@ -7713,7 +7713,7 @@ const TAG_FAMILY_SETS = [
   new Set(['craving', 'trigger']),                         // cravings
   new Set(['insight', 'person']),                          // insights (+ person enrichment)
   new Set(['pattern', 'person']),                          // patterns (+ person enrichment)
-  // Wave 4.1 (issue #157): ОДНО астрособытие проекции всегда даёт три тега
+  // Wave 4.1 (issue #156): ОДНО астрособытие проекции всегда даёт три тега
   // сразу — `astro:transit:*`, `astro:aspect:*`, `astro:natal:*`. Без записи
   // в этом реестре они образовали бы гарантированную тавтологию («Марс»
   // всегда совпадает с «квадрат»), ровно ту, против которой Волна 4 вводила
@@ -8186,11 +8186,11 @@ let _synDays = 90;
 // &lt;&gt;) не защищал от кавычек, и апостроф/кавычка в свободном тексте
 // эмоции/триггера мог сломать inline JS-атрибут.
 let _synLastPairs = [];
-// Wave 4.1 (issue #157): астрособытия ТЕКУЩЕГО рендера — только в памяти,
+// Wave 4.1 (issue #156): астрособытия ТЕКУЩЕГО рендера — только в памяти,
 // сбрасываются каждым rSynthesis(), никогда не персистируются.
 let _synLastAstroEvents = [];
 function synGoDays(days) { _synDays = days; rSynthesis(); }
-// Wave 4.1 (issue #157): участвует ли в паре символический астроисточник.
+// Wave 4.1 (issue #156): участвует ли в паре символический астроисточник.
 function pairHasAstro(p) { return tagPrefix(p.a) === 'astro' || tagPrefix(p.b) === 'astro'; }
 function pairRowHtml(p) {
   const conf = correlationConfidence(p);
