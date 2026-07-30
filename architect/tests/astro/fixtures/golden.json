@@ -1,0 +1,1119 @@
+{
+  "$schema": "wave3-astro-golden-fixtures/v1",
+  "generatedBy": "tests/astro/golden/generate.mjs (независимый oracle, НЕ production-код)",
+  "generatedAt": "2026-07-30",
+  "oracleModule": "tests/astro/helpers/oracle.mjs",
+  "warning": "НЕ редактировать вручную и НЕ обновлять из production-вывода. Только `npm run astro:update-golden` после независимого доказательства нового значения.",
+  "count": 39,
+  "fixtures": [
+    {
+      "id": "jd-2000-01-01-12h",
+      "category": "time",
+      "method": "julianDayFromUTC",
+      "methodologyVersion": "meeus-ch7",
+      "oracle": {
+        "source": "Meeus, Astronomical Algorithms, 2nd ed. (1998)",
+        "version": "2nd-ed-1998",
+        "verification": "независимая реализация формулы гл. 7 + сверка с общеизвестной реперной точкой"
+      },
+      "input": {
+        "date": "2000-01-01",
+        "hourUTC": 12
+      },
+      "expected": {
+        "jd": 2451545
+      },
+      "tolerance": {
+        "jd": 1e-9
+      },
+      "unit": {
+        "jd": "сутки"
+      },
+      "notes": "определение эпохи J2000.0 — общеизвестная реперная точка"
+    },
+    {
+      "id": "jd-1999-01-01-0h",
+      "category": "time",
+      "method": "julianDayFromUTC",
+      "methodologyVersion": "meeus-ch7",
+      "oracle": {
+        "source": "Meeus, Astronomical Algorithms, 2nd ed. (1998)",
+        "version": "2nd-ed-1998",
+        "verification": "независимая реализация формулы гл. 7 + сверка с общеизвестной реперной точкой"
+      },
+      "input": {
+        "date": "1999-01-01",
+        "hourUTC": 0
+      },
+      "expected": {
+        "jd": 2451179.5
+      },
+      "tolerance": {
+        "jd": 1e-9
+      },
+      "unit": {
+        "jd": "сутки"
+      },
+      "notes": "контрольный пример Meeus, гл. 7"
+    },
+    {
+      "id": "jd-1987-01-27-0h",
+      "category": "time",
+      "method": "julianDayFromUTC",
+      "methodologyVersion": "meeus-ch7",
+      "oracle": {
+        "source": "Meeus, Astronomical Algorithms, 2nd ed. (1998)",
+        "version": "2nd-ed-1998",
+        "verification": "независимая реализация формулы гл. 7 + сверка с общеизвестной реперной точкой"
+      },
+      "input": {
+        "date": "1987-01-27",
+        "hourUTC": 0
+      },
+      "expected": {
+        "jd": 2446822.5
+      },
+      "tolerance": {
+        "jd": 1e-9
+      },
+      "unit": {
+        "jd": "сутки"
+      },
+      "notes": "контрольный пример Meeus, гл. 7"
+    },
+    {
+      "id": "jd-1900-01-01-0h",
+      "category": "time",
+      "method": "julianDayFromUTC",
+      "methodologyVersion": "meeus-ch7",
+      "oracle": {
+        "source": "Meeus, Astronomical Algorithms, 2nd ed. (1998)",
+        "version": "2nd-ed-1998",
+        "verification": "независимая реализация формулы гл. 7 + сверка с общеизвестной реперной точкой"
+      },
+      "input": {
+        "date": "1900-01-01",
+        "hourUTC": 0
+      },
+      "expected": {
+        "jd": 2415020.5
+      },
+      "tolerance": {
+        "jd": 1e-9
+      },
+      "unit": {
+        "jd": "сутки"
+      },
+      "notes": "начало XX века, григорианский календарь"
+    },
+    {
+      "id": "obliquity-mean-1900",
+      "category": "frame",
+      "method": "meanObliquity",
+      "methodologyVersion": "meeus-22.2",
+      "oracle": {
+        "source": "Meeus, Astronomical Algorithms, 2nd ed. (1998)",
+        "version": "2nd-ed-1998",
+        "verification": "независимая реализация формулы 22.2 (ε0 в угловых секундах)"
+      },
+      "input": {
+        "year": 1900,
+        "jd": 2415021,
+        "T": -0.9999726214921287
+      },
+      "expected": {
+        "eps": 23.452294254293435
+      },
+      "tolerance": {
+        "eps": 1e-9
+      },
+      "unit": {
+        "eps": "°"
+      },
+      "notes": "Production «зашивает» ε константой J2000. Эта фикстура фиксирует истинный дрейф — см. limitation L-OBLIQUITY в контракте."
+    },
+    {
+      "id": "obliquity-mean-2000",
+      "category": "frame",
+      "method": "meanObliquity",
+      "methodologyVersion": "meeus-22.2",
+      "oracle": {
+        "source": "Meeus, Astronomical Algorithms, 2nd ed. (1998)",
+        "version": "2nd-ed-1998",
+        "verification": "независимая реализация формулы 22.2 (ε0 в угловых секундах)"
+      },
+      "input": {
+        "year": 2000,
+        "jd": 2451545,
+        "T": 0
+      },
+      "expected": {
+        "eps": 23.43929111111111
+      },
+      "tolerance": {
+        "eps": 1e-9
+      },
+      "unit": {
+        "eps": "°"
+      },
+      "notes": "Production «зашивает» ε константой J2000. Эта фикстура фиксирует истинный дрейф — см. limitation L-OBLIQUITY в контракте."
+    },
+    {
+      "id": "obliquity-mean-2050",
+      "category": "frame",
+      "method": "meanObliquity",
+      "methodologyVersion": "meeus-22.2",
+      "oracle": {
+        "source": "Meeus, Astronomical Algorithms, 2nd ed. (1998)",
+        "version": "2nd-ed-1998",
+        "verification": "независимая реализация формулы 22.2 (ε0 в угловых секундах)"
+      },
+      "input": {
+        "year": 2050,
+        "jd": 2469808,
+        "T": 0.5000136892539356
+      },
+      "expected": {
+        "eps": 23.43278887174253
+      },
+      "tolerance": {
+        "eps": 1e-9
+      },
+      "unit": {
+        "eps": "°"
+      },
+      "notes": "Production «зашивает» ε константой J2000. Эта фикстура фиксирует истинный дрейф — см. limitation L-OBLIQUITY в контракте."
+    },
+    {
+      "id": "houses-whole-asc-0",
+      "category": "houses",
+      "method": "houseCusps(whole)",
+      "methodologyVersion": "whole-sign-v1",
+      "oracle": {
+        "source": "Определение системы Whole-sign (куспид I = 0° знака Асцендента)",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "asc": 0
+      },
+      "expected": {
+        "cusps": [
+          0,
+          30,
+          60,
+          90,
+          120,
+          150,
+          180,
+          210,
+          240,
+          270,
+          300,
+          330
+        ]
+      },
+      "tolerance": {
+        "cusps": 1e-9
+      },
+      "unit": {
+        "cusps": "°"
+      },
+      "notes": "Границы знака (0°, 29.9999°, 30°) проверяют корректность floor-деления."
+    },
+    {
+      "id": "houses-equal-asc-0",
+      "category": "houses",
+      "method": "houseCusps(equal)",
+      "methodologyVersion": "equal-v1",
+      "oracle": {
+        "source": "Определение системы Equal (куспид I = Асцендент, далее +30°)",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "asc": 0
+      },
+      "expected": {
+        "cusps": [
+          0,
+          30,
+          60,
+          90,
+          120,
+          150,
+          180,
+          210,
+          240,
+          270,
+          300,
+          330
+        ]
+      },
+      "tolerance": {
+        "cusps": 1e-9
+      },
+      "unit": {
+        "cusps": "°"
+      },
+      "notes": ""
+    },
+    {
+      "id": "houses-whole-asc-29.9999",
+      "category": "houses",
+      "method": "houseCusps(whole)",
+      "methodologyVersion": "whole-sign-v1",
+      "oracle": {
+        "source": "Определение системы Whole-sign (куспид I = 0° знака Асцендента)",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "asc": 29.9999
+      },
+      "expected": {
+        "cusps": [
+          0,
+          30,
+          60,
+          90,
+          120,
+          150,
+          180,
+          210,
+          240,
+          270,
+          300,
+          330
+        ]
+      },
+      "tolerance": {
+        "cusps": 1e-9
+      },
+      "unit": {
+        "cusps": "°"
+      },
+      "notes": "Границы знака (0°, 29.9999°, 30°) проверяют корректность floor-деления."
+    },
+    {
+      "id": "houses-equal-asc-29.9999",
+      "category": "houses",
+      "method": "houseCusps(equal)",
+      "methodologyVersion": "equal-v1",
+      "oracle": {
+        "source": "Определение системы Equal (куспид I = Асцендент, далее +30°)",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "asc": 29.9999
+      },
+      "expected": {
+        "cusps": [
+          29.999900000000025,
+          59.999900000000025,
+          89.99990000000003,
+          119.99990000000003,
+          149.99990000000003,
+          179.99990000000003,
+          209.99990000000003,
+          239.99990000000003,
+          269.9999,
+          299.9999,
+          329.9999,
+          359.9999
+        ]
+      },
+      "tolerance": {
+        "cusps": 1e-9
+      },
+      "unit": {
+        "cusps": "°"
+      },
+      "notes": ""
+    },
+    {
+      "id": "houses-whole-asc-30",
+      "category": "houses",
+      "method": "houseCusps(whole)",
+      "methodologyVersion": "whole-sign-v1",
+      "oracle": {
+        "source": "Определение системы Whole-sign (куспид I = 0° знака Асцендента)",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "asc": 30
+      },
+      "expected": {
+        "cusps": [
+          30,
+          60,
+          90,
+          120,
+          150,
+          180,
+          210,
+          240,
+          270,
+          300,
+          330,
+          0
+        ]
+      },
+      "tolerance": {
+        "cusps": 1e-9
+      },
+      "unit": {
+        "cusps": "°"
+      },
+      "notes": "Границы знака (0°, 29.9999°, 30°) проверяют корректность floor-деления."
+    },
+    {
+      "id": "houses-equal-asc-30",
+      "category": "houses",
+      "method": "houseCusps(equal)",
+      "methodologyVersion": "equal-v1",
+      "oracle": {
+        "source": "Определение системы Equal (куспид I = Асцендент, далее +30°)",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "asc": 30
+      },
+      "expected": {
+        "cusps": [
+          30,
+          60,
+          90,
+          120,
+          150,
+          180,
+          210,
+          240,
+          270,
+          300,
+          330,
+          0
+        ]
+      },
+      "tolerance": {
+        "cusps": 1e-9
+      },
+      "unit": {
+        "cusps": "°"
+      },
+      "notes": ""
+    },
+    {
+      "id": "houses-whole-asc-185.9958",
+      "category": "houses",
+      "method": "houseCusps(whole)",
+      "methodologyVersion": "whole-sign-v1",
+      "oracle": {
+        "source": "Определение системы Whole-sign (куспид I = 0° знака Асцендента)",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "asc": 185.9958
+      },
+      "expected": {
+        "cusps": [
+          180,
+          210,
+          240,
+          270,
+          300,
+          330,
+          0,
+          30,
+          60,
+          90,
+          120,
+          150
+        ]
+      },
+      "tolerance": {
+        "cusps": 1e-9
+      },
+      "unit": {
+        "cusps": "°"
+      },
+      "notes": "Границы знака (0°, 29.9999°, 30°) проверяют корректность floor-деления."
+    },
+    {
+      "id": "houses-equal-asc-185.9958",
+      "category": "houses",
+      "method": "houseCusps(equal)",
+      "methodologyVersion": "equal-v1",
+      "oracle": {
+        "source": "Определение системы Equal (куспид I = Асцендент, далее +30°)",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "asc": 185.9958
+      },
+      "expected": {
+        "cusps": [
+          185.99580000000003,
+          215.99580000000003,
+          245.99580000000003,
+          275.99580000000003,
+          305.99580000000003,
+          335.99580000000003,
+          5.995800000000031,
+          35.99580000000003,
+          65.99580000000003,
+          95.99580000000003,
+          125.99580000000003,
+          155.99580000000003
+        ]
+      },
+      "tolerance": {
+        "cusps": 1e-9
+      },
+      "unit": {
+        "cusps": "°"
+      },
+      "notes": ""
+    },
+    {
+      "id": "houses-whole-asc-359.5",
+      "category": "houses",
+      "method": "houseCusps(whole)",
+      "methodologyVersion": "whole-sign-v1",
+      "oracle": {
+        "source": "Определение системы Whole-sign (куспид I = 0° знака Асцендента)",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "asc": 359.5
+      },
+      "expected": {
+        "cusps": [
+          330,
+          0,
+          30,
+          60,
+          90,
+          120,
+          150,
+          180,
+          210,
+          240,
+          270,
+          300
+        ]
+      },
+      "tolerance": {
+        "cusps": 1e-9
+      },
+      "unit": {
+        "cusps": "°"
+      },
+      "notes": "Границы знака (0°, 29.9999°, 30°) проверяют корректность floor-деления."
+    },
+    {
+      "id": "houses-equal-asc-359.5",
+      "category": "houses",
+      "method": "houseCusps(equal)",
+      "methodologyVersion": "equal-v1",
+      "oracle": {
+        "source": "Определение системы Equal (куспид I = Асцендент, далее +30°)",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "asc": 359.5
+      },
+      "expected": {
+        "cusps": [
+          359.5,
+          29.5,
+          59.5,
+          89.5,
+          119.5,
+          149.5,
+          179.5,
+          209.5,
+          239.5,
+          269.5,
+          299.5,
+          329.5
+        ]
+      },
+      "tolerance": {
+        "cusps": 1e-9
+      },
+      "unit": {
+        "cusps": "°"
+      },
+      "notes": ""
+    },
+    {
+      "id": "fortune-100-50-200-day",
+      "category": "points",
+      "method": "partOfFortune",
+      "methodologyVersion": "classical-day-night-v1",
+      "oracle": {
+        "source": "Классическое определение: день Asc+Луна−Солнце, ночь Asc+Солнце−Луна",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "asc": 100,
+        "sun": 50,
+        "moon": 200,
+        "isDay": true
+      },
+      "expected": {
+        "lon": 250
+      },
+      "tolerance": {
+        "lon": 1e-9
+      },
+      "unit": {
+        "lon": "°"
+      },
+      "notes": "Включён случай с переходом через 0° (Солнце 350°, Луна 20°)."
+    },
+    {
+      "id": "fortune-100-50-200-night",
+      "category": "points",
+      "method": "partOfFortune",
+      "methodologyVersion": "classical-day-night-v1",
+      "oracle": {
+        "source": "Классическое определение: день Asc+Луна−Солнце, ночь Asc+Солнце−Луна",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "asc": 100,
+        "sun": 50,
+        "moon": 200,
+        "isDay": false
+      },
+      "expected": {
+        "lon": 310
+      },
+      "tolerance": {
+        "lon": 1e-9
+      },
+      "unit": {
+        "lon": "°"
+      },
+      "notes": "Включён случай с переходом через 0° (Солнце 350°, Луна 20°)."
+    },
+    {
+      "id": "fortune-10-350-20-day",
+      "category": "points",
+      "method": "partOfFortune",
+      "methodologyVersion": "classical-day-night-v1",
+      "oracle": {
+        "source": "Классическое определение: день Asc+Луна−Солнце, ночь Asc+Солнце−Луна",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "asc": 10,
+        "sun": 350,
+        "moon": 20,
+        "isDay": true
+      },
+      "expected": {
+        "lon": 40
+      },
+      "tolerance": {
+        "lon": 1e-9
+      },
+      "unit": {
+        "lon": "°"
+      },
+      "notes": "Включён случай с переходом через 0° (Солнце 350°, Луна 20°)."
+    },
+    {
+      "id": "fortune-0-0-0-day",
+      "category": "points",
+      "method": "partOfFortune",
+      "methodologyVersion": "classical-day-night-v1",
+      "oracle": {
+        "source": "Классическое определение: день Asc+Луна−Солнце, ночь Asc+Солнце−Луна",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "asc": 0,
+        "sun": 0,
+        "moon": 0,
+        "isDay": true
+      },
+      "expected": {
+        "lon": 0
+      },
+      "tolerance": {
+        "lon": 1e-9
+      },
+      "unit": {
+        "lon": "°"
+      },
+      "notes": "Включён случай с переходом через 0° (Солнце 350°, Луна 20°)."
+    },
+    {
+      "id": "harmonic-100-h5",
+      "category": "natal",
+      "method": "computeHarmonic",
+      "methodologyVersion": "harmonic-v1",
+      "oracle": {
+        "source": "Определение гармонической карты: H_n(λ) = (n·λ) mod 360",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "lon": 100,
+        "n": 5
+      },
+      "expected": {
+        "lon": 140
+      },
+      "tolerance": {
+        "lon": 1e-9
+      },
+      "unit": {
+        "lon": "°"
+      },
+      "notes": ""
+    },
+    {
+      "id": "harmonic-359-h7",
+      "category": "natal",
+      "method": "computeHarmonic",
+      "methodologyVersion": "harmonic-v1",
+      "oracle": {
+        "source": "Определение гармонической карты: H_n(λ) = (n·λ) mod 360",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "lon": 359,
+        "n": 7
+      },
+      "expected": {
+        "lon": 353
+      },
+      "tolerance": {
+        "lon": 1e-9
+      },
+      "unit": {
+        "lon": "°"
+      },
+      "notes": ""
+    },
+    {
+      "id": "harmonic-0-h9",
+      "category": "natal",
+      "method": "computeHarmonic",
+      "methodologyVersion": "harmonic-v1",
+      "oracle": {
+        "source": "Определение гармонической карты: H_n(λ) = (n·λ) mod 360",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "lon": 0,
+        "n": 9
+      },
+      "expected": {
+        "lon": 0
+      },
+      "tolerance": {
+        "lon": 1e-9
+      },
+      "unit": {
+        "lon": "°"
+      },
+      "notes": ""
+    },
+    {
+      "id": "harmonic-180-h2",
+      "category": "natal",
+      "method": "computeHarmonic",
+      "methodologyVersion": "harmonic-v1",
+      "oracle": {
+        "source": "Определение гармонической карты: H_n(λ) = (n·λ) mod 360",
+        "version": "classical",
+        "verification": "независимая реализация определения"
+      },
+      "input": {
+        "lon": 180,
+        "n": 2
+      },
+      "expected": {
+        "lon": 0
+      },
+      "tolerance": {
+        "lon": 1e-9
+      },
+      "unit": {
+        "lon": "°"
+      },
+      "notes": ""
+    },
+    {
+      "id": "ayanamsha-lahiri-d0",
+      "category": "vedic",
+      "method": "ayanamsha",
+      "methodologyVersion": "linear-precession-v1(50.2888\"/год)",
+      "oracle": {
+        "source": "Линейная модель: значение на J2000 + постоянная прецессия 50.2888″/год",
+        "version": "linear-v1",
+        "verification": "независимый пересчёт модели (ловит дрейф коэффициента и опорного значения)"
+      },
+      "input": {
+        "key": "lahiri",
+        "daysFromJ2000": 0
+      },
+      "expected": {
+        "ayanamsha": 23.85306
+      },
+      "tolerance": {
+        "ayanamsha": 0.000001
+      },
+      "unit": {
+        "ayanamsha": "°"
+      },
+      "notes": "ЛИНЕЙНАЯ модель, не эфемеридная Лахири. Ограничение зафиксировано как L-AYANAMSHA-LINEAR. Допуск учитывает шкалу TT против UT."
+    },
+    {
+      "id": "ayanamsha-lahiri-d9131",
+      "category": "vedic",
+      "method": "ayanamsha",
+      "methodologyVersion": "linear-precession-v1(50.2888\"/год)",
+      "oracle": {
+        "source": "Линейная модель: значение на J2000 + постоянная прецессия 50.2888″/год",
+        "version": "linear-v1",
+        "verification": "независимый пересчёт модели (ловит дрейф коэффициента и опорного значения)"
+      },
+      "input": {
+        "key": "lahiri",
+        "daysFromJ2000": 9131.25
+      },
+      "expected": {
+        "ayanamsha": 24.202287777777777
+      },
+      "tolerance": {
+        "ayanamsha": 0.000001
+      },
+      "unit": {
+        "ayanamsha": "°"
+      },
+      "notes": "ЛИНЕЙНАЯ модель, не эфемеридная Лахири. Ограничение зафиксировано как L-AYANAMSHA-LINEAR. Допуск учитывает шкалу TT против UT."
+    },
+    {
+      "id": "ayanamsha-raman-d0",
+      "category": "vedic",
+      "method": "ayanamsha",
+      "methodologyVersion": "linear-precession-v1(50.2888\"/год)",
+      "oracle": {
+        "source": "Линейная модель: значение на J2000 + постоянная прецессия 50.2888″/год",
+        "version": "linear-v1",
+        "verification": "независимый пересчёт модели (ловит дрейф коэффициента и опорного значения)"
+      },
+      "input": {
+        "key": "raman",
+        "daysFromJ2000": 0
+      },
+      "expected": {
+        "ayanamsha": 22.49703
+      },
+      "tolerance": {
+        "ayanamsha": 0.000001
+      },
+      "unit": {
+        "ayanamsha": "°"
+      },
+      "notes": "ЛИНЕЙНАЯ модель, не эфемеридная Лахири. Ограничение зафиксировано как L-AYANAMSHA-LINEAR. Допуск учитывает шкалу TT против UT."
+    },
+    {
+      "id": "ayanamsha-raman-d9131",
+      "category": "vedic",
+      "method": "ayanamsha",
+      "methodologyVersion": "linear-precession-v1(50.2888\"/год)",
+      "oracle": {
+        "source": "Линейная модель: значение на J2000 + постоянная прецессия 50.2888″/год",
+        "version": "linear-v1",
+        "verification": "независимый пересчёт модели (ловит дрейф коэффициента и опорного значения)"
+      },
+      "input": {
+        "key": "raman",
+        "daysFromJ2000": 9131.25
+      },
+      "expected": {
+        "ayanamsha": 22.846257777777776
+      },
+      "tolerance": {
+        "ayanamsha": 0.000001
+      },
+      "unit": {
+        "ayanamsha": "°"
+      },
+      "notes": "ЛИНЕЙНАЯ модель, не эфемеридная Лахири. Ограничение зафиксировано как L-AYANAMSHA-LINEAR. Допуск учитывает шкалу TT против UT."
+    },
+    {
+      "id": "ayanamsha-kp-d0",
+      "category": "vedic",
+      "method": "ayanamsha",
+      "methodologyVersion": "linear-precession-v1(50.2888\"/год)",
+      "oracle": {
+        "source": "Линейная модель: значение на J2000 + постоянная прецессия 50.2888″/год",
+        "version": "linear-v1",
+        "verification": "независимый пересчёт модели (ловит дрейф коэффициента и опорного значения)"
+      },
+      "input": {
+        "key": "kp",
+        "daysFromJ2000": 0
+      },
+      "expected": {
+        "ayanamsha": 23.7521
+      },
+      "tolerance": {
+        "ayanamsha": 0.000001
+      },
+      "unit": {
+        "ayanamsha": "°"
+      },
+      "notes": "ЛИНЕЙНАЯ модель, не эфемеридная Лахири. Ограничение зафиксировано как L-AYANAMSHA-LINEAR. Допуск учитывает шкалу TT против UT."
+    },
+    {
+      "id": "ayanamsha-kp-d9131",
+      "category": "vedic",
+      "method": "ayanamsha",
+      "methodologyVersion": "linear-precession-v1(50.2888\"/год)",
+      "oracle": {
+        "source": "Линейная модель: значение на J2000 + постоянная прецессия 50.2888″/год",
+        "version": "linear-v1",
+        "verification": "независимый пересчёт модели (ловит дрейф коэффициента и опорного значения)"
+      },
+      "input": {
+        "key": "kp",
+        "daysFromJ2000": 9131.25
+      },
+      "expected": {
+        "ayanamsha": 24.101327777777776
+      },
+      "tolerance": {
+        "ayanamsha": 0.000001
+      },
+      "unit": {
+        "ayanamsha": "°"
+      },
+      "notes": "ЛИНЕЙНАЯ модель, не эфемеридная Лахири. Ограничение зафиксировано как L-AYANAMSHA-LINEAR. Допуск учитывает шкалу TT против UT."
+    },
+    {
+      "id": "ayanamsha-fagan-d0",
+      "category": "vedic",
+      "method": "ayanamsha",
+      "methodologyVersion": "linear-precession-v1(50.2888\"/год)",
+      "oracle": {
+        "source": "Линейная модель: значение на J2000 + постоянная прецессия 50.2888″/год",
+        "version": "linear-v1",
+        "verification": "независимый пересчёт модели (ловит дрейф коэффициента и опорного значения)"
+      },
+      "input": {
+        "key": "fagan",
+        "daysFromJ2000": 0
+      },
+      "expected": {
+        "ayanamsha": 24.73631
+      },
+      "tolerance": {
+        "ayanamsha": 0.000001
+      },
+      "unit": {
+        "ayanamsha": "°"
+      },
+      "notes": "ЛИНЕЙНАЯ модель, не эфемеридная Лахири. Ограничение зафиксировано как L-AYANAMSHA-LINEAR. Допуск учитывает шкалу TT против UT."
+    },
+    {
+      "id": "ayanamsha-fagan-d9131",
+      "category": "vedic",
+      "method": "ayanamsha",
+      "methodologyVersion": "linear-precession-v1(50.2888\"/год)",
+      "oracle": {
+        "source": "Линейная модель: значение на J2000 + постоянная прецессия 50.2888″/год",
+        "version": "linear-v1",
+        "verification": "независимый пересчёт модели (ловит дрейф коэффициента и опорного значения)"
+      },
+      "input": {
+        "key": "fagan",
+        "daysFromJ2000": 9131.25
+      },
+      "expected": {
+        "ayanamsha": 25.085537777777777
+      },
+      "tolerance": {
+        "ayanamsha": 0.000001
+      },
+      "unit": {
+        "ayanamsha": "°"
+      },
+      "notes": "ЛИНЕЙНАЯ модель, не эфемеридная Лахири. Ограничение зафиксировано как L-AYANAMSHA-LINEAR. Допуск учитывает шкалу TT против UT."
+    },
+    {
+      "id": "ayanamsha-yukteshwar-d0",
+      "category": "vedic",
+      "method": "ayanamsha",
+      "methodologyVersion": "linear-precession-v1(50.2888\"/год)",
+      "oracle": {
+        "source": "Линейная модель: значение на J2000 + постоянная прецессия 50.2888″/год",
+        "version": "linear-v1",
+        "verification": "независимый пересчёт модели (ловит дрейф коэффициента и опорного значения)"
+      },
+      "input": {
+        "key": "yukteshwar",
+        "daysFromJ2000": 0
+      },
+      "expected": {
+        "ayanamsha": 22.7466
+      },
+      "tolerance": {
+        "ayanamsha": 0.000001
+      },
+      "unit": {
+        "ayanamsha": "°"
+      },
+      "notes": "ЛИНЕЙНАЯ модель, не эфемеридная Лахири. Ограничение зафиксировано как L-AYANAMSHA-LINEAR. Допуск учитывает шкалу TT против UT."
+    },
+    {
+      "id": "ayanamsha-yukteshwar-d9131",
+      "category": "vedic",
+      "method": "ayanamsha",
+      "methodologyVersion": "linear-precession-v1(50.2888\"/год)",
+      "oracle": {
+        "source": "Линейная модель: значение на J2000 + постоянная прецессия 50.2888″/год",
+        "version": "linear-v1",
+        "verification": "независимый пересчёт модели (ловит дрейф коэффициента и опорного значения)"
+      },
+      "input": {
+        "key": "yukteshwar",
+        "daysFromJ2000": 9131.25
+      },
+      "expected": {
+        "ayanamsha": 23.095827777777778
+      },
+      "tolerance": {
+        "ayanamsha": 0.000001
+      },
+      "unit": {
+        "ayanamsha": "°"
+      },
+      "notes": "ЛИНЕЙНАЯ модель, не эфемеридная Лахири. Ограничение зафиксировано как L-AYANAMSHA-LINEAR. Допуск учитывает шкалу TT против UT."
+    },
+    {
+      "id": "fact-march-equinox-window",
+      "category": "ephemeris",
+      "method": "SunPosition→elon=0",
+      "methodologyVersion": "astronomical-fact",
+      "oracle": {
+        "source": "Астрономический факт: мартовское равноденствие приходится на 19–21 марта UTC",
+        "version": "n/a",
+        "verification": "общеизвестный календарный факт, не зависящий от реализации"
+      },
+      "input": {
+        "years": [
+          1950,
+          1984,
+          2000,
+          2024
+        ]
+      },
+      "expected": {
+        "dayOfMarchMin": 19,
+        "dayOfMarchMax": 21
+      },
+      "tolerance": {
+        "days": 0
+      },
+      "unit": {
+        "days": "сутки"
+      },
+      "notes": "Ловит грубый сдвиг шкалы времени или системы отсчёта долгот."
+    },
+    {
+      "id": "fact-mean-synodic-month",
+      "category": "ephemeris",
+      "method": "newMoonSpacing",
+      "methodologyVersion": "astronomical-constant",
+      "oracle": {
+        "source": "Meeus, гл. 49: средний синодический месяц 29.530588861 сут",
+        "version": "2nd-ed-1998",
+        "verification": "опубликованная константа"
+      },
+      "input": {
+        "spanDays": 3000,
+        "startISO": "2000-01-06T00:00:00Z"
+      },
+      "expected": {
+        "meanSynodicMonth": 29.530588861
+      },
+      "tolerance": {
+        "meanSynodicMonth": 0.02
+      },
+      "unit": {
+        "meanSynodicMonth": "сутки"
+      },
+      "notes": "Усреднение по ~100 лунациям гасит реальную вариацию отдельных месяцев (±0.3 сут)."
+    },
+    {
+      "id": "fact-luminaries-never-retrograde",
+      "category": "ephemeris",
+      "method": "computeNatalChart.retro",
+      "methodologyVersion": "astronomical-fact",
+      "oracle": {
+        "source": "Астрономический факт: геоцентрические Солнце и Луна не бывают ретроградными",
+        "version": "n/a",
+        "verification": "определение видимого геоцентрического движения"
+      },
+      "input": {
+        "samples": 60
+      },
+      "expected": {
+        "sunRetro": false,
+        "moonRetro": false
+      },
+      "tolerance": {},
+      "unit": {},
+      "notes": ""
+    },
+    {
+      "id": "angles-definition-geometry",
+      "category": "natal",
+      "method": "computeNatalChart.angles",
+      "methodologyVersion": "spherical-astronomy-definition",
+      "oracle": {
+        "source": "Определения MC и Asc в сферической астрономии (Meeus, гл. 13)",
+        "version": "2nd-ed-1998",
+        "verification": "обратное преобразование эклиптика→экватор и проверка определения, а не повтор формулы production"
+      },
+      "input": {
+        "note": "набор широт/времён задаётся в runner"
+      },
+      "expected": {
+        "mcRaEqualsRamcDeg": 0,
+        "ascAltitudeDeg": 0
+      },
+      "tolerance": {
+        "mcRaEqualsRamcDeg": 0.02,
+        "ascAltitudeDeg": 0.02
+      },
+      "unit": {
+        "mcRaEqualsRamcDeg": "°",
+        "ascAltitudeDeg": "°"
+      },
+      "notes": "Допуск 0.02° покрывает расхождение ε(J2000) в production и ε(date) в эталоне."
+    }
+  ]
+}

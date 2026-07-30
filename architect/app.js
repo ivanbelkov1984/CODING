@@ -4026,7 +4026,16 @@ function computeNatalChart(birth) {
       if (Math.abs(sep - asp.angle) <= asp.orb) { aspects.push({ a: planets[i].name, b: planets[j].name, name: asp.name, exact: Math.abs(sep - asp.angle).toFixed(1) }); break; }
     }
   }
-  return { planets, asteroids, points, antiscia, angles, houses, housesMeta, aspects, timeKnown: !!birth.timeKnown, versions: { ...ASTRO_VERSIONS, houses: (birth.houseSystem || 'whole') + '-v1', asteroids: 'jpl-sbdb-2body@JD2461200.5' } };
+  // Wave 3 (issue #154), дефект provenance: раньше versions.houses сообщал
+  // ЗАПРОШЕННУЮ систему домов, а не ту, которой куспиды реально посчитаны.
+  // На широтах за полярным кругом квадрантные системы не имеют решения, и
+  // полярный страж выше честно откатывается на whole-sign (housesMeta.system
+  // + fallbackFrom) — но versions.houses при этом продолжал утверждать,
+  // например, «koch-v1». Метаданные карты обязаны описывать фактическую
+  // методологию, иначе провенанс молча врёт (минимальный контрпример
+  // property-теста: lat=83.4692, houseSystem='koch').
+  const usedHouseSystem = housesMeta ? housesMeta.system : (birth.houseSystem || 'whole');
+  return { planets, asteroids, points, antiscia, angles, houses, housesMeta, aspects, timeKnown: !!birth.timeKnown, versions: { ...ASTRO_VERSIONS, houses: usedHouseSystem + '-v1', housesRequested: (birth.houseSystem || 'whole') + '-v1', asteroids: 'jpl-sbdb-2body@JD2461200.5' } };
 }
 // ─── АСТЕРОИДЫ И ДОПОЛНИТЕЛЬНЫЕ ТОЧКИ (очередь 1.2) ─────────────────
 // Астероиды/Хирон: кеплеровские элементы JPL Small-Body Database
@@ -5288,6 +5297,79 @@ function computeTransits(natalChart, at) {
   }
   return { current, hits, versions: { ...ASTRO_VERSIONS, transitOrbPolicy: 'transit-orbs-v1(3)' }, at: (at || new Date()).toISOString() };
 }
+
+// ─── ПРОЕКЦИЯ АСТРОСОБЫТИЙ (Wave 3, issue #154, §16) ─────────────────
+// Read-only нормализованная проекция для БУДУЩЕЙ Волны 4.1. В этой волне
+// НЕ подключается к «Закономерностям» — ни один вызывающий её код в
+// production не добавлен намеренно.
+//
+// Контракт проекции:
+//  • ничего не дублирует в DB и ничего не персистирует;
+//  • детерминирована: одинаковый вход → одинаковые id, порядок и состав;
+//  • нет астроданных → пустой массив (не выдумывает события);
+//  • неизвестное время рождения → события, зависящие от домов/углов,
+//    ИСКЛЮЧАЮТСЯ (нет ложной точности);
+//  • в tags только расчётные факты, без интерпретационных текстов.
+const ASTRO_PROJECTION_VERSION = 'astro-projection-v1';
+function astroEventProjection(opts = {}) {
+  const out = [];
+  const birth = DB.astroBirth;
+  if (!birth || !birth.date || !window.Astronomy) return out;   // нет данных → пусто
+
+  const days = Math.max(1, Math.min(400, opts.days || 30));
+  const end = opts.at ? new Date(opts.at) : new Date();
+  const chart = computeNatalChart(birth);
+  const timeKnown = !!chart.timeKnown;
+
+  // Транзитные аспекты: суточная выборка в полдень UTC, дедупликация по
+  // (транзитное тело, аспект, натальное тело) с датой ПЕРВОГО попадания в
+  // окно — устойчиво к повторным прохождениям из-за ретроградности.
+  const seen = new Map();
+  for (let d = days - 1; d >= 0; d--) {
+    const at = new Date(Date.UTC(
+      end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate() - d, 12, 0, 0));
+    const tr = computeTransits(chart, at);
+    for (const hit of tr.hits) {
+      const key = `${hit.transit}|${hit.aspect}|${hit.natal}`;
+      if (!seen.has(key)) seen.set(key, { hit, at, orb: parseFloat(hit.exact) });
+      else if (parseFloat(hit.exact) < seen.get(key).orb) {
+        // Более точное схождение внутри окна — уточняем дату пика, но не
+        // создаём второе событие.
+        seen.set(key, { hit, at, orb: parseFloat(hit.exact) });
+      }
+    }
+  }
+
+  for (const [key, { hit, at, orb }] of seen) {
+    const day = at.toISOString().slice(0, 10);
+    out.push({
+      // id стабилен: зависит только от содержания события, не от порядка обхода.
+      id: `astro:transit:${day}:${key}`,
+      type: 'astro_transit_aspect',
+      date: day,
+      time: null,                       // суточная выборка — точное время не заявляем
+      tags: [`astro:transit:${hit.transit}`, `astro:aspect:${hit.aspect}`, `astro:natal:${hit.natal}`],
+      importance: orb <= 1 ? 3 : (orb <= 2 ? 2 : 1),
+      sourceCollection: 'astroBirth',
+      referenceId: 'astroBirth',
+      methodologyId: `${ASTRO_VERSIONS.ruleset}/transit-orbs-v1(${TRANSIT_ORB})`,
+      // Уверенность честно понижена при неизвестном времени рождения: сама
+      // натальная позиция планет тогда посчитана на полдень.
+      confidence: timeKnown ? 'medium' : 'low',
+      provenance: {
+        engine: ASTRO_VERSIONS.engine,
+        projection: ASTRO_PROJECTION_VERSION,
+        birthTimeKnown: timeKnown,
+        orbDeg: orb,
+      },
+    });
+  }
+
+  // Детерминированный порядок: дата, затем id — не зависит от порядка Map.
+  out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
+  return out;
+}
+
 // Текстовая карточка транзитного аспекта (Слой 1: transitGift/Verb + темы).
 function transitHitText(h) {
   const R = window.ASTRO_RULES; if (!R || !R.transitGift) return null;
