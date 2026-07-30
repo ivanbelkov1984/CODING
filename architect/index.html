@@ -488,8 +488,15 @@
       </div>
       <div class="tog-row" style="border-bottom:none;padding:.15rem 0"><span class="tog-lbl">Время известно точно</span><div class="tog" id="ab-time-known" onclick="this.classList.toggle('on');updateHouseAssist()" role="switch"></div></div>
       <div style="display:flex;gap:.5rem">
-        <div style="flex:1"><div class="f-lbl">UTC-офсет места</div><input class="field" id="ab-utc" placeholder="напр. 3 или 5.5"></div>
+        <div style="flex:1"><div class="f-lbl">UTC-офсет места</div><input class="field" id="ab-utc" placeholder="напр. 3 или 5.5" inputmode="decimal"></div>
         <div style="flex:2"><div class="f-lbl">Место (название)</div><input class="field" id="ab-place" placeholder="город"></div>
+      </div>
+      <!-- Wave 3 (issue #154, ревью п.7): приложение НЕ определяет смещение
+           само и не знает историю переводов часов. Для рождения в прошлом
+           текущий офсет города может отличаться от действовавшего тогда, и
+           ошибка сдвигает Asc/MC/дома. Поэтому требование сказано явно. -->
+      <div id="ab-utc-hint" class="si-text" style="color:var(--t4);font-size:.72rem;line-height:1.5;margin:-.15rem 0 .1rem">
+        Укажите смещение, действовавшее в дату и в месте рождения, включая историческое летнее и декретное время, — а не сегодняшнее смещение города. Допустимый диапазон: от −12 до +14, дробное задаётся точкой (например 5.5).
       </div>
       <div style="display:flex;gap:.5rem">
         <div style="flex:1"><div class="f-lbl">Широта</div><input class="field" id="ab-lat" placeholder="55.75" oninput="updateHouseAssist()"></div>

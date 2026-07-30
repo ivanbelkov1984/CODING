@@ -4026,7 +4026,16 @@ function computeNatalChart(birth) {
       if (Math.abs(sep - asp.angle) <= asp.orb) { aspects.push({ a: planets[i].name, b: planets[j].name, name: asp.name, exact: Math.abs(sep - asp.angle).toFixed(1) }); break; }
     }
   }
-  return { planets, asteroids, points, antiscia, angles, houses, housesMeta, aspects, timeKnown: !!birth.timeKnown, versions: { ...ASTRO_VERSIONS, houses: (birth.houseSystem || 'whole') + '-v1', asteroids: 'jpl-sbdb-2body@JD2461200.5' } };
+  // Wave 3 (issue #154), дефект provenance: раньше versions.houses сообщал
+  // ЗАПРОШЕННУЮ систему домов, а не ту, которой куспиды реально посчитаны.
+  // На широтах за полярным кругом квадрантные системы не имеют решения, и
+  // полярный страж выше честно откатывается на whole-sign (housesMeta.system
+  // + fallbackFrom) — но versions.houses при этом продолжал утверждать,
+  // например, «koch-v1». Метаданные карты обязаны описывать фактическую
+  // методологию, иначе провенанс молча врёт (минимальный контрпример
+  // property-теста: lat=83.4692, houseSystem='koch').
+  const usedHouseSystem = housesMeta ? housesMeta.system : (birth.houseSystem || 'whole');
+  return { planets, asteroids, points, antiscia, angles, houses, housesMeta, aspects, timeKnown: !!birth.timeKnown, versions: { ...ASTRO_VERSIONS, houses: usedHouseSystem + '-v1', housesRequested: (birth.houseSystem || 'whole') + '-v1', asteroids: 'jpl-sbdb-2body@JD2461200.5' } };
 }
 // ─── АСТЕРОИДЫ И ДОПОЛНИТЕЛЬНЫЕ ТОЧКИ (очередь 1.2) ─────────────────
 // Астероиды/Хирон: кеплеровские элементы JPL Small-Body Database
@@ -5288,6 +5297,129 @@ function computeTransits(natalChart, at) {
   }
   return { current, hits, versions: { ...ASTRO_VERSIONS, transitOrbPolicy: 'transit-orbs-v1(3)' }, at: (at || new Date()).toISOString() };
 }
+
+// ─── ПРОЕКЦИЯ АСТРОСОБЫТИЙ (Wave 3, issue #154, §16) ─────────────────
+// Read-only нормализованная проекция для БУДУЩЕЙ Волны 4.1. В этой волне
+// НЕ подключается к «Закономерностям» — ни один вызывающий её код в
+// production не добавлен намеренно.
+//
+// Контракт проекции:
+//  • ничего не дублирует в DB и ничего не персистирует;
+//  • детерминирована: одинаковый вход → одинаковые id, порядок и состав;
+//  • нет астроданных → пустой массив (не выдумывает события);
+//  • неизвестное время рождения → события, зависящие от домов/углов,
+//    ИСКЛЮЧАЮТСЯ (нет ложной точности);
+//  • в tags только расчётные факты, без интерпретационных текстов.
+const ASTRO_PROJECTION_VERSION = 'astro-projection-v1';
+function astroEventProjection(opts = {}) {
+  const out = [];
+  const birth = DB.astroBirth;
+  if (!birth || !birth.date || !window.Astronomy) return out;   // нет данных → пусто
+
+  const days = Math.max(1, Math.min(400, opts.days || 30));
+  const end = opts.at ? new Date(opts.at) : new Date();
+  const chart = computeNatalChart(birth);
+  const timeKnown = !!chart.timeKnown;
+
+  // Owner review #4816670495: отдельное прохождение нельзя определять по
+  // ВЫХОДУ пары из орбиса. Ход direct → retrograde → direct даёт несколько
+  // точных сближений, НЕ покидая 3° орбиса ни на сутки, — и такие физически
+  // разные прохождения схлопывались в одно событие. Ряд вида
+  // 2.5 → 1.0 → 0.2 → 1.1 → 0.3 → 1.2 → 2.4 обязан дать ДВА события.
+  //
+  // Теперь прохождение = ЛОКАЛЬНЫЙ МИНИМУМ абсолютного орбиса. Сутки d
+  // считаются пиком, если orb(d) ≤ orb(d−1) и orb(d) < orb(d+1); сутки вне
+  // орбиса участвуют как +∞, поэтому вход и выход из орбиса обрабатываются
+  // тем же правилом без отдельной ветки. Нестрогое сравнение слева и строгое
+  // справа детерминированно выбирают первые сутки плато при равных орбисах.
+  //
+  // Прежнего произвольного запаса MARGIN_DAYS больше нет: пик полностью
+  // определяется ТРЕМЯ соседними суточными выборками, поэтому окно
+  // расширяется ровно на ±1 сутки — минимальная окрестность, необходимая
+  // чтобы вычислить признак локального минимума на самих краях окна. Ни дата
+  // пика, ни id не зависят от того, каким окном пользователь смотрит на
+  // событие, даже если пара остаётся в орбисе месяцами.
+  const dayMs = 864e5;
+  const endDay = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate(), 12, 0, 0);
+  const windowFrom = endDay - (days - 1) * dayMs;
+
+  // Орбис берём с ПОЛНОЙ точностью, а не из строки `hit.exact`: она округлена
+  // до 0.1° (`toFixed(1)`) для показа пользователю, и на монотонном расхождении
+  // превращает ряд в ступеньки вида 0.7, 0.7, 0.7, 0.8, 0.8… Последняя точка
+  // каждой ступеньки выглядела бы локальным минимумом, и одно плавное
+  // расхождение (например, Плутон в квадрате к своему натальному месту)
+  // порождало бы десятки ложных «прохождений». На полной точности ряд строго
+  // монотонен, и признак локального минимума срабатывает только на настоящих
+  // сближениях. Числа берутся из собственного вывода computeTransits и карты,
+  // эфемерида здесь не пересчитывается.
+  const aspectAngle = {};
+  for (const a of ASTRO_ASPECTS) aspectAngle[a.name] = a.angle;
+  const natalLon = {};
+  for (const p of chart.planets) natalLon[p.name] = p.lon;
+
+  const samples = [];
+  for (let ms = windowFrom - dayMs; ms <= endDay + dayMs; ms += dayMs) {
+    const byKey = new Map();
+    const tr = computeTransits(chart, new Date(ms));
+    const curLon = {};
+    for (const p of (tr.current || [])) curLon[p.name] = p.lon;
+    for (const hit of tr.hits) {
+      const a = curLon[hit.transit], b = natalLon[hit.natal], ang = aspectAngle[hit.aspect];
+      // Точный орбис, если доступны обе долготы; иначе — честный откат на
+      // округлённое значение (используется подменённым computeTransits в тестах).
+      const orb = (a != null && b != null && ang != null)
+        ? Math.abs(Math.abs(((a - b + 180) % 360 + 360) % 360 - 180) - ang)
+        : parseFloat(hit.exact);
+      byKey.set(`${hit.transit}|${hit.aspect}|${hit.natal}`, { hit, orb });
+    }
+    samples.push({ ms, byKey });
+  }
+  const orbAt = (i, key) => {
+    if (i < 0 || i >= samples.length) return Infinity;      // вне интервала выборки
+    const s = samples[i].byKey.get(key);
+    return s ? s.orb : Infinity;                            // вне орбиса
+  };
+
+  for (let i = 1; i < samples.length - 1; i++) {
+    const s = samples[i];
+    if (s.ms < windowFrom || s.ms > endDay) continue;        // краевые сутки — только опора
+    for (const [key, cur] of s.byKey) {
+      // Локальный минимум орбиса ⇒ отдельное точное сближение.
+      if (!(cur.orb <= orbAt(i - 1, key) && cur.orb < orbAt(i + 1, key))) continue;
+      const peakDay = new Date(s.ms).toISOString().slice(0, 10);
+      const orb = cur.orb;
+      out.push({
+        // id = пара + дата пика. Обе составляющие внутренние для самого
+        // прохождения, поэтому одно физическое сближение имеет один и тот же
+        // id в любых перекрывающихся окнах.
+        id: `astro:transit:${key}:${peakDay}`,
+        type: 'astro_transit_aspect',
+        date: peakDay,
+        time: null,                     // суточная дискретизация — точное время не заявляем
+        tags: [`astro:transit:${cur.hit.transit}`, `astro:aspect:${cur.hit.aspect}`, `astro:natal:${cur.hit.natal}`],
+        importance: orb <= 1 ? 3 : (orb <= 2 ? 2 : 1),
+        sourceCollection: 'astroBirth',
+        referenceId: 'astroBirth',
+        methodologyId: `${ASTRO_VERSIONS.ruleset}/transit-orbs-v1(${TRANSIT_ORB})`,
+        // Уверенность честно понижена при неизвестном времени рождения: сама
+        // натальная позиция планет тогда посчитана на полдень.
+        confidence: timeKnown ? 'medium' : 'low',
+        provenance: {
+          engine: ASTRO_VERSIONS.engine,
+          projection: ASTRO_PROJECTION_VERSION,
+          birthTimeKnown: timeKnown,
+          orbDeg: orb,
+          peakRule: 'local-minimum-of-abs-orb(daily)',
+        },
+      });
+    }
+  }
+
+  // Детерминированный порядок: дата, затем id — не зависит от порядка Map.
+  out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
+  return out;
+}
+
 // Текстовая карточка транзитного аспекта (Слой 1: transitGift/Verb + темы).
 function transitHitText(h) {
   const R = window.ASTRO_RULES; if (!R || !R.transitGift) return null;
@@ -5360,6 +5492,13 @@ function saveAstroBirth() {
   const time = ($('ab-time') ? $('ab-time').value : '').trim();
   if (timeKnown && !/^\d{2}:\d{2}$/.test(time)) { toast('Время в формате ЧЧ:ММ', 'warn'); return; }
   const utcOffset = parseFloat($('ab-utc') ? $('ab-utc').value : '0') || 0;
+  // Wave 3 (issue #154, ревью п.7): реальные зоны лежат в [−12, +14].
+  // Значение вне диапазона — почти всегда опечатка, а она молча сдвигает
+  // Asc/MC/дома, и пользователь не поймёт причину. Отказ вместо тихого приёма.
+  if (!(utcOffset >= -12 && utcOffset <= 14)) {
+    toast('UTC-офсет должен быть от −12 до +14 (укажите смещение, действовавшее в дату рождения)', 'warn');
+    return;
+  }
   const lat = parseFloat($('ab-lat') ? $('ab-lat').value : ''); const lon = parseFloat($('ab-lon') ? $('ab-lon').value : '');
   DB.astroBirth = {
     kType: 'birth_evidence', privacyClass: 'sensitive',
