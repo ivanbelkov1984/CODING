@@ -246,6 +246,16 @@
     <div id="ov-health"></div>
     <div id="ov-livingdig"></div>
     <div class="mx mb"><button type="button" class="btn btn-s btn-full" onclick="sysGo('detail')"><i data-lucide="bar-chart-3"></i>Подробный обзор (месяц/год)</button></div>
+    <div class="mx mb"><button type="button" class="btn btn-s btn-full" onclick="sysGo('patterns')"><i data-lucide="git-branch"></i>Закономерности</button></div>
+    <div style="height:5rem"></div>
+  </div>
+  <!-- Wave 4 (issue #152): «Закономерности» — третий режим этого же экрана
+       «Итоги» (тот же паттерн переключения видимости, что и overview↔detail),
+       без нового top-level раздела и без изменения canonical hashes. -->
+  <div id="sys-patterns" style="display:none">
+    <button type="button" class="btn btn-s" id="sys-patterns-back" onclick="sysGo('overview')" style="margin:var(--s3) var(--s4) 0"><i data-lucide="chevron-left"></i>К обзору недели</button>
+    <div class="sec-lbl">Закономерности</div>
+    <div id="sys-patterns-out"></div>
     <div style="height:5rem"></div>
   </div>
   <div id="sys-detail">
@@ -1072,6 +1082,14 @@
     <div class="sh-title">История состояний</div>
     <div id="history-list" class="mx" style="padding:0 1rem 1.5rem;max-height:70vh;overflow-y:auto"></div>
     <div style="padding:0 1rem 1rem"><button class="btn btn-s btn-full" onclick="closeOv('ov-history')">Закрыть</button></div>
+  </div>
+</div>
+<div class="ov" id="ov-syn-evidence" onclick="if(event.target===this)closeOv('ov-syn-evidence')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Записи, подтверждающие эту закономерность</div>
+    <div id="syn-evidence-list" class="mx" style="padding:0 1rem 1.5rem;max-height:70vh;overflow-y:auto"></div>
+    <div style="padding:0 1rem 1rem"><button class="btn btn-s btn-full" onclick="closeOv('ov-syn-evidence')">Закрыть</button></div>
   </div>
 </div>
 <div class="ov" id="ov-moment-det" onclick="if(event.target===this)closeOv('ov-moment-det')">

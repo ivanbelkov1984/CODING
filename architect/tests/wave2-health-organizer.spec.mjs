@@ -63,7 +63,10 @@ const fresh = await page.evaluate(() => ({
   schemaVersion: SCHEMA_VERSION,
 }));
 ok(fresh.labInit && fresh.docInit, 'свежий профиль: labObservations=[]/healthDocuments=[] по умолчанию');
-ok(fresh.schemaVersion === 4, 'SCHEMA_VERSION поднят до 4');
+// >=4, не ===4: последующие волны (напр. Wave 4, issue #152) легитимно
+// поднимают SCHEMA_VERSION дальше — этот тест доказывает именно бэйслайн
+// Волны 2 (не откатился), точную текущую версию проверяет тест актуальной волны.
+ok(fresh.schemaVersion >= 4, 'SCHEMA_VERSION >= 4 (не откатился ниже бэйслайна Волны 2)');
 
 const migration = await page.evaluate(() => {
   const id = activeId();
