@@ -337,6 +337,146 @@ ok(calls === 1, `astroEventProjection() вызван РОВНО один раз 
   ok(legacy.off, 'старый профиль: переключатель отрисован выключенным');
 }
 
+// ── 16. Owner review (PR #157): панель подробностей показывает ТОЛЬКО ──
+//     астрособытия, реально вошедшие в evidence этой пары.
+//
+// Дефект: отбор шёл по `e.tags.includes(p.a) || e.tags.includes(p.b)` и брал
+// ПЕРВОЕ совпавшее событие. Один и тот же тег `astro:transit:*` несут десятки
+// прохождений за окно, поэтому панель могла показать чужую дату пика и чужой
+// орбис — событие, не участвовавшее в подтверждении этой корреляции.
+//
+// Фикстура детерминированная: три события с ОДИНАКОВЫМ астротегом, а
+// поддерживающее — третье (не первое). Если отбор снова поедет на теги,
+// проверки упадут.
+{
+  await page.evaluate(() => {
+    // Три астрособытия с ОДИНАКОВЫМ набором тегов и разными датами/орбисами.
+    window.setupAstroDetailFixture = function () {
+      const mk = (ref, date, orb) => ({
+        id: 'astro:transit:' + ref, type: 'astro_transit_aspect', date,
+        time: Date.parse(date + 'T12:00:00.000Z'), importance: 2,
+        tags: ['astro:transit:mars', 'astro:aspect:square', 'astro:natal:pluto'],
+        sphereId: null, source: 'astro', sourceCollection: 'astroBirth',
+        referenceId: ref, methodologyId: 'western-tropical-v1/transit-orbs-v1(3)',
+        confidence: 'medium',
+        provenance: { engine: 'astronomy-engine@2.1.19', orbDeg: orb, birthTimeKnown: true, projectedTime: null },
+      });
+      _synLastAstroEvents = [
+        mk('mars-sq-pluto:2026-01-05', '2026-01-05', 2.91),
+        mk('mars-sq-pluto:2026-02-11', '2026-02-11', 1.42),
+        mk('mars-sq-pluto:2026-03-19', '2026-03-19', 0.07),
+      ];
+    };
+  });
+
+  // — 16.1 астрология на стороне A, поддерживающее событие — третье —
+  const sideA = await page.evaluate(() => {
+    setupAstroDetailFixture();
+    const p = {
+      _i: 0, a: 'astro:transit:mars', b: 'emo:Тревога',
+      evidence: [{
+        aDay: '2026-03-19', aRecs: [{ coll: 'astroBirth', id: 'mars-sq-pluto:2026-03-19' }],
+        bDay: '2026-03-21', bRecs: [{ coll: 'moments', id: 9002 }], sameDay: false,
+      }],
+    };
+    _synLastPairs = [p];
+    const sup = synAstroSupportingEvents(p);
+    synAstroDetailAt(0);
+    const html = document.getElementById('syn-astro-detail').innerHTML;
+    return {
+      refs: sup.map(e => e.referenceId),
+      html,
+      opened: document.getElementById('ov-syn-astro').classList.contains('on'),
+    };
+  });
+  ok(sideA.refs.length === 1 && sideA.refs[0] === 'mars-sq-pluto:2026-03-19',
+    `astro на стороне A: выбрано ровно поддерживающее событие, а не первое с тем же тегом (${sideA.refs.join(',')})`);
+  ok(sideA.html.includes('2026-03-19') && !sideA.html.includes('2026-01-05') && !sideA.html.includes('2026-02-11'),
+    'astro на стороне A: в панели дата пика поддерживающего события; чужих дат нет');
+  ok(sideA.html.includes('0.07') && !sideA.html.includes('2.91'),
+    'astro на стороне A: орбис принадлежит поддерживающему событию');
+  ok(sideA.opened, 'astro на стороне A: панель подробностей открыта');
+
+  // — 16.2 астрология на стороне B (симметрия) —
+  const sideB = await page.evaluate(() => {
+    setupAstroDetailFixture();
+    const p = {
+      _i: 0, a: 'emo:Тревога', b: 'astro:transit:mars',
+      evidence: [{
+        aDay: '2026-02-09', aRecs: [{ coll: 'moments', id: 9002 }],
+        bDay: '2026-02-11', bRecs: [{ coll: 'astroBirth', id: 'mars-sq-pluto:2026-02-11' }], sameDay: false,
+      }],
+    };
+    _synLastPairs = [p];
+    const sup = synAstroSupportingEvents(p);
+    synAstroDetailAt(0);
+    return { refs: sup.map(e => e.referenceId), html: document.getElementById('syn-astro-detail').innerHTML };
+  });
+  ok(sideB.refs.length === 1 && sideB.refs[0] === 'mars-sq-pluto:2026-02-11',
+    `astro на стороне B: выбрано ровно поддерживающее событие (${sideB.refs.join(',')})`);
+  ok(sideB.html.includes('2026-02-11') && !sideB.html.includes('2026-01-05') && !sideB.html.includes('2026-03-19'),
+    'astro на стороне B: в панели только дата поддерживающего события');
+  ok(sideB.html.includes('1.42'), 'astro на стороне B: орбис принадлежит поддерживающему событию');
+
+  // — 16.3 несколько поддерживающих событий + дедупликация —
+  const multi = await page.evaluate(() => {
+    setupAstroDetailFixture();
+    const p = {
+      _i: 0, a: 'astro:transit:mars', b: 'emo:Тревога',
+      evidence: [
+        // одно и то же прохождение повторяется в двух записях evidence
+        { aDay: '2026-01-05', aRecs: [{ coll: 'astroBirth', id: 'mars-sq-pluto:2026-01-05' }], bDay: '2026-01-07', bRecs: [{ coll: 'moments', id: 1 }], sameDay: false },
+        { aDay: '2026-01-05', aRecs: [{ coll: 'astroBirth', id: 'mars-sq-pluto:2026-01-05' }], bDay: '2026-01-08', bRecs: [{ coll: 'moments', id: 2 }], sameDay: false },
+        { aDay: '2026-03-19', aRecs: [{ coll: 'astroBirth', id: 'mars-sq-pluto:2026-03-19' }], bDay: '2026-03-20', bRecs: [{ coll: 'moments', id: 3 }], sameDay: false },
+      ],
+    };
+    _synLastPairs = [p];
+    const sup = synAstroSupportingEvents(p);
+    synAstroDetailAt(0);
+    return { refs: sup.map(e => e.referenceId), html: document.getElementById('syn-astro-detail').innerHTML };
+  });
+  ok(multi.refs.length === 2, `дедупликация: одно прохождение показано один раз (${multi.refs.length} события)`);
+  ok(multi.refs.includes('mars-sq-pluto:2026-01-05') && multi.refs.includes('mars-sq-pluto:2026-03-19')
+    && !multi.refs.includes('mars-sq-pluto:2026-02-11'),
+    'несколько поддерживающих: показаны оба вошедших в evidence, непричастное — нет');
+  ok(multi.html.includes('Поддерживающих астрособытий:</b> 2'),
+    'панель честно сообщает число поддерживающих астрособытий');
+
+  // — 16.4 пара без астрологии в evidence: подробностей нет —
+  const none = await page.evaluate(() => {
+    setupAstroDetailFixture();
+    const p = {
+      _i: 0, a: 'astro:transit:mars', b: 'emo:Тревога',
+      evidence: [{ aDay: '2026-03-19', aRecs: [{ coll: 'moments', id: 7 }], bDay: '2026-03-20', bRecs: [{ coll: 'moments', id: 8 }], sameDay: false }],
+    };
+    _synLastPairs = [p];
+    const sup = synAstroSupportingEvents(p);
+    synAstroDetailAt(0);
+    return { n: sup.length, html: document.getElementById('syn-astro-detail').innerHTML };
+  });
+  ok(none.n === 0 && none.html.includes('недоступны'),
+    'записи не из astroBirth игнорируются: подробностей нет вместо произвольного события');
+
+  // — 16.5 referenceId из evidence, которого нет среди астрособытий окна —
+  const stale = await page.evaluate(() => {
+    setupAstroDetailFixture();
+    const p = {
+      _i: 0, a: 'astro:transit:mars', b: 'emo:Тревога',
+      evidence: [{ aDay: '2026-06-01', aRecs: [{ coll: 'astroBirth', id: 'mars-sq-pluto:2026-06-01' }], bDay: '2026-06-02', bRecs: [{ coll: 'moments', id: 9 }], sameDay: false }],
+    };
+    _synLastPairs = [p];
+    return synAstroSupportingEvents(p).length;
+  });
+  ok(stale === 0, 'неизвестный referenceId не подменяется первым попавшимся событием');
+
+  // — 16.6 отбор по тегам в коде отсутствует —
+  const noTagLookup = await page.evaluate(() => {
+    const src = synAstroSupportingEvents.toString() + synAstroDetailAt.toString();
+    return !/tags\s*\.\s*includes\s*\(\s*p\s*\.\s*[ab]\s*\)/.test(src);
+  });
+  ok(noTagLookup, 'реализация не использует отбор астрособытий по тегам пары');
+}
+
 ok(errors.length === 0, `JS-ошибок нет за весь прогон (${errors.length})`, errors.slice(0, 3).join('\n'));
 
 await browser.close();

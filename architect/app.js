@@ -8233,25 +8233,54 @@ function synToggleAstro() {
   persist();
   rSynthesis();
 }
+// Owner review (PR #157): астрособытия, РЕАЛЬНО поддерживающие эту пару.
+// Единственный допустимый источник — `p.evidence`: те самые supporting записи,
+// на которых движок посчитал hits. Отбор по тегам (`e.tags.includes(p.a)`) был
+// дефектом: тег `astro:transit:*` несут десятки прохождений за окно, и панель
+// показывала ПЕРВОЕ из них — с чужой датой пика и чужим орбисом, не
+// участвовавшее в подтверждении именно этой корреляции.
+//
+// Сопоставление идёт по точному `referenceId` (`sourceCollection` + `id` — тот
+// же ключ записи, которым оперирует Pattern Engine), с дедупликацией: одно
+// прохождение попадает в evidence несколько раз (разные дни окна, обе стороны
+// пары), но в панели должно быть показано один раз.
+function synAstroSupportingEvents(p) {
+  if (!p) return [];
+  const byRef = new Map();
+  (_synLastAstroEvents || []).forEach(e => { if (!byRef.has(e.referenceId)) byRef.set(e.referenceId, e); });
+  const out = [], seen = new Set();
+  (p.evidence || []).forEach(ev => {
+    [...(ev.aRecs || []), ...(ev.bRecs || [])].forEach(r => {
+      if (!r || r.coll !== 'astroBirth' || seen.has(r.id)) return;
+      const e = byRef.get(r.id);
+      if (!e) return;
+      seen.add(r.id);
+      out.push(e);
+    });
+  });
+  return out;
+}
 // Детали символического источника: только факты расчёта, без трактовок.
 function synAstroDetailAt(i) {
   const p = _synLastPairs[i];
   if (!p) return;
-  const ev = (_synLastAstroEvents || []).filter(e => e.tags.includes(p.a) || e.tags.includes(p.b));
+  const ev = synAstroSupportingEvents(p);
   const el = $('syn-astro-detail');
   if (!el) return;
-  const first = ev[0];
-  el.innerHTML = !first
+  const row = (e) => `<div style="padding:.5rem 0;border-top:1px solid var(--bd)">
+        <div><b>Дата пика:</b> ${esc(e.date)}</div>
+        <div><b>Орбис:</b> ${e.provenance && e.provenance.orbDeg != null ? esc(String(Math.round(e.provenance.orbDeg * 100) / 100)) + '°' : '—'}</div>
+        <div><b>Методология:</b> ${esc(e.methodologyId || '—')}</div>
+        <div><b>Движок:</b> ${esc((e.provenance && e.provenance.engine) || '—')}</div>
+        <div><b>Уверенность:</b> ${esc(e.confidence || '—')}</div>
+        <div><b>Время рождения известно:</b> ${e.provenance && e.provenance.birthTimeKnown ? 'да' : 'нет'}</div>
+      </div>`;
+  el.innerHTML = !ev.length
     ? `<div class="ai-sp-empty">Астрологические подробности для этой пары недоступны.</div>`
     : `<div class="si-text" style="line-height:1.7">
-        <div><b>Методология:</b> ${esc(first.methodologyId || '—')}</div>
-        <div><b>Движок:</b> ${esc((first.provenance && first.provenance.engine) || '—')}</div>
-        <div><b>Дата пика:</b> ${esc(first.date)}</div>
-        <div><b>Орбис:</b> ${first.provenance && first.provenance.orbDeg != null ? esc(String(Math.round(first.provenance.orbDeg * 100) / 100)) + '°' : '—'}</div>
-        <div><b>Уверенность:</b> ${esc(first.confidence || '—')}</div>
-        <div><b>Время рождения известно:</b> ${first.provenance && first.provenance.birthTimeKnown ? 'да' : 'нет'}</div>
-        <div><b>Событий этой пары в окне:</b> ${ev.length}</div>
-        <div style="color:var(--t4);margin-top:.4rem">Символический контекст. Наблюдается временная связь; причинность не доказывается.</div>
+        <div><b>Поддерживающих астрособытий:</b> ${ev.length}</div>
+        ${ev.map(row).join('')}
+        <div style="color:var(--t4);margin-top:.4rem">Показаны только события, вошедшие в подтверждение этого совпадения. Символический контекст. Наблюдается временная связь; причинность не доказывается.</div>
       </div>`;
   openOv('ov-syn-astro');
 }
