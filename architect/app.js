@@ -111,7 +111,13 @@ const DEFAULT_DB = {
   // сигнатуре вывода, не по хранимому id — сами выводы никогда не пишутся
   // в DB, пересчитываются заново на каждый рендер). Скаляр, сливается как
   // DB.env/DB.vit — «последний документ по __ts побеждает» (см. mergeDB()).
-  correlationSettings: { minSamples: 3, lagDays: 7, dismissed: [] },
+  // Wave 4.1 (issue #156): `useAstro` — символический источник «Астрология»
+  // в «Закономерностях». По умолчанию ВЫКЛЮЧЕН, в том числе для существующих
+  // профилей: у них в сохранённом correlationSettings этого ключа нет, и
+  // чтение даёт undefined → falsy. Поэтому миграция не нужна и SCHEMA_VERSION
+  // не поднимается — это добавление поля в УЖЕ существующий скаляр, который
+  // backup/sync переносят целиком и генерично.
+  correlationSettings: { minSamples: 3, lagDays: 7, dismissed: [], useAstro: false },
   _del: {},   // «надгробия» удалённых записей: { id: timestamp }
   __ts: 0,    // метка времени документа (для слияния скалярных полей)
 };
@@ -322,6 +328,9 @@ function resetSyncState() { clearTimeout(_syncTimer); _syncing = false; _dirty =
 function switchProfile(id) {
   if (id === activeId()) { closeOv('ov-profiles'); return; }
   resetSyncState();
+  // Wave 4.1 (issue #156): астропроекция другого профиля не должна
+  // переиспользоваться — кэш анализа сбрасывается вместе с sync-состоянием.
+  resetAstroSourceCache();
   setActiveId(id);
   hydrate();
   closeOv('ov-profiles');
@@ -5398,8 +5407,14 @@ function astroEventProjection(opts = {}) {
         time: null,                     // суточная дискретизация — точное время не заявляем
         tags: [`astro:transit:${cur.hit.transit}`, `astro:aspect:${cur.hit.aspect}`, `astro:natal:${cur.hit.natal}`],
         importance: orb <= 1 ? 3 : (orb <= 2 ? 2 : 1),
+        source: 'astro',
         sourceCollection: 'astroBirth',
-        referenceId: 'astroBirth',
+        // Wave 4.1 (issue #156): referenceId обязан быть УНИКАЛЬНЫМ на событие.
+        // Раньше он был константой 'astroBirth', и в Pattern Engine ключ записи
+        // `sourceCollection:referenceId` совпадал бы у ВСЕХ астрособытий —
+        // они выглядели бы одной записью, а evidence схлопывался бы в одну.
+        // Берём стабильный ключ самого прохождения (пара + дата пика).
+        referenceId: `${key}:${peakDay}`,
         methodologyId: `${ASTRO_VERSIONS.ruleset}/transit-orbs-v1(${TRANSIT_ORB})`,
         // Уверенность честно понижена при неизвестном времени рождения: сама
         // натальная позиция планет тогда посчитана на полдень.
@@ -5508,6 +5523,7 @@ function saveAstroBirth() {
     lat: isFinite(lat) ? lat : null, lon: isFinite(lon) ? lon : null,
     verif: 'user_confirmed', life: 'current', createdAt: nowISO(), sv: SCHEMA_VERSION, _u: Date.now(),
   };
+  resetAstroSourceCache();   // Wave 4.1: изменились данные рождения — проекция устарела
   persist(); toast('Данные рождения сохранены', 'ok');
   runNatalChart();
 }
@@ -7611,11 +7627,61 @@ function unifiedEvents(days) {
       out.push({
         id: coll + ':' + rec.id, type: coll, date: new Date(t).toISOString().slice(0, 10), time: t,
         importance: built.importance || 1, tags, sphereId: built.sphereId != null ? built.sphereId : null,
-        sourceCollection: coll, referenceId: rec.id,
+        source: 'db', sourceCollection: coll, referenceId: rec.id,
       });
     });
   });
+  // Wave 4.1 (issue #156): астрология — ЕЩЁ ОДИН источник того же потока, без
+  // отдельного пути и без второго движка. Единственный источник астрособытий —
+  // astroEventProjection() (Волна 3); здесь ничего не пересчитывается.
+  out.push(...astroSourceEvents(days));
   return out.sort((a, b) => a.time - b.time);
+}
+
+// ─── ИСТОЧНИК `astro` ДЛЯ PATTERN ENGINE (Wave 4.1, issue #156) ──────
+// Read-only. Ничего не персистирует, не создаёт коллекций и не трогает
+// backup/sync/schema. Проекция живёт только на время анализа.
+let _astroSrcCache = null;   // { key, events } — НЕ персистируется
+// Сбрасывается при смене профиля и при изменении данных рождения/настроек.
+function resetAstroSourceCache() { _astroSrcCache = null; }
+function astroSourceEvents(days) {
+  const settings = DB.correlationSettings || DEFAULT_DB.correlationSettings;
+  if (!settings.useAstro) return [];                      // источник выключен
+  const birth = DB.astroBirth;
+  if (!birth || !birth.date) return [];                   // нет данных рождения
+  if (!window.Astronomy) return [];                       // движок не загружен — молча пусто
+  // Ключ кэша включает профиль (изоляция), окно, признак включённости и
+  // отпечаток данных рождения: любое расхождение — пересчёт.
+  const pid = activeId();
+  const key = JSON.stringify([pid, days, true, birth.date, birth.time, birth.timeKnown,
+    birth.utcOffset, birth.lat, birth.lon, birth.houseSystem]);
+  if (_astroSrcCache && _astroSrcCache.key === key) return _astroSrcCache.events;
+
+  // Ровно ОДИН вызов проекции на анализ (повторные вызовы в рамках того же
+  // анализа обслуживает кэш выше).
+  const projected = astroEventProjection({ days: days == null ? 400 : days });
+  const events = projected.map(e => ({
+    id: e.id,
+    type: e.type,
+    date: e.date,
+    // Суточная дискретизация: проекция честно НЕ заявляет точное время
+    // (`e.time === null`). Для сортировки и оконных расчётов берём тот же
+    // полдень-UTC якорь, что production применяет к записям, у которых есть
+    // только день. Это не претензия на точное время — исходное `time: null`
+    // сохранено в provenance.
+    time: Date.parse(e.date + 'T12:00:00.000Z'),
+    importance: e.importance,
+    tags: e.tags,
+    sphereId: null,
+    source: 'astro',
+    sourceCollection: e.sourceCollection,
+    referenceId: e.referenceId,
+    methodologyId: e.methodologyId,
+    confidence: e.confidence,
+    provenance: { ...e.provenance, projectedTime: e.time },
+  }));
+  _astroSrcCache = { key, events };
+  return events;
 }
 
 // ── 2. Correlation Engine (support/confidence/lift, deterministic) ──
@@ -7647,6 +7713,13 @@ const TAG_FAMILY_SETS = [
   new Set(['craving', 'trigger']),                         // cravings
   new Set(['insight', 'person']),                          // insights (+ person enrichment)
   new Set(['pattern', 'person']),                          // patterns (+ person enrichment)
+  // Wave 4.1 (issue #156): ОДНО астрособытие проекции всегда даёт три тега
+  // сразу — `astro:transit:*`, `astro:aspect:*`, `astro:natal:*`. Без записи
+  // в этом реестре они образовали бы гарантированную тавтологию («Марс»
+  // всегда совпадает с «квадрат»), ровно ту, против которой Волна 4 вводила
+  // TAG_FAMILY_SETS. Сама логика same-record не меняется — новый источник
+  // просто регистрируется в существующем механизме.
+  new Set(['astro']),                                      // astroEventProjection (transit|aspect|natal)
 ];
 function tagPrefix(tag) { const i = String(tag).indexOf(':'); return i < 0 ? tag : tag.slice(0, i); }
 // Консервативно (по umolчанию — «да, риск есть»): если ОДИН mapper МОЖЕТ
@@ -8012,6 +8085,9 @@ function synthesisReport(days) {
   visible.forEach((p, i) => { p._i = i; });
   return {
     events, stats, totalDays, settings,
+    // Wave 4.1: астрособытия текущего анализа — для панели подробностей.
+    // Только в памяти отчёта, ничего не персистируется.
+    astroEvents: events.filter(e => e.source === 'astro'),
     pairs: visible,
     // Owner review, дефект 3: цепочки строятся ТОЛЬКО из пар с реальным
     // предшествованием (lag≥1, см. pair.precedes) — не из совпадений в
@@ -8110,18 +8186,103 @@ let _synDays = 90;
 // &lt;&gt;) не защищал от кавычек, и апостроф/кавычка в свободном тексте
 // эмоции/триггера мог сломать inline JS-атрибут.
 let _synLastPairs = [];
+// Wave 4.1 (issue #156): астрособытия ТЕКУЩЕГО рендера — только в памяти,
+// сбрасываются каждым rSynthesis(), никогда не персистируются.
+let _synLastAstroEvents = [];
 function synGoDays(days) { _synDays = days; rSynthesis(); }
+// Wave 4.1 (issue #156): участвует ли в паре символический астроисточник.
+function pairHasAstro(p) { return tagPrefix(p.a) === 'astro' || tagPrefix(p.b) === 'astro'; }
 function pairRowHtml(p) {
   const conf = correlationConfidence(p);
+  // Бейдж-источник: пользователь сразу видит, что совпадение символическое.
+  const astro = pairHasAstro(p)
+    ? `<span class="si-src-astro" title="Символический источник — не доказывает причинность">✦ Астрология</span>
+       <button type="button" class="btn btn-s btn-xs" onclick="synAstroDetailAt(${p._i})" aria-label="Подробности астрологического источника">Подробности</button>`
+    : '';
   return `<div class="si-row">
     <div class="si-body"><div class="si-text">${esc(correlationSentence(p))}</div>
-      <div style="display:flex;gap:.4rem;margin-top:.3rem;flex-wrap:wrap">
+      <div style="display:flex;gap:.4rem;margin-top:.3rem;flex-wrap:wrap;align-items:center">
+        ${astro}
         <button type="button" class="btn btn-s btn-xs" onclick="synEvidenceAt(${p._i},'a')">Записи «${esc(tagLabel(p.a))}»</button>
         <button type="button" class="btn btn-s btn-xs" onclick="synEvidenceAt(${p._i},'b')">Записи «${esc(tagLabel(p.b))}»</button>
         <button type="button" class="btn btn-s btn-xs" onclick="synDismissAt(${p._i})" aria-label="Скрыть этот вывод">Скрыть</button>
       </div></div>
     <span class="si-conf ${conf.cls}">${conf.label}</span>
   </div>`;
+}
+// Переключатель символического источника. По умолчанию ВЫКЛЮЧЕН.
+function synAstroToggleHtml() {
+  const on = !!(DB.correlationSettings || DEFAULT_DB.correlationSettings).useAstro;
+  return `<div class="card mx mb" style="padding:.75rem 1rem">
+    <div class="tog-row" style="border-bottom:none;padding:.15rem 0">
+      <span class="tog-lbl">Использовать астрологические события</span>
+      <div class="tog${on ? ' on' : ''}" id="syn-astro-tog" role="switch" aria-checked="${on}"
+           tabindex="0" aria-label="Использовать астрологические события"
+           onclick="synToggleAstro()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();synToggleAstro();}"></div>
+    </div>
+    <div class="si-text" style="color:var(--t4);font-size:.72rem;line-height:1.5;margin-top:.25rem">
+      Символический источник. Используется только при поиске временных совпадений. Не доказывает причинность.
+    </div>
+  </div>`;
+}
+function synToggleAstro() {
+  const cur = DB.correlationSettings || DEFAULT_DB.correlationSettings;
+  DB.correlationSettings = { ...cur, useAstro: !cur.useAstro };
+  DB.__ts = Date.now();
+  resetAstroSourceCache();
+  persist();
+  rSynthesis();
+}
+// Owner review (PR #157): астрособытия, РЕАЛЬНО поддерживающие эту пару.
+// Единственный допустимый источник — `p.evidence`: те самые supporting записи,
+// на которых движок посчитал hits. Отбор по тегам (`e.tags.includes(p.a)`) был
+// дефектом: тег `astro:transit:*` несут десятки прохождений за окно, и панель
+// показывала ПЕРВОЕ из них — с чужой датой пика и чужим орбисом, не
+// участвовавшее в подтверждении именно этой корреляции.
+//
+// Сопоставление идёт по точному `referenceId` (`sourceCollection` + `id` — тот
+// же ключ записи, которым оперирует Pattern Engine), с дедупликацией: одно
+// прохождение попадает в evidence несколько раз (разные дни окна, обе стороны
+// пары), но в панели должно быть показано один раз.
+function synAstroSupportingEvents(p) {
+  if (!p) return [];
+  const byRef = new Map();
+  (_synLastAstroEvents || []).forEach(e => { if (!byRef.has(e.referenceId)) byRef.set(e.referenceId, e); });
+  const out = [], seen = new Set();
+  (p.evidence || []).forEach(ev => {
+    [...(ev.aRecs || []), ...(ev.bRecs || [])].forEach(r => {
+      if (!r || r.coll !== 'astroBirth' || seen.has(r.id)) return;
+      const e = byRef.get(r.id);
+      if (!e) return;
+      seen.add(r.id);
+      out.push(e);
+    });
+  });
+  return out;
+}
+// Детали символического источника: только факты расчёта, без трактовок.
+function synAstroDetailAt(i) {
+  const p = _synLastPairs[i];
+  if (!p) return;
+  const ev = synAstroSupportingEvents(p);
+  const el = $('syn-astro-detail');
+  if (!el) return;
+  const row = (e) => `<div style="padding:.5rem 0;border-top:1px solid var(--bd)">
+        <div><b>Дата пика:</b> ${esc(e.date)}</div>
+        <div><b>Орбис:</b> ${e.provenance && e.provenance.orbDeg != null ? esc(String(Math.round(e.provenance.orbDeg * 100) / 100)) + '°' : '—'}</div>
+        <div><b>Методология:</b> ${esc(e.methodologyId || '—')}</div>
+        <div><b>Движок:</b> ${esc((e.provenance && e.provenance.engine) || '—')}</div>
+        <div><b>Уверенность:</b> ${esc(e.confidence || '—')}</div>
+        <div><b>Время рождения известно:</b> ${e.provenance && e.provenance.birthTimeKnown ? 'да' : 'нет'}</div>
+      </div>`;
+  el.innerHTML = !ev.length
+    ? `<div class="ai-sp-empty">Астрологические подробности для этой пары недоступны.</div>`
+    : `<div class="si-text" style="line-height:1.7">
+        <div><b>Поддерживающих астрособытий:</b> ${ev.length}</div>
+        ${ev.map(row).join('')}
+        <div style="color:var(--t4);margin-top:.4rem">Показаны только события, вошедшие в подтверждение этого совпадения. Символический контекст. Наблюдается временная связь; причинность не доказывается.</div>
+      </div>`;
+  openOv('ov-syn-astro');
 }
 function synPeriodButtonsHtml() {
   const periods = [{ v: 7, l: '7 дн.' }, { v: 30, l: '30 дн.' }, { v: 90, l: '90 дн.' }, { v: 365, l: '365 дн.' }];
@@ -8199,8 +8360,10 @@ function rSynthesis() {
   const el = $('sys-patterns-out'); if (!el) return;
   const report = synthesisReport(_synDays);
   _synLastPairs = report.pairs;
+  _synLastAstroEvents = report.astroEvents || [];
   let html = `<div class="be-note mx mb" style="color:var(--t3)">Только твои данные, без ИИ. Совпадения по времени между записями — не диагноз, не терапия, не медицинская рекомендация.</div>`;
   html += synPeriodButtonsHtml();
+  html += synAstroToggleHtml();
   html += synStatsBlockHtml(report.stats);
   html += synCorrelationsBlockHtml(report.pairs);
   html += synTriggersBlockHtml(report.pairs);

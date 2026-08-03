@@ -1410,3 +1410,8 @@ body.navshell .nsh-tab:focus-visible,body.navshell .nsh-fab:focus-visible,
 .nsh-grp-lbl{font-size:.64rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--t4);padding:.7rem .8rem .25rem}
 .more-list .srow{border-radius:var(--r12)}
 #ov-capture .sec-lbl:first-of-type,#ov-more .sec-lbl:first-of-type{margin-top:0}
+
+/* Wave 4.1 (issue #156): бейдж символического астроисточника в «Закономерностях». */
+.si-src-astro{display:inline-flex;align-items:center;gap:.25rem;font-size:.68rem;line-height:1;
+  padding:.28rem .45rem;border-radius:.4rem;white-space:nowrap;
+  color:var(--t3);background:var(--s2);border:1px solid var(--bd)}

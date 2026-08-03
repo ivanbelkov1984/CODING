@@ -46,3 +46,17 @@ jobs:
           path: architect/evidence
           retention-days: 21
           if-no-files-found: warn
+      # Wave 4.1 (issue #156): отдельная матрица для астрологического источника
+      # Pattern Engine — iPhone/Android/Desktop × Source OFF/ON/Detail/Unknown
+      # Birth Time. Тоже evidence-only, не гейт.
+      - name: Wave 4.1 astro-source evidence
+        if: always()
+        run: npm run evidence:astro-source
+      - name: Upload Wave 4.1 evidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ux-evidence-wave4-1-astro-source
+          path: architect/evidence-wave4-1
+          retention-days: 21
+          if-no-files-found: warn
