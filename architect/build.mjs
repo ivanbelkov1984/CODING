@@ -39,9 +39,34 @@ async function contentVersion() {
   return 'v' + h.digest('hex').slice(0, 10);
 }
 
+// ── Release metadata (Wave 5, issue #158) ──────────────────────────
+// Версия/SHA/время сборки проставляются ЗДЕСЬ и больше нигде: раньше их
+// пришлось бы поддерживать руками в нескольких местах, и они неизбежно
+// разъехались бы. app.js содержит только плейсхолдеры.
+function releaseMeta(build) {
+  // GITHUB_SHA есть в CI; локально — короткий git-хеш недоступен без вызова
+  // git, поэтому честно пишем 'local' вместо выдуманного значения.
+  const sha = process.env.GITHUB_SHA || 'local';
+  return {
+    build: build || 'dev',
+    sha: sha.slice(0, 40),
+    // SOURCE_DATE_EPOCH позволяет получить воспроизводимую сборку.
+    builtAt: new Date(process.env.SOURCE_DATE_EPOCH ? +process.env.SOURCE_DATE_EPOCH * 1000 : Date.now()).toISOString(),
+  };
+}
+function injectRelease(html, meta) {
+  const out = html
+    .replaceAll('__ARCH_BUILD__', meta.build)
+    .replaceAll('__ARCH_SHA__', meta.sha)
+    .replaceAll('__ARCH_BUILT_AT__', meta.builtAt);
+  if (out.includes('__ARCH_BUILD__') || out.includes('__ARCH_SHA__') || out.includes('__ARCH_BUILT_AT__'))
+    throw new Error('release metadata: остались незаменённые плейсхолдеры');
+  return out;
+}
+
 // Инлайн CSS/JS в HTML. Замена через функцию — чтобы `$` в коде трактовался
 // буквально (в строке-замене `$&`, `$1` и т.п. — специальные).
-export async function buildCombined() {
+export async function buildCombined(build) {
   let html = await readFile(join(DIR, 'index.html'), 'utf8');
   const css = await readFile(join(DIR, 'styles.css'), 'utf8');
   const contextCss = await readFile(join(DIR, 'context-action-dock.css'), 'utf8');
@@ -53,7 +78,8 @@ export async function buildCombined() {
   if (!html.includes(js.slice(0, 80))) throw new Error('JS не вставился дословно');
   if (!html.includes('Context action dock — issue #138')) throw new Error('context action dock JS не вставился');
   if (!html.includes('Context action dock — actions of the current section')) throw new Error('context action dock CSS не вставился');
-  return html;
+  if (!html.includes('__ARCH_BUILD__')) throw new Error('в app.js нет плейсхолдера __ARCH_BUILD__');
+  return injectRelease(html, releaseMeta(build));
 }
 
 async function main() {
@@ -74,7 +100,7 @@ async function main() {
   const build = args[0] || await contentVersion();
   const dist = join(DIR, 'dist');
   await mkdir(dist, { recursive: true });
-  await writeFile(join(dist, 'index.html'), await buildCombined());
+  await writeFile(join(dist, 'index.html'), await buildCombined(build));
   const sw = await readFile(join(DIR, 'sw.js'), 'utf8');
   if (!sw.includes('__BUILD__')) throw new Error('в sw.js нет плейсхолдера __BUILD__');
   await writeFile(join(dist, 'sw.js'), sw.replaceAll('__BUILD__', build));

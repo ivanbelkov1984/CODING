@@ -6,6 +6,11 @@
 //  Версия кэша меняется при каждой сборке (__BUILD__), старые чистятся.
 // ═══════════════════════════════════════════════════════════════
 const V = 'arch-__BUILD__';
+// Wave 5 (issue #158): кэш последней ПОДТВЕРЖДЁННО рабочей сборки. Раньше
+// activate удалял ВСЕ прежние кэши — сломанный deploy мгновенно уничтожал
+// единственную рабочую копию, и откатиться было некуда. Теперь предыдущий
+// кэш сохраняется до тех пор, пока новая версия не подтвердит успешный старт.
+const LKG = 'arch-lkg';
 const SHELL = ['./', './index.html', './lucide.js', './astronomy.min.js', './astro_rules.js', './inter-latin.woff2', './inter-cyrillic.woff2', './manifest.json', './icon-192.png', './icon-512.png',
   // ESM-модули зашифрованного backup — в app shell, чтобы UI работал офлайн
   // (dynamic import из index.html резолвится из кэша). Пути относительны scope
@@ -19,11 +24,53 @@ self.addEventListener('install', e => {
 });
 
 self.addEventListener('activate', e => {
-  e.waitUntil(
-    caches.keys()
-      .then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
+  e.waitUntil((async () => {
+    // Старые кэши чистим, НО оставляем last-known-good: он — единственный путь
+    // назад, если новая сборка не стартует.
+    const ks = await caches.keys();
+    await Promise.all(ks.filter(k => k !== V && k !== LKG).map(k => caches.delete(k)));
+    await self.clients.claim();
+  })());
+});
+
+// ─── HEALTH MARKER / RECOVERY (Wave 5, issue #158) ──────────────────
+// Приложение сообщает об успешном старте (`arch:startup-ok`). Только после
+// этого текущая сборка копируется в last-known-good. До подтверждения LKG
+// хранит предыдущую рабочую версию.
+//
+// Ограничение честное: полноценный автоматический откат на GitHub Pages
+// невозможен — сервер всегда отдаёт новый index.html, и SW не может выдать
+// себя за прошлую версию для НАВИГАЦИИ, не сломав обновление. Поэтому здесь
+// реализовано то, что реально работает: сохранение рабочей копии + выдача её
+// по явному запросу восстановления, без бесконечных перезагрузок.
+async function promoteToLastKnownGood() {
+  const cur = await caches.open(V);
+  const reqs = await cur.keys();
+  if (!reqs.length) return;
+  await caches.delete(LKG);
+  const lkg = await caches.open(LKG);
+  for (const rq of reqs) {
+    const res = await cur.match(rq);
+    if (res) await lkg.put(rq, res.clone());
+  }
+  await lkg.put('__arch_lkg_version__', new Response(V, { headers: { 'content-type': 'text/plain' } }));
+}
+async function lastKnownGoodVersion() {
+  const lkg = await caches.open(LKG);
+  const r = await lkg.match('__arch_lkg_version__');
+  return r ? (await r.text()) : null;
+}
+self.addEventListener('message', e => {
+  const msg = e.data || {};
+  if (msg.type === 'arch:startup-ok') {
+    e.waitUntil(promoteToLastKnownGood().catch(() => {}));
+  } else if (msg.type === 'arch:version?') {
+    e.waitUntil((async () => {
+      const lkgV = await lastKnownGoodVersion().catch(() => null);
+      const src = e.source || (e.ports && e.ports[0]);
+      if (src && src.postMessage) src.postMessage({ type: 'arch:version', current: V, lastKnownGood: lkgV });
+    })());
+  }
 });
 
 self.addEventListener('fetch', e => {

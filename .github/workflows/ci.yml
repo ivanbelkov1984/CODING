@@ -61,3 +61,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Build + E2E
         run: npm test
+      # Wave 5 (issue #158): release gate по СОБРАННОМУ артефакту, а не по
+      # исходникам — секреты в бандле, потерянные ассеты app shell и
+      # незаменённые плейсхолдеры версии не видны обычным тестам.
+      - name: Release gate — целостность артефакта
+        run: npm run test:artifact
