@@ -1769,6 +1769,9 @@
     <div class="sh-pull"></div>
     <div class="sh-title">Хранилище и диагностика</div>
     <div class="sh-form">
+      <!-- Wave 5 owner review: recovery-состояния (блокировка записи профиля
+           и возврат к предыдущей рабочей сборке). -->
+      <div id="recovery-out" aria-live="polite"></div>
       <div id="storage-out" aria-live="polite"></div>
       <button type="button" class="btn" id="storage-persist-btn" onclick="askPersistentStorage()">Запросить постоянное хранилище</button>
       <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5">Постоянное хранилище снижает риск автоматической очистки браузером. Полной гарантии не даёт: операционная система всё равно вправе освободить место. Регулярная резервная копия остаётся основной защитой.</div>

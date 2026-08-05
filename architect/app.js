@@ -242,45 +242,81 @@ function isQuotaError(e) {
   return e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED'
     || e.code === 22 || e.code === 1014;
 }
+// Wave 5 (owner review #2): запись — ТРАНЗАКЦИЯ над набором ключей.
+// Раньше последовательность была DB → CFG → backup без отката: если CFG падал
+// по квоте, retry переписывал только DB и функция возвращала true, хотя
+// настройки остались старыми. Пользователь получал ложный успех.
+//
+// Теперь: снимаем прежние значения всех участвующих ключей, пишем набор
+// целиком, при ЛЮБОЙ ошибке откатываем уже изменённые ключи к снятым
+// значениям и возвращаем false. Частичный успех не существует как исход.
+function _txWrite(entries) {
+  const prev = [];
+  try {
+    for (const [k, v] of entries) {
+      prev.push([k, localStorage.getItem(k)]);   // до записи — снимок
+      localStorage.setItem(k, v);
+    }
+    return { ok: true };
+  } catch (e) {
+    // Откат в обратном порядке: восстанавливаем ровно то, что было.
+    for (let i = prev.length - 1; i >= 0; i--) {
+      const [k, old] = prev[i];
+      try { if (old === null) localStorage.removeItem(k); else localStorage.setItem(k, old); }
+      catch (_) { /* откат best-effort: сообщаем об ошибке в любом случае */ }
+    }
+    return { ok: false, error: e };
+  }
+}
 function persistLocal() {
   const id = activeId();
-  try {
-    const key = dbKey(id), cur = dbCount(DB);
-    // ЗАЩИТА ДАННЫХ: не затираем непустое (или повреждённое) хранилище пустым
-    // состоянием — иначе сбой парсинга/памяти уничтожал бы данные.
-    if (cur === 0 && !_allowEmptyWrite) {
-      let prev = 0;
-      try { prev = dbCount(JSON.parse(localStorage.getItem(key) || 'null')); }
-      catch (e) { prev = 1; }   // повреждено → считаем, что данные были, не трогаем
-      if (prev > 0) { if (typeof log === 'function') log('warn', 'persist: запись пустого состояния заблокирована (защита данных)'); return; }
-    }
-    const json = JSON.stringify(DB);
-    localStorage.setItem(key, json);
-    localStorage.setItem(cfgKey(id), JSON.stringify(CFG));
-    if (cur > 0) { try { localStorage.setItem(bakKey(id), json); } catch (e) {} }  // резервная копия
-    _lastPersistError = null;
-    return true;
-  } catch (e) {
-    // Транзакционность: основной слот либо содержит прежнюю валидную версию
-    // (setItem при переполнении не пишет частичное значение), либо новую.
-    // Полузаписанного состояния быть не может — JSON пишется одним setItem.
-    const quota = isQuotaError(e);
-    _lastPersistError = { quota, name: e && e.name, at: Date.now() };
-    if (typeof log === 'function') log('error', quota ? 'persist: хранилище переполнено' : 'persist: ошибка записи', (e && e.name) || '');
-    // Освобождаем то, что можно освободить БЕЗ потери пользовательских данных:
-    // старые ежедневные снимки. Данные при этом не удаляются автоматически.
-    if (quota) {
-      try { pruneSnapshotsForSpace(id); } catch (_) {}
-      try {
-        localStorage.setItem(dbKey(id), JSON.stringify(DB));
-        _lastPersistError = null;
-        if (typeof log === 'function') log('warn', 'persist: запись удалась после освобождения места старыми снимками');
-        return true;
-      } catch (_) { /* по-прежнему нет места — сообщаем пользователю */ }
-      notifyStorageFull();
-    }
+  // Owner review #3: профиль под recovery-блокировкой не пишется вообще.
+  if (isWriteLocked(id)) {
+    _lastPersistError = { quota: false, locked: true, name: 'RecoveryLock', at: Date.now() };
+    if (typeof log === 'function') log('warn', 'persist: запись заблокирована до разрешения recovery');
     return false;
   }
+  const key = dbKey(id), cur = dbCount(DB);
+  // ЗАЩИТА ДАННЫХ: не затираем непустое (или повреждённое) хранилище пустым
+  // состоянием — иначе сбой парсинга/памяти уничтожал бы данные.
+  if (cur === 0 && !_allowEmptyWrite) {
+    let prevCount;
+    try { prevCount = dbCount(JSON.parse(localStorage.getItem(key) || 'null')); }
+    catch (e) { prevCount = 1; }   // повреждено → считаем, что данные были, не трогаем
+    if (prevCount > 0) { if (typeof log === 'function') log('warn', 'persist: запись пустого состояния заблокирована (защита данных)'); return false; }
+  }
+  let json, cfgJson;
+  try { json = JSON.stringify(DB); cfgJson = JSON.stringify(CFG); }
+  catch (e) { _lastPersistError = { quota: false, name: (e && e.name) || 'Error', at: Date.now() }; return false; }
+
+  // Набор ключей, которые операция объявляет сохранёнными. Резервный слот
+  // входит в транзакцию: иначе его сбой скрывался бы общим catch.
+  const entries = [[key, json], [cfgKey(id), cfgJson]];
+  if (cur > 0) entries.push([bakKey(id), json]);
+
+  let r = _txWrite(entries);
+  if (r.ok) { _lastPersistError = null; return true; }
+
+  const quota = isQuotaError(r.error);
+  if (typeof log === 'function') log('error', quota ? 'persist: хранилище переполнено' : 'persist: ошибка записи', (r.error && r.error.name) || '');
+  if (quota) {
+    // Освобождаем то, что можно освободить БЕЗ потери пользовательских данных:
+    // старые ежедневные снимки. Данные при этом не удаляются автоматически.
+    try { pruneSnapshotsForSpace(id); } catch (_) {}
+    // Повтор — ВСЕГО набора, а не только DB. Иначе повторилась бы ровно та
+    // ошибка, из-за которой этот блокер и был заведён.
+    r = _txWrite(entries);
+    if (r.ok) {
+      _lastPersistError = null;
+      if (typeof log === 'function') log('warn', 'persist: запись удалась после освобождения места старыми снимками');
+      return true;
+    }
+    _lastPersistError = { quota: true, name: (r.error && r.error.name) || 'QuotaExceededError', at: Date.now() };
+    notifyStorageFull();
+    return false;
+  }
+  _lastPersistError = { quota: false, name: (r.error && r.error.name) || 'Error', at: Date.now() };
+  return false;
 }
 // Удаляет самые старые снимки текущего профиля (не пользовательские записи).
 function pruneSnapshotsForSpace(id) {
@@ -315,6 +351,8 @@ async function openStorage() {
 async function rStorage() {
   const el = $('storage-out'); if (!el) return;
   el.innerHTML = `<div class="ai-sp-empty">Считаю…</div>`;
+  const rec = $('recovery-out');
+  if (rec) rec.innerHTML = recoveryPanelHtml() + buildRecoveryHtml();
   const s = await storageSummary();
   const btn = $('storage-persist-btn');
   if (btn) {
@@ -339,6 +377,86 @@ async function rStorage() {
     ${s.lastPersistError ? `<div style="color:var(--red,#DC2626)"><b>Последняя запись не сохранена</b> — ${s.lastPersistError.quota ? 'хранилище переполнено' : 'ошибка записи'}.</div>` : ''}
   </div>`;
 }
+// ── Восстановление предыдущей рабочей сборки (owner review #1) ──────
+// Явное действие пользователя. SW включает режим выдачи из last-known-good;
+// перезагрузку инициирует приложение — сам SW не перезагружает ничего, поэтому
+// петли не возникает.
+function swPost(msg) {
+  const ctl = navigator.serviceWorker && navigator.serviceWorker.controller;
+  if (!ctl) return false;
+  try { ctl.postMessage(msg); return true; } catch (_) { return false; }
+}
+function restorePreviousBuild() {
+  if (!swPost({ type: 'arch:restore-lkg' })) { toast('Восстановление недоступно: service worker не активен', 'warn'); return false; }
+  toast('Включаю предыдущую рабочую версию…', 'ok');
+  setTimeout(() => { try { location.reload(); } catch (_) {} }, 800);
+  return true;
+}
+function exitRecoveryMode() {
+  if (!swPost({ type: 'arch:exit-recovery' })) return false;
+  toast('Возврат к текущей версии…', 'ok');
+  setTimeout(() => { try { location.reload(); } catch (_) {} }, 800);
+  return true;
+}
+
+// ── Разрешение recovery-блокировки (owner review #3) ────────────────
+// Три безопасных исхода. Пока ни один не выбран, запись для профиля закрыта.
+function recoveryExportRaw() {
+  const raw = exportRawSlot();
+  if (raw == null) { toast('Повреждённый слот пуст — выгружать нечего', 'warn'); resolveRecovery('exported'); rStorage(); return false; }
+  try {
+    const blob = new Blob([raw], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'architect-corrupt-slot-' + todayKey() + '.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  } catch (_) { toast('Не удалось выгрузить файл', 'err'); return false; }
+  resolveRecovery('exported');
+  toast('Повреждённые данные выгружены. Запись разблокирована.', 'ok');
+  rStorage();
+  return true;
+}
+function recoveryDiscard() {
+  if (!confirm('Повреждённые данные этого профиля будут заменены пустыми. Это необратимо. Продолжить?')) return false;
+  discardCorruptProfile(true);
+  toast('Профиль сброшен. Запись разблокирована.', 'ok');
+  rStorage();
+  return true;
+}
+// Панель восстановления сборки. Показывается всегда, когда есть
+// last-known-good — чтобы путь назад существовал не только на словах.
+function buildRecoveryHtml() {
+  let lkg = null, inRecovery = false;
+  try { lkg = window.__archSwLastKnownGood || null; inRecovery = !!window.__archSwRecovery; } catch (_) {}
+  if (!lkg) return '';
+  return `<div class="card mx mb" style="padding:1rem">
+    <div class="f-lbl">Версия приложения</div>
+    <div class="si-text" style="line-height:1.6">Сохранена предыдущая рабочая сборка <b>${esc(String(lkg))}</b>. Если после обновления приложение работает неправильно, можно вернуться к ней. Данные пользователя при этом не затрагиваются — откат касается только файлов приложения.</div>
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.6rem">
+      ${inRecovery
+        ? `<button type="button" class="btn btn-s" onclick="exitRecoveryMode()">Вернуться к текущей версии</button>`
+        : `<button type="button" class="btn btn-s" onclick="restorePreviousBuild()">Вернуться к предыдущей версии</button>`}
+    </div>
+  </div>`;
+}
+function recoveryPanelHtml() {
+  const lock = recoveryLock();
+  if (!lock) return '';
+  const why = lock.reasons.includes('migration-failed')
+    ? 'Не удалось обновить формат данных этого профиля.'
+    : 'Данные профиля повреждены, резервной копии не нашлось.';
+  return `<div class="card mx mb" style="padding:1rem;border:1px solid var(--red,#DC2626)">
+    <div class="f-lbl" style="color:var(--red,#DC2626)">Запись заблокирована</div>
+    <div class="si-text" style="line-height:1.6">${esc(why)} Ничего не перезаписано. Пока не выберешь безопасное действие, приложение не пишет в этот профиль — иначе исходные данные будут уничтожены.</div>
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.6rem">
+      <button type="button" class="btn btn-s" onclick="openBackups()">Восстановить из резервной копии</button>
+      <button type="button" class="btn btn-s" onclick="recoveryExportRaw()">Выгрузить как есть</button>
+      <button type="button" class="btn btn-s" onclick="recoveryDiscard()">Сбросить профиль</button>
+    </div>
+  </div>`;
+}
+
 // Запрос постоянного хранилища — ТОЛЬКО по явному действию пользователя.
 async function askPersistentStorage() {
   const granted = await requestPersistentStorage();
@@ -565,21 +683,36 @@ function hydrate() {
   DB  = db  ? {...DEFAULT_DB,  ...db} : JSON.parse(JSON.stringify(DEFAULT_DB));
   CFG = cfg ? {...DEFAULT_CFG, ...cfg, axes: {...DEFAULT_CFG.axes, ...(cfg.axes||{})}}
             : JSON.parse(JSON.stringify(DEFAULT_CFG));
-  // Wave 5 (issue #158): миграция не должна ронять загрузку, но и молча
-  // терять данные не должна. Раньше исключение просто проглатывалось: профиль
-  // оставался частично мигрированным, а пользователь ничего не знал. Теперь
-  // сбой фиксируется, ЗАПИСЬ НЕ ВЫПОЛНЯЕТСЯ (чтобы не закрепить полурезультат)
-  // и показывается recovery-состояние.
+  // Wave 5 (issue #158, owner review #3): миграция выполняется НАД КЛОНОМ и
+  // коммитится в DB только после полного успеха. Раньше migrateRecords()
+  // мутировал живой DB по ходу и мог бросить на середине — полурезультат
+  // оставался в памяти и закреплялся следующим persist().
   _startupIssues = [];
   let migrationFailed = false;
-  try { migrateRecords(); }
-  catch (e) {
+  const preMigration = DB;
+  try {
+    const draft = JSON.parse(JSON.stringify(DB));
+    migrateRecordsOn(draft);          // мутирует ТОЛЬКО клон
+    DB = draft;                       // коммит атомарно, после полного успеха
+  } catch (e) {
     migrationFailed = true;
+    DB = preMigration;                // откат к домиграционному состоянию
     _startupIssues.push({ code: 'migration-failed', profileId: id, name: (e && e.name) || 'Error' });
   }
   // Профиль повреждён и бэкапа не нашлось — данные НЕ затираются пустым
   // DEFAULT_DB (persistLocal защищён), но пользователь обязан это увидеть.
   if (dbCorrupt && !recovered) _startupIssues.push({ code: 'profile-corrupt', profileId: id });
+
+  // Owner review #3: recovery write lock. Пока пользователь явно не выбрал
+  // безопасное действие, ЛЮБАЯ обычная запись для этого профиля запрещена —
+  // иначе первое же действие перезаписало бы повреждённый слот и уничтожило
+  // возможность ручного спасения.
+  if (migrationFailed || (dbCorrupt && !recovered)) {
+    _recoveryLock = { profileId: id, reasons: _startupIssues.map(i => i.code), at: Date.now() };
+  } else {
+    _recoveryLock = null;
+  }
+
   if (recovered) {
     _startupIssues.push({ code: 'recovered-from-backup', profileId: id });
     if (!migrationFailed) { try { persistLocal(); } catch (e) {} }
@@ -592,14 +725,53 @@ function hydrate() {
 // Проблемы последнего запуска — read-only, для recovery-UI и диагностики.
 let _startupIssues = [];
 function startupIssues() { return _startupIssues.slice(); }
+
+// ─── RECOVERY WRITE LOCK (Wave 5, owner review #3) ──────────────────
+// Профиль-специфичная блокировка записи. Взводится, когда слот повреждён без
+// резервной копии или когда миграция упала. Снимается ТОЛЬКО явным
+// осознанным действием пользователя.
+let _recoveryLock = null;
+function recoveryLock() { return _recoveryLock ? { ..._recoveryLock } : null; }
+function isWriteLocked(id) {
+  if (!_recoveryLock) return false;
+  return _recoveryLock.profileId === (id === undefined ? activeId() : id);
+}
+// Снятие блокировки: три безопасных исхода, каждый — явный выбор пользователя.
+//   'restored'  — данные восстановлены из резервной копии;
+//   'exported'  — сырой повреждённый слот выгружен, можно продолжать;
+//   'discarded' — пользователь осознанно отказался от повреждённых данных.
+const RECOVERY_RESOLUTIONS = ['restored', 'exported', 'discarded'];
+function resolveRecovery(kind) {
+  if (!_recoveryLock) return false;
+  if (!RECOVERY_RESOLUTIONS.includes(kind)) return false;
+  _recoveryLock = null;
+  return true;
+}
+// Выгрузка СЫРОГО содержимого повреждённого слота — до любой перезаписи.
+function exportRawSlot(id) {
+  const pid = id === undefined ? activeId() : id;
+  try { return localStorage.getItem(dbKey(pid)); } catch (_) { return null; }
+}
+// Осознанный сброс повреждённого профиля. Требует подтверждения от вызывающего
+// кода: без явного `confirmed` ничего не делает.
+function discardCorruptProfile(confirmed) {
+  if (!confirmed || !_recoveryLock) return false;
+  const id = _recoveryLock.profileId;
+  DB = JSON.parse(JSON.stringify(DEFAULT_DB));
+  resolveRecovery('discarded');
+  _allowEmptyWrite = true;
+  try { persistLocal(); } finally { _allowEmptyWrite = false; }
+  try { if (typeof activeId === 'function' && activeId() === id && typeof initAll === 'function') initAll(); } catch (_) {}
+  return true;
+}
 // Recovery-состояние вместо молчаливой потери. Ничего не чинит само:
 // предлагает резервную копию и диагностику, решение принимает пользователь.
 function showStartupRecovery() {
   if (!_startupIssues.length || typeof toast !== 'function') return;
   const codes = _startupIssues.map(i => i.code);
   const msg = codes.includes('migration-failed')
-    ? 'Не удалось обновить формат данных этого профиля. Данные НЕ изменены. Открой «Диагностику» и сделай резервную копию.'
-    : 'Данные профиля повреждены и резервной копии не нашлось. Ничего не перезаписано. Открой «Диагностику».';
+    ? 'Не удалось обновить формат данных этого профиля. Данные НЕ изменены, запись заблокирована. Открой «Хранилище и диагностика».'
+    : 'Данные профиля повреждены, резервной копии нет. Ничего не перезаписано, запись заблокирована. Открой «Хранилище и диагностика».';
   toast(msg, 'err');
 }
 
@@ -648,7 +820,12 @@ function rBackups() {
 
 // Идемпотентная миграция: бэкфилл ISO-меток в старые записи.
 // id создавался как Date.now(), поэтому служит надёжным источником createdAt.
-function migrateRecords() {
+// Wave 5 (owner review #3): миграция работает над ПЕРЕДАННЫМ объектом, а не
+// над живым DB. hydrate() передаёт клон и коммитит его только после полного
+// успеха — исключение на середине больше не оставляет полумигрированное
+// состояние в памяти.
+function migrateRecords() { return migrateRecordsOn(DB); }
+function migrateRecordsOn(DB) {
   let changed = false;
   IDCOLS.forEach(c => {
     (DB[c] || []).forEach(r => {
@@ -673,7 +850,9 @@ function migrateRecords() {
       if (t.length >= 3) { i.title = t.slice(0, 80) + (t.length > 80 ? '…' : ''); changed = true; }
     }
   });
-  if (changed) persistLocal();
+  // Запись выполняет ВЫЗЫВАЮЩИЙ (hydrate коммитит клон и сохраняет сам) —
+  // миграция над клоном не должна писать в хранилище на середине.
+  return changed;
 }
 
 // ─── ПЕРЕКЛЮЧЕНИЕ / УПРАВЛЕНИЕ ПРОФИЛЯМИ ────────────────────────
@@ -11091,7 +11270,11 @@ function showUpdateToast() {
   navigator.serviceWorker.addEventListener('message', e => {
     const m = e.data || {};
     if (m.type === 'arch:version') {
-      try { window.__archSwVersion = m.current; window.__archSwLastKnownGood = m.lastKnownGood; } catch (_) {}
+      try {
+        window.__archSwVersion = m.current;
+        window.__archSwLastKnownGood = m.lastKnownGood;
+        window.__archSwRecovery = !!m.recovery;
+      } catch (_) {}
     }
   });
   const ctl = navigator.serviceWorker.controller;

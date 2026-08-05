@@ -437,13 +437,13 @@ const page = await boot();
 
   // Сбой миграции: запись не выполняется, полурезультат не закрепляется.
   const migFail = await page.evaluate(() => {
-    const real = window.migrateRecords;
+    const real = window.migrateRecordsOn;
     const id = activeId();
     const key = 'arch5_db_' + id;
     const saved = localStorage.getItem(key);
     try {
       localStorage.setItem(key, JSON.stringify({ insights: [{ id: 5, title: 'до миграции' }] }));
-      window.migrateRecords = () => { throw new Error('boom'); };
+      window.migrateRecordsOn = () => { throw new Error('boom'); };
       hydrate();
       return {
         codes: startupIssues().map(i => i.code),
@@ -452,8 +452,9 @@ const page = await boot();
       };
     } catch (e) { return { threw: true, msg: e.message }; }
     finally {
-      window.migrateRecords = real;
+      window.migrateRecordsOn = real;
       if (saved === null) localStorage.removeItem(key); else localStorage.setItem(key, saved);
+      resolveRecovery('discarded'); hydrate();
     }
   });
   ok(migFail.threw === false, 'старт: исключение миграции не роняет загрузку', migFail.msg);
@@ -499,12 +500,14 @@ const page = await boot();
 
 // ── 10. Deploy recovery / service worker ────────────────────────────
 {
+  // Поведенческие сценарии deploy recovery живут в отдельной сюите
+  // tests/wave5-sw-recovery.spec.mjs (реальный sw.js на mock CacheStorage).
+  // Здесь — только интеграция со стороны приложения.
   const sw = readFileSync(join(ROOT, 'sw.js'), 'utf8');
   ok(/const LKG\s*=/.test(sw), 'deploy: заведён кэш last-known-good');
-  ok(/k !== V && k !== LKG/.test(sw),
-    'deploy: activate больше не удаляет ВСЕ прежние кэши — рабочая копия сохраняется');
   ok(/arch:startup-ok/.test(sw), 'deploy: сборка становится last-known-good только после подтверждения старта');
   ok(/promoteToLastKnownGood/.test(sw), 'deploy: есть явная процедура повышения до last-known-good');
+  ok(/arch:restore-lkg/.test(sw), 'deploy: реализован путь явного восстановления, а не только сохранение кэша');
   ok(!/location\.reload/.test(sw), 'deploy: service worker не инициирует перезагрузок (нет reload-петли)');
 
   const appSrc = readFileSync(join(ROOT, 'app.js'), 'utf8');
@@ -615,6 +618,330 @@ const page = await boot();
     return (btn.getAttribute('onclick') || '').includes('askPersistentStorage');
   });
   ok(explicit, 'storage: разрешение запрашивается только по явному нажатию пользователя');
+}
+
+// ── 14. Owner review #2: транзакционность persistLocal ──────────────
+// Fault injection по КАЖДОМУ отдельному setItem. Проверяется содержимое
+// localStorage, а не только DB в памяти: раньше сбой на CFG приводил к
+// записанному DB, откату не подлежащему, и общему `true` — ложный успех.
+{
+  const scenario = await page.evaluate(async (which) => {
+    const id = activeId();
+    const K = { db: 'arch5_db_' + id, cfg: 'arch5_cfg_' + id, bak: 'arch5_bak_' + id };
+    const snap = k => localStorage.getItem(k);
+
+    // Исходное согласованное состояние.
+    DB.insights = [{ id: 1, title: 'исходная' }];
+    CFG.userName = 'ИСХОДНОЕ-ИМЯ';
+    persistLocal();
+    const before = { db: snap(K.db), cfg: snap(K.cfg), bak: snap(K.bak) };
+
+    // Меняем и то и другое, затем ломаем ровно один setItem.
+    DB.insights = [{ id: 1, title: 'новая' }, { id: 2, title: 'ещё' }];
+    CFG.userName = 'НОВОЕ-ИМЯ';
+    const realSet = Storage.prototype.setItem;
+    const realToast = window.toast; window.toast = () => {};
+    let result;
+    try {
+      Storage.prototype.setItem = function (k, v) {
+        if (k === K[which]) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; }
+        return realSet.call(this, k, v);
+      };
+      result = persistLocal();
+    } finally { Storage.prototype.setItem = realSet; window.toast = realToast; }
+
+    const after = { db: snap(K.db), cfg: snap(K.cfg), bak: snap(K.bak) };
+    return {
+      result,
+      dbRolledBack: after.db === before.db,
+      cfgRolledBack: after.cfg === before.cfg,
+      bakRolledBack: after.bak === before.bak,
+      err: lastPersistError(),
+    };
+  }, 'cfg');
+  ok(scenario.result === false,
+    'транзакция: сбой на записи CFG НЕ возвращает успех (раньше был ложный true)');
+  ok(scenario.dbRolledBack,
+    'транзакция: уже записанный DB откачен к прежнему значению — частичного состояния нет');
+  ok(scenario.cfgRolledBack, 'транзакция: CFG остался прежним');
+  ok(scenario.err && scenario.err.quota === true, 'транзакция: ошибка классифицирована как переполнение');
+
+  // То же для сбоя на резервном слоте — раньше он глотался и скрывал частичность.
+  const bakCase = await page.evaluate(async () => {
+    const id = activeId();
+    const K = { db: 'arch5_db_' + id, cfg: 'arch5_cfg_' + id, bak: 'arch5_bak_' + id };
+    DB.insights = [{ id: 1, title: 'база' }]; CFG.userName = 'БАЗА';
+    persistLocal();
+    const before = { db: localStorage.getItem(K.db), cfg: localStorage.getItem(K.cfg) };
+    DB.insights = [{ id: 9, title: 'изменено' }]; CFG.userName = 'ИЗМЕНЕНО';
+    const realSet = Storage.prototype.setItem;
+    const realToast = window.toast; window.toast = () => {};
+    let result;
+    try {
+      Storage.prototype.setItem = function (k, v) {
+        if (k === K.bak) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; }
+        return realSet.call(this, k, v);
+      };
+      result = persistLocal();
+    } finally { Storage.prototype.setItem = realSet; window.toast = realToast; }
+    return {
+      result,
+      dbRolledBack: localStorage.getItem(K.db) === before.db,
+      cfgRolledBack: localStorage.getItem(K.cfg) === before.cfg,
+    };
+  });
+  ok(bakCase.result === false, 'транзакция: сбой на резервном слоте не маскируется общим успехом');
+  ok(bakCase.dbRolledBack && bakCase.cfgRolledBack,
+    'транзакция: DB и CFG откачены при сбое резервного слота');
+
+  // Сбой на самом DB — первая же запись, откатывать нечего, но и успеха нет.
+  const dbCase = await page.evaluate(async () => {
+    const id = activeId();
+    const K = 'arch5_db_' + id;
+    DB.insights = [{ id: 1 }]; persistLocal();
+    const before = localStorage.getItem(K);
+    DB.insights = [{ id: 2 }];
+    const realSet = Storage.prototype.setItem;
+    const realToast = window.toast; window.toast = () => {};
+    let result;
+    try {
+      Storage.prototype.setItem = function (k, v) {
+        if (k === K) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; }
+        return realSet.call(this, k, v);
+      };
+      result = persistLocal();
+    } finally { Storage.prototype.setItem = realSet; window.toast = realToast; }
+    return { result, unchanged: localStorage.getItem(K) === before };
+  });
+  ok(dbCase.result === false && dbCase.unchanged,
+    'транзакция: сбой на DB оставляет прежнее значение в хранилище и возвращает false');
+
+  // Retry после prune повторяет ВЕСЬ набор, а не только DB.
+  const retry = await page.evaluate(async () => {
+    const id = activeId();
+    const K = { db: 'arch5_db_' + id, cfg: 'arch5_cfg_' + id };
+    DB.insights = [{ id: 1, title: 'до' }]; CFG.userName = 'ДО'; persistLocal();
+    localStorage.setItem('arch5_snap_' + id + '_2020-01-01', 'x');
+    DB.insights = [{ id: 5, title: 'после' }]; CFG.userName = 'ПОСЛЕ';
+    const realSet = Storage.prototype.setItem;
+    const realToast = window.toast; window.toast = () => {};
+    let attempts = 0, result;
+    try {
+      Storage.prototype.setItem = function (k, v) {
+        // Падаем на CFG только пока снимок не удалён — имитируем освобождение.
+        if (k === K.cfg && localStorage.getItem('arch5_snap_' + id + '_2020-01-01') !== null) {
+          attempts++; const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e;
+        }
+        return realSet.call(this, k, v);
+      };
+      result = persistLocal();
+    } finally { Storage.prototype.setItem = realSet; window.toast = realToast; }
+    return {
+      result, attempts,
+      cfg: JSON.parse(localStorage.getItem(K.cfg) || '{}').userName,
+      db: (JSON.parse(localStorage.getItem(K.db) || '{}').insights || [])[0],
+    };
+  });
+  ok(retry.result === true, 'транзакция: после освобождения места повтор набора удаётся');
+  ok(retry.cfg === 'ПОСЛЕ' && retry.db && retry.db.id === 5,
+    `транзакция: повтор записал ВЕСЬ набор — и DB, и CFG (${retry.cfg})`);
+
+  // Реализация не должна писать «в лоб» мимо транзакции.
+  const src = await page.evaluate(() => persistLocal.toString());
+  ok(!/localStorage\.setItem/.test(src),
+    'транзакция: persistLocal не пишет напрямую — только через транзакционный помощник');
+}
+
+// ── 15. Owner review #3: recovery write lock ────────────────────────
+{
+  // Повреждённый слот → hydrate → обычная правка + persist → исходная
+  // повреждённая строка обязана остаться byte-identical.
+  const lockCase = await page.evaluate(() => {
+    const id = activeId();
+    const key = 'arch5_db_' + id, bakK = 'arch5_bak_' + id;
+    const savedDb = localStorage.getItem(key), savedBak = localStorage.getItem(bakK);
+    const CORRUPT = '{ "insights": [ {"id":1,"title":"ЦЕННЫЕ ДАННЫЕ"';   // обрезанный JSON
+    try {
+      localStorage.setItem(key, CORRUPT);
+      localStorage.removeItem(bakK);
+      hydrate();
+      const locked = isWriteLocked();
+      // Пользователь делает обычное действие.
+      DB.insights = [{ id: 42, title: 'новая запись' }];
+      const wrote = persistLocal();
+      const stored = localStorage.getItem(key);
+      return {
+        locked, wrote,
+        identical: stored === CORRUPT,
+        lockInfo: recoveryLock(),
+        err: lastPersistError(),
+      };
+    } finally {
+      resolveRecovery('discarded');
+      if (savedDb === null) localStorage.removeItem(key); else localStorage.setItem(key, savedDb);
+      if (savedBak === null) localStorage.removeItem(bakK); else localStorage.setItem(bakK, savedBak);
+      hydrate();
+    }
+  });
+  ok(lockCase.locked === true, 'lock: повреждённый профиль без резервной копии блокирует запись');
+  ok(lockCase.wrote === false, 'lock: обычный persist отклонён, а не выполнен молча');
+  ok(lockCase.identical,
+    'lock: исходная повреждённая строка осталась byte-identical — ручное спасение возможно');
+  ok(lockCase.err && lockCase.err.locked === true, 'lock: причина отказа записи — блокировка, и она видна');
+  ok(lockCase.lockInfo && lockCase.lockInfo.reasons.includes('profile-corrupt'),
+    'lock: причина блокировки зафиксирована');
+
+  // Миграция мутировала и упала → и память, и хранилище остаются исходными.
+  const migCase = await page.evaluate(() => {
+    const real = window.migrateRecordsOn;
+    const id = activeId();
+    const key = 'arch5_db_' + id;
+    const saved = localStorage.getItem(key);
+    const ORIGINAL = JSON.stringify({ insights: [{ id: 7, title: 'оригинал' }] });
+    try {
+      localStorage.setItem(key, ORIGINAL);
+      // Мутирует переданный объект и только потом бросает.
+      window.migrateRecordsOn = (target) => {
+        target.insights[0].title = 'ИСПОРЧЕНО МИГРАЦИЕЙ';
+        target.__halfMigrated = true;
+        throw new Error('boom');
+      };
+      hydrate();
+      const inMemory = (DB.insights || [])[0];
+      const wrote = persistLocal();
+      return {
+        locked: isWriteLocked(),
+        memoryClean: inMemory && inMemory.title === 'оригинал' && !DB.__halfMigrated,
+        wrote,
+        storedIdentical: localStorage.getItem(key) === ORIGINAL,
+        codes: startupIssues().map(i => i.code),
+      };
+    } finally {
+      window.migrateRecordsOn = real;
+      resolveRecovery('discarded');
+      if (saved === null) localStorage.removeItem(key); else localStorage.setItem(key, saved);
+      hydrate();
+    }
+  });
+  ok(migCase.memoryClean,
+    'lock: миграция шла над клоном — полурезультат НЕ попал в живой DB');
+  ok(migCase.locked === true && migCase.wrote === false,
+    'lock: после сбоя миграции запись заблокирована');
+  ok(migCase.storedIdentical,
+    'lock: сохранённый слот после сбоя миграции остался byte-identical');
+  ok(migCase.codes.includes('migration-failed'), 'lock: сбой миграции зафиксирован');
+
+  // Явное подтверждённое разрешение снимает блокировку.
+  const resolveCase = await page.evaluate(() => {
+    const id = activeId();
+    const key = 'arch5_db_' + id, bakK = 'arch5_bak_' + id;
+    const savedDb = localStorage.getItem(key), savedBak = localStorage.getItem(bakK);
+    try {
+      localStorage.setItem(key, '{ битый');
+      localStorage.removeItem(bakK);
+      hydrate();
+      const before = isWriteLocked();
+      const badKind = resolveRecovery('что-то-другое');     // неизвестный исход
+      const stillLocked = isWriteLocked();
+      const okKind = resolveRecovery('exported');
+      DB.insights = [{ id: 3, title: 'после разблокировки' }];
+      const wrote = persistLocal();
+      return { before, badKind, stillLocked, unlocked: !isWriteLocked(), wrote };
+    } finally {
+      if (savedDb === null) localStorage.removeItem(key); else localStorage.setItem(key, savedDb);
+      if (savedBak === null) localStorage.removeItem(bakK); else localStorage.setItem(bakK, savedBak);
+      hydrate();
+    }
+  });
+  ok(resolveCase.before === true && resolveCase.badKind === false && resolveCase.stillLocked === true,
+    'lock: произвольная строка не снимает блокировку — только из перечня безопасных исходов');
+  ok(resolveCase.unlocked === true && resolveCase.wrote === true,
+    'lock: явное подтверждённое разрешение снимает блокировку и запись снова работает');
+
+  // Сброс профиля требует подтверждения.
+  const discard = await page.evaluate(() => {
+    const id = activeId();
+    const key = 'arch5_db_' + id, bakK = 'arch5_bak_' + id;
+    const savedDb = localStorage.getItem(key), savedBak = localStorage.getItem(bakK);
+    try {
+      localStorage.setItem(key, '{ битый');
+      localStorage.removeItem(bakK);
+      hydrate();
+      const withoutConfirm = discardCorruptProfile(false);
+      const stillLocked = isWriteLocked();
+      const withConfirm = discardCorruptProfile(true);
+      return { withoutConfirm, stillLocked, withConfirm, unlocked: !isWriteLocked() };
+    } finally {
+      if (savedDb === null) localStorage.removeItem(key); else localStorage.setItem(key, savedDb);
+      if (savedBak === null) localStorage.removeItem(bakK); else localStorage.setItem(bakK, savedBak);
+      hydrate();
+    }
+  });
+  ok(discard.withoutConfirm === false && discard.stillLocked === true,
+    'lock: сброс профиля без подтверждения не выполняется');
+  ok(discard.withConfirm === true && discard.unlocked === true,
+    'lock: сброс с подтверждением выполняется и снимает блокировку');
+
+  // Сырой слот можно выгрузить ДО любой перезаписи.
+  const rawExport = await page.evaluate(() => {
+    const id = activeId();
+    const key = 'arch5_db_' + id;
+    const saved = localStorage.getItem(key);
+    try {
+      localStorage.setItem(key, '{ ЦЕННОЕ но битое');
+      return exportRawSlot() === '{ ЦЕННОЕ но битое';
+    } finally { if (saved === null) localStorage.removeItem(key); else localStorage.setItem(key, saved); }
+  });
+  ok(rawExport, 'lock: сырое содержимое повреждённого слота доступно для выгрузки');
+
+  // Блокировка профиль-специфична.
+  const perProfile = await page.evaluate(() => {
+    const id = activeId();
+    const key = 'arch5_db_' + id, bakK = 'arch5_bak_' + id;
+    const savedDb = localStorage.getItem(key), savedBak = localStorage.getItem(bakK);
+    try {
+      localStorage.setItem(key, '{ битый');
+      localStorage.removeItem(bakK);
+      hydrate();
+      return { thisOne: isWriteLocked(id), other: isWriteLocked('p-другой-профиль') };
+    } finally {
+      resolveRecovery('discarded');
+      if (savedDb === null) localStorage.removeItem(key); else localStorage.setItem(key, savedDb);
+      if (savedBak === null) localStorage.removeItem(bakK); else localStorage.setItem(bakK, savedBak);
+      hydrate();
+    }
+  });
+  ok(perProfile.thisOne === true && perProfile.other === false,
+    'lock: блокировка профиль-специфична — другие профили писать можно');
+
+  // UI восстановления присутствует и объясняет, что делать.
+  const panel = await page.evaluate(() => {
+    const id = activeId();
+    const key = 'arch5_db_' + id, bakK = 'arch5_bak_' + id;
+    const savedDb = localStorage.getItem(key), savedBak = localStorage.getItem(bakK);
+    try {
+      localStorage.setItem(key, '{ битый'); localStorage.removeItem(bakK);
+      hydrate();
+      const html = recoveryPanelHtml();
+      return {
+        has: html.length > 0,
+        backup: html.includes('Восстановить из резервной копии'),
+        raw: html.includes('Выгрузить как есть'),
+        discard: html.includes('Сбросить профиль'),
+        buttons: (html.match(/<button/g) || []).length,
+        divClick: (html.match(/<div[^>]*onclick/g) || []).length,
+      };
+    } finally {
+      resolveRecovery('discarded');
+      if (savedDb === null) localStorage.removeItem(key); else localStorage.setItem(key, savedDb);
+      if (savedBak === null) localStorage.removeItem(bakK); else localStorage.setItem(bakK, savedBak);
+      hydrate();
+    }
+  });
+  ok(panel.has && panel.backup && panel.raw && panel.discard,
+    'lock: панель предлагает все три безопасных исхода');
+  ok(panel.buttons === 3 && panel.divClick === 0,
+    `lock: действия — настоящие button, интерактивных div нет (${panel.buttons}/${panel.divClick})`);
 }
 
 ok(errors.length === 0, `JS-ошибок нет за весь прогон (${errors.length})`, errors.slice(0, 3).join('\n'));
