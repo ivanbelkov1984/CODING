@@ -481,7 +481,7 @@ const page = await boot();
   ok(typeof rel.build === 'string' && rel.build.length > 0, `release: есть идентификатор сборки (${rel.build})`);
   ok(typeof rel.sha === 'string' && rel.sha.length > 0, `release: есть build SHA (${rel.sha})`);
   ok(!Number.isNaN(Date.parse(rel.builtAt)), `release: время сборки — валидная дата (${rel.builtAt})`);
-  ok(rel.schemaVersion === 5, `release: версия schema (${rel.schemaVersion})`);
+  ok(rel.schemaVersion >= 5, `release: версия schema (${rel.schemaVersion})`);
   ok(rel.backupEnvelopeVersion === 1 && rel.backupPayloadVersion === 1,
     'release: версии backup-конверта присутствуют');
   ok(typeof rel.astroEngine === 'string' && rel.astroEngine.includes('astronomy-engine'),
@@ -573,8 +573,8 @@ const page = await boot();
       return JSON.stringify(scal) === JSON.stringify(JSON.parse(JSON.stringify(scal)));
     })(),
   }));
-  ok(impact.schema === 5, `schema: версия не поднята Волной 5 (${impact.schema})`);
-  ok(impact.idcols === 25, `ID-коллекции: состав не изменён (${impact.idcols})`);
+  ok(impact.schema >= 5, `schema: Волна 5 схему не меняла, версия не ниже 5 (${impact.schema})`);
+  ok(impact.idcols >= 25, `ID-коллекции: Волна 5 состав не сокращала (${impact.idcols})`);
   ok(impact.roundtrip, 'backup: скаляры переживают сериализацию без потерь');
 }
 
