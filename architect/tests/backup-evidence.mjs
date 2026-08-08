@@ -28,7 +28,7 @@ const OUT = join(ROOT, 'evidence', ENGINE);
 const MIME = { '.html': 'text/html; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.png': 'image/png' };
 
 let pass = 0, fail = 0; const results = [];
-const ok = (c, n) => { if (c) { pass++; results.push({ ok: true, status: 'PASS', n }); console.log('  ✓ ' + n); } else { fail++; results.push({ ok: false, status: 'FAIL', n }); console.log('  ✗ ' + n); } };
+const ok = (c, n, detail) => { if (c) { pass++; results.push({ ok: true, status: 'PASS', n }); console.log('  ✓ ' + n); } else { fail++; results.push({ ok: false, status: 'FAIL', n, detail: detail || null }); console.log('  ✗ ' + n); if (detail) console.log('      ' + String(detail).split('\n').join('\n      ')); } };
 // Некоторые проверки честно НЕ являются PASS (SKIP/BLOCKED). Их НЕ засчитываем
 // как pass — фиксируем реальный статус в отчёте (см. item 10: no ok(true) для
 // невыполненного теста; отчёт различает PASS/FAIL/SKIP/BLOCKED).
@@ -90,6 +90,25 @@ async function openSheet(page) {
 
 async function shot(page, name) { try { await mkdir(OUT, { recursive: true }); await page.screenshot({ path: join(OUT, name + '.png') }); } catch (e) {} }
 
+// Диагностика для zero-mutation: голое «снимки не совпали» ничего не говорит о
+// том, ЧТО изменилось, и превращает любой сбой в гадание. Возвращает список
+// изменившихся ключей с усечёнными значениями.
+function snapshotDiff(before, after) {
+  let a, b;
+  try { a = JSON.parse(before); b = JSON.parse(after); } catch (e) { return 'снимки не разбираются как JSON'; }
+  const out = [];
+  for (const part of ['ls', 'md']) {
+    const keys = new Set([...Object.keys(a[part] || {}), ...Object.keys(b[part] || {})]);
+    for (const k of keys) {
+      const x = (a[part] || {})[k], y = (b[part] || {})[k];
+      if (x === y) continue;
+      const cut = v => (v === undefined ? '(отсутствует)' : String(v).length > 160 ? String(v).slice(0, 160) + '…' : String(v));
+      out.push(`${part}.${k}: ${cut(x)}  →  ${cut(y)}`);
+    }
+  }
+  return out.length ? out.join('\n      ') : '(различий по ключам нет — расходится только порядок сериализации)';
+}
+
 // Полный снимок мутируемого состояния для zero-mutation проверок: весь
 // localStorage (registry/active/db/cfg/bak/…) + все записи IndexedDB arch5_media.
 async function fullSnapshot(page) {
@@ -148,6 +167,15 @@ async function main() {
     await page.reload({ waitUntil: 'load' });
     await page.waitForFunction(() => !!(window.ArchBackup), null, { timeout: 8000 });
     ok(true, 'приложение загрузилось, backup-модуль подключён по HTTP');
+    // Маркер успешного старта Волны 5 (`arch5_last_good_build`) пишется
+    // отложенно — через STARTUP_OK_DELAY_MS = 8 c после загрузки. Этот таймер
+    // срабатывал ПОСЕРЕДИНЕ сценариев восстановления и портил snapshot
+    // zero-mutation: снимок «до» ключа ещё не содержал, снимок «после» уже
+    // содержал, хотя restore тут вообще ни при чём. Вызываем маркер сразу:
+    // markStartupOk() идемпотентен и пишет ту же строку BUILD_ID, поэтому
+    // отложенный таймер станет no-op, а проверка zero-mutation останется
+    // ПОЛНОЙ — ни один ключ из неё не исключается.
+    await page.evaluate(() => { try { markStartupOk(); } catch (_) {} });
     // entry видима
     await page.evaluate(() => { ['ov-onboard', 'ov-tour', 'splash'].forEach(id => { const e = document.getElementById(id); if (e) { e.classList.remove('on'); e.style.display = 'none'; } }); goTo('settings'); });
     const entryVisible = await page.locator('text=Зашифрованная резервная копия').first().isVisible();
@@ -204,7 +232,9 @@ async function main() {
     await page.waitForFunction(() => /Неверный пароль/.test((document.getElementById('be-restore-status') || {}).textContent || ''), null, { timeout: 8000 });
     const errText = await page.locator('#be-restore-status').textContent();
     ok(/Неверный пароль/.test(errText) && !errText.includes('WRONG-PASSWORD'), 'wrong password: безопасное сообщение без пароля');
-    ok((await fullSnapshot(page)) === beforeWP, 'wrong password: полный zero-mutation (registry/active/DB/CFG/bak/IndexedDB)');
+    const afterWP = await fullSnapshot(page);
+    ok(afterWP === beforeWP, 'wrong password: полный zero-mutation (registry/active/DB/CFG/bak/IndexedDB)',
+      afterWP === beforeWP ? null : snapshotDiff(beforeWP, afterWP));
     await shot(page, '04-wrong-password');
 
     // ── Corrupted ciphertext: safe error + ПОЛНЫЙ zero-mutation snapshot ──
@@ -216,7 +246,9 @@ async function main() {
       await page.click('#be-restore-new-btn');
       await page.waitForFunction(() => /повреждён|Неверный пароль/i.test((document.getElementById('be-restore-status') || {}).textContent || ''), null, { timeout: 8000 });
       ok(true, 'corrupted ciphertext: показано безопасное сообщение');
-      ok((await fullSnapshot(page)) === beforeCC, 'corrupted ciphertext: полный zero-mutation (registry/active/DB/CFG/bak/IndexedDB)');
+      const afterCC = await fullSnapshot(page);
+      ok(afterCC === beforeCC, 'corrupted ciphertext: полный zero-mutation (registry/active/DB/CFG/bak/IndexedDB)',
+        afterCC === beforeCC ? null : snapshotDiff(beforeCC, afterCC));
     }
     // Чистый сброс controller-состояния между сценариями восстановления.
     await page.click('#be-close');
