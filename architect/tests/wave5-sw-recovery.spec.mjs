@@ -141,7 +141,7 @@ async function seedBuild(name, marker) {
   const B = await loadSW('vB', { cacheStorage: CACHES });
   await seedBuild('arch-vB', 'BUILD-B-GOOD');
   await B.api.activateWithRecovery();
-  await B.api.handleMessage({ type: 'arch:startup-ok' });
+  await B.api.handleMessage({ type: 'arch:startup-ok', build: 'vB' });
   ok((await B.api.lastKnownGoodVersion()) === 'arch-vB',
     'сценарий 2: после подтверждённого старта LKG стал B');
   const lkgB = await (await CACHES.open('arch-lkg')).match('./index.html');
@@ -174,13 +174,13 @@ async function seedBuild(name, marker) {
   await seedBuild('arch-vB', 'BUILD-B-GOOD');
   const B = await loadSW('vB', { cacheStorage: CACHES });
   await B.api.activateWithRecovery();
-  await B.api.handleMessage({ type: 'arch:startup-ok' });
+  await B.api.handleMessage({ type: 'arch:startup-ok', build: 'vB' });
   await B.api.enterRecovery();                       // пользователь был в восстановлении
 
   const D = await loadSW('vD', { cacheStorage: CACHES });
   await seedBuild('arch-vD', 'BUILD-D-FIXED');
   await D.api.activateWithRecovery();
-  await D.api.handleMessage({ type: 'arch:startup-ok' });
+  await D.api.handleMessage({ type: 'arch:startup-ok', build: 'vD' });
 
   ok((await D.api.lastKnownGoodVersion()) === 'arch-vD',
     'сценарий 3: исправленная сборка после подтверждения старта становится LKG');
@@ -210,7 +210,7 @@ async function seedBuild(name, marker) {
   await seedBuild('arch-vB', 'BUILD-B');
   const B = await loadSW('vB', { cacheStorage: CACHES });
   await B.api.activateWithRecovery();
-  await B.api.handleMessage({ type: 'arch:startup-ok' });
+  await B.api.handleMessage({ type: 'arch:startup-ok', build: 'vB' });
 
   const replies = [];
   await B.api.handleMessage({ type: 'arch:version?' }, m => replies.push(m));
@@ -231,6 +231,233 @@ async function seedBuild(name, marker) {
   let threw = false;
   try { await B.api.handleMessage({ type: 'arch:unknown' }, () => {}); } catch (_) { threw = true; }
   ok(!threw, 'message API: неизвестный тип сообщения игнорируется без исключения');
+}
+
+// ── Сценарий 7 (owner review, финальный проход): чужая сборка НЕ может ─
+//    сертифицировать сломанную текущую. C broken → recovery B →
+//    B шлёт startup-ok(build=B) контроллеру C.
+{
+  CACHES.caches.clear();
+  await seedBuild('arch-vB', 'BUILD-B-GOOD');
+  const B = await loadSW('vB', { cacheStorage: CACHES });
+  await B.api.activateWithRecovery();
+  await B.api.handleMessage({ type: 'arch:startup-ok', build: 'vB' });
+
+  // Деплой сломанной C; пользователь включает восстановление.
+  const C = await loadSW('vC', { cacheStorage: CACHES });
+  await seedBuild('arch-vC', 'BUILD-C-BROKEN');
+  await C.api.activateWithRecovery();
+  await C.api.enterRecovery();
+  ok((await C.api.recoveryMode()) === true, 'сценарий 7: восстановление включено, SW-контроллер — сломанная C');
+
+  // Код РАБОЧЕЙ B (выданной из LKG) через 8 секунд шлёт свой health marker.
+  const replies = [];
+  await C.api.handleMessage({ type: 'arch:startup-ok', build: 'vB' }, m => replies.push(m));
+
+  ok((await C.api.lastKnownGoodVersion()) === 'arch-vB',
+    'сценарий 7: маркер сборки B НЕ продвинул C — LKG остался B');
+  const lkgIdx = await (await CACHES.open('arch-lkg')).match('./index.html');
+  ok((await lkgIdx.text()) === 'BUILD-B-GOOD',
+    'сценарий 7: содержимое LKG не подменено сломанной C');
+  ok((await C.api.recoveryMode()) === true,
+    'сценарий 7: режим восстановления НЕ сброшен чужим маркером');
+  const rej = replies.find(m => m.type === 'arch:startup-ok-result');
+  ok(!!rej && rej.ok === false && rej.reason === 'build-mismatch',
+    `сценарий 7: маркер отклонён явно как build-mismatch (${rej && rej.reason})`);
+
+  // И маркер вообще без build отклоняется так же (старая вкладка, старый код).
+  await C.api.handleMessage({ type: 'arch:startup-ok' });
+  ok((await C.api.lastKnownGoodVersion()) === 'arch-vB',
+    'сценарий 7: маркер без build id тоже не продвигает LKG');
+
+  // Только маркер САМОЙ C (реально успешный старт C) продвигает C.
+  await C.api.exitRecovery();
+  await C.api.handleMessage({ type: 'arch:startup-ok', build: 'vC' });
+  ok((await C.api.lastKnownGoodVersion()) === 'arch-vC',
+    'сценарий 7: собственный маркер C после реального успешного старта продвигает C');
+}
+
+// ── Сценарий 8: recovery FAIL-CLOSED — недостающий ассет не берётся из V ─
+{
+  CACHES.caches.clear();
+  await seedBuild('arch-vB', 'BUILD-B-GOOD');
+  const B = await loadSW('vB', { cacheStorage: CACHES });
+  await B.api.activateWithRecovery();
+  await B.api.handleMessage({ type: 'arch:startup-ok', build: 'vB' });
+
+  const C = await loadSW('vC', { cacheStorage: CACHES });
+  // В C есть ассет, которого НЕТ в B (новый модуль появился в новой сборке).
+  const cCache = await CACHES.open('arch-vC');
+  await cCache.put('./index.html', new MockResponse('BUILD-C-BROKEN'));
+  await cCache.put('./new-module.js', new MockResponse('script:BUILD-C-BROKEN'));
+  await C.api.activateWithRecovery();
+  await C.api.enterRecovery();
+
+  // Запрос ассета, отсутствующего в LKG: НЕ выдавать C и НЕ ходить в сеть.
+  let fetched = 0;
+  const C2 = await loadSW('vC', { cacheStorage: CACHES, fetchImpl: async () => { fetched++; return new MockResponse('network:FRESH-C'); } });
+  const missing = await C2.api.handleAsset('./new-module.js');
+  const missText = missing ? await missing.text() : null;
+  ok(missing && missing.status === 503,
+    `сценарий 8: отсутствующий в LKG ассет приложения даёт контролируемую ошибку, а не подмену (status ${missing && missing.status})`);
+  ok(missText !== 'script:BUILD-C-BROKEN' && missText !== 'network:FRESH-C',
+    'сценарий 8: ни сломанная C, ни свежий network bundle не подмешаны к странице B');
+  ok(fetched === 0, 'сценарий 8: сеть в recovery для ассетов приложения не используется');
+
+  // Присутствующий в LKG ассет отдаётся из LKG.
+  const present = await C2.api.handleAsset('./lucide.js');
+  ok(present && (await present.text()) === 'lucide:BUILD-B-GOOD',
+    'сценарий 8: присутствующий ассет по-прежнему отдаётся из LKG');
+
+  // Навигация при пустом LKG-index — тоже контролируемая ошибка, не V.
+  const lkgCache = await CACHES.open('arch-lkg');
+  await lkgCache.delete('./index.html'); await lkgCache.delete('./');
+  const nav = await C2.api.handleNavigate({ url: './', mode: 'navigate' });
+  ok(nav && nav.status === 503 && (await nav.text()).includes('Режим восстановления'),
+    'сценарий 8: навигация без index в LKG даёт recovery-ошибку, а не сломанную C');
+}
+
+// ── Сценарий 9: независимый recovery bootstrap (hard-startup failure) ─
+// Bootstrap извлекается из РЕАЛЬНОГО index.html и исполняется в песочнице
+// БЕЗ app.js — ровно как при syntax error основного бандла.
+{
+  const html = await readFile(join(ROOT, 'index.html'), 'utf8');
+  const m = html.match(/\/\*ARCH_RECOVERY_BOOTSTRAP_START\*\/([\s\S]*?)\/\*ARCH_RECOVERY_BOOTSTRAP_END\*\//);
+  ok(!!m, 'bootstrap: блок присутствует в index.html');
+  const bootSrc = m ? m[1] : '';
+  const appPos = html.indexOf('<script src="app.js">');
+  const bootPos = html.indexOf('ARCH_RECOVERY_BOOTSTRAP_START');
+  ok(bootPos > 0 && appPos > 0 && bootPos < appPos,
+    'bootstrap: исполняется ДО основного бандла');
+  ok(!/\b(persist|hydrate|rStorage|toast|openOv|DB\.)\w*\s*\(/.test(bootSrc),
+    'bootstrap: не вызывает функций основного приложения и не читает DB');
+  ok(!/localStorage|indexedDB|arch5_/.test(bootSrc),
+    'bootstrap: не обращается к пользовательским данным');
+
+  // Песочница: фейковые window/document/navigator, НИКАКОГО app.js.
+  function makeSandbox({ lkg, ackOk }) {
+    const created = [];
+    let reloads = 0;
+    const timeouts = [];
+    const mkEl = (tag) => {
+      const el = {
+        tag, style: { cssText: '' }, children: [], attrs: {}, textContent: '', disabled: false,
+        setAttribute(k, v) { this.attrs[k] = v; },
+        appendChild(c) { this.children.push(c); return c; },
+        onclick: null, type: '', id: '',
+      };
+      created.push(el);
+      return el;
+    };
+    const fakeCtl = {
+      postMessage(msg, ports) {
+        const port2 = ports && ports[0];
+        if (!port2) return;
+        // Отвечаем асинхронно, как настоящий SW.
+        queueMicrotask(() => {
+          if (msg.type === 'arch:version?') port2._deliver({ type: 'arch:version', current: 'arch-vC', lastKnownGood: lkg, recovery: false });
+          else if (msg.type === 'arch:restore-lkg') port2._deliver(ackOk ? { type: 'arch:restore-lkg-result', ok: true, version: lkg } : { type: 'arch:restore-lkg-result', ok: false, reason: 'no-last-known-good' });
+        });
+      },
+    };
+    class FakePort {
+      constructor() { this.onmessage = null; }
+      _deliver(data) { if (this.pair && this.pair.onmessage) this.pair.onmessage({ data }); }
+    }
+    class FakeMessageChannel {
+      constructor() {
+        this.port1 = new FakePort(); this.port2 = new FakePort();
+        this.port1.pair = this.port1; this.port2.pair = this.port1;
+        // postMessage со стороны SW доставляет в port1
+        this.port2._deliver = (data) => { if (this.port1.onmessage) this.port1.onmessage({ data }); };
+      }
+    }
+    const win = {
+      addEventListener: () => {},
+      location: { reload: () => { reloads++; } },
+      get reloads() { return reloads; },
+    };
+    win.window = win;
+    const sandbox = {
+      window: win,
+      document: {
+        body: mkEl('body'),
+        documentElement: mkEl('html'),
+        getElementById: (id) => created.find(e => e.id === id) || null,
+        createElement: mkEl,
+      },
+      navigator: { serviceWorker: { controller: lkg === 'none' ? null : fakeCtl } },
+      MessageChannel: FakeMessageChannel,
+      setTimeout: (fn, ms) => { timeouts.push({ fn, ms }); return timeouts.length; },
+      clearTimeout: () => {},
+      queueMicrotask, Promise, console, location: win.location,
+    };
+    sandbox.globalThis = sandbox;
+    vm.createContext(sandbox);
+    return { sandbox, created, win, timeouts, flushTimers: (maxMs) => { timeouts.splice(0).forEach(t => { if (t.ms <= (maxMs == null ? Infinity : maxMs)) t.fn(); }); } };
+  }
+
+  // 9.1 Основной бандл НЕ стартовал (флага нет) + LKG есть → recovery UI.
+  {
+    const env = makeSandbox({ lkg: 'arch-vB', ackOk: true });
+    vm.runInContext(bootSrc, env.sandbox);
+    ok(typeof env.sandbox.window.__archRecoveryBoot === 'object',
+      'bootstrap: экспортирует управляемый вход для проверки');
+    const res = await env.sandbox.window.__archRecoveryBoot.check();
+    ok(res && res.shown === true && res.lkg === 'arch-vB',
+      'bootstrap: при упавшем основном бандле и существующем LKG показан recovery UI');
+    const dlg = env.created.find(e => e.id === 'arch-boot-recovery');
+    ok(!!dlg, 'bootstrap: recovery-панель реально создана в DOM');
+    const btn = dlg && dlg.children.find(c => c.tag === 'button');
+    ok(!!btn && btn.type === 'button' && /предыдущей рабочей версии/.test(btn.textContent),
+      'bootstrap: кнопка возврата присутствует и названа понятно');
+
+    // Клик → ACK ok:true → reload (и только после ACK).
+    btn.onclick();
+    await new Promise(r => setTimeout(r, 5));      // микротаски ответа SW
+    ok(env.win.reloads === 0, 'bootstrap: reload не мгновенный — ждёт подтверждения');
+    env.flushTimers();                              // отложенный reload после ok:true
+    ok(env.win.reloads === 1, 'bootstrap: после ACK ok:true выполняется ровно один reload');
+  }
+
+  // 9.2 ACK отрицательный → reload запрещён, кнопка снова доступна.
+  {
+    const env = makeSandbox({ lkg: 'arch-vB', ackOk: false });
+    vm.runInContext(bootSrc, env.sandbox);
+    await env.sandbox.window.__archRecoveryBoot.check();
+    const dlg = env.created.find(e => e.id === 'arch-boot-recovery');
+    const btn = dlg.children.find(c => c.tag === 'button');
+    btn.onclick();
+    await new Promise(r => setTimeout(r, 5));
+    env.flushTimers();
+    ok(env.win.reloads === 0, 'bootstrap: отрицательный ACK — перезагрузки нет');
+    ok(btn.disabled === false, 'bootstrap: после отказа кнопка снова активна');
+    const status = dlg.children.find(c => c.attrs && c.attrs['aria-live']);
+    ok(!!status && /не подтверждено/.test(status.textContent),
+      'bootstrap: пользователь видит точную причину отказа');
+  }
+
+  // 9.3 Основной бандл стартовал нормально → bootstrap молчит.
+  {
+    const env = makeSandbox({ lkg: 'arch-vB', ackOk: true });
+    vm.runInContext(bootSrc, env.sandbox);
+    env.sandbox.window.__archAppStarted = true;
+    const res = await env.sandbox.window.__archRecoveryBoot.check();
+    ok(res && res.shown === false,
+      'bootstrap: при нормальном старте приложения recovery UI не показывается');
+    ok(!env.created.find(e => e.id === 'arch-boot-recovery'),
+      'bootstrap: панель не создана при здоровом старте');
+  }
+
+  // 9.4 LKG не существует → UI не показывается, reload невозможен.
+  {
+    const env = makeSandbox({ lkg: null, ackOk: false });
+    vm.runInContext(bootSrc, env.sandbox);
+    const res = await env.sandbox.window.__archRecoveryBoot.check();
+    ok(res && res.shown === false && res.reason === 'no-last-known-good',
+      'bootstrap: без last-known-good честно сообщается, что откатываться некуда');
+    ok(env.win.reloads === 0, 'bootstrap: и никакой перезагрузки не происходит');
+  }
 }
 
 // ── Сценарий 6: данные пользователя восстановление не трогает ───────

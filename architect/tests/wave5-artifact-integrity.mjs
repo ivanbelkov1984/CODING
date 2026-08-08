@@ -76,11 +76,21 @@ ok(missing.length === 0, `SW: все ассеты app shell присутству
 ok(/const LKG\s*=/.test(sw), 'SW: last-known-good кэш присутствует в выпускаемом артефакте');
 ok(/arch:startup-ok/.test(sw), 'SW: health marker присутствует в выпускаемом артефакте');
 ok(/arch:restore-lkg/.test(sw), 'SW: путь явного восстановления присутствует в выпускаемом артефакте');
-// Поведение (seed LKG до уборки, выдача из LKG, отсутствие подмены сломанной
-// сборкой) проверяется сценарной сюитой tests/wave5-sw-recovery.spec.mjs на
+ok(/buildMatchesCurrent/.test(sw), 'SW: проверка build identity присутствует в выпускаемом артефакте');
+// Поведение (seed LKG до уборки, fail-closed выдача, отклонение чужого
+// маркера) проверяется сценарной сюитой tests/wave5-sw-recovery.spec.mjs на
 // mock CacheStorage. Здесь — только что логика реально попала в артефакт.
 ok(/activateWithRecovery/.test(sw) && /self\.__archSw/.test(sw),
   'SW: логика восстановления попала в выпускаемый артефакт и доступна сценарному тесту');
+
+// Независимый recovery bootstrap: присутствует в артефакте и стоит ДО
+// основного бандла — иначе hard-startup ошибка снова оставила бы
+// пользователя без пути назад.
+const bootStart = html.indexOf('ARCH_RECOVERY_BOOTSTRAP_START');
+ok(bootStart > 0, 'bootstrap: присутствует в выпускаемом index.html');
+const mainScript = html.search(/<script>\s*\n\/\/ Кастомный дашборд|__archAppStarted/) >= 0
+  ? html.indexOf('__archAppStarted', bootStart + 100) : -1;
+ok(mainScript > bootStart, 'bootstrap: маркер старта приложения стоит после bootstrap-блока');
 
 // ── 6. SHA критических ассетов ──────────────────────────────────────
 // Фиксируем и печатаем контрольные суммы того, что публикуется. Это делает

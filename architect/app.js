@@ -242,31 +242,57 @@ function isQuotaError(e) {
   return e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED'
     || e.code === 22 || e.code === 1014;
 }
-// Wave 5 (owner review #2): запись — ТРАНЗАКЦИЯ над набором ключей.
-// Раньше последовательность была DB → CFG → backup без отката: если CFG падал
-// по квоте, retry переписывал только DB и функция возвращала true, хотя
-// настройки остались старыми. Пользователь получал ложный успех.
+// Wave 5 (owner review #2, финальный проход): запись — ТРАНЗАКЦИЯ над набором
+// ключей, и сбой ОТКАТА больше не проглатывается.
 //
-// Теперь: снимаем прежние значения всех участвующих ключей, пишем набор
-// целиком, при ЛЮБОЙ ошибке откатываем уже изменённые ключи к снятым
-// значениям и возвращаем false. Частичный успех не существует как исход.
+// Фазы:
+//   1) snapshot: прежние значения ВСЕХ ключей снимаются ДО первой записи.
+//      Если getItem любого ключа сам падает — транзакция не начинается.
+//   2) write: набор пишется целиком.
+//   3) rollback при сбое: каждый уже изменённый ключ возвращается к снятому
+//      значению, с read-back проверкой. Сбой отката любого ключа — это
+//      rollbackFailed: хранилище в неизвестном смешанном состоянии, и
+//      вызывающий код ОБЯЗАН перейти в критический режим, а не продолжать.
+//
+// Результат: { ok, error?, phase?, rollbackAttempted, rollbackFailed,
+//              rollbackErrors: [имена ключей], affectedKeys: [ключи] }.
 function _txWrite(entries) {
+  // Фаза 1: snapshot до первой записи.
   const prev = [];
-  try {
-    for (const [k, v] of entries) {
-      prev.push([k, localStorage.getItem(k)]);   // до записи — снимок
-      localStorage.setItem(k, v);
+  for (const [k] of entries) {
+    try { prev.push([k, localStorage.getItem(k)]); }
+    catch (e) {
+      return { ok: false, phase: 'snapshot', error: e, rollbackAttempted: false, rollbackFailed: false, rollbackErrors: [], affectedKeys: [] };
     }
-    return { ok: true };
-  } catch (e) {
-    // Откат в обратном порядке: восстанавливаем ровно то, что было.
-    for (let i = prev.length - 1; i >= 0; i--) {
-      const [k, old] = prev[i];
-      try { if (old === null) localStorage.removeItem(k); else localStorage.setItem(k, old); }
-      catch (_) { /* откат best-effort: сообщаем об ошибке в любом случае */ }
-    }
-    return { ok: false, error: e };
   }
+  // Фаза 2: запись набора.
+  const written = [];
+  let writeError = null;
+  for (let i = 0; i < entries.length; i++) {
+    const [k, v] = entries[i];
+    try { localStorage.setItem(k, v); written.push(i); }
+    catch (e) { writeError = e; break; }
+  }
+  if (!writeError) return { ok: true, rollbackAttempted: false, rollbackFailed: false, rollbackErrors: [], affectedKeys: entries.map(([k]) => k) };
+  // Фаза 3: откат изменённых ключей в обратном порядке + read-back проверка.
+  const rollbackErrors = [];
+  for (let j = written.length - 1; j >= 0; j--) {
+    const [k] = entries[written[j]];
+    const old = prev[written[j]][1];
+    try {
+      if (old === null) localStorage.removeItem(k); else localStorage.setItem(k, old);
+      // Read-back: откат считается успешным, только если значение реально прежнее.
+      const now = localStorage.getItem(k);
+      if (now !== old) rollbackErrors.push(k);
+    } catch (_) { rollbackErrors.push(k); }
+  }
+  return {
+    ok: false, phase: 'write', error: writeError,
+    rollbackAttempted: true,
+    rollbackFailed: rollbackErrors.length > 0,
+    rollbackErrors,
+    affectedKeys: written.map(i => entries[i][0]),
+  };
 }
 function persistLocal() {
   const id = activeId();
@@ -297,19 +323,32 @@ function persistLocal() {
   let r = _txWrite(entries);
   if (r.ok) { _lastPersistError = null; return true; }
 
+  // Сбой ОТКАТА — критическое состояние: хранилище в неизвестной смеси
+  // старого и нового. Никакого prune, никакого retry, немедленная блокировка.
+  if (r.rollbackFailed) {
+    _lastPersistError = { quota: isQuotaError(r.error), critical: true, rollbackFailed: true, affectedKeys: r.rollbackErrors.slice(), name: (r.error && r.error.name) || 'Error', at: Date.now() };
+    enterCriticalState(id, r.rollbackErrors);
+    return false;
+  }
+
   const quota = isQuotaError(r.error);
   if (typeof log === 'function') log('error', quota ? 'persist: хранилище переполнено' : 'persist: ошибка записи', (r.error && r.error.name) || '');
   if (quota) {
-    // Освобождаем то, что можно освободить БЕЗ потери пользовательских данных:
-    // старые ежедневные снимки. Данные при этом не удаляются автоматически.
+    // Retry допустим ТОЛЬКО при полностью успешном откате первой попытки
+    // (мы в этой ветке — откат прошёл, состояние прежнее и известное).
+    // Освобождаем место старыми снимками — пользовательские данные не трогаем.
     try { pruneSnapshotsForSpace(id); } catch (_) {}
-    // Повтор — ВСЕГО набора, а не только DB. Иначе повторилась бы ровно та
-    // ошибка, из-за которой этот блокер и был заведён.
+    // Повтор — ВСЕГО набора, а не только DB.
     r = _txWrite(entries);
     if (r.ok) {
       _lastPersistError = null;
       if (typeof log === 'function') log('warn', 'persist: запись удалась после освобождения места старыми снимками');
       return true;
+    }
+    if (r.rollbackFailed) {
+      _lastPersistError = { quota: true, critical: true, rollbackFailed: true, affectedKeys: r.rollbackErrors.slice(), name: (r.error && r.error.name) || 'QuotaExceededError', at: Date.now() };
+      enterCriticalState(id, r.rollbackErrors);
+      return false;
     }
     _lastPersistError = { quota: true, name: (r.error && r.error.name) || 'QuotaExceededError', at: Date.now() };
     notifyStorageFull();
@@ -386,16 +425,45 @@ function swPost(msg) {
   if (!ctl) return false;
   try { ctl.postMessage(msg); return true; } catch (_) { return false; }
 }
-function restorePreviousBuild() {
-  if (!swPost({ type: 'arch:restore-lkg' })) { toast('Восстановление недоступно: service worker не активен', 'warn'); return false; }
+// Owner review (финальный проход): запрос к SW с ПОДТВЕРЖДЕНИЕМ через
+// MessageChannel. Раньше restorePreviousBuild() делал postMessage → 800 мс →
+// reload вслепую: при no-last-known-good или молчании SW пользователь получал
+// перезагрузку в неизвестное состояние. Теперь reload разрешён только после
+// явного ответа { ok: true }.
+function swRequest(msg, timeoutMs = 4000) {
+  return new Promise((resolve) => {
+    const ctl = navigator.serviceWorker && navigator.serviceWorker.controller;
+    if (!ctl) { resolve({ ok: false, reason: 'no-controller' }); return; }
+    let done = false;
+    const finish = (r) => { if (!done) { done = true; resolve(r); } };
+    const to = setTimeout(() => finish({ ok: false, reason: 'timeout' }), timeoutMs);
+    try {
+      const ch = new MessageChannel();
+      ch.port1.onmessage = (e) => { clearTimeout(to); finish(e.data || { ok: false, reason: 'empty-reply' }); };
+      ctl.postMessage(msg, [ch.port2]);
+    } catch (_) { clearTimeout(to); finish({ ok: false, reason: 'post-failed' }); }
+  });
+}
+async function restorePreviousBuild() {
+  const r = await swRequest({ type: 'arch:restore-lkg' });
+  if (!r || r.ok !== true) {
+    const why = r && r.reason === 'no-last-known-good'
+      ? 'предыдущая рабочая версия не сохранена (это первая установка)'
+      : r && r.reason === 'timeout' ? 'service worker не ответил'
+      : r && r.reason === 'no-controller' ? 'service worker не активен'
+      : 'отказ: ' + ((r && r.reason) || 'неизвестная ошибка');
+    toast('Восстановление не выполнено — ' + why + '. Перезагрузка отменена.', 'err');
+    return false;                        // reload ЗАПРЕЩЁН без подтверждения
+  }
   toast('Включаю предыдущую рабочую версию…', 'ok');
-  setTimeout(() => { try { location.reload(); } catch (_) {} }, 800);
+  setTimeout(() => { try { location.reload(); } catch (_) {} }, 400);
   return true;
 }
-function exitRecoveryMode() {
-  if (!swPost({ type: 'arch:exit-recovery' })) return false;
+async function exitRecoveryMode() {
+  const r = await swRequest({ type: 'arch:exit-recovery' });
+  if (!r || r.ok !== true) { toast('Не удалось выйти из режима восстановления — перезагрузка отменена', 'err'); return false; }
   toast('Возврат к текущей версии…', 'ok');
-  setTimeout(() => { try { location.reload(); } catch (_) {} }, 800);
+  setTimeout(() => { try { location.reload(); } catch (_) {} }, 400);
   return true;
 }
 
@@ -403,7 +471,12 @@ function exitRecoveryMode() {
 // Три безопасных исхода. Пока ни один не выбран, запись для профиля закрыта.
 function recoveryExportRaw() {
   const raw = exportRawSlot();
-  if (raw == null) { toast('Повреждённый слот пуст — выгружать нечего', 'warn'); resolveRecovery('exported'); rStorage(); return false; }
+  if (raw == null) {
+    // Выгрузка НЕ состоялась — блокировка не снимается и «выгружено» не
+    // утверждается. Пользователь выбирает другой исход.
+    toast('Слот недоступен для чтения — выгрузка невозможна. Выбери восстановление или сброс.', 'warn');
+    return false;
+  }
   try {
     const blob = new Blob([raw], { type: 'application/json' });
     const a = document.createElement('a');
@@ -411,7 +484,11 @@ function recoveryExportRaw() {
     a.download = 'architect-corrupt-slot-' + todayKey() + '.json';
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  } catch (_) { toast('Не удалось выгрузить файл', 'err'); return false; }
+  } catch (_) {
+    // Скачивание не инициировано — блокировка стоит, успех не заявляется.
+    toast('Не удалось выгрузить файл — блокировка сохранена', 'err');
+    return false;
+  }
   resolveRecovery('exported');
   toast('Повреждённые данные выгружены. Запись разблокирована.', 'ok');
   rStorage();
@@ -419,7 +496,15 @@ function recoveryExportRaw() {
 }
 function recoveryDiscard() {
   if (!confirm('Повреждённые данные этого профиля будут заменены пустыми. Это необратимо. Продолжить?')) return false;
-  discardCorruptProfile(true);
+  // Owner review (финальный проход): успех показывается ТОЛЬКО после реально
+  // удавшейся записи. При сбое (квота, rollback) блокировка и corrupt slot
+  // сохраняются, и пользователь видит ошибку, а не ложное «сброшено».
+  const done = discardCorruptProfile(true);
+  if (!done) {
+    toast('Сброс не удался — данные и блокировка сохранены. Освободи место и повтори.', 'err');
+    rStorage();
+    return false;
+  }
   toast('Профиль сброшен. Запись разблокирована.', 'ok');
   rStorage();
   return true;
@@ -659,11 +744,22 @@ async function storageSummary() {
 }
 // persist — вызывается после любой правки пользователя: помечает
 // документ меткой времени, пишет локально и планирует фоновый синк.
+// Wave 5 (owner review, финальный проход): write barrier. Под блокировкой
+// НИЧЕГО не меняется — ни __ts/_ts, ни хранилище, ни расписание синка. При
+// неудачной записи метки откатываются, синк не планируется (иначе на сервер
+// ушло бы состояние, которого нет локально). Возвращает реальный статус.
 function persist() {
+  if (isWriteLocked()) return false;
+  const prevDbTs = DB.__ts, prevCfgTs = CFG._ts;
   const now = Date.now();
   DB.__ts = now; CFG._ts = now;
-  persistLocal();
+  const ok = persistLocal();
+  if (!ok) {
+    DB.__ts = prevDbTs; CFG._ts = prevCfgTs;
+    return false;
+  }
   if (typeof scheduleSync === 'function') scheduleSync();
+  return true;
 }
 // Загружает данные активного профиля (или дефолты, если пусто).
 function hydrate() {
@@ -706,11 +802,19 @@ function hydrate() {
   // Owner review #3: recovery write lock. Пока пользователь явно не выбрал
   // безопасное действие, ЛЮБАЯ обычная запись для этого профиля запрещена —
   // иначе первое же действие перезаписало бы повреждённый слот и уничтожило
-  // возможность ручного спасения.
-  if (migrationFailed || (dbCorrupt && !recovered)) {
-    _recoveryLock = { profileId: id, reasons: _startupIssues.map(i => i.code), at: Date.now() };
-  } else {
-    _recoveryLock = null;
+  // возможность ручного спасения. Реестр PER-PROFILE: hydrate трогает только
+  // запись СВОЕГО профиля — блокировка другого профиля переживает переключение.
+  {
+    const existing = _recoveryLocks.get(id);
+    if (migrationFailed || (dbCorrupt && !recovered)) {
+      _setLock(id, _startupIssues.map(i => i.code));
+    } else if (existing && !existing.critical) {
+      // Слот здоров (например, после успешного transactional restore) —
+      // обычная блокировка снимается фактом успешной активации.
+      _recoveryLocks.delete(id);
+    }
+    // Критическая блокировка (rollback failed) hydrate НЕ снимается — только
+    // явным разрешением: содержимое хранилища всё ещё не заслуживает доверия.
   }
 
   if (recovered) {
@@ -726,25 +830,46 @@ function hydrate() {
 let _startupIssues = [];
 function startupIssues() { return _startupIssues.slice(); }
 
-// ─── RECOVERY WRITE LOCK (Wave 5, owner review #3) ──────────────────
-// Профиль-специфичная блокировка записи. Взводится, когда слот повреждён без
-// резервной копии или когда миграция упала. Снимается ТОЛЬКО явным
-// осознанным действием пользователя.
-let _recoveryLock = null;
-function recoveryLock() { return _recoveryLock ? { ..._recoveryLock } : null; }
+// ─── RECOVERY WRITE LOCK (Wave 5, owner review #3, финальный проход) ─
+// PER-PROFILE реестр блокировок: Map profileId → { reasons, at, critical }.
+// Раньше блокировка была одной глобальной переменной и могла исчезнуть при
+// hydrate() другого профиля. Теперь hydrate трогает только запись СВОЕГО
+// профиля; блокировка профиля A переживает работу в профиле B.
+//
+// Блокировка — настоящий write barrier: под ней запрещены persistLocal,
+// persist (включая метки времени), scheduleSync/runSync/applyServer/pullData/
+// recoverFromKey и snapshotDaily. Критическая блокировка
+// (transaction-rollback-failed) дополнительно запрещает prune/retry.
+const _recoveryLocks = new Map();
+function _setLock(profileId, reasons, extra) {
+  _recoveryLocks.set(profileId, { profileId, reasons: reasons.slice(), at: Date.now(), ...(extra || {}) });
+}
+function recoveryLock(id) {
+  const l = _recoveryLocks.get(id === undefined ? activeId() : id);
+  return l ? { ...l, reasons: l.reasons.slice() } : null;
+}
 function isWriteLocked(id) {
-  if (!_recoveryLock) return false;
-  return _recoveryLock.profileId === (id === undefined ? activeId() : id);
+  return _recoveryLocks.has(id === undefined ? activeId() : id);
+}
+// Критическое состояние после неудачного отката транзакции: содержимое
+// хранилища неизвестно, продолжать обычные записи и retry нельзя.
+function enterCriticalState(profileId, affectedKeys) {
+  _setLock(profileId, ['transaction-rollback-failed'], { critical: true, affectedKeys: (affectedKeys || []).slice() });
+  if (typeof toast === 'function') {
+    toast('Не удалось гарантированно восстановить прежнее состояние хранилища. Запись и синхронизация остановлены до восстановления.', 'err');
+  }
+  if (typeof log === 'function') log('error', 'storage: critical — rollback failed', (affectedKeys || []).join(','));
 }
 // Снятие блокировки: три безопасных исхода, каждый — явный выбор пользователя.
-//   'restored'  — данные восстановлены из резервной копии;
+//   'restored'  — данные восстановлены (backup/снимок) ПОСЛЕ успешной записи;
 //   'exported'  — сырой повреждённый слот выгружен, можно продолжать;
-//   'discarded' — пользователь осознанно отказался от повреждённых данных.
+//   'discarded' — осознанный сброс, УЖЕ записанный успешно.
 const RECOVERY_RESOLUTIONS = ['restored', 'exported', 'discarded'];
-function resolveRecovery(kind) {
-  if (!_recoveryLock) return false;
+function resolveRecovery(kind, id) {
+  const pid = id === undefined ? activeId() : id;
+  if (!_recoveryLocks.has(pid)) return false;
   if (!RECOVERY_RESOLUTIONS.includes(kind)) return false;
-  _recoveryLock = null;
+  _recoveryLocks.delete(pid);
   return true;
 }
 // Выгрузка СЫРОГО содержимого повреждённого слота — до любой перезаписи.
@@ -752,16 +877,35 @@ function exportRawSlot(id) {
   const pid = id === undefined ? activeId() : id;
   try { return localStorage.getItem(dbKey(pid)); } catch (_) { return null; }
 }
-// Осознанный сброс повреждённого профиля. Требует подтверждения от вызывающего
-// кода: без явного `confirmed` ничего не делает.
+// Транзакционный коммит восстановленного состояния ПОД блокировкой.
+// Порядок жёсткий: кандидат пишется в хранилище при ещё стоящей блокировке;
+// только успешная запись коммитит runtime и снимает блокировку. При сбое —
+// runtime и блокировка не меняются, повреждённый слот сохраняется, ложного
+// успеха нет.
+function commitRecoveredState(candidateDb, resolution) {
+  const id = activeId();
+  let json;
+  try { json = JSON.stringify(candidateDb); } catch (_) { return false; }
+  let cfgJson;
+  try { cfgJson = JSON.stringify(CFG); } catch (_) { return false; }
+  const r = _txWrite([[dbKey(id), json], [cfgKey(id), cfgJson], [bakKey(id), json]]);
+  if (!r.ok) {
+    if (r.rollbackFailed) enterCriticalState(id, r.affectedKeys);
+    return false;
+  }
+  DB = candidateDb;                       // runtime — только после успешной записи
+  resolveRecovery(resolution, id);
+  return true;
+}
+// Осознанный сброс повреждённого профиля. Требует подтверждения; блокировка
+// снимается ТОЛЬКО после успешной записи. Возвращает реальный успех/сбой.
 function discardCorruptProfile(confirmed) {
-  if (!confirmed || !_recoveryLock) return false;
-  const id = _recoveryLock.profileId;
-  DB = JSON.parse(JSON.stringify(DEFAULT_DB));
-  resolveRecovery('discarded');
-  _allowEmptyWrite = true;
-  try { persistLocal(); } finally { _allowEmptyWrite = false; }
-  try { if (typeof activeId === 'function' && activeId() === id && typeof initAll === 'function') initAll(); } catch (_) {}
+  const id = activeId();
+  if (!confirmed || !_recoveryLocks.has(id)) return false;
+  const candidate = JSON.parse(JSON.stringify(DEFAULT_DB));
+  const okWrite = commitRecoveredState(candidate, 'discarded');
+  if (!okWrite) return false;             // lock стоит, corrupt slot цел
+  try { if (typeof initAll === 'function') initAll(); } catch (_) {}
   return true;
 }
 // Recovery-состояние вместо молчаливой потери. Ничего не чинит само:
@@ -781,6 +925,9 @@ function showStartupRecovery() {
 const snapPrefix = id => 'arch5_snap_' + id + '_';
 function snapshotDaily() {
   const id = activeId(); if (dbCount(DB) === 0) return;
+  // Wave 5: под recovery-блокировкой автоматические снимки не пишутся —
+  // runtime может содержать DEFAULT_DB вместо реальных данных профиля.
+  if (isWriteLocked(id)) return;
   const key = snapPrefix(id) + todayKey();
   try {
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(DB));
@@ -794,15 +941,30 @@ function listSnapshots() {
     .map(k => { let n = 0; try { n = dbCount(JSON.parse(localStorage.getItem(k))); } catch (e) {} return { key: k, date: k.slice(pre.length), n }; })
     .sort((a, b) => a.date < b.date ? 1 : -1);
 }
+// Wave 5 (owner review, финальный проход): восстановление снимка —
+// ТРАНЗАКЦИОННОЕ разрешение блокировки. Кандидат валидируется, пишется под
+// ещё стоящей блокировкой; только успешная запись коммитит runtime, снимает
+// блокировку и показывает успех. При сбое — corrupt slot цел, блокировка
+// стоит, «Восстановлено» не показывается. Возвращает реальный статус.
 function restoreSnapshot(key) {
   let snap = null; try { snap = JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) {}
-  if (!snap || dbCount(snap) === 0) { toast('Копия пуста или повреждена', 'warn'); return; }
-  if (!confirm(`Восстановить копию от ${key.split('_').pop()}? Текущие данные заменятся (записей в копии: ${dbCount(snap)}).`)) return;
-  DB = { ...DEFAULT_DB, ...snap };
-  persist();
+  if (!snap || dbCount(snap) === 0) { toast('Копия пуста или повреждена', 'warn'); return false; }
+  if (!confirm(`Восстановить копию от ${key.split('_').pop()}? Текущие данные заменятся (записей в копии: ${dbCount(snap)}).`)) return false;
+  const candidate = { ...JSON.parse(JSON.stringify(DEFAULT_DB)), ...snap };
+  if (isWriteLocked()) {
+    // Recovery-safe путь: запись кандидата при стоящей блокировке.
+    if (!commitRecoveredState(candidate, 'restored')) {
+      toast('Не удалось записать восстановленную копию — исходные данные и блокировка сохранены', 'err');
+      return false;
+    }
+  } else {
+    DB = candidate;
+    if (!persist()) { toast('Не удалось записать восстановленную копию', 'err'); return false; }
+  }
   if (typeof renderAfterSync === 'function') renderAfterSync(); else rHome();
   closeOv('ov-backups');
   hptMed && hptMed(); toast('Данные восстановлены из копии', 'ok');
+  return true;
 }
 function openBackups() { rBackups(); openOv('ov-backups'); }
 function rBackups() {
@@ -9956,6 +10118,7 @@ async function unpackServer(server) {
 // Восстановление на устройстве без фразы: развернуть серверный блок ключом
 // восстановления, применить локально, затем попросить задать новую фразу.
 async function recoverFromKey() {
+  if (isWriteLocked()) { toast('Профиль в режиме восстановления — сначала разреши его на экране «Хранилище и диагностика»', 'warn'); return; }
   const k = ($('cfg-rec-in') && $('cfg-rec-in').value || '').trim();
   if (!k) { toast('Введи ключ восстановления', 'warn'); return; }
   if (!apiBase() || !CFG.spaceKey) { toast('Сначала укажи URL backend и ключ пространства', 'warn'); openOv('ov-cfg'); return; }
@@ -9985,6 +10148,9 @@ function generateRecoveryKey() {
 }
 // Применить серверный снимок к локальному состоянию (со слиянием).
 async function applyServer(server, { merge = true } = {}) {
+  // Wave 5: под блокировкой серверный снимок НЕ применяется — merge мог бы
+  // смешать remote-данные с DEFAULT_DB и затем уехать обратно на сервер.
+  if (isWriteLocked()) { const e = new Error('Профиль в режиме восстановления — применение серверных данных заблокировано'); e.locked = true; throw e; }
   const { db: rdb, cfg: rcfg } = await unpackServer(server);
   const remoteTs = Date.parse(server.updated_at) || 0;
   const keepApi = CFG.apiUrl, keepKey = CFG.spaceKey;
@@ -10003,6 +10169,8 @@ async function applyServer(server, { merge = true } = {}) {
 // ─── ДВИЖОК АВТО-СИНКА (offline-first) ───────────────────────────
 let _syncTimer = null, _syncing = false, _dirty = false;
 function scheduleSync(delay = 2500) {
+  // Wave 5: под recovery-блокировкой синхронизация не планируется вовсе.
+  if (isWriteLocked()) { setSyncBadge('locked'); return; }
   if (!apiBase()) return;            // backend не настроен — авто-синк не нужен
   _dirty = true;
   if (CFG.spaceKey) setSyncBadge('pending');
@@ -10010,6 +10178,13 @@ function scheduleSync(delay = 2500) {
   _syncTimer = setTimeout(() => runSync().catch(() => {}), delay);
 }
 async function runSync({ manual = false } = {}) {
+  // Wave 5 (owner review, финальный проход): fail-closed под блокировкой.
+  // Ни pull, ни merge в runtime, ни PUT/POST данных заблокированного профиля.
+  if (isWriteLocked()) {
+    setSyncBadge('locked');
+    if (manual) toast('Синхронизация приостановлена: профиль находится в режиме восстановления', 'warn');
+    return;
+  }
   if (!apiBase()) { if (manual) { toast('Укажи URL backend в Конфигурации', 'warn'); openOv('ov-cfg'); } return; }
   if (_syncing) { _dirty = true; return; }
   if (!navigator.onLine) { setSyncBadge('offline'); log('warn', 'offline — синк отложен'); return; }
@@ -10068,6 +10243,7 @@ function setSyncBadge(state) {
     offline:  ['Оффлайн — сохранится при сети', 'var(--orange)'],
     error:    ['Ошибка синхронизации', 'var(--red)'],
     needpass: ['Нужна парольная фраза', 'var(--red)'],
+    locked:   ['Синхронизация приостановлена: режим восстановления', 'var(--red)'],
   };
   const [txt, col] = map[state] || map.idle;
   el.textContent = txt;
@@ -10091,6 +10267,7 @@ function doSync() { runSync({ manual: true }); }
 
 // Ручная загрузка с сервера (принудительная сверка со слиянием).
 async function pullData() {
+  if (isWriteLocked()) { toast('Синхронизация приостановлена: профиль находится в режиме восстановления', 'warn'); return; }
   if (!apiBase())    { toast('Укажи URL backend', 'warn'); return; }
   if (!CFG.spaceKey) { toast('Нет ключа пространства', 'warn'); return; }
   try {
@@ -11868,3 +12045,9 @@ function rPsyView(elId) {
     ${egoHtml}${gamesHtml}${freshHtml}
   </div>`;
 }
+
+// Wave 5 (owner review, финальный проход): маркер для независимого recovery
+// bootstrap (index.html). Выставляется ПОСЛЕДНЕЙ строкой top-level кода:
+// если основной бандл упал на любом месте выше (включая syntax error всего
+// файла), флага не будет — и bootstrap предложит восстановление.
+try { window.__archAppStarted = true; } catch (_) {}

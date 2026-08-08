@@ -944,6 +944,512 @@ const page = await boot();
     `lock: действия — настоящие button, интерактивных div нет (${panel.buttons}/${panel.divClick})`);
 }
 
+// ── 16. Owner review (финальный проход): write barrier целиком ──────
+// Блокировка обязана останавливать не только persistLocal, но и persist
+// (включая метки времени), планирование синка, применение серверных данных
+// и автоматические снимки.
+{
+  const barrier = await page.evaluate(async () => {
+    const id = activeId();
+    const key = 'arch5_db_' + id, bakK = 'arch5_bak_' + id;
+    const savedDb = localStorage.getItem(key), savedBak = localStorage.getItem(bakK);
+    const realToast = window.toast; window.toast = () => {};
+    let fetches = 0;
+    const realFetch = window.fetch;
+    window.fetch = (...a) => { fetches++; return realFetch(...a); };
+    try {
+      localStorage.setItem(key, '{ битый');
+      localStorage.removeItem(bakK);
+      hydrate();                              // взводит блокировку
+
+      // persist(): метки времени не двигаются, синк не планируется.
+      const tsBefore = { db: DB.__ts, cfg: CFG._ts };
+      DB.insights = [{ id: 1, title: 'попытка' }];
+      const persisted = persist();
+      const tsAfter = { db: DB.__ts, cfg: CFG._ts };
+
+      // scheduleSync(): не выставляет dirty-флаг и не заводит таймер.
+      CFG.apiUrl = 'https://example.invalid';
+      _dirty = false;
+      scheduleSync(1);
+      const dirtyAfterSchedule = _dirty;
+
+      // runSync(): ноль сетевых вызовов. Настраиваем всё так, чтобы БЕЗ
+      // гейта запрос точно ушёл бы (privacy-согласие + ключ пространства) —
+      // иначе тест не отличал бы гейт блокировки от других ранних выходов.
+      CFG.plainSyncConsent = true;
+      CFG.spaceKey = 'test-space';
+      await runSync({ manual: false });
+      const fetchesAfterRun = fetches;
+      CFG.plainSyncConsent = false; CFG.spaceKey = '';
+
+      // applyServer(): отказ с пометкой locked, runtime не изменён.
+      const dbJson = JSON.stringify(DB);
+      let applyErr = null;
+      try { await applyServer({ db: { insights: [{ id: 999, title: 'с сервера' }] }, cfg: {}, updated_at: new Date().toISOString() }); }
+      catch (e) { applyErr = { locked: !!e.locked }; }
+      const dbUnchanged = JSON.stringify(DB) === dbJson;
+
+      // snapshotDaily(): новых snapshot-ключей нет.
+      const snapPre = 'arch5_snap_' + id + '_';
+      const snapsBefore = Object.keys(localStorage).filter(k => k.startsWith(snapPre)).length;
+      snapshotDaily();
+      const snapsAfter = Object.keys(localStorage).filter(k => k.startsWith(snapPre)).length;
+
+      return {
+        persisted, tsUnchanged: tsBefore.db === tsAfter.db && tsBefore.cfg === tsAfter.cfg,
+        dirtyAfterSchedule, fetchesAfterRun,
+        applyErr, dbUnchanged,
+        snapsBefore, snapsAfter,
+        slotIdentical: localStorage.getItem(key) === '{ битый',
+      };
+    } finally {
+      window.fetch = realFetch; window.toast = realToast;
+      CFG.apiUrl = '';
+      resolveRecovery('discarded');
+      if (savedDb === null) localStorage.removeItem(key); else localStorage.setItem(key, savedDb);
+      if (savedBak === null) localStorage.removeItem(bakK); else localStorage.setItem(bakK, savedBak);
+      hydrate();
+    }
+  });
+  ok(barrier.persisted === false && barrier.tsUnchanged,
+    'барьер: persist() под блокировкой отклонён и НЕ сдвинул __ts/_ts');
+  ok(barrier.dirtyAfterSchedule === false, 'барьер: scheduleSync() под блокировкой не планирует синк');
+  ok(barrier.fetchesAfterRun === 0, `барьер: runSync() под блокировкой — ноль сетевых вызовов (${barrier.fetchesAfterRun})`);
+  ok(barrier.applyErr && barrier.applyErr.locked === true,
+    'барьер: applyServer() отказывает с пометкой locked');
+  ok(barrier.dbUnchanged, 'барьер: серверные данные не слиты в runtime заблокированного профиля');
+  ok(barrier.snapsAfter === barrier.snapsBefore,
+    `барьер: snapshotDaily() не создал снимков (${barrier.snapsBefore} → ${barrier.snapsAfter})`);
+  ok(barrier.slotIdentical, 'барьер: повреждённый слот остался byte-identical после всех попыток');
+}
+
+// ── 17. Per-profile блокировка переживает переключение профиля ──────
+{
+  const perProfile = await page.evaluate(() => {
+    const idA = activeId();
+    const keyA = 'arch5_db_' + idA, bakA = 'arch5_bak_' + idA;
+    const savedDb = localStorage.getItem(keyA), savedBak = localStorage.getItem(bakA);
+    const savedProfiles = localStorage.getItem('arch5_profiles');
+    const realToast = window.toast; window.toast = () => {};
+    try {
+      // A повреждён → блокировка A.
+      localStorage.setItem(keyA, '{ битый A');
+      localStorage.removeItem(bakA);
+      hydrate();
+      const aLocked1 = isWriteLocked(idA);
+
+      // Заводим здоровый профиль B и «переключаемся» на него, как это делает
+      // switchProfile: смена activeId + hydrate.
+      const idB = 'p-test-b-' + Date.now();
+      const list = JSON.parse(localStorage.getItem('arch5_profiles') || '[]');
+      list.push({ id: idB, name: 'B', color: '#1056CC' });
+      localStorage.setItem('arch5_profiles', JSON.stringify(list));
+      localStorage.setItem('arch5_db_' + idB, JSON.stringify({ insights: [{ id: 1, title: 'данные B' }] }));
+      setActiveId(idB);
+      hydrate();
+      const bLocked = isWriteLocked(idB);
+      DB.insights.push({ id: 2, title: 'новая запись B' });
+      const bWrote = persistLocal();
+      const aLockedWhileOnB = isWriteLocked(idA);
+
+      // Возвращаемся на A.
+      setActiveId(idA);
+      hydrate();
+      const aLocked2 = isWriteLocked(idA);
+      const aSlotIdentical = localStorage.getItem(keyA) === '{ битый A';
+
+      // Уборка B.
+      localStorage.removeItem('arch5_db_' + idB);
+      localStorage.removeItem('arch5_cfg_' + idB);
+      localStorage.removeItem('arch5_bak_' + idB);
+      return { aLocked1, bLocked, bWrote, aLockedWhileOnB, aLocked2, aSlotIdentical };
+    } finally {
+      window.toast = realToast;
+      resolveRecovery('discarded');
+      if (savedProfiles === null) localStorage.removeItem('arch5_profiles'); else localStorage.setItem('arch5_profiles', savedProfiles);
+      if (savedDb === null) localStorage.removeItem(keyA); else localStorage.setItem(keyA, savedDb);
+      if (savedBak === null) localStorage.removeItem(bakA); else localStorage.setItem(bakA, savedBak);
+      setActiveId(idA); hydrate();
+    }
+  });
+  ok(perProfile.aLocked1 === true, 'per-profile: A заблокирован после повреждения');
+  ok(perProfile.bLocked === false && perProfile.bWrote === true,
+    'per-profile: здоровый B работает и сохраняется, пока A заблокирован');
+  ok(perProfile.aLockedWhileOnB === true,
+    'per-profile: блокировка A видна и во время работы в B (реестр, не одна переменная)');
+  ok(perProfile.aLocked2 === true, 'per-profile: после возврата A по-прежнему заблокирован');
+  ok(perProfile.aSlotIdentical, 'per-profile: повреждённый слот A не изменился за всё время');
+}
+
+// ── 18. Транзакционное разрешение: restoreSnapshot и discard ────────
+{
+  // Снимок восстанавливается ПОД блокировкой; успех — только после записи.
+  const snapRestore = await page.evaluate(() => {
+    const id = activeId();
+    const key = 'arch5_db_' + id, bakK = 'arch5_bak_' + id;
+    const snapKey = 'arch5_snap_' + id + '_2026-01-01';
+    const savedDb = localStorage.getItem(key), savedBak = localStorage.getItem(bakK);
+    const realToast = window.toast; const toasts = [];
+    window.toast = (m, k) => toasts.push({ m, k });
+    const realConfirm = window.confirm; window.confirm = () => true;
+    try {
+      localStorage.setItem(snapKey, JSON.stringify({ insights: [{ id: 5, title: 'из снимка' }] }));
+      localStorage.setItem(key, '{ битый');
+      localStorage.removeItem(bakK);
+      hydrate();
+      const lockedBefore = isWriteLocked();
+      const okRestore = restoreSnapshot(snapKey);
+      const stored = JSON.parse(localStorage.getItem(key) || '{}');
+      return {
+        lockedBefore, okRestore,
+        unlocked: !isWriteLocked(),
+        storedTitle: (stored.insights || [{}])[0].title,
+        runtimeTitle: (DB.insights || [{}])[0].title,
+        successToast: toasts.some(t => /восстановлены/i.test(t.m) && t.k === 'ok'),
+      };
+    } finally {
+      window.toast = realToast; window.confirm = realConfirm;
+      localStorage.removeItem(snapKey);
+      if (savedDb === null) localStorage.removeItem(key); else localStorage.setItem(key, savedDb);
+      if (savedBak === null) localStorage.removeItem(bakK); else localStorage.setItem(bakK, savedBak);
+      hydrate();
+    }
+  });
+  ok(snapRestore.lockedBefore === true && snapRestore.okRestore === true,
+    'restore: снимок восстановлен через recovery-safe путь под блокировкой');
+  ok(snapRestore.unlocked === true, 'restore: блокировка снята ПОСЛЕ успешной записи');
+  ok(snapRestore.storedTitle === 'из снимка' && snapRestore.runtimeTitle === 'из снимка',
+    'restore: и хранилище, и runtime содержат восстановленные данные');
+  ok(snapRestore.successToast, 'restore: успех показан только после реального восстановления');
+
+  // Сбой записи при восстановлении: блокировка стоит, corrupt slot цел,
+  // «Восстановлено» НЕ показывается.
+  const snapFail = await page.evaluate(() => {
+    const id = activeId();
+    const key = 'arch5_db_' + id, bakK = 'arch5_bak_' + id;
+    const snapKey = 'arch5_snap_' + id + '_2026-01-02';
+    const savedDb = localStorage.getItem(key), savedBak = localStorage.getItem(bakK);
+    const realToast = window.toast; const toasts = [];
+    window.toast = (m, k) => toasts.push({ m, k });
+    const realConfirm = window.confirm; window.confirm = () => true;
+    const realSet = Storage.prototype.setItem;
+    try {
+      localStorage.setItem(snapKey, JSON.stringify({ insights: [{ id: 5, title: 'из снимка' }] }));
+      localStorage.setItem(key, '{ битый');
+      localStorage.removeItem(bakK);
+      hydrate();
+      Storage.prototype.setItem = function (k, v) {
+        if (k === key) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; }
+        return realSet.call(this, k, v);
+      };
+      const okRestore = restoreSnapshot(snapKey);
+      Storage.prototype.setItem = realSet;
+      return {
+        okRestore,
+        stillLocked: isWriteLocked(),
+        slotIdentical: localStorage.getItem(key) === '{ битый',
+        falseSuccess: toasts.some(t => /восстановлены/i.test(t.m) && t.k === 'ok'),
+        failureShown: toasts.some(t => t.k === 'err'),
+      };
+    } finally {
+      Storage.prototype.setItem = realSet;
+      window.toast = realToast; window.confirm = realConfirm;
+      localStorage.removeItem(snapKey);
+      resolveRecovery('discarded');
+      if (savedDb === null) localStorage.removeItem(key); else localStorage.setItem(key, savedDb);
+      if (savedBak === null) localStorage.removeItem(bakK); else localStorage.setItem(bakK, savedBak);
+      hydrate();
+    }
+  });
+  ok(snapFail.okRestore === false && snapFail.stillLocked === true,
+    'restore-сбой: возврат false и блокировка остаётся');
+  ok(snapFail.slotIdentical, 'restore-сбой: corrupt slot остался byte-identical');
+  ok(snapFail.falseSuccess === false && snapFail.failureShown === true,
+    'restore-сбой: ложного «Восстановлено» нет, ошибка показана');
+
+  // discard при сбое записи: возврат false, блокировка стоит, успех не показан.
+  const discardFail = await page.evaluate(() => {
+    const id = activeId();
+    const key = 'arch5_db_' + id, bakK = 'arch5_bak_' + id;
+    const savedDb = localStorage.getItem(key), savedBak = localStorage.getItem(bakK);
+    const realToast = window.toast; const toasts = [];
+    window.toast = (m, k) => toasts.push({ m, k });
+    const realConfirm = window.confirm; window.confirm = () => true;
+    const realSet = Storage.prototype.setItem;
+    try {
+      localStorage.setItem(key, '{ ЦЕННОЕ битое');
+      localStorage.removeItem(bakK);
+      hydrate();
+      Storage.prototype.setItem = function (k, v) {
+        if (k === key) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; }
+        return realSet.call(this, k, v);
+      };
+      const done = recoveryDiscard();
+      Storage.prototype.setItem = realSet;
+      return {
+        done,
+        stillLocked: isWriteLocked(),
+        slotIdentical: localStorage.getItem(key) === '{ ЦЕННОЕ битое',
+        falseSuccess: toasts.some(t => /сброшен/i.test(t.m) && t.k === 'ok'),
+        failureShown: toasts.some(t => /не удался/i.test(t.m) && t.k === 'err'),
+      };
+    } finally {
+      Storage.prototype.setItem = realSet;
+      window.toast = realToast; window.confirm = realConfirm;
+      resolveRecovery('discarded');
+      if (savedDb === null) localStorage.removeItem(key); else localStorage.setItem(key, savedDb);
+      if (savedBak === null) localStorage.removeItem(bakK); else localStorage.setItem(bakK, savedBak);
+      hydrate();
+    }
+  });
+  ok(discardFail.done === false && discardFail.stillLocked === true,
+    'discard-сбой: возврат false, блокировка НЕ снята до успешной записи');
+  ok(discardFail.slotIdentical, 'discard-сбой: corrupt slot сохранён');
+  ok(discardFail.falseSuccess === false && discardFail.failureShown === true,
+    'discard-сбой: ложного «сброшено» нет, показана ошибка');
+
+  // exportRaw при сбое скачивания: блокировка стоит.
+  const exportFail = await page.evaluate(() => {
+    const id = activeId();
+    const key = 'arch5_db_' + id, bakK = 'arch5_bak_' + id;
+    const savedDb = localStorage.getItem(key), savedBak = localStorage.getItem(bakK);
+    const realToast = window.toast; window.toast = () => {};
+    const realCreate = document.createElement.bind(document);
+    try {
+      localStorage.setItem(key, '{ битый'); localStorage.removeItem(bakK);
+      hydrate();
+      document.createElement = () => { throw new Error('blocked'); };
+      const done = recoveryExportRaw();
+      return { done, stillLocked: isWriteLocked() };
+    } finally {
+      document.createElement = realCreate;
+      window.toast = realToast;
+      resolveRecovery('discarded');
+      if (savedDb === null) localStorage.removeItem(key); else localStorage.setItem(key, savedDb);
+      if (savedBak === null) localStorage.removeItem(bakK); else localStorage.setItem(bakK, savedBak);
+      hydrate();
+    }
+  });
+  ok(exportFail.done === false && exportFail.stillLocked === true,
+    'export-сбой: неудавшаяся выгрузка не снимает блокировку и не заявляет успех');
+}
+
+// ── 19. Rollback failure = критическое состояние ────────────────────
+{
+  // Case A: DB записан, CFG упал, откат DB тоже упал.
+  const caseA = await page.evaluate(() => {
+    const id = activeId();
+    const K = { db: 'arch5_db_' + id, cfg: 'arch5_cfg_' + id };
+    DB.insights = [{ id: 1, title: 'база' }]; CFG.userName = 'БАЗА'; persistLocal();
+    const realSet = Storage.prototype.setItem;
+    const realToast = window.toast; const toasts = [];
+    window.toast = (m, k) => toasts.push({ m, k });
+    let dbWrites = 0;
+    DB.insights = [{ id: 2, title: 'новое' }]; CFG.userName = 'НОВОЕ';
+    let result;
+    try {
+      Storage.prototype.setItem = function (k, v) {
+        if (k === K.db) {
+          dbWrites++;
+          if (dbWrites >= 2) { const e = new Error('rollback-fail'); e.name = 'QuotaExceededError'; throw e; }
+          return realSet.call(this, k, v);     // первая запись DB удаётся
+        }
+        if (k === K.cfg) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; }
+        return realSet.call(this, k, v);
+      };
+      result = persistLocal();
+    } finally { Storage.prototype.setItem = realSet; window.toast = realToast; }
+    const err = lastPersistError();
+    const lock = recoveryLock();
+    const persistAfter = persist();
+    _dirty = false; CFG.apiUrl = 'https://example.invalid'; scheduleSync(1);
+    const syncBlocked = _dirty === false;
+    CFG.apiUrl = '';
+    resolveRecovery('discarded');
+    return {
+      result,
+      rollbackFailed: !!(err && err.rollbackFailed), critical: !!(err && err.critical),
+      affected: err && err.affectedKeys, lockReason: lock && lock.reasons[0], lockCritical: !!(lock && lock.critical),
+      persistAfter, syncBlocked,
+      criticalToast: toasts.some(t => /гарантированно восстановить/i.test(t.m)),
+    };
+  });
+  ok(caseA.result === false && caseA.rollbackFailed && caseA.critical,
+    'rollback A: сбой отката DB зафиксирован как rollbackFailed + critical');
+  ok(Array.isArray(caseA.affected) && caseA.affected.length > 0,
+    `rollback A: перечислены затронутые ключи (${(caseA.affected || []).join(',')})`);
+  ok(caseA.lockReason === 'transaction-rollback-failed' && caseA.lockCritical,
+    'rollback A: профиль в критической блокировке transaction-rollback-failed');
+  ok(caseA.persistAfter === false, 'rollback A: обычный persist после критического сбоя запрещён');
+  ok(caseA.syncBlocked === true, 'rollback A: синк после критического сбоя не планируется');
+  ok(caseA.criticalToast, 'rollback A: пользователь видит сообщение об остановке записи и синка');
+
+  // Case B: новый ключ создан, следующая запись падает, откат removeItem падает.
+  const caseB = await page.evaluate(() => {
+    const id = activeId();
+    const K = { db: 'arch5_db_' + id, cfg: 'arch5_cfg_' + id, bak: 'arch5_bak_' + id };
+    const savedCfg = localStorage.getItem(K.cfg);
+    DB.insights = [{ id: 1, title: 'есть' }]; persistLocal();
+    localStorage.removeItem(K.cfg);            // cfg-ключа до транзакции НЕ существует
+    const realSet = Storage.prototype.setItem;
+    const realRemove = Storage.prototype.removeItem;
+    const realToast = window.toast; window.toast = () => {};
+    let result;
+    try {
+      Storage.prototype.setItem = function (k, v) {
+        if (k === K.bak) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; }
+        return realSet.call(this, k, v);
+      };
+      Storage.prototype.removeItem = function (k) {
+        if (k === K.cfg) { throw new Error('remove-fail'); }   // откат нового ключа падает
+        return realRemove.call(this, k);
+      };
+      result = persistLocal();
+    } finally { Storage.prototype.setItem = realSet; Storage.prototype.removeItem = realRemove; window.toast = realToast; }
+    const err = lastPersistError();
+    const lock = recoveryLock();
+    resolveRecovery('discarded');
+    if (savedCfg === null) localStorage.removeItem(K.cfg); else localStorage.setItem(K.cfg, savedCfg);
+    return { result, rollbackFailed: !!(err && err.rollbackFailed), lockCritical: !!(lock && lock.critical) };
+  });
+  ok(caseB.result === false && caseB.rollbackFailed && caseB.lockCritical,
+    'rollback B: сбой удаления созданного ключа при откате — тоже критическое состояние');
+
+  // Case C: откат полностью успешен — критической блокировки НЕТ, retry работает.
+  const caseC = await page.evaluate(() => {
+    const id = activeId();
+    const K = { cfg: 'arch5_cfg_' + id };
+    DB.insights = [{ id: 1, title: 'база' }]; CFG.userName = 'БАЗА'; persistLocal();
+    localStorage.setItem('arch5_snap_' + id + '_2020-02-02', 'x');
+    const realSet = Storage.prototype.setItem;
+    const realToast = window.toast; window.toast = () => {};
+    DB.insights = [{ id: 3, title: 'после' }]; CFG.userName = 'ПОСЛЕ';
+    let result;
+    try {
+      Storage.prototype.setItem = function (k, v) {
+        if (k === K.cfg && localStorage.getItem('arch5_snap_' + id + '_2020-02-02') !== null) {
+          const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e;
+        }
+        return realSet.call(this, k, v);
+      };
+      result = persistLocal();
+    } finally { Storage.prototype.setItem = realSet; window.toast = realToast; }
+    return { result, locked: isWriteLocked(), err: lastPersistError() };
+  });
+  ok(caseC.result === true && caseC.locked === false && caseC.err === null,
+    'rollback C: полностью успешный откат → обычный quota-retry работает, критической блокировки нет');
+
+  // Сбой на фазе snapshot: транзакция не начинается, ничего не записано.
+  const snapPhase = await page.evaluate(() => {
+    const id = activeId();
+    const K = 'arch5_db_' + id;
+    DB.insights = [{ id: 1, title: 'снап-база' }]; persistLocal();
+    const before = localStorage.getItem(K);
+    const realGet = Storage.prototype.getItem;
+    const realToast = window.toast; window.toast = () => {};
+    let result;
+    try {
+      DB.insights = [{ id: 9, title: 'не должно записаться' }];
+      Storage.prototype.getItem = function (k) {
+        if (k === 'arch5_cfg_' + id) throw new Error('SecurityError');
+        return realGet.call(this, k);
+      };
+      result = persistLocal();
+    } finally { Storage.prototype.getItem = realGet; window.toast = realToast; }
+    return { result, unchanged: localStorage.getItem(K) === before, locked: isWriteLocked() };
+  });
+  ok(snapPhase.result === false && snapPhase.unchanged,
+    'snapshot-фаза: сбой чтения прежнего значения не даёт транзакции начаться — ничего не записано');
+  ok(snapPhase.locked === false,
+    'snapshot-фаза: это обычный отказ, не критическое состояние (ничего не менялось)');
+
+  // Диагностика показывает критическое состояние без содержимого значений.
+  const diagCritical = await page.evaluate(async () => {
+    enterCriticalState(activeId(), ['arch5_db_' + activeId()]);
+    const rep = await diagnosticsReport();
+    const lock = recoveryLock();
+    const json = JSON.stringify(rep.integrity) + JSON.stringify(lock);
+    resolveRecovery('discarded');
+    return {
+      lockCritical: !!(lock && lock.critical),
+      keysListed: !!(lock && lock.affectedKeys && lock.affectedKeys.length),
+      noValues: !/ЦЕННОЕ|битый|title/.test(json),
+    };
+  });
+  ok(diagCritical.lockCritical && diagCritical.keysListed,
+    'диагностика: критическое состояние видно с именами затронутых ключей');
+  ok(diagCritical.noValues, 'диагностика: содержимое значений в отчёт не попадает');
+}
+
+// ── 20. ACK восстановления на стороне приложения ────────────────────
+{
+  // Фейковый контроллер SW: отвечает через MessageChannel как настоящий.
+  const setupCtl = (mode) => `
+    (() => {
+      const fake = { postMessage(msg, ports) {
+        const p = ports && ports[0]; if (!p) return;
+        const mode = ${JSON.stringify('%MODE%')};
+        setTimeout(() => {
+          if (mode === 'silent') return;                       // молчание → таймаут
+          if (msg.type === 'arch:restore-lkg')
+            p.postMessage(mode === 'ok' ? { type: 'arch:restore-lkg-result', ok: true, version: 'arch-vB' }
+                                        : { type: 'arch:restore-lkg-result', ok: false, reason: 'no-last-known-good' });
+          if (msg.type === 'arch:exit-recovery') p.postMessage({ type: 'arch:exit-recovery-result', ok: mode === 'ok' });
+        }, 10);
+      } };
+      Object.defineProperty(navigator.serviceWorker, 'controller', { configurable: true, get: () => fake });
+    })();`;
+
+  // Отрицательный ответ → reload запрещён.
+  const neg = await page.evaluate(async (code) => {
+    eval(code);
+    window.__reloadMarker = 'alive';
+    const realToast = window.toast; const toasts = [];
+    window.toast = (m, k) => toasts.push({ m, k });
+    const r = await restorePreviousBuild();
+    await new Promise(res => setTimeout(res, 700));
+    window.toast = realToast;
+    return { r, marker: window.__reloadMarker, err: toasts.some(t => t.k === 'err' && /не выполнено/.test(t.m)) };
+  }, setupCtl('neg').replace('%MODE%', 'neg'));
+  ok(neg.r === false && neg.marker === 'alive',
+    'ACK: отрицательный ответ (no-last-known-good) — перезагрузки не было');
+  ok(neg.err, 'ACK: пользователь получил точную причину отказа');
+
+  // Молчание SW → таймаут → reload запрещён. Таймаут проверяем напрямую
+  // через swRequest с коротким лимитом.
+  const silent = await page.evaluate(async (code) => {
+    eval(code);
+    const r = await swRequest({ type: 'arch:restore-lkg' }, 300);
+    return r;
+  }, setupCtl('silent').replace('%MODE%', 'silent'));
+  ok(silent && silent.ok === false && silent.reason === 'timeout',
+    'ACK: молчание SW распознаётся как таймаут, а не как успех');
+
+  // Нет контроллера вообще → честный отказ без reload.
+  const noCtl = await page.evaluate(async () => {
+    Object.defineProperty(navigator.serviceWorker, 'controller', { configurable: true, get: () => null });
+    const realToast = window.toast; window.toast = () => {};
+    const r = await restorePreviousBuild();
+    window.toast = realToast;
+    return r;
+  });
+  ok(noCtl === false, 'ACK: без активного SW восстановление честно отклоняется');
+
+  // Положительный ACK → возврат true (reload запланирован). Отдельная
+  // страница: настоящий reload не должен убить общий прогон.
+  const okPage = await boot();
+  const pos = await okPage.evaluate(async (code) => {
+    eval(code);
+    const realToast = window.toast; window.toast = () => {};
+    const r = await restorePreviousBuild();
+    window.toast = realToast;
+    return r;
+  }, setupCtl('ok').replace('%MODE%', 'ok'));
+  await okPage.close();
+  ok(pos === true, 'ACK: положительный ответ разрешает перезагрузку');
+}
+
 ok(errors.length === 0, `JS-ошибок нет за весь прогон (${errors.length})`, errors.slice(0, 3).join('\n'));
 
 await browser.close();

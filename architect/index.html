@@ -13,6 +13,92 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <title>Архитектор</title>
 <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
+<script>
+/*ARCH_RECOVERY_BOOTSTRAP_START*/
+// Wave 5 (issue #158, owner review — финальный проход): НЕЗАВИСИМЫЙ recovery
+// bootstrap. Если основной бандл сломан (syntax error, падение до
+// инициализации UI), кнопка восстановления внутри app.js недостижима — этот
+// маленький скрипт исполняется ДО основного приложения, не зависит от app.js,
+// не читает DB и пользовательские данные, и умеет ровно одно: спросить у
+// service worker про last-known-good и по явному действию пользователя, после
+// подтверждения (ACK), включить восстановление. Автоматического rollback нет.
+(function () {
+  'use strict';
+  var errors = [];
+  window.addEventListener('error', function (e) { errors.push(String((e && e.message) || 'error')); });
+  window.addEventListener('unhandledrejection', function () { errors.push('unhandledrejection'); });
+
+  function swRequest(msg, timeoutMs) {
+    return new Promise(function (resolve) {
+      var ctl = navigator.serviceWorker && navigator.serviceWorker.controller;
+      if (!ctl) { resolve({ ok: false, reason: 'no-controller' }); return; }
+      var done = false;
+      function finish(r) { if (!done) { done = true; resolve(r); } }
+      var to = setTimeout(function () { finish({ ok: false, reason: 'timeout' }); }, timeoutMs || 4000);
+      try {
+        var ch = new MessageChannel();
+        ch.port1.onmessage = function (e) { clearTimeout(to); finish(e.data || { ok: false, reason: 'empty-reply' }); };
+        ctl.postMessage(msg, [ch.port2]);
+      } catch (_) { clearTimeout(to); finish({ ok: false, reason: 'post-failed' }); }
+    });
+  }
+
+  // Минимальный UI: чистый DOM, ни одной функции основного приложения.
+  function showUI(lkgVersion) {
+    if (document.getElementById('arch-boot-recovery')) return;
+    var box = document.createElement('div');
+    box.id = 'arch-boot-recovery';
+    box.setAttribute('role', 'alertdialog');
+    box.setAttribute('aria-label', 'Восстановление приложения');
+    box.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0b1020;color:#e7ecf5;font-family:system-ui,sans-serif;padding:2rem;display:flex;flex-direction:column;gap:1rem;align-items:flex-start;justify-content:center;max-width:100%;';
+    var h = document.createElement('h2');
+    h.textContent = 'Приложение не запустилось';
+    var p = document.createElement('p');
+    p.style.cssText = 'max-width:34rem;line-height:1.6;margin:0';
+    p.textContent = 'Похоже, обновление сломало запуск. Сохранена предыдущая рабочая версия (' + lkgVersion + '). Данные не затронуты — восстановление касается только файлов приложения.';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Вернуться к предыдущей рабочей версии';
+    btn.style.cssText = 'min-height:44px;padding:.7rem 1.2rem;font-size:1rem;border-radius:.6rem;border:0;background:#22D3EE;color:#08222a;cursor:pointer';
+    var status = document.createElement('p');
+    status.setAttribute('aria-live', 'polite');
+    status.style.cssText = 'margin:0;min-height:1.4em';
+    btn.onclick = function () {
+      btn.disabled = true;
+      status.textContent = 'Запрашиваю восстановление…';
+      swRequest({ type: 'arch:restore-lkg' }, 4000).then(function (r) {
+        if (r && r.ok === true) {
+          status.textContent = 'Готово, перезагружаю…';
+          setTimeout(function () { location.reload(); }, 300);   // ТОЛЬКО после ok:true
+        } else {
+          btn.disabled = false;
+          status.textContent = 'Восстановление не подтверждено (' + ((r && r.reason) || 'нет ответа') + '). Перезагрузка отменена.';
+        }
+      });
+    };
+    box.appendChild(h); box.appendChild(p); box.appendChild(btn); box.appendChild(status);
+    (document.body || document.documentElement).appendChild(box);
+  }
+
+  // Проверка через 9 секунд: если основной бандл так и не дошёл до конца
+  // своего top-level кода (__archAppStarted не выставлен) ИЛИ были ранние
+  // ошибки при недостартовавшем приложении — предложить восстановление,
+  // если оно вообще существует. Ничего не делаем автоматически.
+  function check() {
+    if (window.__archAppStarted && errors.length === 0) return Promise.resolve({ shown: false, reason: 'app-ok' });
+    if (window.__archAppStarted) return Promise.resolve({ shown: false, reason: 'app-started' });
+    return swRequest({ type: 'arch:version?' }, 3000).then(function (v) {
+      if (v && v.lastKnownGood) { showUI(v.lastKnownGood); return { shown: true, lkg: v.lastKnownGood }; }
+      return { shown: false, reason: 'no-last-known-good' };
+    });
+  }
+  setTimeout(function () { check(); }, 9000);
+
+  // Экспорт для детерминированных тестов (и ручной диагностики).
+  window.__archRecoveryBoot = { check: check, showUI: showUI, swRequest: swRequest, errors: errors };
+})();
+/*ARCH_RECOVERY_BOOTSTRAP_END*/
+</script>
 <script src="lucide.js"></script>
 <link rel="stylesheet" href="styles.css">
 </head>

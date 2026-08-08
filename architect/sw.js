@@ -88,14 +88,24 @@ self.addEventListener('activate', e => {
 });
 
 // ─── FETCH ──────────────────────────────────────────────────────────
+// Контролируемый ответ recovery-ошибки: НЕ сломанная текущая сборка.
+function recoveryErrorResponse(what) {
+  return new Response(
+    '<!doctype html><meta charset="utf-8"><title>Восстановление</title>' +
+    '<body style="font-family:system-ui;padding:2rem;max-width:34rem;margin:auto">' +
+    '<h2>Режим восстановления</h2><p>Нужный файл (' + what + ') отсутствует в сохранённой рабочей версии. ' +
+    'Текущая сборка не используется, чтобы не смешивать версии. ' +
+    'Обнови страницу при сети или выйди из режима восстановления.</p></body>',
+    { status: 503, headers: { 'content-type': 'text/html; charset=utf-8' } });
+}
 async function handleNavigate(req) {
-  // Режим восстановления: навигацию обслуживает ТОЛЬКО last-known-good.
-  // Без этого «выдача по явному запросу восстановления» была бы заявлением
-  // без реализации — caches.match('./index.html') мог вернуть сломанный V.
+  // Режим восстановления FAIL-CLOSED: навигацию обслуживает ТОЛЬКО
+  // last-known-good. Если нужного файла в LKG нет — контролируемая ошибка,
+  // а НЕ потенциально сломанный текущий V и не свежий production bundle.
   if (await recoveryMode()) {
     const lkg = await caches.open(LKG);
     const fromLkg = (await lkg.match('./index.html')) || (await lkg.match('./'));
-    if (fromLkg) return fromLkg;
+    return fromLkg || recoveryErrorResponse('index.html');
   }
   try {
     const r = await fetch(req);
@@ -110,11 +120,25 @@ async function handleNavigate(req) {
     return (await lkg.match('./index.html')) || (await lkg.match('./'));
   }
 }
+// Ассет приложения = относительный путь или same-origin URL. Сторонние
+// (аналитики нет, но правило общее) в recovery не блокируются.
+function isAppAsset(req) {
+  const url = typeof req === 'string' ? req : (req && req.url) || '';
+  if (!/^https?:/i.test(url)) return true;   // относительный путь — наш ассет
+  try { return new URL(url).origin === new URL(self.location.href).origin; }
+  catch (_) { return false; }
+}
 async function handleAsset(req) {
   if (await recoveryMode()) {
     const lkg = await caches.open(LKG);
     const fromLkg = await lkg.match(req);
     if (fromLkg) return fromLkg;
+    // FAIL-CLOSED: ассет приложения, которого нет в LKG, НЕ подменяется
+    // текущим V и не тянется из сети — иначе страница B получила бы скрипт C.
+    if (isAppAsset(req)) {
+      const url = typeof req === 'string' ? req : (req && req.url) || '';
+      return recoveryErrorResponse(url || 'asset');
+    }
   }
   const cached = await caches.match(req);
   const net = fetch(req).then(r => {
@@ -165,9 +189,28 @@ async function exitRecovery() {
 async function versionInfo() {
   return { current: V, lastKnownGood: await lastKnownGoodVersion(), recovery: await recoveryMode() };
 }
+// Строгая проверка принадлежности startup-маркера ТЕКУЩЕЙ сборке.
+// Приложение шлёт build id без префикса кэша ('veb90…'), V = 'arch-veb90…'.
+function buildMatchesCurrent(build) {
+  if (typeof build !== 'string' || !build) return false;
+  return build === V || ('arch-' + build) === V;
+}
 async function handleMessage(msg, reply) {
   const type = msg && msg.type;
-  if (type === 'arch:startup-ok') { await promoteToLastKnownGood(); return; }
+  if (type === 'arch:startup-ok') {
+    // Owner review (финальный проход): маркер продвигает V в last-known-good
+    // ТОЛЬКО если он отправлен кодом ИМЕННО этой сборки. Иначе рабочая B,
+    // выданная из LKG в режиме восстановления, «сертифицировала» бы сломанную
+    // C: B шлёт startup-ok(B), контроллер C копировал бы СЕБЯ в LKG и снимал
+    // recovery — уничтожая единственную рабочую копию.
+    if (!buildMatchesCurrent(msg.build)) {
+      reply && reply({ type: 'arch:startup-ok-result', ok: false, reason: 'build-mismatch', expected: V, got: msg && msg.build });
+      return;
+    }
+    const promoted = await promoteToLastKnownGood();
+    reply && reply({ type: 'arch:startup-ok-result', ok: promoted });
+    return;
+  }
   if (type === 'arch:version?') { reply && reply(Object.assign({ type: 'arch:version' }, await versionInfo())); return; }
   if (type === 'arch:restore-lkg') { const r = await enterRecovery(); reply && reply(Object.assign({ type: 'arch:restore-lkg-result' }, r)); return; }
   if (type === 'arch:exit-recovery') { await exitRecovery(); reply && reply({ type: 'arch:exit-recovery-result', ok: true }); return; }
@@ -203,5 +246,5 @@ self.__archSw = {
   V, LKG, LKG_VERSION_KEY, RECOVERY_FLAG_KEY, SHELL,
   activateWithRecovery, promoteToLastKnownGood, enterRecovery, exitRecovery,
   lastKnownGoodVersion, recoveryMode, versionInfo, handleMessage,
-  handleNavigate, handleAsset, copyCache,
+  handleNavigate, handleAsset, copyCache, buildMatchesCurrent, isAppAsset,
 };
