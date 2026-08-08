@@ -26,8 +26,8 @@ const MUTANTS = [
   {
     id: 'provenance-dedup',
     what: 'снят provenance-дедуп: повторный импорт того же sourceId создаёт дубль',
-    find: '    if (provKey && provIdx.has(provKey)) {',
-    replace: '    if (false && provKey && provIdx.has(provKey)) {',
+    find: '      .find(x => x.key && provIdx.has(x.key));',
+    replace: '      .find(() => false);',
     expectFail: 'один факт остался одним canonical-фактом',
   },
   {
@@ -50,6 +50,35 @@ const MUTANTS = [
     find: 'const EVENT_SOURCES = {\n  moments:',
     replace: "const EVENT_SOURCES = {\n  externalWorkSessions: rec => ({ tags: ['externalWork:imported'], importance: 1 }),\n  moments:",
     expectFail: 'EVENT_SOURCES',
+  },
+  // ── Owner review 5228662919: три новые защиты provenance ──
+  {
+    id: 'per-entity-source',
+    what: 'source записи игнорируется — используется только пакетный',
+    find: '  const src = extResolveSource(pkg.source || {}, e.source, null);',
+    replace: '  const src = extResolveSource(pkg.source || {}, null, null);',
+    expectFail: 'перекрывает пакетный',
+  },
+  {
+    id: 'claim-classes-collapse',
+    what: 'многослойный claimClasses схлопнут до одного primary',
+    find: '    claimClasses: claims.all,',
+    replace: '    claimClasses: [claims.primary],',
+    expectFail: 'полный набор claimClasses сохранён',
+  },
+  {
+    id: 'alias-dedup',
+    what: 'дедуп смотрит только на основную ссылку, псевдонимы игнорируются',
+    find: '    const hit = prov.sourceRefs\n      .map(r => ({ ref: r, key: extProvenanceKey(coll, r.sourceId) }))',
+    replace: '    const hit = prov.sourceRefs.filter(r => r.role === \'primary\')\n      .map(r => ({ ref: r, key: extProvenanceKey(coll, r.sourceId) }))',
+    expectFail: 'опознана по СВОЕМУ псевдониму',
+  },
+  {
+    id: 'alias-index',
+    what: 'индекс provenance строится только по плоскому sourceId',
+    find: '      extRecordSourceIds(r).forEach(sid => {',
+    replace: '      [r && r.ext && r.ext.sourceId].filter(Boolean).forEach(sid => {',
+    expectFail: 'PARA↔LIFE cross-link',
   },
   {
     id: 'recovery-write-lock',

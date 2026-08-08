@@ -49,6 +49,24 @@ const PROV = {
   clientRef: 'i1', sourceExcerpt: null, relatedSourceIds: ['TEST-LIFE-001'],
   importedAt: NOW,
 };
+
+// Owner review 5228662919: многослойный claimClasses + несколько ссылок на
+// источники с СОБСТВЕННЫМИ module/chatId. Именно это и обязано пережить
+// зашифрованную копию без потерь — иначе provenance теряется при переносе.
+const PROV_MULTI = {
+  format: 'architect-external-work-v1', packageHash: HASH, sessionRef: 'sess-2',
+  sourceSystem: 'google_drive', sourceModule: 'PARA-MODULE', sourceChatId: 'chat-para',
+  sourceLabel: 'Синтетические практики', sourceId: 'TEST-PARA-500', sourceDate: '2026-02-20',
+  sourceDateRange: null,
+  claimClass: 'practice_action',
+  claimClasses: ['practice_action', 'user_experience', 'symbolic_interpretation'],
+  textOrigin: 'user_words', clientRef: 'p1', sourceExcerpt: null,
+  sourceRefs: [
+    { sourceId: 'TEST-PARA-500', role: 'primary', sourceSystem: 'google_drive', sourceModule: 'PARA-MODULE', sourceChatId: 'chat-para', sourceLabel: 'Синтетические практики', sourceDate: '2026-02-20', note: null },
+    { sourceId: 'TEST-LIFE-500', role: 'alias', sourceSystem: 'chatgpt', sourceModule: 'LIFE-MODULE', sourceChatId: 'chat-life', sourceLabel: 'Дневник', sourceDate: '2026-02-20', note: 'тот же эпизод из дневника' },
+  ],
+  relatedSourceIds: [], importedAt: NOW,
+};
 const LEDGER = [{
   id: 'externalWork:msku8fyb-xc0cakcc8t6o',
   source: 'chatgpt', sourceLabel: 'Синтетическая сессия', sourceModule: 'TEST-MODULE',
@@ -77,6 +95,7 @@ function seed() {
       dreams: [{ id: 1754654400002, title: 'Синтетический сон', body: 'Оригинальный рассказ сна — синтетический.', tone: 'тревожный', arch: 'Синтетическая трактовка', createdAt: NOW, day: '2026-08-08', sv: 6, media: [], ext: { ...PROV, clientRef: 'd1', sourceId: 'TEST-DREAM-001', claimClass: 'user_experience', textOrigin: 'user_words' } }],
       psyLinks: [{ id: 'psyLink:msku8fyb-a1b2c3d4e5f', fromColl: 'insights', fromId: 1754654400001, toColl: 'patterns', toId: 1754654400003, relation: 'insight_to_pattern', createdAt: NOW, day: '2026-08-08', sv: 6, _u: 1754654400000, source: 'user', acceptedAt: NOW, confidenceLabel: null }],
       patterns: [{ id: 1754654400003, text: 'Синтетический повторяющийся паттерн', type: 'behavior', createdAt: NOW, day: '2026-08-08', sv: 6 }],
+      spiritual: [{ id: 1754654400004, type: 'практика', date: '20 февраля 2026 г.', text: 'Синтетическая практика с несколькими источниками.', createdAt: NOW, day: '2026-08-08', sv: 6, ext: PROV_MULTI }],
       externalWorkSessions: LEDGER,
       __ts: 123,
     }),
@@ -157,6 +176,23 @@ async function main() {
       'production restore: журнал в восстановленном профиле byte-identical');
     ok(JSON.stringify(db.insights[0].ext) === JSON.stringify(PROV),
       'production restore: provenance на canonical-записи byte-identical');
+
+    // Owner review 5228662919: полный путь import → sync → encrypted backup →
+    // restore для многослойного claim и нескольких ссылок на источники.
+    const mp = db.spiritual[0].ext;
+    ok(JSON.stringify(mp) === JSON.stringify(PROV_MULTI),
+      'production restore: многослойный provenance byte-identical целиком');
+    ok(JSON.stringify(mp.claimClasses) === JSON.stringify(['practice_action', 'user_experience', 'symbolic_interpretation']),
+      'production restore: все три claim class пережили шифрованную копию');
+    ok(mp.claimClass === 'practice_action' && mp.claimClasses.includes(mp.claimClass),
+      'production restore: primary claim сохранён и остаётся частью набора');
+    ok(mp.sourceRefs.length === 2 &&
+       mp.sourceRefs[0].sourceModule === 'PARA-MODULE' && mp.sourceRefs[0].sourceChatId === 'chat-para' &&
+       mp.sourceRefs[1].sourceModule === 'LIFE-MODULE' && mp.sourceRefs[1].sourceChatId === 'chat-life',
+      'production restore: per-reference module/chatId не схлопнулись в один источник');
+    ok(mp.sourceRefs.filter(r => r.role === 'primary').length === 1 &&
+       mp.sourceRefs.filter(r => r.role === 'alias').length === 1,
+      'production restore: роли primary/alias сохранены');
 
     const s = db.externalWorkSessions[0];
     const recsOk = s.recordRefs.every(r => (db[r.coll] || []).some(x => x.id === r.id));

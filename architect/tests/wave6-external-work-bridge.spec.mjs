@@ -670,6 +670,426 @@ console.log('\n── Wave 6: External Work Bridge ──');
   ok(same.visible, 'импортированная запись участвует в Unified Intelligence как обычная');
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  BLOCKING OWNER REVIEW 5228662919 — дефекты, вскрытые РЕАЛЬНЫМИ данными.
+//  Фикстуры остаются синтетическими: реальные карточки в репозиторий не
+//  попадают ни при каких условиях.
+// ═══════════════════════════════════════════════════════════════════
+
+// ── 32. Per-entity source: пакетный source — только значение по умолчанию ──
+// Реальная первая миграция неизбежно смешивает LIFE / DREAM / очередь
+// психологии / PARA в одном пакете. Если бы source жил только на уровне
+// пакета, часть записей была бы приписана чужому модулю.
+{
+  await reset();
+  const mixed = {
+    format: 'architect-external-work-v1',
+    source: { kind: 'chatgpt', label: 'Пакет по умолчанию', module: 'DEFAULT-MODULE', chatId: 'chat-default' },
+    session: { clientRef: 's-mixed', summary: 'Смешанная сессия', date: '2026-03-02' },
+    entities: [
+      // Без своего source — наследует пакетный.
+      { clientRef: 'a', type: 'insight', sourceId: 'TEST-LIFE-310', claimClass: 'user_fact', textOrigin: 'user_words',
+        data: { title: 'Из дневника', body: 'Синтетический текст дневника.' } },
+      // Со своим source — обязан перекрыть пакетный.
+      { clientRef: 'b', type: 'dream', sourceId: 'TEST-DREAM-310',
+        source: { kind: 'google_drive', module: 'DREAM-MODULE', chatId: 'chat-dreams', label: 'Сны' },
+        claimClass: 'user_experience', textOrigin: 'user_words',
+        data: { title: 'Синтетический сон', body: 'Оригинальный рассказ сна.', tone: 'спокойный' } },
+      // Частичное перекрытие: свой модуль, chatId наследуется.
+      { clientRef: 'c', type: 'spiritual', sourceId: 'TEST-PARA-310',
+        source: { module: 'PARA-MODULE' },
+        claimClass: 'practice_action', textOrigin: 'user_words',
+        data: { text: 'Синтетическая практика.', type: 'практика' } },
+    ],
+    links: [],
+  };
+  await commit(mixed);
+  const per = await page.evaluate(() => {
+    const g = (c) => DB[c][0] && DB[c][0].ext;
+    return {
+      life: { m: g('insights').sourceModule, c: g('insights').sourceChatId, k: g('insights').sourceSystem },
+      dream: { m: g('dreams').sourceModule, c: g('dreams').sourceChatId, k: g('dreams').sourceSystem },
+      para: { m: g('spiritual').sourceModule, c: g('spiritual').sourceChatId, k: g('spiritual').sourceSystem },
+    };
+  });
+  ok(per.life.m === 'DEFAULT-MODULE' && per.life.c === 'chat-default' && per.life.k === 'chatgpt',
+    'запись без своего source наследует пакетный (пакет — значение по умолчанию)');
+  ok(per.dream.m === 'DREAM-MODULE' && per.dream.c === 'chat-dreams' && per.dream.k === 'google_drive',
+    'запись со своим source перекрывает пакетный полностью');
+  ok(per.para.m === 'PARA-MODULE' && per.para.c === 'chat-default',
+    'частичное перекрытие: свой модуль, chatId унаследован');
+  ok(per.life.m !== per.dream.m && per.dream.m !== per.para.m,
+    `разные entities одного пакета сохранили РАЗНЫЕ sourceModule (${per.life.m}/${per.dream.m}/${per.para.m})`);
+  ok(per.life.c !== per.dream.c,
+    `разные entities одного пакета сохранили разные sourceChatId (${per.life.c}/${per.dream.c})`);
+}
+
+// ── 33. Многослойный claimClass: полный набор без повышения статуса ──
+// Реальные PARA-карточки одновременно practice_action + user_experience +
+// symbolic_interpretation. Схема обязана сохранить ВСЕ слои.
+{
+  await reset();
+  const multi = {
+    ...PKG_FULL,
+    entities: [{
+      clientRef: 'mc', type: 'spiritual', sourceId: 'TEST-PARA-320',
+      claimClass: 'practice_action',
+      claimClasses: ['practice_action', 'user_experience', 'symbolic_interpretation'],
+      textOrigin: 'user_words',
+      data: { text: 'Синтетическая практика с переживанием и толкованием.', type: 'практика' },
+    }],
+    links: [],
+  };
+  await commit(multi);
+  const cc = await page.evaluate(() => {
+    const e = DB.spiritual[0].ext;
+    return { primary: e.claimClass, all: e.claimClasses };
+  });
+  ok(JSON.stringify(cc.all) === JSON.stringify(['practice_action', 'user_experience', 'symbolic_interpretation']),
+    `полный набор claimClasses сохранён без потерь (${(cc.all || []).length} слоя)`);
+  ok(cc.primary === 'practice_action', 'primary claimClass сохранён и остаётся ОДНИМ ИЗ набора');
+  ok((cc.all || []).includes('symbolic_interpretation') && cc.primary !== 'user_fact',
+    'symbolic_interpretation не повышен до факта и не выброшен');
+
+  // Повышение статуса невозможно и на входе: primary обязан входить в набор.
+  const bad = await plan({ ...multi, entities: [{ ...multi.entities[0], claimClass: 'user_fact' }] });
+  ok(bad.ok === false && bad.errors.some(e => /отсутствует в claimClasses/.test(e)),
+    'claimClass вне собственного набора отклонён — тихое повышение невозможно');
+
+  const unknown = await plan({ ...multi, entities: [{ ...multi.entities[0], claimClasses: ['practice_action', 'totally_new_class'] }] });
+  ok(unknown.ok === false && unknown.errors.some(e => /неизвестный claimClass/.test(e)),
+    'неизвестный класс в наборе отклонён — enum не расширяется молча');
+}
+
+// ── 34. DREAM primary + LIFE alias: поздний LIFE-пакет → 0 дублей ────
+// Реальный Drive намеренно ссылается на ОДИН эпизод из LIFE и DREAM, а не
+// копирует его. Второй пакет обязан узнать эпизод по псевдониму.
+{
+  await reset();
+  const dreamPkg = {
+    format: 'architect-external-work-v1',
+    source: { kind: 'google_drive', label: 'Сны', module: 'DREAM-MODULE', chatId: 'chat-dreams' },
+    session: { clientRef: 's-dream', summary: 'Сессия снов', date: '2026-03-03' },
+    entities: [{
+      clientRef: 'd1', type: 'dream', sourceId: 'TEST-DREAM-340', sourceDate: '2026-03-03',
+      sourceRefs: [
+        { sourceId: 'TEST-DREAM-340', role: 'primary' },
+        { sourceId: 'TEST-LIFE-340', role: 'alias', source: { module: 'LIFE-MODULE', chatId: 'chat-life' } },
+      ],
+      claimClass: 'user_experience', textOrigin: 'user_words',
+      data: { title: 'Сон об экзамене', body: 'Синтетический рассказ сна об экзамене.', tone: 'тревожный' },
+    }],
+    links: [],
+  };
+  await commit(dreamPkg);
+
+  // Позже приходит LIFE-пакет, ссылающийся на ТОТ ЖЕ эпизод по LIFE-id.
+  const lifePkg = {
+    format: 'architect-external-work-v1',
+    source: { kind: 'chatgpt', label: 'Дневник жизни', module: 'LIFE-MODULE', chatId: 'chat-life' },
+    session: { clientRef: 's-life', summary: 'Сессия дневника', date: '2026-03-04' },
+    entities: [{
+      clientRef: 'l1', type: 'dream', sourceId: 'TEST-LIFE-340', sourceDate: '2026-03-03',
+      claimClass: 'user_experience', textOrigin: 'user_words',
+      data: { title: 'Сон об экзамене', body: 'Синтетический рассказ сна об экзамене.', tone: 'тревожный' },
+    }],
+    links: [],
+  };
+  const second = await commit(lifePkg);
+  const st = await page.evaluate(() => ({
+    dreams: DB.dreams.length,
+    refs: (DB.dreams[0].ext.sourceRefs || []).map(r => r.sourceId).sort(),
+    roles: (DB.dreams[0].ext.sourceRefs || []).map(r => r.role),
+    modules: (DB.dreams[0].ext.sourceRefs || []).map(r => r.sourceModule).sort(),
+    ledger: DB.externalWorkSessions.length,
+  }));
+  ok(st.dreams === 1, `один DREAM-ID → одна запись DB.dreams, дублей нет (${st.dreams})`);
+  ok(JSON.stringify(st.refs) === JSON.stringify(['TEST-DREAM-340', 'TEST-LIFE-340']),
+    'обе provenance-ссылки сохранены на одной canonical-записи');
+  ok(st.roles.filter(r => r === 'primary').length === 1,
+    'основная ссылка ровно одна, поздний пакет её не переопределяет');
+  ok(JSON.stringify(st.modules) === JSON.stringify(['DREAM-MODULE', 'LIFE-MODULE']),
+    'каждая ссылка несёт СВОЙ модуль — кросс-модульный provenance не потерян');
+  // Оба идентификатора эпизода уже известны, поэтому дописывать нечего.
+  // Честный отказ здесь — правильное поведение: пустая запись в журнале
+  // означала бы «импорт был», хотя не изменилось ничего.
+  ok(second.res.ok === false && /ничего не выбрано/.test(second.res.error || ''),
+    'пакет, не добавляющий ни записей, ни ссылок, честно отклонён без записи в журнал');
+  ok(st.ledger === 1, `журнал содержит только реально состоявшийся импорт (${st.ledger})`);
+
+  // А вот пакет с НОВЫМ псевдонимом того же эпизода — полезная работа:
+  // запись не создаётся, но provenance дополняется и это попадает в журнал.
+  const thirdPkg = {
+    format: 'architect-external-work-v1',
+    source: { kind: 'chatgpt', label: 'Психология', module: 'PSY-MODULE', chatId: 'chat-psy' },
+    session: { clientRef: 's-psy', summary: 'Очередь психологии', date: '2026-03-05' },
+    entities: [{
+      clientRef: 'p1', type: 'dream', sourceId: 'TEST-DREAM-340',
+      sourceRefs: [{ sourceId: 'TEST-PSY-340', role: 'alias' }],
+      claimClass: 'user_experience', textOrigin: 'user_words',
+      data: { title: 'Сон об экзамене', body: 'Синтетический рассказ сна об экзамене.', tone: 'тревожный' },
+    }],
+    links: [],
+  };
+  const third = await commit(thirdPkg);
+  const st3 = await page.evaluate(() => ({
+    dreams: DB.dreams.length,
+    refs: (DB.dreams[0].ext.sourceRefs || []).map(r => r.sourceId).sort(),
+    psyModule: (DB.dreams[0].ext.sourceRefs || []).find(r => r.sourceId === 'TEST-PSY-340'),
+    ledger: DB.externalWorkSessions.length,
+    merged: (DB.externalWorkSessions[1] || {}).mergedRefs,
+  }));
+  ok(third.res.ok === true, 'пакет с новым псевдонимом принят как полезная работа');
+  ok(st3.dreams === 1, `новая ссылка НЕ создала вторую запись (${st3.dreams})`);
+  ok(JSON.stringify(st3.refs) === JSON.stringify(['TEST-DREAM-340', 'TEST-LIFE-340', 'TEST-PSY-340']),
+    'третья ссылка дописана к той же canonical-записи');
+  ok(st3.psyModule && st3.psyModule.sourceModule === 'PSY-MODULE' && st3.psyModule.role === 'alias',
+    'дописанная ссылка несёт свой модуль и роль псевдонима');
+  ok(st3.ledger === 2 && Array.isArray(st3.merged) && st3.merged.length === 1 &&
+     st3.merged[0].addedSourceIds.includes('TEST-PSY-340'),
+    'слияние provenance зафиксировано в журнале как mergedRefs');
+
+  // Ключевой кросс-модульный случай: у ВХОДЯЩЕЙ записи основная ссылка —
+  // новый, неизвестный нам LIFE-id, а известный DREAM-эпизод указан лишь
+  // ПСЕВДОНИМОМ. Дедуп обязан смотреть на все ссылки входящей записи, иначе
+  // именно здесь и появился бы дубль.
+  const fourth = await commit({
+    format: 'architect-external-work-v1',
+    source: { kind: 'chatgpt', label: 'Дневник жизни', module: 'LIFE-MODULE', chatId: 'chat-life' },
+    session: { clientRef: 's-life-alias', summary: 'Поздний дневниковый пакет', date: '2026-03-06' },
+    entities: [{
+      clientRef: 'la', type: 'dream', sourceId: 'TEST-LIFE-341',
+      sourceRefs: [{ sourceId: 'TEST-DREAM-340', role: 'alias' }],
+      claimClass: 'user_experience', textOrigin: 'user_words',
+      data: { title: 'Сон об экзамене', body: 'Синтетический рассказ сна об экзамене.', tone: 'тревожный' },
+    }],
+    links: [],
+  });
+  const st4 = await page.evaluate(() => ({
+    dreams: DB.dreams.length,
+    refs: (DB.dreams[0].ext.sourceRefs || []).map(r => r.sourceId).sort(),
+  }));
+  ok(fourth.res.ok === true && st4.dreams === 1,
+    `входящая запись опознана по СВОЕМУ псевдониму — второй записи нет (${st4.dreams})`);
+  ok(st4.refs.includes('TEST-LIFE-341') && st4.refs.length === 4,
+    `новая основная ссылка входящего пакета дописана как псевдоним (${st4.refs.length} ссылки)`);
+}
+
+// ── 35. PARA primary + LIFE alias: тот же инвариант ──────────────────
+{
+  await reset();
+  await commit({
+    format: 'architect-external-work-v1',
+    source: { kind: 'google_drive', label: 'Парапсихология', module: 'PARA-MODULE', chatId: 'chat-para' },
+    session: { clientRef: 's-para', summary: 'Сессия практик', date: '2026-03-05' },
+    entities: [{
+      clientRef: 'p1', type: 'spiritual', sourceId: 'TEST-PARA-350',
+      sourceRefs: [
+        { sourceId: 'TEST-PARA-350', role: 'primary' },
+        { sourceId: 'TEST-LIFE-350', role: 'alias', source: { module: 'LIFE-MODULE' } },
+      ],
+      claimClass: 'practice_action', claimClasses: ['practice_action', 'user_experience'],
+      textOrigin: 'user_words',
+      data: { text: 'Синтетическая энергопрактика 30 минут.', type: 'практика' },
+    }],
+    links: [],
+  });
+  await commit({
+    format: 'architect-external-work-v1',
+    source: { kind: 'chatgpt', label: 'Дневник жизни', module: 'LIFE-MODULE', chatId: 'chat-life' },
+    session: { clientRef: 's-life2', summary: 'Сессия дневника', date: '2026-03-06' },
+    entities: [{
+      clientRef: 'l2', type: 'spiritual', sourceId: 'TEST-LIFE-350',
+      claimClass: 'practice_action', textOrigin: 'user_words',
+      data: { text: 'Синтетическая энергопрактика 30 минут.', type: 'практика' },
+    }],
+    links: [],
+  });
+  const para = await page.evaluate(() => ({
+    spiritual: DB.spiritual.length,
+    refs: (DB.spiritual[0].ext.sourceRefs || []).map(r => r.sourceId).sort(),
+    claims: DB.spiritual[0].ext.claimClasses,
+  }));
+  ok(para.spiritual === 1, `PARA↔LIFE cross-link → одна canonical сущность (${para.spiritual})`);
+  ok(JSON.stringify(para.refs) === JSON.stringify(['TEST-LIFE-350', 'TEST-PARA-350']),
+    'обе ссылки PARA и LIFE сохранены на одной сущности');
+  ok(JSON.stringify(para.claims) === JSON.stringify(['practice_action', 'user_experience']),
+    'многослойный claimClass пережил кросс-модульное слияние');
+}
+
+// ── 36. Похожий текст без общей identity НЕ объединяется ─────────────
+// Дедуп по тексту запрещён: два разных эпизода, описанных одинаково,
+// обязаны остаться двумя записями.
+{
+  await reset();
+  const sameText = 'Совершенно одинаковый синтетический текст записи.';
+  await commit({
+    ...PKG_FULL,
+    entities: [
+      { clientRef: 'x1', type: 'insight', sourceId: 'TEST-LIFE-361', claimClass: 'user_fact', textOrigin: 'user_words',
+        data: { title: 'Одинаковый заголовок', body: sameText } },
+      { clientRef: 'x2', type: 'insight', sourceId: 'TEST-LIFE-362', claimClass: 'user_fact', textOrigin: 'user_words',
+        data: { title: 'Одинаковый заголовок', body: sameText } },
+    ],
+    links: [],
+  });
+  const sim = await page.evaluate(() => ({
+    n: DB.insights.length,
+    ids: DB.insights.map(r => r.ext.sourceId).sort(),
+    bodiesEqual: DB.insights.length === 2 && DB.insights[0].body === DB.insights[1].body,
+  }));
+  ok(sim.n === 2, `разные source ID с идентичным текстом остались ДВУМЯ событиями (${sim.n})`);
+  ok(sim.bodiesEqual, 'тексты действительно совпадают — значит объединения по тексту не произошло именно из-за identity');
+  ok(JSON.stringify(sim.ids) === JSON.stringify(['TEST-LIFE-361', 'TEST-LIFE-362']),
+    'обе записи сохранили собственный sourceId');
+}
+
+// ── 37. Повторный preview того же пакета не создаёт новых записей ────
+{
+  await reset();
+  const pkg = {
+    format: 'architect-external-work-v1',
+    source: { kind: 'chatgpt', label: 'Идемпотентность', module: 'LIFE-MODULE', chatId: 'chat-idem' },
+    session: { clientRef: 's-idem', summary: 'Проверка идемпотентности', date: '2026-03-07' },
+    entities: [{
+      clientRef: 'i1', type: 'insight', sourceId: 'TEST-LIFE-370',
+      sourceRefs: [
+        { sourceId: 'TEST-LIFE-370', role: 'primary' },
+        { sourceId: 'TEST-DREAM-370', role: 'alias', source: { module: 'DREAM-MODULE' } },
+      ],
+      claimClass: 'user_fact', textOrigin: 'structured_summary',
+      data: { title: 'Идемпотентный вывод', body: 'Синтетический текст для проверки повтора.' },
+    }],
+    links: [],
+  };
+  await commit(pkg);
+  const before = await page.evaluate(() => JSON.stringify(DB));
+  const again = await plan(pkg);
+  const after = await page.evaluate(() => JSON.stringify(DB));
+  ok(again.ok === true && (again.counts['already-imported'] || 0) === 1,
+    'повторный preview того же пакета: 0 новых записей');
+  ok((again.counts.new || 0) === 0, `повторный preview не предлагает ни одной новой записи (${again.counts.new || 0})`);
+  ok(before === after, 'повторный preview не изменил базу ни на байт');
+}
+
+// ── 38. Multi-claim provenance переживает sync ──────────────────────
+// Реальный роундтрип зашифрованной копии — в tests/wave6-backup-roundtrip.test.mjs
+// (там доступен production ESM-адаптер). Здесь — половина пути через merge.
+{
+  await reset();
+  await commit({
+    ...PKG_FULL,
+    entities: [{
+      clientRef: 'mc2', type: 'spiritual', sourceId: 'TEST-PARA-380',
+      sourceRefs: [
+        { sourceId: 'TEST-PARA-380', role: 'primary', source: { module: 'PARA-MODULE', chatId: 'chat-para' } },
+        { sourceId: 'TEST-LIFE-380', role: 'alias', source: { module: 'LIFE-MODULE', chatId: 'chat-life' } },
+      ],
+      claimClass: 'practice_action',
+      claimClasses: ['practice_action', 'user_experience', 'symbolic_interpretation'],
+      textOrigin: 'user_words',
+      data: { text: 'Синтетическая практика для проверки синка.', type: 'практика' },
+    }],
+    links: [],
+  });
+  const synced = await page.evaluate(() => {
+    const wire = JSON.parse(JSON.stringify(DB));
+    wire.__ts = (DB.__ts || 0) + 1000;
+    const empty = { ...JSON.parse(JSON.stringify(DEFAULT_DB)), __ts: 1, _del: {} };
+    const merged = mergeDB(empty, wire);
+    const e = merged.spiritual[0] && merged.spiritual[0].ext;
+    return {
+      claims: e && e.claimClasses,
+      refs: e && (e.sourceRefs || []).map(r => r.sourceId).sort(),
+      modules: e && (e.sourceRefs || []).map(r => r.sourceModule).sort(),
+      chats: e && (e.sourceRefs || []).map(r => r.sourceChatId).sort(),
+    };
+  });
+  ok(JSON.stringify(synced.claims) === JSON.stringify(['practice_action', 'user_experience', 'symbolic_interpretation']),
+    'многослойный claimClasses пережил sync без потерь');
+  ok(JSON.stringify(synced.refs) === JSON.stringify(['TEST-LIFE-380', 'TEST-PARA-380']),
+    'все source-ссылки пережили sync');
+  ok(JSON.stringify(synced.modules) === JSON.stringify(['LIFE-MODULE', 'PARA-MODULE']) &&
+     JSON.stringify(synced.chats) === JSON.stringify(['chat-life', 'chat-para']),
+    'per-reference модуль и chatId пережили sync — provenance не схлопнулся');
+}
+
+// ── 39. Backward compatibility architect-external-work-v1 ───────────
+// Пакет СТАРОЙ формы (без source у записи, без claimClasses, без sourceRefs)
+// обязан импортироваться ровно как раньше.
+{
+  await reset();
+  const legacy = {
+    format: 'architect-external-work-v1',
+    source: { kind: 'chatgpt', label: 'Старый пакет', module: 'OLD-MODULE', chatId: 'chat-old' },
+    session: { clientRef: 's-old', summary: 'Пакет старой формы', date: '2026-03-08' },
+    entities: [{
+      clientRef: 'o1', type: 'insight', sourceId: 'TEST-LIFE-390',
+      claimClass: 'user_fact', textOrigin: 'user_words',
+      data: { title: 'Старый вывод', body: 'Синтетический текст старого пакета.' },
+    }],
+    links: [],
+  };
+  const r = await commit(legacy);
+  const back = await page.evaluate(() => {
+    const e = DB.insights[0].ext;
+    return {
+      sourceId: e.sourceId, module: e.sourceModule, chat: e.sourceChatId,
+      claim: e.claimClass, claims: e.claimClasses,
+      refs: (e.sourceRefs || []).map(r2 => ({ id: r2.sourceId, role: r2.role })),
+    };
+  });
+  ok(r.res.ok === true, 'пакет старой формы импортируется без изменений в самом пакете');
+  ok(back.sourceId === 'TEST-LIFE-390' && back.module === 'OLD-MODULE' && back.chat === 'chat-old',
+    'плоские поля provenance читаются как раньше (обратная совместимость чтения)');
+  ok(JSON.stringify(back.claims) === JSON.stringify(['user_fact']),
+    'одиночный claimClass нормализован в набор из одного элемента, значение не изменено');
+  ok(back.refs.length === 1 && back.refs[0].id === 'TEST-LIFE-390' && back.refs[0].role === 'primary',
+    'sourceId старого пакета стал основной ссылкой автоматически');
+}
+
+// ── 40. Дедуп находит записи, импортированные ДО появления sourceRefs ─
+// Записи из предыдущей версии несут только плоский ext.sourceId. Поздний
+// пакет обязан их находить, иначе апгрейд кода породил бы дубли.
+{
+  await reset();
+  const dup = await page.evaluate(async (t) => {
+    // Запись «из прошлой версии»: ext без sourceRefs вообще.
+    DB.insights.push({
+      id: 999001, tag: 'personal', w: 1, title: 'Старая запись',
+      body: 'Импортирована предыдущей версией importer.', date: '01.03.2026',
+      createdAt: new Date().toISOString(), day: '2026-03-01', sv: SCHEMA_VERSION,
+      src: 'Внешняя работа', links: [], media: [],
+      ext: { format: 'architect-external-work-v1', sourceId: 'TEST-LIFE-400', sourceModule: 'OLD', claimClass: 'user_fact' },
+    });
+    const p = await extBuildPlan(t);
+    const res = extCommitPlan(p);
+    return {
+      status: p.items[0].status, n: DB.insights.length,
+      refs: (DB.insights[0].ext.sourceRefs || []).map(r => r.sourceId).sort(),
+      ok: res.ok,
+    };
+  }, JSON.stringify({
+    format: 'architect-external-work-v1',
+    source: { kind: 'chatgpt', label: 'Новый пакет', module: 'NEW-MODULE', chatId: 'chat-new' },
+    session: { clientRef: 's-mig', summary: 'Пакет после апгрейда', date: '2026-03-09' },
+    entities: [{
+      clientRef: 'n1', type: 'insight', sourceId: 'TEST-LIFE-400',
+      sourceRefs: [
+        { sourceId: 'TEST-LIFE-400', role: 'primary' },
+        { sourceId: 'TEST-DREAM-400', role: 'alias', source: { module: 'DREAM-MODULE' } },
+      ],
+      claimClass: 'user_fact', textOrigin: 'user_words',
+      data: { title: 'Тот же источник', body: 'Тот же исходный объект другим пакетом.' },
+    }],
+    links: [],
+  }));
+  ok(dup.status === 'existing-by-provenance' && dup.n === 1,
+    `legacy-запись без sourceRefs найдена дедупом — дубля нет (${dup.n})`);
+  ok(JSON.stringify(dup.refs) === JSON.stringify(['TEST-DREAM-400', 'TEST-LIFE-400']),
+    'плоский legacy sourceId поднят в набор ссылок, новый псевдоним дописан');
+}
+
 ok(errors.length === 0, `JS-ошибок нет за весь прогон (${errors.length})`, errors.slice(0, 3).join('\n'));
 
 await browser.close();

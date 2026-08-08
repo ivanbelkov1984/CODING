@@ -12074,6 +12074,8 @@ const EXT_LIMITS = Object.freeze({
   maxLinks: 1000,
   maxString: 20000,            // любая строка внутри payload
   maxDepth: 12,                // глубина вложенности JSON
+  maxClaimClasses: 10,         // не больше, чем самих классов
+  maxSourceRefs: 20,           // ссылок на исходные объекты у одной записи
 });
 
 // Происхождение утверждения. Закрытый enum: importer НЕ повышает гипотезу до
@@ -12090,6 +12092,9 @@ const EXT_TEXT_ORIGINS = Object.freeze([
   'verification_result',
 ]);
 const EXT_SOURCE_KINDS = Object.freeze(['chatgpt', 'google_drive', 'claude', 'other']);
+// Роль ссылки на исходный объект: основная запись источника либо псевдоним
+// (тот же эпизод, адресованный из другого модуля — LIFE ↔ DREAM ↔ PARA).
+const EXT_REF_ROLES = Object.freeze(['primary', 'alias']);
 
 // Поддерживаемые целевые canonical-типы. Новых доменных коллекций не создаём.
 const EXT_TARGETS = Object.freeze({
@@ -12145,6 +12150,33 @@ function extScanUnsafe(node, depth, errors, path) {
 const extStr = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max || EXT_LIMITS.maxString) : '');
 const extIsIsoDay = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v + 'T00:00:00Z'));
 
+// Один валидатор для source где угодно: пакет, запись, ссылка на источник.
+// Пустой/чужой kind отклоняется fail-closed, как и на уровне пакета.
+function extValidateSourceObj(s, path) {
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return [`${path}: должен быть объектом`];
+  const errs = [];
+  if (s.kind != null && !EXT_SOURCE_KINDS.includes(s.kind)) {
+    errs.push(`${path}.kind должен быть одним из: ${EXT_SOURCE_KINDS.join(', ')}`);
+  }
+  return errs;
+}
+// Слияние source: значения записи/ссылки перекрывают пакетные, отсутствующие
+// наследуются. Пакетный source — ТОЛЬКО значение по умолчанию.
+function extResolveSource(pkgSrc, entitySrc, refSrc) {
+  const pick = (k) => {
+    for (const s of [refSrc, entitySrc, pkgSrc]) {
+      if (s && typeof s === 'object' && s[k] != null && extStr(s[k], 200)) return s[k];
+    }
+    return null;
+  };
+  return {
+    kind: EXT_SOURCE_KINDS.includes(pick('kind')) ? pick('kind') : 'other',
+    module: extStr(pick('module'), 120) || null,
+    chatId: extStr(pick('chatId'), 200) || null,
+    label: extStr(pick('label'), 200) || null,
+  };
+}
+
 function extValidatePackage(raw) {
   const errors = [];
   if (typeof raw !== 'string') return { ok: false, errors: ['пакет не является текстом'] };
@@ -12181,6 +12213,49 @@ function extValidatePackage(raw) {
     if (e.textOrigin != null && !EXT_TEXT_ORIGINS.includes(e.textOrigin)) errors.push(`entities[${i}]: неизвестный textOrigin "${extStr(e.textOrigin, 60)}"`);
     if (e.sourceDate != null && !extIsIsoDay(e.sourceDate)) errors.push(`entities[${i}]: sourceDate должна быть YYYY-MM-DD`);
     if (e.data != null && (typeof e.data !== 'object' || Array.isArray(e.data))) errors.push(`entities[${i}]: data должна быть объектом`);
+
+    // Wave 6 / owner review 5228662919 (1): source на уровне ЗАПИСИ.
+    // Пакетный source остаётся значением по умолчанию, но смешанная миграция
+    // (LIFE + DREAM + PARA + очередь психологии) обязана сохранять модуль и
+    // chatId каждой записи, иначе часть записей припишется чужому источнику.
+    if (e.source != null) errors.push(...extValidateSourceObj(e.source, `entities[${i}].source`));
+
+    // (2): claimClass многослоен. Один и тот же материал бывает одновременно
+    // practice_action + user_experience + symbolic_interpretation. Полный набор
+    // сохраняется как есть — importer НЕ повышает и НЕ схлопывает классы.
+    if (e.claimClasses != null) {
+      if (!Array.isArray(e.claimClasses)) errors.push(`entities[${i}]: claimClasses должен быть массивом`);
+      else if (!e.claimClasses.length) errors.push(`entities[${i}]: claimClasses не может быть пустым`);
+      else if (e.claimClasses.length > EXT_LIMITS.maxClaimClasses) errors.push(`entities[${i}]: claimClasses больше ${EXT_LIMITS.maxClaimClasses}`);
+      else e.claimClasses.forEach((c, j) => {
+        if (!EXT_CLAIM_CLASSES.includes(c)) errors.push(`entities[${i}].claimClasses[${j}]: неизвестный claimClass "${extStr(c, 60) || '—'}"`);
+      });
+      // Явный primary обязан входить в набор — иначе неоднозначно, что главное.
+      if (e.claimClass != null && Array.isArray(e.claimClasses) && !e.claimClasses.includes(e.claimClass)) {
+        errors.push(`entities[${i}]: claimClass "${extStr(e.claimClass, 60)}" отсутствует в claimClasses`);
+      }
+    }
+
+    // (3): один физический эпизод может быть адресован из нескольких модулей
+    // (LIFE/DREAM/PARA). Ссылки описываются явно, а не угадываются по тексту.
+    if (e.sourceRefs != null) {
+      if (!Array.isArray(e.sourceRefs)) errors.push(`entities[${i}]: sourceRefs должен быть массивом`);
+      else if (e.sourceRefs.length > EXT_LIMITS.maxSourceRefs) errors.push(`entities[${i}]: sourceRefs больше ${EXT_LIMITS.maxSourceRefs}`);
+      else {
+        let primaries = 0;
+        e.sourceRefs.forEach((r, j) => {
+          const p = `entities[${i}].sourceRefs[${j}]`;
+          if (!r || typeof r !== 'object' || Array.isArray(r)) { errors.push(`${p}: должна быть объектом`); return; }
+          if (!extStr(r.sourceId, 200)) errors.push(`${p}: отсутствует sourceId`);
+          if (r.role != null && !EXT_REF_ROLES.includes(r.role)) errors.push(`${p}: role должна быть primary или alias`);
+          if (r.role === 'primary') primaries++;
+          if (r.sourceDate != null && !extIsIsoDay(r.sourceDate)) errors.push(`${p}: sourceDate должна быть YYYY-MM-DD`);
+          if (r.source != null) errors.push(...extValidateSourceObj(r.source, `${p}.source`));
+          if (r.kind != null && !EXT_SOURCE_KINDS.includes(r.kind)) errors.push(`${p}: kind должен быть одним из: ${EXT_SOURCE_KINDS.join(', ')}`);
+        });
+        if (primaries > 1) errors.push(`entities[${i}]: более одного sourceRefs с role="primary"`);
+      }
+    }
   });
   links.forEach((l, i) => {
     if (!l || typeof l !== 'object' || Array.isArray(l)) { errors.push(`links[${i}]: должна быть объектом`); return; }
@@ -12391,23 +12466,105 @@ function extConfirm() {
 // Аддитивное поле `ext`: backward-compatible, переживает generic sync/backup,
 // миграция не требуется (старые записи просто не имеют его). Позволяет
 // восстановить полный аудит происхождения.
+// Полный набор классов утверждения БЕЗ повышения статуса: порядок сохраняется,
+// дубликаты убираются, primary — либо явно указанный claimClass, либо первый в
+// наборе. Никакой класс не «дорастает» до факта и не схлопывается в один.
+function extClaimClasses(e) {
+  const listed = Array.isArray(e.claimClasses)
+    ? e.claimClasses.filter(c => EXT_CLAIM_CLASSES.includes(c)) : [];
+  const primaryRaw = EXT_CLAIM_CLASSES.includes(e.claimClass) ? e.claimClass : null;
+  const all = [];
+  // Primary идёт первым, но остаётся ОДНИМ ИЗ набора, а не заменяет его.
+  if (primaryRaw) all.push(primaryRaw);
+  listed.forEach(c => { if (!all.includes(c)) all.push(c); });
+  if (!all.length) all.push('assistant_summary');   // тот же безопасный дефолт
+  return { primary: all[0], all };
+}
+
+// Ссылки на исходные объекты. Одна canonical-запись может быть адресована из
+// нескольких модулей (LIFE ↔ DREAM ↔ PARA) — каждая ссылка несёт СВОИ
+// module/chatId/дату, иначе provenance теряется при кросс-модульном импорте.
+function extSourceRefs(pkg, e) {
+  const pkgSrc = pkg.source || {};
+  // Идентичность исходного объекта — это его sourceId, и ничто иное. Ключевать
+  // по паре sourceId+module нельзя: тогда один и тот же объект, упомянутый
+  // сначала как `sourceId`, а затем в `sourceRefs` со своим модулем, разошёлся
+  // бы на две ссылки (и на две «основные»).
+  const byId = new Map();
+  const put = (sourceId, role, src, sourceDate, note, explicit) => {
+    const id = extStr(sourceId, 200);
+    if (!id) return;
+    const resolved = extResolveSource(pkgSrc, e.source, src);
+    const prev = byId.get(id);
+    if (!prev) {
+      byId.set(id, {
+        sourceId: id, role,
+        sourceSystem: resolved.kind, sourceModule: resolved.module,
+        sourceChatId: resolved.chatId, sourceLabel: resolved.label,
+        sourceDate: extIsIsoDay(sourceDate) ? sourceDate : null,
+        note: extStr(note, 400) || null,
+      });
+      return;
+    }
+    // Явная ссылка уточняет уже известный объект: у неё есть собственные
+    // module/chatId/дата, которых у неявной ссылки из `sourceId` не было.
+    if (!explicit) return;
+    if (src) {
+      prev.sourceSystem = resolved.kind;
+      prev.sourceModule = resolved.module;
+      prev.sourceChatId = resolved.chatId;
+      prev.sourceLabel = resolved.label;
+    }
+    if (extIsIsoDay(sourceDate)) prev.sourceDate = sourceDate;
+    if (extStr(note, 400)) prev.note = extStr(note, 400);
+    if (role === 'primary') prev.role = 'primary';
+  };
+
+  put(e.sourceId, 'primary', null, e.sourceDate, null, false);
+  (Array.isArray(e.sourceRefs) ? e.sourceRefs : []).forEach(r => {
+    if (!r || typeof r !== 'object') return;
+    const role = EXT_REF_ROLES.includes(r.role) ? r.role : 'alias';
+    const src = r.source || (r.kind || r.module || r.chatId || r.label
+      ? { kind: r.kind, module: r.module, chatId: r.chatId, label: r.label } : null);
+    put(r.sourceId, role, src, r.sourceDate, r.note, true);
+  });
+
+  const refs = [...byId.values()];
+  // Ровно одна основная ссылка: явно объявленная побеждает, остальные —
+  // псевдонимы. Если основной нет вовсе, ею становится первая.
+  const primaries = refs.filter(r => r.role === 'primary');
+  if (primaries.length > 1) primaries.slice(1).forEach(r => { r.role = 'alias'; });
+  if (refs.length && !refs.some(r => r.role === 'primary')) refs[0].role = 'primary';
+  return refs.slice(0, EXT_LIMITS.maxSourceRefs);
+}
+
+// Аддитивное поле `ext`: backward-compatible, переживает generic sync/backup,
+// миграция не требуется (старые записи просто не имеют его). Позволяет
+// восстановить полный аудит происхождения.
 function extProvenance(pkg, e, packageHash) {
-  const src = pkg.source || {};
+  // Источник разрешается ПОЗАПИСНО: пакетный source — только дефолт.
+  const src = extResolveSource(pkg.source || {}, e.source, null);
+  const claims = extClaimClasses(e);
+  const refs = extSourceRefs(pkg, e);
+  const primaryRef = refs.find(r => r.role === 'primary') || refs[0] || null;
   return {
     format: EXT_WORK_FORMAT,
     packageHash,
     sessionRef: extStr((pkg.session || {}).clientRef, 200) || null,
-    sourceSystem: extStr(src.kind, 40) || 'other',
-    sourceModule: extStr(src.module, 120) || null,
-    sourceChatId: extStr(src.chatId, 200) || null,
-    sourceLabel: extStr(src.label, 200) || null,
-    sourceId: extStr(e.sourceId, 200) || null,
+    sourceSystem: src.kind,
+    sourceModule: src.module,
+    sourceChatId: src.chatId,
+    sourceLabel: src.label,
+    // Плоские поля сохранены как есть — обратная совместимость чтения `ext`.
+    sourceId: primaryRef ? primaryRef.sourceId : (extStr(e.sourceId, 200) || null),
     sourceDate: extIsIsoDay(e.sourceDate) ? e.sourceDate : null,
     sourceDateRange: extStr(e.sourceDateRange, 80) || null,
-    claimClass: EXT_CLAIM_CLASSES.includes(e.claimClass) ? e.claimClass : 'assistant_summary',
+    claimClass: claims.primary,
+    claimClasses: claims.all,
     textOrigin: EXT_TEXT_ORIGINS.includes(e.textOrigin) ? e.textOrigin : 'structured_summary',
     clientRef: extStr(e.clientRef, 200),
     sourceExcerpt: extStr(e.sourceExcerpt, 1000) || null,
+    sourceRefs: refs,
     relatedSourceIds: Array.isArray(e.relatedSourceIds)
       ? e.relatedSourceIds.map(x => extStr(x, 200)).filter(Boolean).slice(0, 50) : [],
     importedAt: nowISO(),
@@ -12417,13 +12574,30 @@ function extProvenance(pkg, e, packageHash) {
 // не должен импортироваться дважды в ту же canonical-коллекцию — даже из
 // другого модуля/пакета.
 function extProvenanceKey(coll, sourceId) { return sourceId ? coll + '|' + sourceId : null; }
+
+// Все исходные идентификаторы записи: плоский legacy-`sourceId` (записи,
+// импортированные до этого изменения) И весь набор `sourceRefs`. Именно
+// поэтому поздний LIFE-пакет, ссылающийся на тот же DREAM-эпизод, находит
+// существующую запись и не создаёт дубль.
+function extRecordSourceIds(rec) {
+  const ext = rec && rec.ext;
+  if (!ext) return [];
+  const ids = [];
+  if (extStr(ext.sourceId, 200)) ids.push(ext.sourceId);
+  (Array.isArray(ext.sourceRefs) ? ext.sourceRefs : []).forEach(r => {
+    const id = r && extStr(r.sourceId, 200);
+    if (id && !ids.includes(id)) ids.push(id);
+  });
+  return ids;
+}
 function extIndexExistingProvenance(db) {
   const idx = new Map();
   Object.values(EXT_TARGETS).forEach(coll => {
     (db[coll] || []).forEach(r => {
-      const sid = r && r.ext && r.ext.sourceId;
-      const key = extProvenanceKey(coll, sid);
-      if (key && !idx.has(key)) idx.set(key, r.id);
+      extRecordSourceIds(r).forEach(sid => {
+        const key = extProvenanceKey(coll, sid);
+        if (key && !idx.has(key)) idx.set(key, r.id);
+      });
     });
   });
   return idx;
@@ -12461,7 +12635,6 @@ async function extBuildPlan(rawText) {
   for (const e of pkg.entities) {
     const coll = EXT_TARGETS[e.type];
     const prov = extProvenance(pkg, e, packageHash);
-    const provKey = extProvenanceKey(coll, prov.sourceId);
     const base = {
       clientRef: prov.clientRef, type: e.type, coll,
       title: extStr(e.title, 120) || extStr((e.data || {}).title, 120)
@@ -12469,15 +12642,39 @@ async function extBuildPlan(rawText) {
              || extStr((e.data || {}).body, 80) || '(без заголовка)',
       sourceId: prov.sourceId, sourceChatId: prov.sourceChatId, sourceModule: prov.sourceModule,
       date: prov.sourceDate || prov.sourceDateRange || null,
-      claimClass: prov.claimClass, textOrigin: prov.textOrigin,
+      claimClass: prov.claimClass, claimClasses: prov.claimClasses, textOrigin: prov.textOrigin,
+      sourceRefs: prov.sourceRefs.map(r => r.sourceId),
     };
 
     if (already) { items.push({ ...base, status: 'already-imported', reason: 'этот пакет уже импортирован' }); continue; }
-    if (provKey && provIdx.has(provKey)) {
-      // Тот же исходный объект уже есть — переиспользуем его id для связей,
-      // новую запись не создаём. Это provenance-дедуп, не дедуп по тексту.
-      refToRec.set(prov.clientRef, { coll, id: provIdx.get(provKey) });
-      items.push({ ...base, status: 'existing-by-provenance', reason: 'этот источник уже импортирован ранее' });
+
+    // Совпадение ищется по ЛЮБОЙ ссылке записи, а не только по основной:
+    // поздний LIFE-пакет, ссылающийся на тот же DREAM-эпизод, обязан найти
+    // уже существующую запись. Дедуп по тексту не выполняется никогда.
+    const hit = prov.sourceRefs
+      .map(r => ({ ref: r, key: extProvenanceKey(coll, r.sourceId) }))
+      .find(x => x.key && provIdx.has(x.key));
+    if (hit) {
+      const existingId = provIdx.get(hit.key);
+      refToRec.set(prov.clientRef, { coll, id: existingId });
+      // Новые ссылки того же эпизода не выбрасываются: они дописываются к
+      // существующей записи, иначе provenance кросс-модульной связи теряется.
+      const existingRec = (db[coll] || []).find(r => r && r.id === existingId);
+      const known = existingRec ? extRecordSourceIds(existingRec) : [];
+      const addRefs = prov.sourceRefs.filter(r => !known.includes(r.sourceId));
+      items.push({
+        ...base, status: 'existing-by-provenance',
+        reason: addRefs.length
+          ? `этот источник уже импортирован (${hit.ref.role === 'primary' ? 'основная ссылка' : 'псевдоним'}); добавляются ссылки: ${addRefs.map(r => r.sourceId).join(', ')}`
+          : 'этот источник уже импортирован ранее',
+        merge: { coll, id: existingId, addRefs, packageHash },
+      });
+      // Индекс дополняется сразу, чтобы новые псевдонимы участвовали в
+      // дедупликации уже внутри ЭТОГО пакета.
+      addRefs.forEach(r => {
+        const k = extProvenanceKey(coll, r.sourceId);
+        if (k && !provIdx.has(k)) provIdx.set(k, existingId);
+      });
       continue;
     }
     const built = EXT_ADAPTERS[e.type](e, extPickData(e), ctx);
@@ -12485,6 +12682,12 @@ async function extBuildPlan(rawText) {
     built.rec.ext = prov;
     items.push({ ...base, status: 'new', rec: built.rec });
     refToRec.set(prov.clientRef, { coll, id: built.rec.id });
+    // Все ссылки новой записи сразу попадают в индекс: вторая запись ТОГО ЖЕ
+    // пакета, ссылающаяся на тот же эпизод, не создаст дубль.
+    prov.sourceRefs.forEach(r => {
+      const k = extProvenanceKey(coll, r.sourceId);
+      if (k && !provIdx.has(k)) provIdx.set(k, built.rec.id);
+    });
   }
 
   // Связи проверяются ТЕМ ЖЕ production-валидатором, но на кандидате: чтобы
@@ -12531,15 +12734,60 @@ function extCommitPlan(plan, selection) {
   // Импортируются только записи со статусом `new` И не снятые пользователем.
   const pickedItems = plan.items.filter((i, n) => i.status === 'new' && (!sel.items || sel.items[n] !== false));
   const pickedLinks = plan.links.filter((l, n) => l.status === 'new' && (!sel.links || sel.links[n] !== false));
-  if (!pickedItems.length && !pickedLinks.length) return { ok: false, error: 'ничего не выбрано для импорта' };
+  // Дописывание ссылок к УЖЕ существующим записям — тоже полезная работа:
+  // кросс-модульный псевдоним (LIFE→DREAM) не создаёт записи, но обязан
+  // сохранить provenance. Снятый пользователем элемент не дописывается.
+  const pickedMerges = plan.items.filter((i, n) =>
+    i.status === 'existing-by-provenance' && i.merge && i.merge.addRefs.length &&
+    (!sel.items || sel.items[n] !== false));
+  if (!pickedItems.length && !pickedLinks.length && !pickedMerges.length) {
+    return { ok: false, error: 'ничего не выбрано для импорта' };
+  }
 
   const candidate = JSON.parse(JSON.stringify(DB));
   const created = [];
+  const mergedRefs = [];
   try {
     for (const it of pickedItems) {
       if (!Array.isArray(candidate[it.coll])) candidate[it.coll] = [];
       candidate[it.coll].push(JSON.parse(JSON.stringify(it.rec)));
       created.push({ clientRef: it.clientRef, coll: it.coll, id: it.rec.id });
+    }
+    // Слияние provenance: ТОЛЬКО дописывание ссылок в `ext.sourceRefs`.
+    // Ни одно содержательное поле записи не трогается — это аудит источника,
+    // а не редактирование пользовательского текста.
+    for (const it of pickedMerges) {
+      const { coll, id, addRefs } = it.merge;
+      const rec = (candidate[coll] || []).find(r => r && r.id === id);
+      if (!rec) throw new Error('запись для слияния provenance не найдена: ' + coll + '#' + id);
+      if (!rec.ext) throw new Error('у записи нет provenance для слияния: ' + coll + '#' + id);
+      if (!Array.isArray(rec.ext.sourceRefs)) {
+        // Запись, импортированная до появления sourceRefs: поднимаем её
+        // плоский sourceId в набор ссылок, ничего не теряя.
+        rec.ext.sourceRefs = rec.ext.sourceId ? [{
+          sourceId: rec.ext.sourceId, role: 'primary',
+          sourceSystem: rec.ext.sourceSystem || 'other', sourceModule: rec.ext.sourceModule || null,
+          sourceChatId: rec.ext.sourceChatId || null, sourceLabel: rec.ext.sourceLabel || null,
+          sourceDate: rec.ext.sourceDate || null, note: null,
+        }] : [];
+      }
+      const known = extRecordSourceIds(rec);
+      const added = [];
+      addRefs.forEach(r => {
+        if (known.includes(r.sourceId)) return;
+        // Дописанная ссылка всегда приходит как псевдоним: основная ссылка у
+        // записи уже есть и не переопределяется поздним пакетом.
+        rec.ext.sourceRefs.push({ ...r, role: 'alias' });
+        known.push(r.sourceId);
+        added.push(r.sourceId);
+      });
+      if (rec.ext.sourceRefs.length > EXT_LIMITS.maxSourceRefs) {
+        throw new Error('превышен лимит ссылок на источники у записи ' + coll + '#' + id);
+      }
+      if (added.length) {
+        rec._u = Date.now();   // изменение обязано пережить merge/sync
+        mergedRefs.push({ coll, id, addedSourceIds: added });
+      }
     }
     // Повторная полная валидация связей уже на финальном кандидате.
     const linkRefs = [];
@@ -12571,6 +12819,9 @@ function extCommitPlan(plan, selection) {
       summary: extStr((plan.pkg.session || {}).summary, 2000),
       selectedCount: pickedItems.length, rejectedCount: plan.items.length - pickedItems.length,
       recordRefs: created, linkRefs,
+      // Кросс-модульные псевдонимы, дописанные к уже существующим записям.
+      // Записей они не создают, но обязаны быть видны в аудите.
+      mergedRefs,
       status: 'imported', privacyClass: 'sensitive',
       createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
     };
@@ -12582,7 +12833,7 @@ function extCommitPlan(plan, selection) {
     const prevDb = DB;
     DB = candidate;
     if (!persist()) { DB = prevDb; return { ok: false, error: 'не удалось сохранить — данные не изменены' }; }
-    return { ok: true, created, linkRefs, sessionId: session.id };
+    return { ok: true, created, linkRefs, mergedRefs, sessionId: session.id };
   } catch (e) {
     return { ok: false, error: (e && e.message) || 'ошибка импорта' };   // DB не трогался
   }
