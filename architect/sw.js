@@ -216,8 +216,15 @@ async function handleMessage(msg, reply) {
   if (type === 'arch:exit-recovery') { await exitRecovery(); reply && reply({ type: 'arch:exit-recovery-result', ok: true }); return; }
 }
 self.addEventListener('message', e => {
-  const src = e.source || (e.ports && e.ports[0]);
-  const reply = src && src.postMessage ? (m => src.postMessage(m)) : null;
+  // Owner review (final pass): для request/reply приоритет у ПЕРЕДАННОГО
+  // MessagePort. В реальном ExtendableMessageEvent от контролируемой страницы
+  // e.source (Client) существует ОДНОВРЕМЕННО с e.ports[0]; прежний приоритет
+  // `e.source || e.ports[0]` отправлял ACK через Client.postMessage — ответ
+  // приходил обычным message-событием страницы, а ch.port1 в swRequest()
+  // молчал, и restore/exit заканчивались таймаутом именно в production.
+  const port = e.ports && e.ports[0];
+  const target = port || e.source;
+  const reply = target && target.postMessage ? (m => target.postMessage(m)) : null;
   e.waitUntil(handleMessage(e.data || {}, reply).catch(() => {}));
 });
 

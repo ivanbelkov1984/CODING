@@ -460,6 +460,89 @@ async function seedBuild(name, marker) {
   }
 }
 
+// ── Сценарий 10 (owner review 5227067870): ACK routing через РЕАЛЬНЫЙ ─
+//    зарегистрированный message-listener. В настоящем ExtendableMessageEvent
+//    от контролируемой страницы e.source (Client) существует ОДНОВРЕМЕННО с
+//    e.ports[0]. RPC-ответ обязан уйти в ПОРТ — иначе swRequest() на стороне
+//    приложения никогда не получит ACK и restore закончится таймаутом именно
+//    в production. Прямой вызов handleMessage() этот дефект не ловит.
+{
+  CACHES.caches.clear();
+  await seedBuild('arch-vB', 'BUILD-B-GOOD');
+  const B = await loadSW('vB', { cacheStorage: CACHES });
+  await B.api.activateWithRecovery();
+  await B.api.handleMessage({ type: 'arch:startup-ok', build: 'vB' });
+
+  const messageListeners = B.listeners['message'] || [];
+  ok(messageListeners.length === 1,
+    `ACK routing: в sw.js зарегистрирован ровно один message-listener (${messageListeners.length})`);
+  const listener = messageListeners[0];
+
+  // Событие, как его доставляет браузер: И Client-source, И MessagePort.
+  const makeEvent = (data) => {
+    const sourceMsgs = [], portMsgs = [];
+    let settled = null;
+    const e = {
+      data,
+      source: { postMessage: (m) => sourceMsgs.push(m) },          // Client
+      ports: [{ postMessage: (m) => portMsgs.push(m) }],           // переданный порт
+      waitUntil: (p) => { settled = Promise.resolve(p); },
+    };
+    return { e, sourceMsgs, portMsgs, settle: () => settled || Promise.resolve() };
+  };
+
+  // 10.1 arch:restore-lkg — ACK строго в порт, Client не используется для RPC.
+  {
+    const { e, sourceMsgs, portMsgs, settle } = makeEvent({ type: 'arch:restore-lkg' });
+    listener(e);
+    await settle();
+    ok(portMsgs.length === 1 && portMsgs[0].type === 'arch:restore-lkg-result' && portMsgs[0].ok === true,
+      `ACK routing: restore-lkg ответил в MessagePort (${portMsgs.length} сообщ.)`);
+    ok(sourceMsgs.length === 0,
+      `ACK routing: Client.postMessage НЕ использован для RPC-ответа (${sourceMsgs.length} сообщ.)`);
+    await B.api.exitRecovery();   // вернуть состояние для следующих проверок
+  }
+
+  // 10.2 arch:version? — тот же контракт.
+  {
+    const { e, sourceMsgs, portMsgs, settle } = makeEvent({ type: 'arch:version?' });
+    listener(e);
+    await settle();
+    ok(portMsgs.length === 1 && portMsgs[0].type === 'arch:version' && portMsgs[0].current === 'arch-vB',
+      'ACK routing: version? ответил в MessagePort с корректной версией');
+    ok(sourceMsgs.length === 0, 'ACK routing: version? не ушёл через Client');
+  }
+
+  // 10.3 arch:exit-recovery — тот же контракт.
+  {
+    await B.api.enterRecovery();
+    const { e, sourceMsgs, portMsgs, settle } = makeEvent({ type: 'arch:exit-recovery' });
+    listener(e);
+    await settle();
+    ok(portMsgs.length === 1 && portMsgs[0].type === 'arch:exit-recovery-result' && portMsgs[0].ok === true,
+      'ACK routing: exit-recovery ответил в MessagePort');
+    ok(sourceMsgs.length === 0, 'ACK routing: exit-recovery не ушёл через Client');
+  }
+
+  // 10.4 Событие БЕЗ порта (broadcast-сообщение, arch:startup-ok из приложения):
+  // listener не падает, а ответ, если он есть, уходит в source — деградация
+  // корректная, RPC-контракт не нарушен.
+  {
+    const sourceMsgs = [];
+    let settled = null;
+    const e = {
+      data: { type: 'arch:startup-ok', build: 'vB' },
+      source: { postMessage: (m) => sourceMsgs.push(m) },
+      ports: [],
+      waitUntil: (p) => { settled = Promise.resolve(p); },
+    };
+    listener(e);
+    await (settled || Promise.resolve());
+    ok(sourceMsgs.length === 1 && sourceMsgs[0].type === 'arch:startup-ok-result',
+      'ACK routing: сообщение без порта корректно отвечает через source (fallback)');
+  }
+}
+
 // ── Сценарий 6: данные пользователя восстановление не трогает ───────
 {
   const touchesUserData = /localStorage|indexedDB|arch5_/.test(swSource);
