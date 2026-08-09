@@ -67,7 +67,14 @@ for (const t of ['home', 'vit', 'map', 'sys']) {
 }
 // Разум subnav (3 смысловые группы, программный msub подсвечивает пилюлю)
 await page.evaluate(() => goTo('map'));
-ok(await page.locator('#subnav .sn-grp').count() === 3, 'подменю «Разума» сгруппировано: Записи / Связи / Развитие');
+// Wave 7 (issue #162) добавил четвёртую группу «Психология» — first-class
+// подраздел внутри существующего контура, без глобального redesign навигации.
+// Проверяем ИМЕНА групп, а не голое число: снимок структуры так осмысленнее.
+{
+  const groups = await page.evaluate(() => [...document.querySelectorAll('#subnav .sn-glbl')].map(x => x.textContent.trim()));
+  ok(JSON.stringify(groups) === JSON.stringify(['Записи', 'Связи', 'Психология', 'Развитие']),
+    `подменю «Разума» сгруппировано: ${groups.join(' / ')}`);
+}
 for (const s of ['insights', 'graph', 'book', 'patterns', 'dreams', 'spiritual', 'evolution']) {
   await page.evaluate(x => msub(x), s);
   ok(await page.locator('#ms-' + s).isVisible(), `подраздел «Разум» → ${s}`);

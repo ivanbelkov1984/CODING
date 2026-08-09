@@ -479,6 +479,41 @@ PR #146 предлагал: вкладку «Психология», hub «Ин�
   ложнозелёные), `tests/wave6-backup-roundtrip.test.mjs` (20 проверок).
 - **Контракт:** `WAVE6_EXTERNAL_WORK_BRIDGE_CONTRACT.md`.
 
+### Волна 7 — Psychology Workspace — **РЕАЛИЗОВАНО** (issue #162, ветка `claude/wave-7-psychology-workspace`)
+
+- **Что сделано:** мета-слой психологической работы — формулировка → цель →
+  интервенция → наблюдение → review. Пять новых коллекций
+  (`psyFormulations`, `psyGoals`, `psyInterventionEpisodes`, `psyObservations`,
+  `psyReviews`), все `privacyClass='sensitive'`, namespaced id.
+- **Второй психики не создано:** `moments/whys/insights/patterns/
+  relationshipContexts/psyLinks` остаются источниками истины; новые сущности
+  только ссылаются на них через `sourceRefs` с fail-closed отклонением
+  «висячих» ссылок.
+- **Schema/migration:** `SCHEMA_VERSION` 6→**7**, аддитивно. `IDCOLS` 26→31,
+  `REC_COLLS` 24→29, `dbCount()` расширен (профиль «только психология» больше не
+  выглядит пустым).
+- **Единый write contract:** `PSY_BUILDERS` используют и ручная форма, и
+  импортер v2 — импортер не пишет в `DB` мимо валидации.
+- **External Work v2:** введён `architect-external-work-v2`; v1 **не** получает
+  новые типы и импортируется без изменений; v2 переиспользует весь core Волны 6
+  (provenance, `claimClasses[]`, `sourceRefs[]`, глобальная identity, cross-type
+  conflict, идемпотентность, транзакция, recovery lock).
+- **Инварианты доказательности:** гипотеза не повышается до факта;
+  `not_done ≠ not_helpful`; переносимость ≠ исход; нежелательный эффект не
+  исчезает; `missing ≠ zero`; ИИ не создаёт измерений; causal claim запрещён.
+- **Naturalistic ≠ intervention:** естественное изменение хранится как
+  observation с флагом, а не как фиктивный эпизод применения метода.
+- **Method Registry** (`psy-method-registry-v1`, 7 методов) отделён от
+  персональных результатов — личный рейтинг метода это Волна 8.
+- **Unified Intelligence:** ни одна из пяти коллекций не входит в
+  `EVENT_SOURCES` (мета-слой удвоил бы evidence). Закреплено mutation-проверкой.
+- **UX:** видимый вход «Психология» в подменю Дневника + прямой пункт в «Ещё».
+  Глобальный redesign навигации не выполнялся.
+- **Focused tests:** `tests/wave7-psychology-workspace.spec.mjs` (132),
+  `tests/wave7-mutation.mjs` (12 мутаций),
+  `tests/wave7-backup-roundtrip.test.mjs` (24).
+- **Контракт:** `WAVE7_PSYCHOLOGY_WORKSPACE_CONTRACT.md`.
+
 ---
 
 ## 7. Итоговые маркеры
@@ -500,5 +535,6 @@ WAVE_4_COMPLETE=true (issue #152, PR #153, merged)
 WAVE_3_COMPLETE=true (issue #154, PR #155, merged)
 WAVE_4_1_COMPLETE=true (issue #156, PR #157, merged d832cd9)
 WAVE_5_COMPLETE=true (issue #158, PR #159, merged d5686edc)
-WAVE_6_COMPLETE=true (issue #160, this PR — Draft, awaiting owner review)
+WAVE_6_COMPLETE=true (issue #160, PR #161, merged ff564b2)
+WAVE_7_COMPLETE=true (issue #162, this PR — Draft, awaiting owner review)
 ```

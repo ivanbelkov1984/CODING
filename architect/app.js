@@ -11,7 +11,7 @@ const dateRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:
 const dateFullRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:'long',year:'numeric'});
 const todayKey = () => new Date().toISOString().slice(0,10);
 const nowISO = () => new Date().toISOString();            // UTC ISO 8601 — источник истины для времени
-const SCHEMA_VERSION = 6;   // Wave 6 (issue #160): externalWorkSessions ledger — additive collection
+const SCHEMA_VERSION = 7;   // Wave 7 (issue #162): Psychology Workspace — 5 additive meta-collections
 
 // ─── RELEASE METADATA (Wave 5, issue #158) ──────────────────────────
 // Плейсхолдеры заменяются ЕДИНСТВЕННЫМ местом — build.mjs. Руками эти
@@ -117,6 +117,17 @@ const DEFAULT_DB = {
   // idempotency — не второй дневник, не контейнер фактов жизни и НЕ EVENT_SOURCE.
   // Смысловой материал живёт в существующих canonical-коллекциях.
   externalWorkSessions: [],
+  // ─── Wave 7 (issue #162): Psychology Workspace ────────────────────
+  // МЕТА-слой психологической работы. Он НЕ является вторым дневником и НЕ
+  // копирует смысл существующих записей: moments/whys/insights/patterns/
+  // relationshipContexts остаются источниками истины и связываются через
+  // sourceRefs. Ни одна из этих коллекций НЕ входит в EVENT_SOURCES —
+  // иначе один и тот же смысл считался бы дважды (см. контракт §15).
+  psyFormulations: [],          // версионируемая рабочая формулировка случая
+  psyGoals: [],                 // наблюдаемые рабочие цели
+  psyInterventionEpisodes: [],  // фактические применения метода
+  psyObservations: [],          // наблюдения/EMA, которых нет в canonical записях
+  psyReviews: [],               // периодический evidence-linked разбор
   psyAiConsent: null, // Wave 1 AI-помощь (Почему?→Инсайт): отдельное согласие, отзываемо в любой момент
   bots: [
     {id:1, title:'Первая задача — добавь свою', prio:'high', done:false},
@@ -232,7 +243,13 @@ const bakKey = id => 'arch5_bak_' + id;
 function dbCount(db) {
   if (!db || typeof db !== 'object') return 0;
   let n = 0;
-  ['insights','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments']
+  // Wave 7: новые психологические коллекции обязаны считаться здесь. dbCount()
+  // — страховка «пустой записи»/восстановления: профиль, в котором ЕСТЬ только
+  // психологическая работа, иначе выглядел бы пустым и мог быть перезаписан
+  // резервной копией. `bots` намеренно НЕ считается (у него есть значения по
+  // умолчанию, иначе любой профиль всегда «непустой»).
+  ['insights','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments',
+   'psyFormulations','psyGoals','psyInterventionEpisodes','psyObservations','psyReviews']
     .forEach(c => { if (Array.isArray(db[c])) n += db[c].length; });
   return n;
 }
@@ -1268,6 +1285,7 @@ function msub(tab, el) {
   if (tab==='graph')     rMap();
   if (tab==='chats')     rChats();
   if (tab==='overview')  rDiaryOverview();
+  if (tab==='psychology') rPsyWorkspace();   // Wave 7 (issue #162)
 }
 
 // ─── ОВЕРЛЕИ ────────────────────────────────────────────────────
@@ -2218,6 +2236,12 @@ const REC_COLLS = {
   spheres:    { ru: 'Сферы (с историей)', sum: r => r.name || 'сфера', cascade: true },
   astroCharts:{ ru: 'Расчёты натальной карты', sum: r => `${(r.createdAt || '').slice(0, 10)} · расчёт карты` },
   externalWorkSessions: { ru: 'Импорт внешней работы (журнал)', sum: r => `${(r.importedAt || '').slice(0, 10)} · ${r.sourceLabel || r.source || 'сессия'} · записей: ${(r.recordRefs || []).length}` },
+  // Wave 7 (issue #162): психологический workspace — управляемые записи.
+  psyFormulations: { ru: 'Формулировки случая', sum: r => `${r.focus || 'формулировка'} · ${PSY_STATUS_RU[r.status] || r.status}` },
+  psyGoals: { ru: 'Психологические цели', sum: r => `${r.label || 'цель'} · ${PSY_GOAL_STATUS_RU[r.status] || r.status}` },
+  psyInterventionEpisodes: { ru: 'Применения метода', sum: r => `${(r.dateTime || '').slice(0, 10)} · ${r.methodFamily || '—'} · ${PSY_OUTCOME_RU[r.outcomeClass] || r.outcomeClass || 'без исхода'}` },
+  psyObservations: { ru: 'Наблюдения / EMA', sum: r => `${(r.timestamp || '').slice(0, 10)} · ${r.metricId || 'метрика'} · ${r.valueNumber != null ? r.valueNumber + (r.unit ? ' ' + r.unit : '') : (r.valueText || 'без значения')}` },
+  psyReviews: { ru: 'Психологические review', sum: r => `${(r.periodStart || '').slice(0, 10)}–${(r.periodEnd || '').slice(0, 10)} · ${PSY_DECISION_RU[r.decision] || r.decision || '—'}` },
   astroPartners: { ru: 'Партнёры (синастрия)', sum: r => r.label || 'партнёр' },
   psyLinks: { ru: 'Связи (доказательная цепочка)', sum: r => `${PSY_LINK_RELATION_LABELS[r.relation] || r.relation}` },
   relationshipContexts: { ru: 'Контексты отношений', sum: r => `${r.label || ''}${r.status === 'archived' ? ' (архив)' : ''}` },
@@ -10040,7 +10064,7 @@ function genRecoveryKey() {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','astroPartners','bots','digests','spheres','sphereLogs','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments','externalWorkSessions'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','astroPartners','bots','digests','spheres','sphereLogs','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments','externalWorkSessions','psyFormulations','psyGoals','psyInterventionEpisodes','psyObservations','psyReviews'];
 
 // ─── SCALAR MERGE CONTRACT (Wave 5, issue #158) ─────────────────────
 // Внутренние ключи DB, которые НЕ являются пользовательскими данными и
@@ -12055,6 +12079,613 @@ function rPsyView(elId) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  WAVE 7 (issue #162): PSYCHOLOGY WORKSPACE — мета-слой работы.
+//
+//  Принцип: НЕ вторая психика. moments/whys/insights/patterns/
+//  relationshipContexts/psyLinks остаются источниками истины; новые сущности
+//  только ссылаются на них через sourceRefs. Ни одна коллекция Волны 7 не
+//  входит в EVENT_SOURCES — иначе один смысл считался бы дважды.
+//
+//  Единый write contract: и ручная форма, и импортер v2 пишут ЧЕРЕЗ эти
+//  валидаторы/строители. Двух психологий с разными схемами не существует.
+// ═══════════════════════════════════════════════════════════════════
+const PSY_STATUSES        = Object.freeze(['draft', 'active', 'superseded', 'archived']);
+const PSY_GOAL_STATUSES   = Object.freeze(['active', 'paused', 'achieved', 'dropped']);
+const PSY_METHOD_FAMILIES = Object.freeze(['CBT', 'ACT', 'DBT_SKILL', 'SCHEMA', 'CFT', 'MI', 'BEHAVIORAL', 'PSYCHOEDUCATION', 'OTHER']);
+const PSY_ADHERENCE       = Object.freeze(['done', 'partial', 'not_done', 'unknown']);
+const PSY_ACCEPTABILITY   = Object.freeze(['helpful', 'neutral', 'irritating', 'burdensome', 'unknown']);
+// Категориальный язык доказательности. НЕ вероятность и НЕ причинность:
+// causal claim по одному эпизоду в Волне 7 недопустим (контракт §12).
+const PSY_OUTCOME_CLASSES = Object.freeze([
+  'promising', 'helpful_in_context', 'probably_helpful', 'unclear',
+  'not_helpful', 'poorly_tolerated', 'counterproductive', 'unsafe_or_out_of_scope',
+]);
+const PSY_ENTRY_MODES     = Object.freeze(['scheduled', 'event_based', 'session', 'imported']);
+// Источник наблюдения. `ai` намеренно ОТСУТСТВУЕТ: ИИ не создаёт измерений.
+const PSY_OBS_SOURCES     = Object.freeze(['user', 'deterministic']);
+const PSY_DECISIONS       = Object.freeze(['continue', 'modify', 'stop', 'escalate_to_professional']);
+const PSY_STATUS_RU   = { draft: 'черновик', active: 'активная', superseded: 'заменена', archived: 'в архиве' };
+const PSY_GOAL_STATUS_RU = { active: 'активна', paused: 'пауза', achieved: 'достигнута', dropped: 'снята' };
+const PSY_OUTCOME_RU  = {
+  promising: 'обнадёживает', helpful_in_context: 'помогло в этом контексте',
+  probably_helpful: 'вероятно помогло', unclear: 'неясно', not_helpful: 'не помогло',
+  poorly_tolerated: 'плохо переносилось', counterproductive: 'контрпродуктивно',
+  unsafe_or_out_of_scope: 'небезопасно / вне рамок',
+};
+const PSY_ADHERENCE_RU = { done: 'выполнено', partial: 'частично', not_done: 'не выполнено', unknown: 'неизвестно' };
+const PSY_ACCEPT_RU = { helpful: 'полезно', neutral: 'нейтрально', irritating: 'раздражало', burdensome: 'тяжело', unknown: 'неизвестно' };
+const PSY_DECISION_RU = { continue: 'продолжать', modify: 'скорректировать', stop: 'прекратить', escalate_to_professional: 'к специалисту' };
+const PSY_FAMILY_RU = {
+  CBT: 'КПТ', ACT: 'ACT', DBT_SKILL: 'DBT-навык', SCHEMA: 'Схема-терапия',
+  CFT: 'CFT (сострадание)', MI: 'Мотивационное интервью', BEHAVIORAL: 'Поведенческий',
+  PSYCHOEDUCATION: 'Психообразование', OTHER: 'Другое',
+};
+
+// ── Method Registry: «что известно вообще», отдельно от «что было у меня» ──
+// Детерминированный versioned справочник. Персональные результаты сюда НЕ
+// попадают: рейтинг метода по личным эпизодам — это Волна 8, и смешивать
+// внешнюю доказательность с личным опытом в одно число запрещено.
+const PSY_METHOD_REGISTRY_VERSION = 'psy-method-registry-v1';
+const PSY_METHOD_REGISTRY = Object.freeze([
+  { methodId: 'behavioral_activation', name: 'Поведенческая активация', family: 'BEHAVIORAL',
+    mechanismTargets: ['избегание', 'снижение активности', 'ангедония'],
+    intendedUse: ['сниженное настроение', 'уход от активности'],
+    cautions: ['при выраженном истощении начинать с очень малых шагов'],
+    evidenceMetadata: [{ kind: 'clinical_guideline', ref: 'NICE CG90 (депрессия у взрослых)', note: 'внешняя доказательность, не персональный результат' }] },
+  { methodId: 'cognitive_restructuring', name: 'Работа с автоматическими мыслями', family: 'CBT',
+    mechanismTargets: ['катастрофизация', 'чтение мыслей', 'долженствование'],
+    intendedUse: ['тревожные и депрессивные интерпретации'],
+    cautions: ['не применять как спор с чувствами; не использовать при остром кризисе'],
+    evidenceMetadata: [{ kind: 'textbook', ref: 'Beck, Cognitive Therapy: Basics and Beyond', note: 'методологический источник' }] },
+  { methodId: 'values_clarification', name: 'Прояснение ценностей', family: 'ACT',
+    mechanismTargets: ['слияние с мыслями', 'потеря направления'],
+    intendedUse: ['выбор действия при неопределённости'],
+    cautions: ['не превращать в моральную оценку себя'],
+    evidenceMetadata: [{ kind: 'textbook', ref: 'Hayes et al., Acceptance and Commitment Therapy', note: 'методологический источник' }] },
+  { methodId: 'opposite_action', name: 'Противоположное действие', family: 'DBT_SKILL',
+    mechanismTargets: ['импульс, не соответствующий фактам', 'избегание'],
+    intendedUse: ['сильная эмоция с импульсом к вредному действию'],
+    cautions: ['не применять, когда эмоция ОБОСНОВАНА фактами и требует действия по границе'],
+    evidenceMetadata: [{ kind: 'textbook', ref: 'Linehan, DBT Skills Training Manual', note: 'методологический источник' }] },
+  { methodId: 'self_compassion_break', name: 'Пауза самосострадания', family: 'CFT',
+    mechanismTargets: ['самокритика', 'стыд'],
+    intendedUse: ['эпизод резкой самокритики'],
+    cautions: ['у части людей вызывает сопротивление/тревогу — это не «неудача», а сигнал темпа'],
+    evidenceMetadata: [{ kind: 'textbook', ref: 'Gilbert, Compassion Focused Therapy', note: 'методологический источник' }] },
+  { methodId: 'boundary_script', name: 'Подготовленная формулировка границы', family: 'BEHAVIORAL',
+    mechanismTargets: ['уступчивость', 'отложенная граница'],
+    intendedUse: ['повторяющееся нарушение границы'],
+    cautions: ['при риске насилия сначала безопасность, а не разговор'],
+    evidenceMetadata: [{ kind: 'practice_note', ref: 'ассертивные протоколы', note: 'общая методология' }] },
+  { methodId: 'psychoeducation_cycle', name: 'Объяснение цикла', family: 'PSYCHOEDUCATION',
+    mechanismTargets: ['непонимание механизма', 'самообвинение'],
+    intendedUse: ['первое знакомство с паттерном'],
+    cautions: ['знание механизма само по себе не меняет поведение'],
+    evidenceMetadata: [{ kind: 'practice_note', ref: 'общая психообразовательная практика', note: 'не является доказательством эффективности' }] },
+]);
+function psyMethod(id) { return PSY_METHOD_REGISTRY.find(m => m.methodId === id) || null; }
+
+// ── Общие помощники валидации ───────────────────────────────────────
+const psyStr = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max || 8000) : '');
+const psyIsIso = v => typeof v === 'string' && !Number.isNaN(Date.parse(v));
+const psyEnum = (v, list, dflt) => (list.includes(v) ? v : dflt);
+const psyArr = v => (Array.isArray(v) ? v : []);
+// Ссылки на существующие записи: { coll, id }. Fail-closed — «висячая»
+// ссылка отклоняется, иначе review мог бы «опираться» на несуществующее.
+const PSY_REF_COLLS = Object.freeze([
+  'moments', 'whys', 'insights', 'patterns', 'relationshipContexts', 'dreams', 'spiritual',
+  'evolution', 'sphereLogs', 'symptoms', 'measures', 'medIntakes', 'labObservations',
+  'healthDocuments', 'cravings', 'checkins', 'chats',
+  'psyFormulations', 'psyGoals', 'psyInterventionEpisodes', 'psyObservations', 'psyReviews',
+]);
+function psyNormRefs(list, db, errors, path) {
+  const d = db || DB;
+  const out = [];
+  psyArr(list).slice(0, 100).forEach((r, i) => {
+    if (!r || typeof r !== 'object') { errors.push(`${path}[${i}]: ссылка должна быть объектом {coll,id}`); return; }
+    const coll = psyStr(r.coll, 60);
+    if (!PSY_REF_COLLS.includes(coll)) { errors.push(`${path}[${i}]: коллекция «${coll || '—'}» не поддерживается как источник`); return; }
+    if (r.id == null || r.id === '') { errors.push(`${path}[${i}]: отсутствует id`); return; }
+    const exists = Array.isArray(d[coll]) && d[coll].some(x => x && x.id === r.id);
+    if (!exists) { errors.push(`${path}[${i}]: запись ${coll}#${r.id} не существует — «висячая» ссылка отклонена`); return; }
+    if (!out.some(x => x.coll === coll && x.id === r.id)) out.push({ coll, id: r.id });
+  });
+  return out;
+}
+function psyBase(prefix, input) {
+  return {
+    id: psyStr(input.id, 120) || psyUid(prefix),
+    createdAt: psyIsIso(input.createdAt) ? input.createdAt : nowISO(),
+    day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+    privacyClass: 'sensitive',
+  };
+}
+
+// ── ЕДИНЫЙ WRITE CONTRACT: 5 сущностей ──────────────────────────────
+// Каждый строитель возвращает { ok, errors, rec }. Ручной UI и внешний
+// импортер v2 обязаны идти сюда, а не писать в DB напрямую.
+const PSY_BUILDERS = {
+  // 4.1 Версионируемая формулировка случая. НЕ диагноз.
+  psyFormulation(input, db) {
+    const errors = [];
+    const focus = psyStr(input.focus, 200);
+    const formulation = psyStr(input.formulation, 8000);
+    if (!focus) errors.push('formulation: отсутствует focus');
+    if (!formulation) errors.push('formulation: отсутствует текст формулировки');
+    const status = psyEnum(input.status, PSY_STATUSES, 'draft');
+    const supersedesId = psyStr(input.supersedesId, 120) || null;
+    const d = db || DB;
+    if (supersedesId && !(d.psyFormulations || []).some(f => f && f.id === supersedesId)) {
+      errors.push('formulation: supersedesId указывает на несуществующую версию');
+    }
+    // Гипотеза остаётся гипотезой: claimClass ограничен, повышения нет.
+    const hypotheses = psyArr(input.hypotheses).slice(0, 50).map((h, i) => {
+      const text = psyStr(h && h.text, 2000);
+      if (!text) { errors.push(`formulation.hypotheses[${i}]: пустой текст`); return null; }
+      const cc = psyStr(h.claimClass, 60) || 'working_hypothesis';
+      if (!EXT_CLAIM_CLASSES.includes(cc)) errors.push(`formulation.hypotheses[${i}]: неизвестный claimClass «${cc}»`);
+      if (cc === 'user_fact') errors.push(`formulation.hypotheses[${i}]: рабочая гипотеза не может быть записана как user_fact`);
+      return {
+        text, claimClass: cc,
+        confidenceLabel: psyStr(h.confidenceLabel, 40) || null,
+        // Несогласие пользователя хранится как позиция, а не как «сопротивление».
+        userStance: psyEnum(h.userStance, ['undecided', 'agreed', 'disputed', 'alternative'], 'undecided'),
+        sourceRefs: psyNormRefs(h.sourceRefs, db, errors, `formulation.hypotheses[${i}].sourceRefs`),
+      };
+    }).filter(Boolean);
+    const rec = {
+      ...psyBase('psyFormulation', input),
+      supersedesId, status, focus, formulation, hypotheses,
+      protectiveFactors: psyArr(input.protectiveFactors).slice(0, 50).map(x => psyStr(x, 500)).filter(Boolean),
+      maintainingFactors: psyArr(input.maintainingFactors).slice(0, 50).map(x => psyStr(x, 500)).filter(Boolean),
+      sourceRefs: psyNormRefs(input.sourceRefs, db, errors, 'formulation.sourceRefs'),
+      ext: input.ext || undefined,
+    };
+    return { ok: !errors.length, errors, rec };
+  },
+
+  // 4.2 Наблюдаемая цель.
+  psyGoal(input, db) {
+    const errors = [];
+    const label = psyStr(input.label, 200);
+    if (!label) errors.push('goal: отсутствует label');
+    const proximalOutcome = psyStr(input.proximalOutcome, 1000);
+    if (!proximalOutcome) errors.push('goal: цель должна быть наблюдаемой — нужен proximalOutcome');
+    const rec = {
+      ...psyBase('psyGoal', input),
+      label,
+      targetMechanism: psyStr(input.targetMechanism, 500),
+      status: psyEnum(input.status, PSY_GOAL_STATUSES, 'active'),
+      startedAt: psyIsIso(input.startedAt) ? input.startedAt : nowISO(),
+      reviewAt: psyIsIso(input.reviewAt) ? input.reviewAt : null,
+      proximalOutcome,
+      distalOutcome: psyStr(input.distalOutcome, 1000),
+      measureRefs: psyNormRefs(input.measureRefs, db, errors, 'goal.measureRefs'),
+      sourceRefs: psyNormRefs(input.sourceRefs, db, errors, 'goal.sourceRefs'),
+      ext: input.ext || undefined,
+    };
+    return { ok: !errors.length, errors, rec };
+  },
+
+  // 4.3 Фактическое применение метода. Центральная сущность Волны 7.
+  psyInterventionEpisode(input, db) {
+    const errors = [];
+    const interventionSummary = psyStr(input.interventionSummary, 4000);
+    if (!interventionSummary) errors.push('intervention: отсутствует interventionSummary');
+    const methodId = psyStr(input.methodId, 120);
+    // Метод либо из реестра, либо явно OTHER со свободным именем — но не
+    // выдуманный id, притворяющийся известным методом.
+    if (methodId && !psyMethod(methodId) && psyEnum(input.methodFamily, PSY_METHOD_FAMILIES, null) !== 'OTHER') {
+      errors.push(`intervention: methodId «${methodId}» отсутствует в Method Registry (для нестандартного метода укажи methodFamily=OTHER)`);
+    }
+    // Семейство метода выводится из реестра, если метод известен: это знание
+    // принадлежит общему write contract, а не форме — иначе импортер и UI
+    // разошлись бы в трактовке одного и того же methodId.
+    const known = psyMethod(methodId);
+    const family = psyEnum(input.methodFamily, PSY_METHOD_FAMILIES, null) || (known ? known.family : null);
+    if (!family) errors.push('intervention: methodFamily обязателен и должен быть из списка (или укажи methodId из Method Registry)');
+    const adherence = psyEnum(input.adherence, PSY_ADHERENCE, 'unknown');
+    const outcomeClass = psyEnum(input.outcomeClass, PSY_OUTCOME_CLASSES, 'unclear');
+    // `not_done` ≠ `not_helpful`: невыполненная техника не может быть
+    // объявлена бесполезной — её просто не применяли.
+    if (adherence === 'not_done' && ['not_helpful', 'probably_helpful', 'helpful_in_context', 'promising'].includes(outcomeClass)) {
+      errors.push('intervention: при adherence="not_done" нельзя утверждать исход применения (not_done ≠ not_helpful)');
+    }
+    const rec = {
+      ...psyBase('psyIntervention', input),
+      dateTime: psyIsIso(input.dateTime) ? input.dateTime : nowISO(),
+      targetProblem: psyStr(input.targetProblem, 1000),
+      targetMechanism: psyStr(input.targetMechanism, 1000),
+      methodId: methodId || null,
+      methodFamily: family || 'OTHER',
+      interventionSummary,
+      rationale: psyStr(input.rationale, 2000),
+      intendedProximalOutcome: psyStr(input.intendedProximalOutcome, 1000),
+      preObservationRefs: psyNormRefs(input.preObservationRefs, db, errors, 'intervention.preObservationRefs'),
+      postObservationRefs: psyNormRefs(input.postObservationRefs, db, errors, 'intervention.postObservationRefs'),
+      followUpRefs: psyNormRefs(input.followUpRefs, db, errors, 'intervention.followUpRefs'),
+      adherence,
+      fidelityNote: psyStr(input.fidelityNote, 1000),
+      acceptability: psyEnum(input.acceptability, PSY_ACCEPTABILITY, 'unknown'),
+      // Нежелательный эффект не исчезает из-за положительного исхода.
+      adverseEffects: psyArr(input.adverseEffects).slice(0, 30).map(x => psyStr(x, 500)).filter(Boolean),
+      confounders: psyArr(input.confounders).slice(0, 30).map(x => psyStr(x, 500)).filter(Boolean),
+      outcomeClass,
+      sourceRefs: psyNormRefs(input.sourceRefs, db, errors, 'intervention.sourceRefs'),
+      ext: input.ext || undefined,
+    };
+    return { ok: !errors.length, errors, rec };
+  },
+
+  // 4.4 Наблюдение/EMA. Числовое значение — только явный ввод или
+  // детерминированный подсчёт. missing ≠ 0.
+  psyObservation(input, db) {
+    const errors = [];
+    const metricId = psyStr(input.metricId, 120);
+    if (!metricId) errors.push('observation: отсутствует metricId');
+    const hasNum = typeof input.valueNumber === 'number' && isFinite(input.valueNumber);
+    const valueText = psyStr(input.valueText, 4000);
+    if (!hasNum && !valueText) errors.push('observation: нужно значение — число или текст (пустое наблюдение не сохраняется)');
+    const source = psyEnum(input.source, PSY_OBS_SOURCES, 'user');
+    // Явный запрет: ИИ не порождает измерения. Числовое значение из
+    // ai-источника отклоняется fail-closed.
+    if (input.source != null && !PSY_OBS_SOURCES.includes(input.source)) {
+      errors.push(`observation: source «${psyStr(input.source, 40)}» недопустим — измерение создаёт только пользователь или детерминированный расчёт`);
+    }
+    const rec = {
+      ...psyBase('psyObservation', input),
+      timestamp: psyIsIso(input.timestamp) ? input.timestamp : nowISO(),
+      metricId,
+      valueNumber: hasNum ? input.valueNumber : null,
+      valueText: valueText || null,
+      unit: psyStr(input.unit, 40) || null,
+      contextTag: psyStr(input.contextTag, 120) || null,
+      triggerRef: (() => {
+        if (!input.triggerRef) return null;
+        const r = psyNormRefs([input.triggerRef], db, errors, 'observation.triggerRef');
+        return r[0] || null;
+      })(),
+      entryMode: psyEnum(input.entryMode, PSY_ENTRY_MODES, 'event_based'),
+      source,
+      // Естественное изменение без применённой техники — first-class, а не
+      // фиктивный intervention episode (контракт §5).
+      naturalistic: !!input.naturalistic,
+      sourceRefs: psyNormRefs(input.sourceRefs, db, errors, 'observation.sourceRefs'),
+      ext: input.ext || undefined,
+    };
+    return { ok: !errors.length, errors, rec };
+  },
+
+  // 4.5 Периодический разбор. Раскрывается до contributing IDs.
+  psyReview(input, db) {
+    const errors = [];
+    const periodStart = psyIsIso(input.periodStart) ? input.periodStart : null;
+    const periodEnd = psyIsIso(input.periodEnd) ? input.periodEnd : null;
+    if (!periodStart || !periodEnd) errors.push('review: нужны корректные periodStart и periodEnd');
+    if (periodStart && periodEnd && Date.parse(periodEnd) < Date.parse(periodStart)) {
+      errors.push('review: periodEnd раньше periodStart');
+    }
+    const d = db || DB;
+    const formulationRef = psyStr(input.formulationRef, 120) || null;
+    if (formulationRef && !(d.psyFormulations || []).some(f => f && f.id === formulationRef)) {
+      errors.push('review: formulationRef указывает на несуществующую формулировку');
+    }
+    const refIds = (list, coll, path) => psyArr(list).slice(0, 200).map((id, i) => {
+      const v = psyStr(id, 120);
+      if (!v) { errors.push(`${path}[${i}]: пустой id`); return null; }
+      if (!(d[coll] || []).some(x => x && x.id === v)) { errors.push(`${path}[${i}]: ${coll}#${v} не существует`); return null; }
+      return v;
+    }).filter(Boolean);
+    const rec = {
+      ...psyBase('psyReview', input),
+      periodStart, periodEnd,
+      goalRefs: refIds(input.goalRefs, 'psyGoals', 'review.goalRefs'),
+      formulationRef,
+      interventionEpisodeRefs: refIds(input.interventionEpisodeRefs, 'psyInterventionEpisodes', 'review.interventionEpisodeRefs'),
+      observationRefs: refIds(input.observationRefs, 'psyObservations', 'review.observationRefs'),
+      methodsAppliedSummary: psyStr(input.methodsAppliedSummary, 4000),
+      adherenceSummary: psyStr(input.adherenceSummary, 2000),
+      outcomeSummary: psyStr(input.outcomeSummary, 4000),
+      acceptabilitySummary: psyStr(input.acceptabilitySummary, 2000),
+      adverseEffectsSummary: psyStr(input.adverseEffectsSummary, 2000),
+      confoundersSummary: psyStr(input.confoundersSummary, 2000),
+      hypothesesStrengthened: psyArr(input.hypothesesStrengthened).slice(0, 30).map(x => psyStr(x, 500)).filter(Boolean),
+      hypothesesWeakened: psyArr(input.hypothesesWeakened).slice(0, 30).map(x => psyStr(x, 500)).filter(Boolean),
+      decision: psyEnum(input.decision, PSY_DECISIONS, 'continue'),
+      limitations: psyArr(input.limitations).slice(0, 30).map(x => psyStr(x, 500)).filter(Boolean),
+      sourceRefs: psyNormRefs(input.sourceRefs, db, errors, 'review.sourceRefs'),
+      ext: input.ext || undefined,
+    };
+    return { ok: !errors.length, errors, rec };
+  },
+};
+const PSY_TYPE_TO_COLL = Object.freeze({
+  psyFormulation: 'psyFormulations',
+  psyGoal: 'psyGoals',
+  psyInterventionEpisode: 'psyInterventionEpisodes',
+  psyObservation: 'psyObservations',
+  psyReview: 'psyReviews',
+});
+
+// Единственная точка записи из ручного UI. Импортер идёт через тот же
+// PSY_BUILDERS, но собственным транзакционным коммитом Волны 6.
+function psySaveRecord(type, input) {
+  const coll = PSY_TYPE_TO_COLL[type];
+  if (!coll) return { ok: false, errors: ['неизвестный тип психологической записи'] };
+  if (typeof isWriteLocked === 'function' && isWriteLocked()) {
+    return { ok: false, errors: ['профиль в режиме восстановления — запись заблокирована'] };
+  }
+  const built = PSY_BUILDERS[type](input, DB);
+  if (!built.ok) return { ok: false, errors: built.errors };
+  if (!Array.isArray(DB[coll])) DB[coll] = [];
+  // Одна активная формулировка: предыдущая переводится в superseded, а не
+  // переписывается — история стратегии обязана сохраняться.
+  if (type === 'psyFormulation' && built.rec.status === 'active') {
+    DB.psyFormulations.forEach(f => {
+      if (f && f.status === 'active' && f.id !== built.rec.id) { f.status = 'superseded'; f._u = Date.now(); }
+    });
+  }
+  DB[coll].push(built.rec);
+  if (!persist()) { DB[coll].pop(); return { ok: false, errors: ['не удалось сохранить — данные не изменены'] }; }
+  return { ok: true, errors: [], rec: built.rec };
+}
+// Активная формулировка и цепочка версий.
+function psyActiveFormulation() { return (DB.psyFormulations || []).find(f => f && f.status === 'active') || null; }
+function psyFormulationHistory(id) {
+  const out = []; const all = DB.psyFormulations || [];
+  let cur = all.find(f => f && f.id === id);
+  while (cur && out.length < 50) { out.push(cur); cur = cur.supersedesId ? all.find(f => f && f.id === cur.supersedesId) : null; }
+  return out;
+}
+
+// ── Psychology Workspace UI ─────────────────────────────────────────
+// Прямой вход из «Ещё» и из подраздела Дневника.
+function openPsyWorkspace() { goTo('map'); msub('psychology'); }
+// Человеческая подпись источника — только provenance, без личного текста.
+function psyProvLine(rec) {
+  const e = rec && rec.ext;
+  if (!e) return '<span class="psy-src-own">запись создана в приложении</span>';
+  const parts = [e.sourceSystem || 'внешний источник'];
+  if (e.sourceModule) parts.push(e.sourceModule);
+  if (e.sourceChatId) parts.push('чат ' + e.sourceChatId);
+  if (e.sourceId) parts.push('ID ' + e.sourceId);
+  if (e.sourceDate) parts.push(e.sourceDate);
+  const cls = (e.claimClasses || [e.claimClass]).filter(Boolean).join(', ');
+  return `внешний импорт (${esc(e.format || '')}) · ${esc(parts.join(' · '))}${cls ? ' · классы: ' + esc(cls) : ''}`;
+}
+function psyRefLine(refs) {
+  const list = (refs || []).slice(0, 8);
+  if (!list.length) return '<span style="color:var(--t4)">источников не указано</span>';
+  return list.map(r => `<span class="psy-ref">${esc(r.coll)}#${esc(String(r.id))}</span>`).join(' ');
+}
+function rPsyWorkspace() {
+  const el = $('psy-ws'); if (!el) return;
+  const F = psyActiveFormulation();
+  const goals = (DB.psyGoals || []).filter(g => g && g.status === 'active').slice(0, 3);
+  const allGoals = (DB.psyGoals || []).slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const eps = (DB.psyInterventionEpisodes || []).slice().sort((a, b) => String(b.dateTime).localeCompare(String(a.dateTime)));
+  const obs = (DB.psyObservations || []).slice().sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+  const revs = (DB.psyReviews || []).slice().sort((a, b) => String(b.periodEnd).localeCompare(String(a.periodEnd)));
+  const nextReview = allGoals.map(g => g.reviewAt).filter(Boolean).sort()[0] || null;
+
+  // 1. «Сейчас» — над чем работаю, цели, следующий шаг.
+  const now = `<div class="card mx psy-now">
+    <div class="sec-lbl" style="padding:0 0 .35rem">Сейчас</div>
+    ${F ? `<div class="psy-focus">${esc(F.focus)}</div>
+           <div class="si-text" style="color:var(--t3)">Формулировка · ${esc(PSY_STATUS_RU[F.status] || F.status)}</div>`
+        : `<div class="ai-sp-empty">Формулировки пока нет. Она нужна, чтобы работа не превратилась в набор разрозненных техник.</div>`}
+    ${goals.length ? `<div class="psy-goals-inline">${goals.map(g => `<span class="psy-chip">${esc(g.label)}</span>`).join('')}</div>` : ''}
+    <div class="si-text" style="margin-top:.4rem;color:var(--t3)">${nextReview ? 'Следующий review: ' + esc(String(nextReview).slice(0, 10)) : 'Дата review не назначена'}</div>
+    <div class="psy-actions">
+      <button type="button" class="btn btn-s btn-sm" onclick="openPsyObservation()">Наблюдать эпизод</button>
+      <button type="button" class="btn btn-s btn-sm" onclick="openPsyIntervention()">Записать метод</button>
+      <button type="button" class="btn btn-s btn-sm" onclick="openPsyReview()">Review</button>
+    </div>
+  </div>`;
+
+  // 2. Текущая карта + история версий (прогрессивное раскрытие).
+  const hist = F ? psyFormulationHistory(F.id).slice(1) : [];
+  const map = `<details class="card mx psy-det"><summary>Текущая карта${F ? '' : ' — пусто'}</summary>
+    ${F ? `<div class="si-text" style="white-space:pre-wrap">${esc(F.formulation)}</div>
+      ${F.hypotheses.length ? `<div class="sec-lbl" style="padding-left:0">Рабочие гипотезы</div>` +
+        F.hypotheses.map(h => `<div class="psy-hyp"><b>${esc(h.text)}</b><br>
+          <span style="color:var(--t4);font-size:.72rem">${esc(h.claimClass)}${h.confidenceLabel ? ' · ' + esc(h.confidenceLabel) : ''} · позиция: ${esc(h.userStance)}</span><br>
+          <span style="font-size:.72rem">${psyRefLine(h.sourceRefs)}</span></div>`).join('') : ''}
+      ${F.protectiveFactors.length ? `<div class="sec-lbl" style="padding-left:0">Опоры</div>${F.protectiveFactors.map(x => `<div class="si-text">• ${esc(x)}</div>`).join('')}` : ''}
+      ${F.maintainingFactors.length ? `<div class="sec-lbl" style="padding-left:0">Что поддерживает проблему (гипотезы)</div>${F.maintainingFactors.map(x => `<div class="si-text">• ${esc(x)}</div>`).join('')}` : ''}
+      <div class="sec-lbl" style="padding-left:0">Источники</div><div class="si-text">${psyRefLine(F.sourceRefs)}</div>
+      <div class="si-text" style="color:var(--t4);font-size:.72rem;margin-top:.3rem">${psyProvLine(F)}</div>
+      ${hist.length ? `<div class="sec-lbl" style="padding-left:0">Предыдущие версии (${hist.length})</div>` +
+        hist.map(h => `<div class="psy-hist">${esc(String(h.createdAt).slice(0, 10))} · ${esc(h.focus)} · ${esc(PSY_STATUS_RU[h.status] || h.status)}</div>`).join('') : ''}`
+      : '<div class="ai-sp-empty">Добавь первую формулировку — она версионируется, старые версии не теряются.</div>'}
+    <div style="margin-top:.6rem"><button type="button" class="btn btn-s btn-sm" onclick="openPsyFormulation()">${F ? 'Новая версия формулировки' : 'Создать формулировку'}</button></div>
+  </details>`;
+
+  // 3. Цели.
+  const goalsBlock = `<details class="card mx psy-det"><summary>Цели (${allGoals.length})</summary>
+    ${allGoals.length ? allGoals.map(g => `<div class="psy-item">
+      <b>${esc(g.label)}</b> · ${esc(PSY_GOAL_STATUS_RU[g.status] || g.status)}<br>
+      <span class="si-text">Ближайшая цель: ${esc(g.proximalOutcome)}</span>
+      ${g.distalOutcome ? `<br><span class="si-text" style="color:var(--t3)">Долгосрочно: ${esc(g.distalOutcome)}</span>` : ''}
+      ${g.reviewAt ? `<br><span style="font-size:.72rem;color:var(--t4)">review: ${esc(String(g.reviewAt).slice(0, 10))}</span>` : ''}
+      <br><span style="font-size:.72rem">${psyRefLine(g.sourceRefs)}</span>
+    </div>`).join('') : '<div class="ai-sp-empty">Целей пока нет.</div>'}
+    <div style="margin-top:.6rem"><button type="button" class="btn btn-s btn-sm" onclick="openPsyGoal()">Добавить цель</button></div>
+  </details>`;
+
+  // 4. Что я пробовал — интервенции.
+  const epsBlock = `<details class="card mx psy-det"><summary>Что я пробовал (${eps.length})</summary>
+    ${eps.length ? eps.slice(0, 30).map(e => {
+      const m = psyMethod(e.methodId);
+      return `<div class="psy-item">
+        <b>${esc(m ? m.name : (e.methodId || 'метод'))}</b> · ${esc(PSY_FAMILY_RU[e.methodFamily] || e.methodFamily)} · ${esc(String(e.dateTime).slice(0, 10))}<br>
+        <span class="si-text">${esc(e.interventionSummary)}</span><br>
+        <span style="font-size:.72rem;color:var(--t3)">выполнение: ${esc(PSY_ADHERENCE_RU[e.adherence] || e.adherence)} · переносимость: ${esc(PSY_ACCEPT_RU[e.acceptability] || e.acceptability)} · исход: ${esc(PSY_OUTCOME_RU[e.outcomeClass] || e.outcomeClass)}</span>
+        ${e.adverseEffects.length ? `<div class="psy-adv">Нежелательные эффекты: ${esc(e.adverseEffects.join('; '))}</div>` : ''}
+        ${e.confounders.length ? `<div style="font-size:.72rem;color:var(--t4)">Смешивающие факторы: ${esc(e.confounders.join('; '))}</div>` : ''}
+        <div style="font-size:.72rem">${psyRefLine(e.sourceRefs)}</div>
+        <div style="font-size:.72rem;color:var(--t4)">${psyProvLine(e)}</div>
+      </div>`;
+    }).join('') : '<div class="ai-sp-empty">Пока нет записанных применений метода.</div>'}
+    <div class="be-note" style="margin-top:.5rem">Один эпизод не доказывает эффективность метода. Здесь фиксируется, что было сделано и что наблюдалось после — без вывода о причинности.</div>
+  </details>`;
+
+  // 5. Наблюдения / EMA.
+  const obsBlock = `<details class="card mx psy-det"><summary>Наблюдения (${obs.length})</summary>
+    ${obs.length ? obs.slice(0, 40).map(o => `<div class="psy-item">
+      <b>${esc(o.metricId)}</b> · ${esc(String(o.timestamp).slice(0, 16).replace('T', ' '))}<br>
+      <span class="si-text">${o.valueNumber != null ? esc(String(o.valueNumber)) + (o.unit ? ' ' + esc(o.unit) : '') : esc(o.valueText || '')}</span>
+      ${o.naturalistic ? '<span class="psy-nat">естественное изменение (техника не применялась)</span>' : ''}
+      <br><span style="font-size:.72rem;color:var(--t4)">режим: ${esc(o.entryMode)} · источник: ${esc(o.source)}</span>
+    </div>`).join('') : '<div class="ai-sp-empty">Наблюдений пока нет.</div>'}
+    <div class="be-note" style="margin-top:.5rem">Отсутствие замера — это отсутствие данных, а не ноль. Числа вводит только человек или детерминированный подсчёт.</div>
+  </details>`;
+
+  // 6. Review.
+  const revBlock = `<details class="card mx psy-det"><summary>Review (${revs.length})</summary>
+    ${revs.length ? revs.slice(0, 20).map(r => `<div class="psy-item">
+      <b>${esc(String(r.periodStart).slice(0, 10))} — ${esc(String(r.periodEnd).slice(0, 10))}</b> · решение: ${esc(PSY_DECISION_RU[r.decision] || r.decision)}<br>
+      <span class="si-text">${esc(r.outcomeSummary)}</span><br>
+      <span style="font-size:.72rem;color:var(--t4)">эпизодов: ${r.interventionEpisodeRefs.length} · наблюдений: ${r.observationRefs.length} · целей: ${r.goalRefs.length}</span>
+      ${r.limitations.length ? `<div style="font-size:.72rem;color:var(--t4)">Ограничения: ${esc(r.limitations.join('; '))}</div>` : ''}
+    </div>`).join('') : '<div class="ai-sp-empty">Разборов пока нет.</div>'}
+  </details>`;
+
+  el.innerHTML = `<div class="sec-lbl">Психология</div>
+    <div class="be-note mx">Рабочее пространство самонаблюдения. Это не диагностика и не замена специалисту.</div>
+    ${now}${map}${goalsBlock}${epsBlock}${obsBlock}${revBlock}`;
+  try { if (window.lucide) window.lucide.createIcons(); } catch (e) {}
+}
+
+// ── Единая форма: описания полей на тип ─────────────────────────────
+// Поля описываются данными, а не пятью почти одинаковыми разметками, и
+// сохраняются ОДНИМ путём psySaveRecord() — тем же, что использует импортер.
+const PSY_FORM_SPECS = {
+  psyFormulation: { title: 'Формулировка случая', fields: [
+    { k: 'focus', l: 'Над чем работаем', t: 'text', req: true },
+    { k: 'formulation', l: 'Рабочее описание (не диагноз)', t: 'area', req: true },
+    { k: '_hypothesis', l: 'Рабочая гипотеза (необязательно)', t: 'area' },
+    { k: '_protective', l: 'Опоры — по строке', t: 'area' },
+    { k: '_maintaining', l: 'Что поддерживает проблему — по строке', t: 'area' },
+    { k: 'status', l: 'Статус', t: 'sel', opts: [['active', 'активная'], ['draft', 'черновик']] },
+  ] },
+  psyGoal: { title: 'Рабочая цель', fields: [
+    { k: 'label', l: 'Цель', t: 'text', req: true },
+    { k: 'proximalOutcome', l: 'Ближайший наблюдаемый результат', t: 'area', req: true },
+    { k: 'distalOutcome', l: 'Долгосрочный результат', t: 'area' },
+    { k: 'targetMechanism', l: 'На какой механизм направлена', t: 'text' },
+    { k: 'reviewAt', l: 'Дата review', t: 'date' },
+    { k: 'status', l: 'Статус', t: 'sel', opts: PSY_GOAL_STATUSES.map(s => [s, PSY_GOAL_STATUS_RU[s]]) },
+  ] },
+  psyInterventionEpisode: { title: 'Применение метода', fields: [
+    { k: 'methodId', l: 'Метод', t: 'sel', opts: [['', '— свой метод —']].concat(PSY_METHOD_REGISTRY.map(m => [m.methodId, m.name])) },
+    { k: 'methodFamily', l: 'Семейство метода', t: 'sel', opts: PSY_METHOD_FAMILIES.map(f => [f, PSY_FAMILY_RU[f]]) },
+    { k: 'targetProblem', l: 'На что направлено', t: 'text' },
+    { k: 'interventionSummary', l: 'Что именно было сделано', t: 'area', req: true },
+    { k: 'rationale', l: 'Почему это применялось', t: 'area' },
+    { k: 'adherence', l: 'Выполнение', t: 'sel', opts: PSY_ADHERENCE.map(a => [a, PSY_ADHERENCE_RU[a]]) },
+    { k: 'acceptability', l: 'Переносимость', t: 'sel', opts: PSY_ACCEPTABILITY.map(a => [a, PSY_ACCEPT_RU[a]]) },
+    { k: 'outcomeClass', l: 'Исход (без вывода о причинности)', t: 'sel', opts: PSY_OUTCOME_CLASSES.map(o => [o, PSY_OUTCOME_RU[o]]) },
+    { k: '_adverse', l: 'Нежелательные эффекты — по строке', t: 'area' },
+    { k: '_confounders', l: 'Что ещё могло повлиять — по строке', t: 'area' },
+  ] },
+  psyObservation: { title: 'Наблюдение', fields: [
+    { k: 'metricId', l: 'Что наблюдаем (метрика)', t: 'text', req: true },
+    { k: 'valueNumber', l: 'Числовое значение (если измерялось)', t: 'num' },
+    { k: 'unit', l: 'Единица', t: 'text' },
+    { k: 'valueText', l: 'Или описание словами', t: 'area' },
+    { k: 'contextTag', l: 'Контекст', t: 'text' },
+    { k: 'entryMode', l: 'Режим записи', t: 'sel', opts: PSY_ENTRY_MODES.filter(m => m !== 'imported').map(m => [m, m]) },
+    { k: 'naturalistic', l: 'Изменение произошло само, техника не применялась', t: 'chk' },
+  ] },
+  psyReview: { title: 'Review периода', fields: [
+    { k: 'periodStart', l: 'Начало периода', t: 'date', req: true },
+    { k: 'periodEnd', l: 'Конец периода', t: 'date', req: true },
+    { k: 'outcomeSummary', l: 'Что изменилось / не изменилось', t: 'area', req: true },
+    { k: 'methodsAppliedSummary', l: 'Какие методы реально применялись', t: 'area' },
+    { k: 'decision', l: 'Решение', t: 'sel', opts: PSY_DECISIONS.map(d => [d, PSY_DECISION_RU[d]]) },
+    { k: '_limitations', l: 'Ограничения вывода — по строке', t: 'area' },
+  ] },
+};
+let _psyFormType = null;
+function openPsyForm(type) {
+  const spec = PSY_FORM_SPECS[type]; if (!spec) return;
+  _psyFormType = type;
+  const t = $('psy-form-title'); if (t) t.textContent = spec.title;
+  const err = $('psy-form-err'); if (err) err.textContent = '';
+  const body = $('psy-form-body');
+  if (body) body.innerHTML = spec.fields.map(f => {
+    const id = 'psyf-' + f.k;
+    const lbl = `<label class="f-lbl" for="${id}">${esc(f.l)}${f.req ? ' *' : ''}</label>`;
+    if (f.t === 'area') return `<div class="psy-fld">${lbl}<textarea id="${id}" class="field" rows="3"></textarea></div>`;
+    if (f.t === 'sel') return `<div class="psy-fld">${lbl}<select id="${id}" class="field">${f.opts.map(o => `<option value="${esc(o[0])}">${esc(o[1] || o[0])}</option>`).join('')}</select></div>`;
+    if (f.t === 'chk') return `<div class="psy-fld psy-fld-chk"><input type="checkbox" id="${id}">${lbl}</div>`;
+    if (f.t === 'num') return `<div class="psy-fld">${lbl}<input type="number" step="any" id="${id}" class="field"></div>`;
+    if (f.t === 'date') return `<div class="psy-fld">${lbl}<input type="date" id="${id}" class="field"></div>`;
+    return `<div class="psy-fld">${lbl}<input type="text" id="${id}" class="field"></div>`;
+  }).join('');
+  openOv('ov-psy-form');
+}
+function openPsyFormulation() { openPsyForm('psyFormulation'); }
+function openPsyGoal() { openPsyForm('psyGoal'); }
+function openPsyIntervention() { openPsyForm('psyInterventionEpisode'); }
+function openPsyObservation() { openPsyForm('psyObservation'); }
+function openPsyReview() { openPsyForm('psyReview'); }
+const psyLines = v => String(v || '').split('\n').map(x => x.trim()).filter(Boolean);
+function psyFormSubmit() {
+  const type = _psyFormType; const spec = PSY_FORM_SPECS[type]; if (!spec) return;
+  const val = k => { const el = $('psyf-' + k); if (!el) return ''; return el.type === 'checkbox' ? el.checked : el.value; };
+  const input = {};
+  spec.fields.forEach(f => { if (!f.k.startsWith('_')) input[f.k] = val(f.k); });
+
+  if (type === 'psyFormulation') {
+    const h = String(val('_hypothesis') || '').trim();
+    // Гипотеза остаётся гипотезой — класс задаётся системой, не пользователем.
+    if (h) input.hypotheses = [{ text: h, claimClass: 'working_hypothesis' }];
+    input.protectiveFactors = psyLines(val('_protective'));
+    input.maintainingFactors = psyLines(val('_maintaining'));
+    const prev = psyActiveFormulation();
+    if (prev) input.supersedesId = prev.id;   // новая версия ссылается на прошлую
+  }
+  if (type === 'psyInterventionEpisode') {
+    input.adverseEffects = psyLines(val('_adverse'));
+    input.confounders = psyLines(val('_confounders'));
+    input.dateTime = nowISO();
+    const m = psyMethod(input.methodId);
+    if (m) input.methodFamily = m.family;                       // семейство из реестра
+    else if (!input.methodId) input.methodFamily = input.methodFamily || 'OTHER';
+  }
+  if (type === 'psyObservation') {
+    const n = String(val('valueNumber') || '').trim();
+    // Пустое поле — это ОТСУТСТВИЕ данных, а не ноль.
+    input.valueNumber = n === '' ? null : Number(n);
+    input.timestamp = nowISO();
+    input.source = 'user';
+  }
+  if (type === 'psyReview') {
+    input.limitations = psyLines(val('_limitations'));
+    input.periodStart = input.periodStart ? input.periodStart + 'T00:00:00.000Z' : '';
+    input.periodEnd = input.periodEnd ? input.periodEnd + 'T23:59:59.000Z' : '';
+    // Evidence привязывается ДЕТЕРМИНИРОВАННО: только реально существующие
+    // записи, попавшие в период. Review не может «опираться» на пустоту.
+    const s = Date.parse(input.periodStart), e = Date.parse(input.periodEnd);
+    const inRange = (v) => { const t = Date.parse(v); return isFinite(t) && t >= s && t <= e; };
+    input.interventionEpisodeRefs = (DB.psyInterventionEpisodes || []).filter(x => inRange(x.dateTime)).map(x => x.id);
+    input.observationRefs = (DB.psyObservations || []).filter(x => inRange(x.timestamp)).map(x => x.id);
+    input.goalRefs = (DB.psyGoals || []).filter(g => g.status === 'active').map(g => g.id);
+    const f = psyActiveFormulation(); if (f) input.formulationRef = f.id;
+  }
+  if (type === 'psyGoal' && input.reviewAt) input.reviewAt = input.reviewAt + 'T00:00:00.000Z';
+
+  const res = psySaveRecord(type, input);
+  const err = $('psy-form-err');
+  if (!res.ok) { if (err) err.textContent = res.errors.slice(0, 4).join('; '); return; }
+  closeOv('ov-psy-form');
+  toast('Сохранено', 'ok');
+  rPsyWorkspace();
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  WAVE 6 (issue #160): EXTERNAL WORK BRIDGE — импорт внешней работы.
 //
 //  Принцип: внешняя сессия = provenance/audit envelope + проекция в УЖЕ
@@ -12066,6 +12697,13 @@ function rPsyView(elId) {
 //  Импорт строго локальный: без сети, без AI, без Google OAuth/Drive API.
 // ═══════════════════════════════════════════════════════════════════
 const EXT_WORK_FORMAT = 'architect-external-work-v1';
+// Wave 7 (issue #162): явная ВЕРСИЯ формата, а не молчаливое расширение v1.
+// v1 продолжает импортироваться ровно как раньше и НЕ получает новые типы:
+// старый клиент/пакет не должен внезапно поменять семантику. v2 переиспользует
+// весь core Волны 6 (разбор, provenance, sourceRefs, дедуп, конфликты,
+// транзакция, recovery lock) и лишь расширяет список допустимых типов.
+const EXT_WORK_FORMAT_V2 = 'architect-external-work-v2';
+const EXT_FORMATS = Object.freeze([EXT_WORK_FORMAT, EXT_WORK_FORMAT_V2]);
 
 // Границы — защита от случайного/вредоносного огромного пакета.
 const EXT_LIMITS = Object.freeze({
@@ -12108,6 +12746,15 @@ const EXT_TARGETS = Object.freeze({
   moment:              'moments',
   sphereLog:           'sphereLogs',
 });
+// Типы, ДОБАВЛЕННЫЕ версией v2. В v1 они недопустимы и отвергаются
+// fail-closed — именно поэтому потребовалась версия формата, а не «тихое»
+// расширение enum.
+const EXT_TARGETS_V2_ONLY = Object.freeze(PSY_TYPE_TO_COLL);
+const EXT_TARGETS_V2 = Object.freeze({ ...EXT_TARGETS, ...EXT_TARGETS_V2_ONLY });
+// Разрешённые типы зависят ТОЛЬКО от версии формата пакета.
+function extTargetsFor(format) {
+  return format === EXT_WORK_FORMAT_V2 ? EXT_TARGETS_V2 : EXT_TARGETS;
+}
 
 // Ключи, которые payload НЕ имеет права задавать ни при каких условиях:
 // служебные поля синка/надгробий/схемы и всё, что вычисляет само приложение.
@@ -12186,7 +12833,10 @@ function extValidatePackage(raw) {
   if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) return { ok: false, errors: ['корень пакета должен быть объектом'] };
 
   extScanUnsafe(pkg, 0, errors, 'package');
-  if (pkg.format !== EXT_WORK_FORMAT) errors.push(`format должен быть "${EXT_WORK_FORMAT}"`);
+  if (!EXT_FORMATS.includes(pkg.format)) errors.push(`format должен быть одним из: ${EXT_FORMATS.join(', ')}`);
+  // Список допустимых типов определяется версией пакета, а не «максимумом»:
+  // v1-пакет с психологическим типом обязан быть отвергнут.
+  const targets = extTargetsFor(pkg.format);
 
   const src = pkg.source && typeof pkg.source === 'object' && !Array.isArray(pkg.source) ? pkg.source : null;
   if (!src) errors.push('отсутствует source');
@@ -12208,7 +12858,12 @@ function extValidatePackage(raw) {
     if (!ref) errors.push(`entities[${i}]: отсутствует clientRef`);
     else if (seenRefs.has(ref)) errors.push(`entities[${i}]: clientRef "${ref}" повторяется`);
     else seenRefs.add(ref);
-    if (!Object.prototype.hasOwnProperty.call(EXT_TARGETS, e.type)) errors.push(`entities[${i}]: неподдерживаемый тип "${extStr(e.type, 60) || '—'}"`);
+    if (!Object.prototype.hasOwnProperty.call(targets, e.type)) {
+      const inV2 = Object.prototype.hasOwnProperty.call(EXT_TARGETS_V2_ONLY, e.type);
+      errors.push(inV2
+        ? `entities[${i}]: тип "${extStr(e.type, 60)}" доступен только в формате ${EXT_WORK_FORMAT_V2} — обнови поле format пакета`
+        : `entities[${i}]: неподдерживаемый тип "${extStr(e.type, 60) || '—'}"`);
+    }
     if (e.claimClass != null && !EXT_CLAIM_CLASSES.includes(e.claimClass)) errors.push(`entities[${i}]: неизвестный claimClass "${extStr(e.claimClass, 60)}"`);
     if (e.textOrigin != null && !EXT_TEXT_ORIGINS.includes(e.textOrigin)) errors.push(`entities[${i}]: неизвестный textOrigin "${extStr(e.textOrigin, 60)}"`);
     if (e.sourceDate != null && !extIsIsoDay(e.sourceDate)) errors.push(`entities[${i}]: sourceDate должна быть YYYY-MM-DD`);
@@ -12365,6 +13020,15 @@ const EXT_ADAPTERS = {
     return { rec: { id: uid(), sphereId, date, value: val, note: extStr(d.note, 2000),
       createdAt: ctx.createdAt, sv: SCHEMA_VERSION, _u: Date.now() } };
   },
+  // ── v2: психологический workspace (Wave 7) ────────────────────────
+  // Адаптеры НЕ содержат собственной схемы: они делегируют в те же
+  // PSY_BUILDERS, что и ручная форма. Второй психологии не существует,
+  // и импортер физически не может записать то, что отвергнет UI.
+  ...Object.fromEntries(Object.keys(PSY_TYPE_TO_COLL).map(type => [type, (e, d, ctx) => {
+    const built = PSY_BUILDERS[type](d, ctx.db);
+    if (!built.ok) return { reject: built.errors.slice(0, 3).join('; ') };
+    return { rec: built.rec };
+  }])),
 };
 
 // ── UI импорта ──────────────────────────────────────────────────────
@@ -12556,7 +13220,9 @@ function extProvenance(pkg, e, packageHash) {
   const refs = extSourceRefs(pkg, e);
   const primaryRef = refs.find(r => r.role === 'primary') || refs[0] || null;
   return {
-    format: EXT_WORK_FORMAT,
+    // Записывается ФАКТИЧЕСКАЯ версия пакета: по provenance должно быть видно,
+    // каким контрактом запись пришла (v1 или v2).
+    format: EXT_FORMATS.includes(pkg.format) ? pkg.format : EXT_WORK_FORMAT,
     packageHash,
     sessionRef: extStr((pkg.session || {}).clientRef, 200) || null,
     sourceSystem: src.kind,
@@ -12610,7 +13276,9 @@ function extRecordSourceIds(rec) {
 // «тот же объект, спроецированный в другой canonical type» (конфликт).
 function extIndexExistingProvenance(db) {
   const idx = new Map();
-  [...new Set(Object.values(EXT_TARGETS))].forEach(coll => {
+  // Индексируются ВСЕ целевые коллекции обеих версий: иначе v2-запись,
+  // импортированная ранее, не участвовала бы в дедупе и конфликтах.
+  [...new Set(Object.values(EXT_TARGETS_V2))].forEach(coll => {
     (db[coll] || []).forEach(r => {
       extRecordSourceIds(r).forEach(sid => {
         const key = extProvenanceKey(coll, sid);
@@ -12651,7 +13319,7 @@ async function extBuildPlan(rawText) {
   const items = [];
   const refToRec = new Map();   // clientRef -> { coll, id }
   for (const e of pkg.entities) {
-    const coll = EXT_TARGETS[e.type];
+    const coll = extTargetsFor(pkg.format)[e.type];
     const prov = extProvenance(pkg, e, packageHash);
     const base = {
       clientRef: prov.clientRef, type: e.type, coll,
@@ -12863,7 +13531,7 @@ function extCommitPlan(plan, selection) {
       sourceChatId: extStr(src.chatId, 200) || null,
       sessionDate: extIsIsoDay((plan.pkg.session || {}).date) ? plan.pkg.session.date : null,
       importedAt: nowISO(),
-      formatVersion: EXT_WORK_FORMAT,
+      formatVersion: EXT_FORMATS.includes((plan.pkg || {}).format) ? plan.pkg.format : EXT_WORK_FORMAT,
       contentHash: plan.packageHash,
       summary: extStr((plan.pkg.session || {}).summary, 2000),
       selectedCount: pickedItems.length, rejectedCount: plan.items.length - pickedItems.length,
