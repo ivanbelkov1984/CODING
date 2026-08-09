@@ -640,6 +640,9 @@
     <div class="srow" onclick="exportData()"><div class="sic" style="background:var(--green-l)"><svg style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div><span class="sl2">Экспорт данных</span><span class="sv2">JSON</span></div>
     <div class="srow" onclick="exportMarkdown()"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg></div><span class="sl2">Экспорт дневника</span><span class="sv2">Markdown</span></div>
     <div class="srow" onclick="openOv('ov-import')"><div class="sic" style="background:var(--orange-l)"><svg style="color:var(--orange)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><span class="sl2">Импорт данных</span><span class="sv2">JSON</span></div>
+    <!-- Wave 6 (issue #160): импорт внешней работы (ChatGPT/Drive) внутри
+         существующего раздела «Данные», без нового top-level раздела. -->
+    <button type="button" class="srow" onclick="openExtImport()"><div class="sic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v12"/><polyline points="8 11 12 15 16 11"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></div><span class="sl2">Импорт внешней работы</span><span class="sv2">ChatGPT · Drive · JSON</span></button>
   </div>
   <div class="sec-lbl">Команды</div>
   <div class="cmd-wrap mx" style="position:relative">
@@ -1850,6 +1853,25 @@
 
 <!-- Wave 5 (issue #158): хранилище и диагностика. Экран read-only:
      показывает состояние, ничего не чинит автоматически. -->
+<!-- Wave 6 (issue #160): импорт внешней работы. Весь разбор локальный:
+     без сети, без AI, без Google OAuth. До подтверждения — ноль мутаций. -->
+<div class="ov" id="ov-ext-import" onclick="if(event.target===this)closeOv('ov-ext-import')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Импорт внешней работы</div>
+    <div class="sh-form">
+      <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5">Пакет формата <code>architect-external-work-v1</code>: структурированные выводы внешней работы попадают в обычные записи приложения с полным происхождением. Разбор идёт локально — без сети и без ИИ.</div>
+      <label class="f-lbl" for="ext-file">Файл пакета (.json)</label>
+      <input type="file" id="ext-file" accept="application/json,.json" onchange="extPickFile(event)">
+      <label class="f-lbl" for="ext-text">…или вставь JSON</label>
+      <textarea id="ext-text" rows="5" placeholder='{"format":"architect-external-work-v1", …}'></textarea>
+      <button type="button" class="btn btn-p" onclick="extPreview()">Проверить пакет</button>
+      <div id="ext-out" aria-live="polite"></div>
+      <div id="ext-actions"></div>
+    </div>
+  </div>
+</div>
+
 <div class="ov" id="ov-storage" onclick="if(event.target===this)closeOv('ov-storage')">
   <div class="sheet">
     <div class="sh-pull"></div>

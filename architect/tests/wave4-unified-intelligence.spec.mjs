@@ -42,7 +42,10 @@ const fresh = await page.evaluate(() => ({
   schemaVersion: SCHEMA_VERSION,
   correlationSettings: DB.correlationSettings,
 }));
-ok(fresh.schemaVersion === 5, 'SCHEMA_VERSION поднят до 5');
+// Wave 6 (issue #160) поднял схему до 6 (additive ledger externalWorkSessions).
+// Проверка Волны 4 по смыслу — «схема не ниже введённой этой волной», а не
+// жёсткое число: иначе любая последующая additive-волна ложно краснеет.
+ok(fresh.schemaVersion >= 5, `SCHEMA_VERSION не ниже 5 (сейчас ${fresh.schemaVersion})`);
 ok(fresh.correlationSettings && fresh.correlationSettings.minSamples === 3 && fresh.correlationSettings.lagDays === 7 && Array.isArray(fresh.correlationSettings.dismissed) && fresh.correlationSettings.dismissed.length === 0,
   'свежий профиль: DB.correlationSettings = {minSamples:3, lagDays:7, dismissed:[]} по умолчанию');
 

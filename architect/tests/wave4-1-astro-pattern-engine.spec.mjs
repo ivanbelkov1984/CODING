@@ -213,7 +213,9 @@ ok(calls === 1, `astroEventProjection() вызван РОВНО один раз 
       noAstroColl: !('astroEvents' in DB) && !('astroProjection' in DB) && !('astroCache' in DB),
     };
   });
-  ok(impact.schema === 5, `schema не изменена: SCHEMA_VERSION = ${impact.schema}`);
+  // Волна 4.1 сама схему не меняла. Wave 6 (issue #160) additive-поднял её до 6,
+  // поэтому проверяем инвариант волны — «не ниже 5», а не устаревшую константу.
+  ok(impact.schema >= 5, `schema не понижена Волной 4.1: SCHEMA_VERSION = ${impact.schema}`);
   ok(impact.hasUseAstro, 'настройка живёт в уже существующем скаляре correlationSettings (новых коллекций нет)');
   ok(impact.roundtrip, 'backup/sync: correlationSettings переживает сериализацию byte-identical, отдельного пути не добавлено');
   ok(impact.noAstroColl, 'read-only: в DB не появилось ни одной новой астрологической коллекции/кэша');

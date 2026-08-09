@@ -11,7 +11,7 @@ const dateRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:
 const dateFullRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:'long',year:'numeric'});
 const todayKey = () => new Date().toISOString().slice(0,10);
 const nowISO = () => new Date().toISOString();            // UTC ISO 8601 — источник истины для времени
-const SCHEMA_VERSION = 5;   // Wave 4 (issue #152): correlationSettings scalar add-only bump
+const SCHEMA_VERSION = 6;   // Wave 6 (issue #160): externalWorkSessions ledger — additive collection
 
 // ─── RELEASE METADATA (Wave 5, issue #158) ──────────────────────────
 // Плейсхолдеры заменяются ЕДИНСТВЕННЫМ местом — build.mjs. Руками эти
@@ -113,6 +113,10 @@ const DEFAULT_DB = {
   // это отдельная сущность). Запись = человек/контекст отношений, к которому
   // можно привязать психологическую запись через psyLinks (record_to_relationship).
   relationshipContexts: [],
+  // Wave 6 (issue #160): ledger импорта внешней работы. ТОЛЬКО audit/provenance/
+  // idempotency — не второй дневник, не контейнер фактов жизни и НЕ EVENT_SOURCE.
+  // Смысловой материал живёт в существующих canonical-коллекциях.
+  externalWorkSessions: [],
   psyAiConsent: null, // Wave 1 AI-помощь (Почему?→Инсайт): отдельное согласие, отзываемо в любой момент
   bots: [
     {id:1, title:'Первая задача — добавь свою', prio:'high', done:false},
@@ -2213,6 +2217,7 @@ const REC_COLLS = {
   sphereLogs: { ru: 'Записи по сферам',   sum: r => { const s = (DB.spheres || []).find(x => x && x.id === r.sphereId); return `${r.date || ''} · ${s ? s.name : 'сфера'}: ${r.value === true ? '✓' : r.value === false ? '—' : r.value}`; } },
   spheres:    { ru: 'Сферы (с историей)', sum: r => r.name || 'сфера', cascade: true },
   astroCharts:{ ru: 'Расчёты натальной карты', sum: r => `${(r.createdAt || '').slice(0, 10)} · расчёт карты` },
+  externalWorkSessions: { ru: 'Импорт внешней работы (журнал)', sum: r => `${(r.importedAt || '').slice(0, 10)} · ${r.sourceLabel || r.source || 'сессия'} · записей: ${(r.recordRefs || []).length}` },
   astroPartners: { ru: 'Партнёры (синастрия)', sum: r => r.label || 'партнёр' },
   psyLinks: { ru: 'Связи (доказательная цепочка)', sum: r => `${PSY_LINK_RELATION_LABELS[r.relation] || r.relation}` },
   relationshipContexts: { ru: 'Контексты отношений', sum: r => `${r.label || ''}${r.status === 'archived' ? ' (архив)' : ''}` },
@@ -3255,11 +3260,14 @@ const PSY_LINK_RELATION_LABELS = {
   moment_to_why: 'Момент → «Зачем?»', why_to_insight: '«Зачем?» → Инсайт',
   insight_to_pattern: 'Инсайт → Паттерн', record_to_relationship: 'Запись → контекст отношений',
 };
-function collExists(coll, id) { return Array.isArray(DB[coll]) && DB[coll].some(r => r && r.id === id); }
+// Wave 6 (issue #160): необязательный параметр `db` — чтобы ОДИН И ТОТ ЖЕ
+// production-валидатор работал и на живом DB, и на транзакционном кандидате
+// импорта. Параллельной копии правил не заводим.
+function collExists(coll, id, db) { const d = db || DB; return Array.isArray(d[coll]) && d[coll].some(r => r && r.id === id); }
 // Fail-safe валидация: неизвестное отношение/пара коллекций, отсутствующий id,
 // self-link и orphan (несуществующая запись с любой стороны) — все отклоняются
 // одной и той же явной причиной, без исключений наверх.
-function validatePsyLink({ fromColl, fromId, toColl, toId, relation }) {
+function validatePsyLink({ fromColl, fromId, toColl, toId, relation }, db) {
   if (!PSY_LINK_RELATIONS.includes(relation)) return 'invalid_relation';
   if (relation === 'record_to_relationship') {
     if (!RELATIONSHIP_LINKABLE_COLLS.includes(fromColl)) return 'invalid_from_collection';
@@ -3270,12 +3278,12 @@ function validatePsyLink({ fromColl, fromId, toColl, toId, relation }) {
   }
   if (fromId == null || toId == null) return 'missing_id';
   if (fromColl === toColl && fromId === toId) return 'self_link';
-  if (!collExists(fromColl, fromId)) return 'orphan_from';
-  if (!collExists(toColl, toId)) return 'orphan_to';
+  if (!collExists(fromColl, fromId, db)) return 'orphan_from';
+  if (!collExists(toColl, toId, db)) return 'orphan_to';
   return null;
 }
-function findPsyLink({ fromColl, fromId, toColl, toId, relation }) {
-  return (DB.psyLinks || []).find(l => l && l.fromColl === fromColl && l.fromId === fromId &&
+function findPsyLink({ fromColl, fromId, toColl, toId, relation }, db) {
+  return ((db || DB).psyLinks || []).find(l => l && l.fromColl === fromColl && l.fromId === fromId &&
     l.toColl === toColl && l.toId === toId && l.relation === relation);
 }
 // Collision-proof id для новых коллекций (owner review, PR #149): tombstone
@@ -10032,7 +10040,7 @@ function genRecoveryKey() {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','astroPartners','bots','digests','spheres','sphereLogs','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','astroPartners','bots','digests','spheres','sphereLogs','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments','externalWorkSessions'];
 
 // ─── SCALAR MERGE CONTRACT (Wave 5, issue #158) ─────────────────────
 // Внутренние ключи DB, которые НЕ являются пользовательскими данными и
@@ -12044,6 +12052,840 @@ function rPsyView(elId) {
     ${needRows || '<div class="ai-sp-empty">Потребности пока не определены</div>'}
     ${egoHtml}${gamesHtml}${freshHtml}
   </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  WAVE 6 (issue #160): EXTERNAL WORK BRIDGE — импорт внешней работы.
+//
+//  Принцип: внешняя сессия = provenance/audit envelope + проекция в УЖЕ
+//  существующие канонические типы. Второй модели жизни не создаётся.
+//  `externalWorkSessions` — только audit/idempotency ledger; он НЕ входит в
+//  EVENT_SOURCES, иначе summary и производный insight дали бы двойное
+//  evidence одному и тому же смыслу.
+//
+//  Импорт строго локальный: без сети, без AI, без Google OAuth/Drive API.
+// ═══════════════════════════════════════════════════════════════════
+const EXT_WORK_FORMAT = 'architect-external-work-v1';
+
+// Границы — защита от случайного/вредоносного огромного пакета.
+const EXT_LIMITS = Object.freeze({
+  maxBytes: 2 * 1024 * 1024,   // размер исходного текста пакета
+  maxEntities: 500,
+  maxLinks: 1000,
+  maxString: 20000,            // любая строка внутри payload
+  maxDepth: 12,                // глубина вложенности JSON
+  maxClaimClasses: 10,         // не больше, чем самих классов
+  maxSourceRefs: 20,           // ссылок на исходные объекты у одной записи
+});
+
+// Происхождение утверждения. Закрытый enum: importer НЕ повышает гипотезу до
+// факта и не превращает субъективный опыт во внешне подтверждённый факт.
+const EXT_CLAIM_CLASSES = Object.freeze([
+  'user_fact', 'user_experience', 'practice_action', 'external_event',
+  'symbolic_interpretation', 'working_hypothesis', 'assistant_interpretation',
+  'assistant_summary', 'external_source_claim', 'verification_result',
+]);
+// Происхождение ТЕКСТА (чьи это слова), отдельно от класса утверждения.
+const EXT_TEXT_ORIGINS = Object.freeze([
+  'user_words', 'structured_summary', 'user_interpretation',
+  'assistant_interpretation', 'working_hypothesis', 'external_source_claim',
+  'verification_result',
+]);
+const EXT_SOURCE_KINDS = Object.freeze(['chatgpt', 'google_drive', 'claude', 'other']);
+// Роль ссылки на исходный объект: основная запись источника либо псевдоним
+// (тот же эпизод, адресованный из другого модуля — LIFE ↔ DREAM ↔ PARA).
+const EXT_REF_ROLES = Object.freeze(['primary', 'alias']);
+
+// Поддерживаемые целевые canonical-типы. Новых доменных коллекций не создаём.
+const EXT_TARGETS = Object.freeze({
+  insight:             'insights',
+  why:                 'whys',
+  pattern:             'patterns',
+  dream:               'dreams',
+  spiritual:           'spiritual',
+  evolution:           'evolution',
+  relationshipContext: 'relationshipContexts',
+  moment:              'moments',
+  sphereLog:           'sphereLogs',
+});
+
+// Ключи, которые payload НЕ имеет права задавать ни при каких условиях:
+// служебные поля синка/надгробий/схемы и всё, что вычисляет само приложение.
+const EXT_RESERVED_FIELDS = Object.freeze([
+  'id', '_u', 'sv', '_del', '__ts', 'ext', 'createdAt', 'day', 'kType', 'verif', 'life', 'privacyClass',
+]);
+const EXT_POLLUTION_KEYS = Object.freeze(['__proto__', 'constructor', 'prototype']);
+
+// ── Детерминированная канонизация для хеша ──────────────────────────
+// Ключи сортируются, undefined отбрасывается. Один и тот же пакет с иным
+// порядком ключей обязан дать ОДИН И ТОТ ЖЕ hash — это контракт дедупликации.
+function extCanonicalJson(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v === undefined ? null : v);
+  if (Array.isArray(v)) return '[' + v.map(extCanonicalJson).join(',') + ']';
+  const keys = Object.keys(v).filter(k => v[k] !== undefined).sort();
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + extCanonicalJson(v[k])).join(',') + '}';
+}
+async function extSha256(text) {
+  const bytes = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// ── Строгая структурная валидация ───────────────────────────────────
+// fail-closed: любая неизвестная/опасная конструкция — ошибка, не «почистим
+// и поедем дальше». Мутации DB на этом этапе не происходит вовсе.
+function extScanUnsafe(node, depth, errors, path) {
+  if (depth > EXT_LIMITS.maxDepth) { errors.push(`${path}: превышена глубина вложенности`); return; }
+  if (typeof node === 'string') {
+    if (node.length > EXT_LIMITS.maxString) errors.push(`${path}: строка длиннее ${EXT_LIMITS.maxString}`);
+    return;
+  }
+  if (node === null || typeof node !== 'object') return;
+  if (Array.isArray(node)) { node.forEach((x, i) => extScanUnsafe(x, depth + 1, errors, `${path}[${i}]`)); return; }
+  for (const k of Object.keys(node)) {
+    if (EXT_POLLUTION_KEYS.includes(k)) { errors.push(`${path}.${k}: запрещённый ключ (prototype pollution)`); continue; }
+    extScanUnsafe(node[k], depth + 1, errors, `${path}.${k}`);
+  }
+}
+const extStr = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max || EXT_LIMITS.maxString) : '');
+const extIsIsoDay = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v + 'T00:00:00Z'));
+
+// Один валидатор для source где угодно: пакет, запись, ссылка на источник.
+// Пустой/чужой kind отклоняется fail-closed, как и на уровне пакета.
+function extValidateSourceObj(s, path) {
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return [`${path}: должен быть объектом`];
+  const errs = [];
+  if (s.kind != null && !EXT_SOURCE_KINDS.includes(s.kind)) {
+    errs.push(`${path}.kind должен быть одним из: ${EXT_SOURCE_KINDS.join(', ')}`);
+  }
+  return errs;
+}
+// Слияние source: значения записи/ссылки перекрывают пакетные, отсутствующие
+// наследуются. Пакетный source — ТОЛЬКО значение по умолчанию.
+function extResolveSource(pkgSrc, entitySrc, refSrc) {
+  const pick = (k) => {
+    for (const s of [refSrc, entitySrc, pkgSrc]) {
+      if (s && typeof s === 'object' && s[k] != null && extStr(s[k], 200)) return s[k];
+    }
+    return null;
+  };
+  return {
+    kind: EXT_SOURCE_KINDS.includes(pick('kind')) ? pick('kind') : 'other',
+    module: extStr(pick('module'), 120) || null,
+    chatId: extStr(pick('chatId'), 200) || null,
+    label: extStr(pick('label'), 200) || null,
+  };
+}
+
+function extValidatePackage(raw) {
+  const errors = [];
+  if (typeof raw !== 'string') return { ok: false, errors: ['пакет не является текстом'] };
+  if (raw.length > EXT_LIMITS.maxBytes) return { ok: false, errors: [`пакет больше ${Math.round(EXT_LIMITS.maxBytes / 1024)} КБ`] };
+  let pkg;
+  try { pkg = JSON.parse(raw); } catch (e) { return { ok: false, errors: ['не удалось разобрать JSON: ' + (e.message || 'ошибка')] }; }
+  if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) return { ok: false, errors: ['корень пакета должен быть объектом'] };
+
+  extScanUnsafe(pkg, 0, errors, 'package');
+  if (pkg.format !== EXT_WORK_FORMAT) errors.push(`format должен быть "${EXT_WORK_FORMAT}"`);
+
+  const src = pkg.source && typeof pkg.source === 'object' && !Array.isArray(pkg.source) ? pkg.source : null;
+  if (!src) errors.push('отсутствует source');
+  else if (!EXT_SOURCE_KINDS.includes(src.kind)) errors.push(`source.kind должен быть одним из: ${EXT_SOURCE_KINDS.join(', ')}`);
+
+  const entities = Array.isArray(pkg.entities) ? pkg.entities : (Array.isArray(pkg.records) ? pkg.records : null);
+  if (!entities) errors.push('отсутствует массив entities');
+  else if (!entities.length) errors.push('пакет не содержит ни одной записи');
+  else if (entities.length > EXT_LIMITS.maxEntities) errors.push(`записей больше ${EXT_LIMITS.maxEntities}`);
+
+  const links = Array.isArray(pkg.links) ? pkg.links : [];
+  if (links.length > EXT_LIMITS.maxLinks) errors.push(`связей больше ${EXT_LIMITS.maxLinks}`);
+
+  // clientRef обязателен и должен быть уникален — иначе связи неоднозначны.
+  const seenRefs = new Set();
+  (entities || []).forEach((e, i) => {
+    if (!e || typeof e !== 'object' || Array.isArray(e)) { errors.push(`entities[${i}]: должна быть объектом`); return; }
+    const ref = extStr(e.clientRef, 200);
+    if (!ref) errors.push(`entities[${i}]: отсутствует clientRef`);
+    else if (seenRefs.has(ref)) errors.push(`entities[${i}]: clientRef "${ref}" повторяется`);
+    else seenRefs.add(ref);
+    if (!Object.prototype.hasOwnProperty.call(EXT_TARGETS, e.type)) errors.push(`entities[${i}]: неподдерживаемый тип "${extStr(e.type, 60) || '—'}"`);
+    if (e.claimClass != null && !EXT_CLAIM_CLASSES.includes(e.claimClass)) errors.push(`entities[${i}]: неизвестный claimClass "${extStr(e.claimClass, 60)}"`);
+    if (e.textOrigin != null && !EXT_TEXT_ORIGINS.includes(e.textOrigin)) errors.push(`entities[${i}]: неизвестный textOrigin "${extStr(e.textOrigin, 60)}"`);
+    if (e.sourceDate != null && !extIsIsoDay(e.sourceDate)) errors.push(`entities[${i}]: sourceDate должна быть YYYY-MM-DD`);
+    if (e.data != null && (typeof e.data !== 'object' || Array.isArray(e.data))) errors.push(`entities[${i}]: data должна быть объектом`);
+
+    // Wave 6 / owner review 5228662919 (1): source на уровне ЗАПИСИ.
+    // Пакетный source остаётся значением по умолчанию, но смешанная миграция
+    // (LIFE + DREAM + PARA + очередь психологии) обязана сохранять модуль и
+    // chatId каждой записи, иначе часть записей припишется чужому источнику.
+    if (e.source != null) errors.push(...extValidateSourceObj(e.source, `entities[${i}].source`));
+
+    // (2): claimClass многослоен. Один и тот же материал бывает одновременно
+    // practice_action + user_experience + symbolic_interpretation. Полный набор
+    // сохраняется как есть — importer НЕ повышает и НЕ схлопывает классы.
+    if (e.claimClasses != null) {
+      if (!Array.isArray(e.claimClasses)) errors.push(`entities[${i}]: claimClasses должен быть массивом`);
+      else if (!e.claimClasses.length) errors.push(`entities[${i}]: claimClasses не может быть пустым`);
+      else if (e.claimClasses.length > EXT_LIMITS.maxClaimClasses) errors.push(`entities[${i}]: claimClasses больше ${EXT_LIMITS.maxClaimClasses}`);
+      else e.claimClasses.forEach((c, j) => {
+        if (!EXT_CLAIM_CLASSES.includes(c)) errors.push(`entities[${i}].claimClasses[${j}]: неизвестный claimClass "${extStr(c, 60) || '—'}"`);
+      });
+      // Явный primary обязан входить в набор — иначе неоднозначно, что главное.
+      if (e.claimClass != null && Array.isArray(e.claimClasses) && !e.claimClasses.includes(e.claimClass)) {
+        errors.push(`entities[${i}]: claimClass "${extStr(e.claimClass, 60)}" отсутствует в claimClasses`);
+      }
+    }
+
+    // (3): один физический эпизод может быть адресован из нескольких модулей
+    // (LIFE/DREAM/PARA). Ссылки описываются явно, а не угадываются по тексту.
+    if (e.sourceRefs != null) {
+      if (!Array.isArray(e.sourceRefs)) errors.push(`entities[${i}]: sourceRefs должен быть массивом`);
+      else if (e.sourceRefs.length > EXT_LIMITS.maxSourceRefs) errors.push(`entities[${i}]: sourceRefs больше ${EXT_LIMITS.maxSourceRefs}`);
+      else {
+        let primaries = 0;
+        e.sourceRefs.forEach((r, j) => {
+          const p = `entities[${i}].sourceRefs[${j}]`;
+          if (!r || typeof r !== 'object' || Array.isArray(r)) { errors.push(`${p}: должна быть объектом`); return; }
+          if (!extStr(r.sourceId, 200)) errors.push(`${p}: отсутствует sourceId`);
+          if (r.role != null && !EXT_REF_ROLES.includes(r.role)) errors.push(`${p}: role должна быть primary или alias`);
+          if (r.role === 'primary') primaries++;
+          if (r.sourceDate != null && !extIsIsoDay(r.sourceDate)) errors.push(`${p}: sourceDate должна быть YYYY-MM-DD`);
+          if (r.source != null) errors.push(...extValidateSourceObj(r.source, `${p}.source`));
+          if (r.kind != null && !EXT_SOURCE_KINDS.includes(r.kind)) errors.push(`${p}: kind должен быть одним из: ${EXT_SOURCE_KINDS.join(', ')}`);
+        });
+        if (primaries > 1) errors.push(`entities[${i}]: более одного sourceRefs с role="primary"`);
+      }
+    }
+  });
+  links.forEach((l, i) => {
+    if (!l || typeof l !== 'object' || Array.isArray(l)) { errors.push(`links[${i}]: должна быть объектом`); return; }
+    if (!extStr(l.from, 200) || !extStr(l.to, 200)) errors.push(`links[${i}]: отсутствует from/to`);
+    if (!PSY_LINK_RELATIONS.includes(l.relation)) errors.push(`links[${i}]: неподдерживаемое отношение "${extStr(l.relation, 60) || '—'}" — enum отношений не расширяется молча`);
+  });
+
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, errors: [], pkg: { ...pkg, entities, links } };
+}
+
+// ── Адаптеры в РЕАЛЬНЫЕ production-схемы ────────────────────────────
+// Каждый адаптер сам решает, достаточно ли материала. Возвращает
+// { rec } либо { reject: 'причина' }. Никаких выдуманных чисел и полей:
+// allowlist на каждый тип, служебные поля payload игнорируются.
+function extPickData(e) {
+  const d = (e && e.data && typeof e.data === 'object' && !Array.isArray(e.data)) ? e.data : {};
+  const out = {};
+  for (const k of Object.keys(d)) {
+    if (EXT_RESERVED_FIELDS.includes(k) || EXT_POLLUTION_KEYS.includes(k)) continue;
+    out[k] = d[k];
+  }
+  return out;
+}
+const EXT_ADAPTERS = {
+  insight(e, d, ctx) {
+    const body = extStr(d.body || d.text, 8000);
+    if (!body) return { reject: 'нет текста инсайта' };
+    return { rec: {
+      id: ctx.nextId(), tag: extStr(d.tag, 40) || 'personal', w: 1,
+      title: extStr(d.title, 120) || titleFrom(body), body,
+      date: ctx.dateRU, createdAt: ctx.createdAt, day: ctx.day, sv: SCHEMA_VERSION,
+      src: ctx.srcLabel, links: [], media: [],
+    } };
+  },
+  why(e, d, ctx) {
+    // Схема метода: пишем только если материал реально ей соответствует.
+    const rec = { id: ctx.nextId(), kType: 'process_reflection', verif: 'user_confirmed', life: 'current',
+      createdAt: ctx.createdAt, day: ctx.day, sv: SCHEMA_VERSION, _u: Date.now() };
+    let filled = 0;
+    WHY_FIELDS.forEach(k => { const v = extStr(d[k], 4000); rec[k] = v; if (v) filled++; });
+    if (!filled) return { reject: 'ни одно поле метода «Зачем?» не заполнено' };
+    return { rec };
+  },
+  pattern(e, d, ctx) {
+    const text = extStr(d.text || d.body, 4000);
+    if (!text) return { reject: 'нет описания паттерна' };
+    return { rec: { id: ctx.nextId(), type: extStr(d.type, 40) || 'behavior', text, cnt: 1 } };
+  },
+  dream(e, d, ctx) {
+    // Источник истины — оригинальный рассказ. Трактовка НЕ подменяет текст сна:
+    // она живёт в отдельном поле `arch`, как и в ручной форме.
+    const body = extStr(d.body || d.text || d.narrative, 12000);
+    if (!body) return { reject: 'нет текста сна' };
+    return { rec: {
+      id: ctx.nextId(), date: ctx.dateFull, createdAt: ctx.createdAt, day: ctx.day, sv: SCHEMA_VERSION,
+      title: extStr(d.title, 52) || (body.slice(0, 52) + (body.length > 52 ? '…' : '')),
+      body, tone: extStr(d.tone, 40) || null, arch: extStr(d.arch || d.interpretation, 4000) || null,
+      src: ctx.srcLabel,
+    } };
+  },
+  spiritual(e, d, ctx) {
+    const text = extStr(d.text || d.body, 8000);
+    if (!text) return { reject: 'нет текста записи' };
+    return { rec: { id: ctx.nextId(), type: extStr(d.type, 40) || 'практика', date: ctx.dateFull,
+      createdAt: ctx.createdAt, day: ctx.day, sv: SCHEMA_VERSION, text } };
+  },
+  evolution(e, d, ctx) {
+    const text = extStr(d.text || d.body, 8000);
+    if (!text) return { reject: 'нет текста вехи' };
+    return { rec: { id: ctx.nextId(), lv: extStr(d.lv || d.level, 40) || 'этап', text, dt: ctx.dateFull,
+      createdAt: ctx.createdAt, day: ctx.day, sv: SCHEMA_VERSION } };
+  },
+  relationshipContext(e, d, ctx) {
+    const label = extStr(d.label, 120);
+    if (!label) return { reject: 'нет обозначения контекста' };
+    return { rec: {
+      id: psyUid('relctx'), label, roleOrRelation: extStr(d.roleOrRelation || d.role, 120),
+      status: 'active', note: extStr(d.note, 4000), privacyClass: 'sensitive',
+      createdAt: ctx.createdAt, day: ctx.day, sv: SCHEMA_VERSION, _u: Date.now(),
+    } };
+  },
+  moment(e, d, ctx) {
+    // ЖЁСТКО: momentum создаётся только из явного self-report. valence/activation
+    // НЕ выводятся из текста — иначе интерпретация превратилась бы в измерение.
+    const v = d.valence, a = d.activation;
+    const okNum = x => typeof x === 'number' && isFinite(x) && x >= 0 && x <= 100;
+    if (!okNum(v) || !okNum(a)) return { reject: 'нет явных числовых valence/activation (0–100) — состояние не выводится из текста' };
+    return { rec: {
+      id: ctx.nextId(), kType: 'self_report', valence: v, activation: a,
+      emo: extStr(d.emo, 80), note: extStr(d.note, 4000),
+      verif: 'unverified', life: 'current',
+      createdAt: ctx.createdAt, day: ctx.day, sv: SCHEMA_VERSION, _u: Date.now(),
+    } };
+  },
+  sphereLog(e, d, ctx) {
+    // Только существующая сфера и явно переданное значение. Числа не выдумываем.
+    const sphereId = d.sphereId;
+    if (sphereId == null) return { reject: 'не указан sphereId' };
+    const exists = (ctx.db.spheres || []).some(s => s && s.id === sphereId);
+    if (!exists) return { reject: 'сфера с таким id не существует в этом профиле' };
+    if (!('value' in d)) return { reject: 'не передано значение value' };
+    const val = d.value;
+    const okVal = typeof val === 'number' ? isFinite(val) : typeof val === 'boolean';
+    if (!okVal) return { reject: 'value должно быть числом или булевым' };
+    const date = extIsIsoDay(d.date) ? d.date : ctx.day;
+    return { rec: { id: uid(), sphereId, date, value: val, note: extStr(d.note, 2000),
+      createdAt: ctx.createdAt, sv: SCHEMA_VERSION, _u: Date.now() } };
+  },
+};
+
+// ── UI импорта ──────────────────────────────────────────────────────
+// Весь пользовательский текст выводится ТОЛЬКО через esc(); в inline-обработчики
+// подставляются исключительно числовые индексы (esc() не экранирует кавычки —
+// это дефект, уже закрытый в Волне 4 тем же приёмом).
+let _extPlan = null, _extSel = { items: {}, links: {} };
+function openExtImport() {
+  _extPlan = null; _extSel = { items: {}, links: {} };
+  const t = $('ext-text'); if (t) t.value = '';
+  const f = $('ext-file'); if (f) f.value = '';
+  const out = $('ext-out'); if (out) out.innerHTML = '';
+  const act = $('ext-actions'); if (act) act.innerHTML = '';
+  openOv('ov-ext-import');
+}
+function extPickFile(ev) {
+  const file = ev && ev.target && ev.target.files && ev.target.files[0];
+  if (!file) return;
+  if (file.size > EXT_LIMITS.maxBytes) { toast('Файл слишком большой', 'warn'); return; }
+  const fr = new FileReader();
+  fr.onload = () => { const t = $('ext-text'); if (t) t.value = String(fr.result || ''); extPreview(); };
+  fr.onerror = () => toast('Не удалось прочитать файл', 'err');
+  fr.readAsText(file);
+}
+const EXT_STATUS_RU = {
+  'new': 'новая', 'existing-by-provenance': 'уже импортировано',
+  'already-imported': 'пакет уже импортирован', 'invalid': 'отклонено', 'unsupported': 'не поддерживается',
+  // Owner review 5230472460: конфликт идентичности виден отдельным статусом —
+  // он не «дубль» и не «новая», и молчаливого выбора одной проекции здесь нет.
+  'conflict': 'конфликт идентичности источника',
+};
+async function extPreview() {
+  const out = $('ext-out'), act = $('ext-actions');
+  const raw = ($('ext-text') || {}).value || '';
+  if (!out) return;
+  if (!raw.trim()) { out.innerHTML = '<div class="ai-sp-empty">Вставь JSON или выбери файл.</div>'; if (act) act.innerHTML = ''; return; }
+  out.innerHTML = '<div class="ai-sp-empty">Проверяю…</div>';
+  let plan;
+  try { plan = await extBuildPlan(raw); }
+  catch (e) { out.innerHTML = `<div class="ai-sp-empty">Ошибка разбора: ${esc((e && e.message) || '')}</div>`; return; }
+  _extPlan = plan; _extSel = { items: {}, links: {} };
+  if (!plan.ok) {
+    out.innerHTML = `<div class="si-text" style="line-height:1.7"><b>Пакет не принят — ничего не изменено.</b>` +
+      plan.errors.slice(0, 20).map(x => `<div>• ${esc(x)}</div>`).join('') +
+      (plan.errors.length > 20 ? `<div>…ещё ${plan.errors.length - 20}</div>` : '') + `</div>`;
+    if (act) act.innerHTML = '';
+    return;
+  }
+  const rows = plan.items.map((i, n) => {
+    const dis = i.status !== 'new';
+    return `<div class="si-row"><div class="si-body">
+      <label style="display:flex;gap:.5rem;align-items:flex-start">
+        <input type="checkbox" ${dis ? 'disabled' : 'checked'} onchange="extToggleItem(${n},this.checked)" aria-label="Импортировать запись ${n + 1}">
+        <span><b>${esc(i.type)}</b> → ${esc(i.coll)}<br><span class="si-text">${esc(i.title.slice(0, 90))}</span>
+        <br><span style="color:var(--t4);font-size:.72rem">${esc(i.sourceId || '—')} · ${esc(i.date || 'без даты')} · ${esc(i.claimClass)} / ${esc(i.textOrigin)}</span>
+        <br><span style="color:var(--t4);font-size:.72rem">статус: ${esc(EXT_STATUS_RU[i.status] || i.status)}${i.reason ? ' — ' + esc(i.reason) : ''}</span></span>
+      </label></div></div>`;
+  }).join('');
+  const linkRows = plan.links.map((l, n) => {
+    const dis = l.status !== 'new';
+    return `<div class="si-row"><div class="si-body">
+      <label style="display:flex;gap:.5rem;align-items:flex-start">
+        <input type="checkbox" ${dis ? 'disabled' : 'checked'} onchange="extToggleLink(${n},this.checked)" aria-label="Создать связь ${n + 1}">
+        <span>${esc(PSY_LINK_RELATION_LABELS[l.relation] || l.relation)}: ${esc(l.from)} → ${esc(l.to)}
+        <br><span style="color:var(--t4);font-size:.72rem">статус: ${esc(EXT_STATUS_RU[l.status] || l.status)}${l.reason ? ' — ' + esc(l.reason) : ''}</span></span>
+      </label></div></div>`;
+  }).join('');
+  const targets = Object.entries(plan.byTarget).map(([c, n]) => `${esc(c)}: ${n}`).join(', ') || 'нечего создавать';
+  out.innerHTML = `<div class="si-text" style="line-height:1.7">
+      <div><b>Будет создано:</b> ${targets}</div>
+      <div><b>Связей:</b> ${plan.links.filter(l => l.status === 'new').length}</div>
+      <div style="color:var(--t4)">До подтверждения ничего не сохраняется.</div>
+      ${plan.alreadyImported ? '<div style="color:var(--orange)"><b>Этот пакет уже импортирован</b> — повторный импорт не создаст дублей.</div>' : ''}
+    </div>
+    <div class="sec-lbl">Записи</div><div class="card mb">${rows}</div>
+    ${linkRows ? `<div class="sec-lbl">Связи</div><div class="card mb">${linkRows}</div>` : ''}`;
+  if (act) {
+    // Конфликт идентичности блокирует ВЕСЬ пакет: кнопки подтверждения нет,
+    // пока источник однозначно не разрешён. Частичный импорт не предлагается.
+    const conflicted = plan.items.filter(i => i.status === 'conflict');
+    const can = !plan.alreadyImported && !conflicted.length && plan.items.some(i => i.status === 'new');
+    act.innerHTML = conflicted.length
+      ? `<div class="ai-sp-empty">Импорт заблокирован: ${conflicted.length} конфликт(ов) идентичности источника. Один исходный объект не может быть двумя разными типами записи — исправь пакет и загрузи заново.</div>`
+      : can
+        ? `<button type="button" class="btn btn-p" onclick="extConfirm()">Импортировать выбранное</button>`
+        : `<div class="ai-sp-empty">Нет новых записей для импорта.</div>`;
+  }
+}
+function extToggleItem(n, on) { _extSel.items[n] = !!on; }
+function extToggleLink(n, on) { _extSel.links[n] = !!on; }
+function extConfirm() {
+  if (!_extPlan) return;
+  const r = extCommitPlan(_extPlan, _extSel);
+  const out = $('ext-out');
+  if (!r.ok) { toast('Импорт не выполнен: ' + r.error, 'err'); return; }
+  toast(`Импортировано записей: ${r.created.length}, связей: ${r.linkRefs.length}`, 'ok');
+  if (out) out.innerHTML = `<div class="si-text" style="line-height:1.7"><b>Импортировано.</b>
+    <div>Записей: ${r.created.length} · связей: ${r.linkRefs.length}</div>
+    <div style="color:var(--t4)">Записи доступны в Дневнике и Психике как обычные.</div></div>`;
+  const act = $('ext-actions');
+  if (act) act.innerHTML = `<button type="button" class="btn btn-s" onclick="closeOv('ov-ext-import');goTo('map')">Открыть Дневник</button>`;
+  _extPlan = null;
+  try { rIns(); rDrms(); rPats(); rSpi(); } catch (e) {}
+}
+
+// ── Provenance на canonical-записи ──────────────────────────────────
+// Аддитивное поле `ext`: backward-compatible, переживает generic sync/backup,
+// миграция не требуется (старые записи просто не имеют его). Позволяет
+// восстановить полный аудит происхождения.
+// Полный набор классов утверждения БЕЗ повышения статуса: порядок сохраняется,
+// дубликаты убираются, primary — либо явно указанный claimClass, либо первый в
+// наборе. Никакой класс не «дорастает» до факта и не схлопывается в один.
+function extClaimClasses(e) {
+  const listed = Array.isArray(e.claimClasses)
+    ? e.claimClasses.filter(c => EXT_CLAIM_CLASSES.includes(c)) : [];
+  const primaryRaw = EXT_CLAIM_CLASSES.includes(e.claimClass) ? e.claimClass : null;
+  const all = [];
+  // Primary идёт первым, но остаётся ОДНИМ ИЗ набора, а не заменяет его.
+  if (primaryRaw) all.push(primaryRaw);
+  listed.forEach(c => { if (!all.includes(c)) all.push(c); });
+  if (!all.length) all.push('assistant_summary');   // тот же безопасный дефолт
+  return { primary: all[0], all };
+}
+
+// Ссылки на исходные объекты. Одна canonical-запись может быть адресована из
+// нескольких модулей (LIFE ↔ DREAM ↔ PARA) — каждая ссылка несёт СВОИ
+// module/chatId/дату, иначе provenance теряется при кросс-модульном импорте.
+function extSourceRefs(pkg, e) {
+  const pkgSrc = pkg.source || {};
+  // Идентичность исходного объекта — это его sourceId, и ничто иное. Ключевать
+  // по паре sourceId+module нельзя: тогда один и тот же объект, упомянутый
+  // сначала как `sourceId`, а затем в `sourceRefs` со своим модулем, разошёлся
+  // бы на две ссылки (и на две «основные»).
+  const byId = new Map();
+  const put = (sourceId, role, src, sourceDate, note, explicit) => {
+    const id = extStr(sourceId, 200);
+    if (!id) return;
+    const resolved = extResolveSource(pkgSrc, e.source, src);
+    const prev = byId.get(id);
+    if (!prev) {
+      byId.set(id, {
+        sourceId: id, role,
+        sourceSystem: resolved.kind, sourceModule: resolved.module,
+        sourceChatId: resolved.chatId, sourceLabel: resolved.label,
+        sourceDate: extIsIsoDay(sourceDate) ? sourceDate : null,
+        note: extStr(note, 400) || null,
+      });
+      return;
+    }
+    // Явная ссылка уточняет уже известный объект: у неё есть собственные
+    // module/chatId/дата, которых у неявной ссылки из `sourceId` не было.
+    if (!explicit) return;
+    if (src) {
+      prev.sourceSystem = resolved.kind;
+      prev.sourceModule = resolved.module;
+      prev.sourceChatId = resolved.chatId;
+      prev.sourceLabel = resolved.label;
+    }
+    if (extIsIsoDay(sourceDate)) prev.sourceDate = sourceDate;
+    if (extStr(note, 400)) prev.note = extStr(note, 400);
+    if (role === 'primary') prev.role = 'primary';
+  };
+
+  put(e.sourceId, 'primary', null, e.sourceDate, null, false);
+  (Array.isArray(e.sourceRefs) ? e.sourceRefs : []).forEach(r => {
+    if (!r || typeof r !== 'object') return;
+    const role = EXT_REF_ROLES.includes(r.role) ? r.role : 'alias';
+    const src = r.source || (r.kind || r.module || r.chatId || r.label
+      ? { kind: r.kind, module: r.module, chatId: r.chatId, label: r.label } : null);
+    put(r.sourceId, role, src, r.sourceDate, r.note, true);
+  });
+
+  const refs = [...byId.values()];
+  // Ровно одна основная ссылка: явно объявленная побеждает, остальные —
+  // псевдонимы. Если основной нет вовсе, ею становится первая.
+  const primaries = refs.filter(r => r.role === 'primary');
+  if (primaries.length > 1) primaries.slice(1).forEach(r => { r.role = 'alias'; });
+  if (refs.length && !refs.some(r => r.role === 'primary')) refs[0].role = 'primary';
+  return refs.slice(0, EXT_LIMITS.maxSourceRefs);
+}
+
+// Аддитивное поле `ext`: backward-compatible, переживает generic sync/backup,
+// миграция не требуется (старые записи просто не имеют его). Позволяет
+// восстановить полный аудит происхождения.
+function extProvenance(pkg, e, packageHash) {
+  // Источник разрешается ПОЗАПИСНО: пакетный source — только дефолт.
+  const src = extResolveSource(pkg.source || {}, e.source, null);
+  const claims = extClaimClasses(e);
+  const refs = extSourceRefs(pkg, e);
+  const primaryRef = refs.find(r => r.role === 'primary') || refs[0] || null;
+  return {
+    format: EXT_WORK_FORMAT,
+    packageHash,
+    sessionRef: extStr((pkg.session || {}).clientRef, 200) || null,
+    sourceSystem: src.kind,
+    sourceModule: src.module,
+    sourceChatId: src.chatId,
+    sourceLabel: src.label,
+    // Плоские поля сохранены как есть — обратная совместимость чтения `ext`.
+    sourceId: primaryRef ? primaryRef.sourceId : (extStr(e.sourceId, 200) || null),
+    sourceDate: extIsIsoDay(e.sourceDate) ? e.sourceDate : null,
+    sourceDateRange: extStr(e.sourceDateRange, 80) || null,
+    claimClass: claims.primary,
+    claimClasses: claims.all,
+    textOrigin: EXT_TEXT_ORIGINS.includes(e.textOrigin) ? e.textOrigin : 'structured_summary',
+    clientRef: extStr(e.clientRef, 200),
+    sourceExcerpt: extStr(e.sourceExcerpt, 1000) || null,
+    sourceRefs: refs,
+    relatedSourceIds: Array.isArray(e.relatedSourceIds)
+      ? e.relatedSourceIds.map(x => extStr(x, 200)).filter(Boolean).slice(0, 50) : [],
+    importedAt: nowISO(),
+  };
+}
+// Ключ provenance-дедупликации: один и тот же исходный объект (LIFE/DREAM/PARA)
+// не должен импортироваться дважды в ту же canonical-коллекцию — даже из
+// другого модуля/пакета.
+// Ключ идентичности исходного объекта. Owner review 5230472460: коллекция в
+// ключ НЕ входит намеренно. Контракт объявляет `sourceId` единственной
+// идентичностью источника, поэтому и индекс обязан быть ГЛОБАЛЬНЫМ: иначе один
+// и тот же эпизод мог бы существовать и как `spiritual`, и как `insight`,
+// поздний псевдоним указывал бы сразу на две записи, а аналитика получила бы
+// двойную проекцию одного события. Параметр `coll` сохранён в сигнатуре ради
+// читаемости вызовов и как явная точка мутационной проверки.
+function extProvenanceKey(coll, sourceId) { return sourceId ? String(sourceId) : null; }
+
+// Все исходные идентификаторы записи: плоский legacy-`sourceId` (записи,
+// импортированные до этого изменения) И весь набор `sourceRefs`. Именно
+// поэтому поздний LIFE-пакет, ссылающийся на тот же DREAM-эпизод, находит
+// существующую запись и не создаёт дубль.
+function extRecordSourceIds(rec) {
+  const ext = rec && rec.ext;
+  if (!ext) return [];
+  const ids = [];
+  if (extStr(ext.sourceId, 200)) ids.push(ext.sourceId);
+  (Array.isArray(ext.sourceRefs) ? ext.sourceRefs : []).forEach(r => {
+    const id = r && extStr(r.sourceId, 200);
+    if (id && !ids.includes(id)) ids.push(id);
+  });
+  return ids;
+}
+// Глобальный индекс: sourceId → { coll, id }. Хранит и коллекцию, чтобы
+// поздний пакет мог отличить «тот же объект в той же коллекции» (дедуп) от
+// «тот же объект, спроецированный в другой canonical type» (конфликт).
+function extIndexExistingProvenance(db) {
+  const idx = new Map();
+  [...new Set(Object.values(EXT_TARGETS))].forEach(coll => {
+    (db[coll] || []).forEach(r => {
+      extRecordSourceIds(r).forEach(sid => {
+        const key = extProvenanceKey(coll, sid);
+        if (key && !idx.has(key)) idx.set(key, { coll, id: r.id });
+      });
+    });
+  });
+  return idx;
+}
+
+// ── Построение плана импорта (preview) ──────────────────────────────
+// ДО подтверждения — ноль мутаций. План строится на КЛОНЕ DB: адаптеры,
+// валидация ссылок и дедуп работают ровно на тех данных, которые получатся
+// после коммита, а живой DB не трогается вовсе.
+async function extBuildPlan(rawText) {
+  const v = extValidatePackage(rawText);
+  if (!v.ok) return { ok: false, errors: v.errors };
+  const pkg = v.pkg;
+
+  // Хеш считается по канонизированному содержимому — порядок ключей не влияет.
+  const packageHash = await extSha256(extCanonicalJson({
+    format: pkg.format, source: pkg.source, session: pkg.session,
+    entities: pkg.entities, links: pkg.links,
+  }));
+
+  const db = JSON.parse(JSON.stringify(DB));
+  const already = (db.externalWorkSessions || []).find(s => s && s.contentHash === packageHash);
+  const provIdx = extIndexExistingProvenance(db);
+
+  let idSeq = Date.now();
+  const ctx = {
+    db,
+    nextId: () => ++idSeq,
+    createdAt: nowISO(), day: todayKey(), dateRU: dateRU(), dateFull: dateFullRU(),
+    srcLabel: extStr((pkg.source || {}).label, 80) || 'Внешняя работа',
+  };
+
+  const items = [];
+  const refToRec = new Map();   // clientRef -> { coll, id }
+  for (const e of pkg.entities) {
+    const coll = EXT_TARGETS[e.type];
+    const prov = extProvenance(pkg, e, packageHash);
+    const base = {
+      clientRef: prov.clientRef, type: e.type, coll,
+      title: extStr(e.title, 120) || extStr((e.data || {}).title, 120)
+             || extStr((e.data || {}).label, 120) || extStr((e.data || {}).text, 80)
+             || extStr((e.data || {}).body, 80) || '(без заголовка)',
+      sourceId: prov.sourceId, sourceChatId: prov.sourceChatId, sourceModule: prov.sourceModule,
+      date: prov.sourceDate || prov.sourceDateRange || null,
+      claimClass: prov.claimClass, claimClasses: prov.claimClasses, textOrigin: prov.textOrigin,
+      sourceRefs: prov.sourceRefs.map(r => r.sourceId),
+    };
+
+    if (already) { items.push({ ...base, status: 'already-imported', reason: 'этот пакет уже импортирован' }); continue; }
+
+    // Совпадение ищется по ЛЮБОЙ ссылке записи, а не только по основной:
+    // поздний LIFE-пакет, ссылающийся на тот же DREAM-эпизод, обязан найти
+    // уже существующую запись. Дедуп по тексту не выполняется никогда.
+    const found = prov.sourceRefs
+      .map(r => ({ ref: r, key: extProvenanceKey(coll, r.sourceId) }))
+      .filter(x => x.key && provIdx.has(x.key))
+      .map(x => ({ ...x, at: provIdx.get(x.key) }));
+
+    // Owner review 5230472460, fail-closed: тот же исходный объект уже
+    // спроецирован в ДРУГОЙ canonical type. Молча выбрать одну из проекций
+    // нельзя — это и есть двойная проекция эпизода. Вторая запись не
+    // создаётся, пакет помечается конфликтом и коммит отклоняется целиком.
+    const cross = found.find(x => x.at.coll !== coll);
+    if (cross) {
+      items.push({
+        ...base, status: 'conflict',
+        conflict: { sourceId: cross.ref.sourceId, existingColl: cross.at.coll, existingId: cross.at.id, requestedColl: coll },
+        reason: `конфликт идентичности источника: «${cross.ref.sourceId}» уже импортирован как «${cross.at.coll}», а пакет проецирует его в «${coll}». Один исходный объект не может быть двумя разными типами записи.`,
+      });
+      continue;
+    }
+
+    const hit = found[0];
+    if (hit) {
+      const existingId = hit.at.id;
+      refToRec.set(prov.clientRef, { coll, id: existingId });
+      // Новые ссылки того же эпизода не выбрасываются: они дописываются к
+      // существующей записи, иначе provenance кросс-модульной связи теряется.
+      const existingRec = (db[coll] || []).find(r => r && r.id === existingId);
+      const known = existingRec ? extRecordSourceIds(existingRec) : [];
+      const addRefs = prov.sourceRefs.filter(r => !known.includes(r.sourceId));
+      items.push({
+        ...base, status: 'existing-by-provenance',
+        reason: addRefs.length
+          ? `этот источник уже импортирован (${hit.ref.role === 'primary' ? 'основная ссылка' : 'псевдоним'}); добавляются ссылки: ${addRefs.map(r => r.sourceId).join(', ')}`
+          : 'этот источник уже импортирован ранее',
+        merge: { coll, id: existingId, addRefs, packageHash },
+      });
+      // Индекс дополняется сразу, чтобы новые псевдонимы участвовали в
+      // дедупликации уже внутри ЭТОГО пакета.
+      addRefs.forEach(r => {
+        const k = extProvenanceKey(coll, r.sourceId);
+        if (k && !provIdx.has(k)) provIdx.set(k, { coll, id: existingId });
+      });
+      continue;
+    }
+    const built = EXT_ADAPTERS[e.type](e, extPickData(e), ctx);
+    if (built.reject) { items.push({ ...base, status: 'invalid', reason: built.reject }); continue; }
+    built.rec.ext = prov;
+    items.push({ ...base, status: 'new', rec: built.rec });
+    refToRec.set(prov.clientRef, { coll, id: built.rec.id });
+    // Все ссылки новой записи сразу попадают в индекс: вторая запись ТОГО ЖЕ
+    // пакета, ссылающаяся на тот же эпизод, не создаст дубль.
+    prov.sourceRefs.forEach(r => {
+      const k = extProvenanceKey(coll, r.sourceId);
+      if (k && !provIdx.has(k)) provIdx.set(k, { coll, id: built.rec.id });
+    });
+  }
+
+  // Связи проверяются ТЕМ ЖЕ production-валидатором, но на кандидате: чтобы
+  // preview показывал ровно тот результат, который даст коммит.
+  const candidate = JSON.parse(JSON.stringify(db));
+  items.filter(i => i.status === 'new').forEach(i => {
+    if (!Array.isArray(candidate[i.coll])) candidate[i.coll] = [];
+    candidate[i.coll].push(i.rec);
+  });
+  const linkItems = pkg.links.map((l, i) => {
+    const from = refToRec.get(extStr(l.from, 200));
+    const to = refToRec.get(extStr(l.to, 200));
+    const base = { idx: i, from: extStr(l.from, 200), to: extStr(l.to, 200), relation: l.relation };
+    if (!from || !to) return { ...base, status: 'invalid', reason: 'clientRef не найден среди записей пакета' };
+    const err = validatePsyLink({ fromColl: from.coll, fromId: from.id, toColl: to.coll, toId: to.id, relation: l.relation }, candidate);
+    if (err) return { ...base, status: 'invalid', reason: 'production-валидатор связей отклонил: ' + err };
+    if (findPsyLink({ fromColl: from.coll, fromId: from.id, toColl: to.coll, toId: to.id, relation: l.relation }, candidate)) {
+      return { ...base, status: 'existing-by-provenance', reason: 'такая связь уже есть' };
+    }
+    return { ...base, status: 'new', link: { fromColl: from.coll, fromId: from.id, toColl: to.coll, toId: to.id, relation: l.relation } };
+  });
+
+  const counts = {};
+  items.forEach(i => { counts[i.status] = (counts[i.status] || 0) + 1; });
+  const byTarget = {};
+  items.filter(i => i.status === 'new').forEach(i => { byTarget[i.coll] = (byTarget[i.coll] || 0) + 1; });
+
+  return {
+    ok: true, errors: [], packageHash, pkg, items, links: linkItems, counts, byTarget,
+    alreadyImported: !!already, existingSessionId: already ? already.id : null,
+  };
+}
+
+// ── Транзакционный коммит ───────────────────────────────────────────
+// Кандидат собирается на КЛОНЕ, валидируется целиком, и только потом один
+// безопасный persist. Любая ошибка — zero mutation всего batch. Wave-5
+// recovery write lock не обходится: под блокировкой импорт запрещён.
+function extCommitPlan(plan, selection) {
+  if (!plan || !plan.ok) return { ok: false, error: 'план невалиден' };
+  if (isWriteLocked()) return { ok: false, error: 'профиль в режиме восстановления — импорт заблокирован' };
+  if (plan.alreadyImported) return { ok: false, error: 'этот пакет уже импортирован' };
+
+  // Owner review 5230472460: конфликт идентичности источника отклоняет ВЕСЬ
+  // пакет. Импортировать «всё кроме конфликтных» нельзя: пакет описывает
+  // связанную работу, и частичный импорт оставил бы её в состоянии, которое
+  // владелец не подтверждал. Zero mutation, пока пакет не разрешён однозначно.
+  const conflicts = plan.items.filter(i => i.status === 'conflict');
+  if (conflicts.length) {
+    return {
+      ok: false, conflicts: conflicts.map(i => i.conflict),
+      error: `конфликт идентичности источника (${conflicts.length}): ` +
+        conflicts.map(i => `«${i.conflict.sourceId}» уже импортирован как «${i.conflict.existingColl}», пакет проецирует его в «${i.conflict.requestedColl}»`).join('; ') +
+        '. Импорт отклонён целиком — данные не изменены.',
+    };
+  }
+
+  const sel = selection || {};
+  // Импортируются только записи со статусом `new` И не снятые пользователем.
+  const pickedItems = plan.items.filter((i, n) => i.status === 'new' && (!sel.items || sel.items[n] !== false));
+  const pickedLinks = plan.links.filter((l, n) => l.status === 'new' && (!sel.links || sel.links[n] !== false));
+  // Дописывание ссылок к УЖЕ существующим записям — тоже полезная работа:
+  // кросс-модульный псевдоним (LIFE→DREAM) не создаёт записи, но обязан
+  // сохранить provenance. Снятый пользователем элемент не дописывается.
+  const pickedMerges = plan.items.filter((i, n) =>
+    i.status === 'existing-by-provenance' && i.merge && i.merge.addRefs.length &&
+    (!sel.items || sel.items[n] !== false));
+  if (!pickedItems.length && !pickedLinks.length && !pickedMerges.length) {
+    return { ok: false, error: 'ничего не выбрано для импорта' };
+  }
+
+  const candidate = JSON.parse(JSON.stringify(DB));
+  const created = [];
+  const mergedRefs = [];
+  try {
+    for (const it of pickedItems) {
+      if (!Array.isArray(candidate[it.coll])) candidate[it.coll] = [];
+      candidate[it.coll].push(JSON.parse(JSON.stringify(it.rec)));
+      created.push({ clientRef: it.clientRef, coll: it.coll, id: it.rec.id });
+    }
+    // Слияние provenance: ТОЛЬКО дописывание ссылок в `ext.sourceRefs`.
+    // Ни одно содержательное поле записи не трогается — это аудит источника,
+    // а не редактирование пользовательского текста.
+    for (const it of pickedMerges) {
+      const { coll, id, addRefs } = it.merge;
+      const rec = (candidate[coll] || []).find(r => r && r.id === id);
+      if (!rec) throw new Error('запись для слияния provenance не найдена: ' + coll + '#' + id);
+      if (!rec.ext) throw new Error('у записи нет provenance для слияния: ' + coll + '#' + id);
+      if (!Array.isArray(rec.ext.sourceRefs)) {
+        // Запись, импортированная до появления sourceRefs: поднимаем её
+        // плоский sourceId в набор ссылок, ничего не теряя.
+        rec.ext.sourceRefs = rec.ext.sourceId ? [{
+          sourceId: rec.ext.sourceId, role: 'primary',
+          sourceSystem: rec.ext.sourceSystem || 'other', sourceModule: rec.ext.sourceModule || null,
+          sourceChatId: rec.ext.sourceChatId || null, sourceLabel: rec.ext.sourceLabel || null,
+          sourceDate: rec.ext.sourceDate || null, note: null,
+        }] : [];
+      }
+      const known = extRecordSourceIds(rec);
+      const added = [];
+      addRefs.forEach(r => {
+        if (known.includes(r.sourceId)) return;
+        // Дописанная ссылка всегда приходит как псевдоним: основная ссылка у
+        // записи уже есть и не переопределяется поздним пакетом.
+        rec.ext.sourceRefs.push({ ...r, role: 'alias' });
+        known.push(r.sourceId);
+        added.push(r.sourceId);
+      });
+      if (rec.ext.sourceRefs.length > EXT_LIMITS.maxSourceRefs) {
+        throw new Error('превышен лимит ссылок на источники у записи ' + coll + '#' + id);
+      }
+      if (added.length) {
+        rec._u = Date.now();   // изменение обязано пережить merge/sync
+        mergedRefs.push({ coll, id, addedSourceIds: added });
+      }
+    }
+    // Повторная полная валидация связей уже на финальном кандидате.
+    const linkRefs = [];
+    if (!Array.isArray(candidate.psyLinks)) candidate.psyLinks = [];
+    for (const l of pickedLinks) {
+      const err = validatePsyLink(l.link, candidate);
+      if (err) throw new Error('связь отклонена валидатором: ' + err);
+      const rec = {
+        id: psyUid('psyLink'), ...l.link,
+        createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+        source: 'user', acceptedAt: nowISO(), confidenceLabel: null,
+      };
+      candidate.psyLinks.push(rec);
+      linkRefs.push({ id: rec.id });
+    }
+    // Ledger: только аудит импорта. Никакого полного transcript и никакого
+    // дублирования canonical-текстов.
+    const src = plan.pkg.source || {};
+    const session = {
+      id: psyUid('externalWork'),
+      source: extStr(src.kind, 40) || 'other',
+      sourceLabel: extStr(src.label, 200) || null,
+      sourceModule: extStr(src.module, 120) || null,
+      sourceChatId: extStr(src.chatId, 200) || null,
+      sessionDate: extIsIsoDay((plan.pkg.session || {}).date) ? plan.pkg.session.date : null,
+      importedAt: nowISO(),
+      formatVersion: EXT_WORK_FORMAT,
+      contentHash: plan.packageHash,
+      summary: extStr((plan.pkg.session || {}).summary, 2000),
+      selectedCount: pickedItems.length, rejectedCount: plan.items.length - pickedItems.length,
+      recordRefs: created, linkRefs,
+      // Кросс-модульные псевдонимы, дописанные к уже существующим записям.
+      // Записей они не создают, но обязаны быть видны в аудите.
+      mergedRefs,
+      status: 'imported', privacyClass: 'sensitive',
+      createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+    };
+    if (!Array.isArray(candidate.externalWorkSessions)) candidate.externalWorkSessions = [];
+    candidate.externalWorkSessions.push(session);
+
+    // Один безопасный переход: подменяем DB целиком и пишем через
+    // production-persist (транзакция Wave 5 + откат при сбое).
+    const prevDb = DB;
+    DB = candidate;
+    if (!persist()) { DB = prevDb; return { ok: false, error: 'не удалось сохранить — данные не изменены' }; }
+    return { ok: true, created, linkRefs, mergedRefs, sessionId: session.id };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || 'ошибка импорта' };   // DB не трогался
+  }
 }
 
 // Wave 5 (owner review, финальный проход): маркер для независимого recovery

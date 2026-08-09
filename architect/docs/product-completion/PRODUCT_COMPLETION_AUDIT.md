@@ -421,7 +421,23 @@ PR #146 предлагал: вкладку «Психология», hub «Ин�
 - **UX Evidence:** `tests/wave4-1-astro-evidence.mjs` (`npm run evidence:astro-source`) — экран «Закономерности» в матрице iPhone/Android/Desktop × Source OFF / Source ON / Correlation Detail / Unknown Birth Time; вместе со снимками фиксируются факты рендера (aria-checked, число астрособытий, распределение уверенности, число событий домов/углов).
 - **Контракт:** `WAVE4_1_ASTRO_PATTERN_ENGINE.md`.
 
-### Волна 5 — Данные, надёжность и выпуск
+### Волна 5 — Данные, надёжность и выпуск — **РЕАЛИЗОВАНО** (issue #158, PR #159, merged `d5686edc772cd3a68a66464fdd4dbae030d7fdd2`)
+
+- **Что сделано:** выведенный из `DEFAULT_DB` scalar-merge контракт (закрывает
+  потерю `astroTexts`/`astroAiConsent`/`astroRectify` при синке); storage
+  durability через `navigator.storage.persist()`/`estimate()`; транзакционная
+  запись `_txWrite()` со снапшотом, read-back и откатом; профильный
+  recovery write lock и критическое состояние `transaction-rollback-failed`;
+  SW last-known-good + build identity + fail-closed recovery + MessagePort ACK
+  + независимый bootstrap; hardening AI-провайдеров; release gate по собранному
+  артефакту (`npm run test:artifact`).
+- **Три круга блокирующего owner review** — включая реальный production-дефект
+  маршрутизации ACK (`e.source || e.ports[0]` вместо `e.ports[0] || e.source`),
+  из-за которого восстановление уходило в таймаут.
+- **Контракт:** `WAVE5_RELIABILITY_RELEASE_CONTRACT.md`.
+- Исходный план волны (для истории) — ниже.
+
+<details><summary>Исходный план Волны 5</summary>
 
 - **Только фактически отсутствующее** (по §1.11–1.14): fix merge-списка для `astroTexts/astroAiConsent/astroRectify` (§1.11, реальный баг); `navigator.storage.persist()`+`estimate()` (§1.14, отсутствует полностью); rollback-механизм для плохого деплоя кода (§1.14, отсутствует полностью); `theme-color` синхронизация (§1.14, косметика); включение медиа в обычный JSON-экспорт или явная дизамбигуация обычного/encrypted экспорта (§1.12/1.13/1.15, DUPLICATE-риск); полный backup/restore roundtrip всех реально используемых сущностей+media (частично уже WORKING — расширить покрытие до `astroTexts`/`astroAiConsent`/`astroRectify` после фикса merge); удаление доказанно мёртвого кода — **кандидат №1: `DB.chapters`/«Книга» либо оживить, либо явно и осознанно удалить** (см. §1.2/§2).
 - **Конечный результат:** надёжный, объяснимый offline-first продукт без тихих потерь данных и без «мёртвых» экранов.
@@ -430,6 +446,38 @@ PR #146 предлагал: вкладку «Психология», hub «Ин�
 - **Focused tests:** offline reload на iPhone/iPad; profile switch; sync conflicts/tombstones/duplicate ID/восстановление после частичного сбоя; performance на большом synthetic dataset.
 - **Критерии готовности:** зелёный CI+evidence на Chromium+WebKit; актуализированный `PRODUCT_COMPLETION_AUDIT.md` до финальной матрицы; owner-readable `PRODUCT_STATUS.md`.
 - **Не смешивать:** функциональные доработки доменов — эта волна только про надёжность/выпуск.
+
+</details>
+
+### Волна 6 — External Work Bridge — **РЕАЛИЗОВАНО** (issue #160, ветка `claude/wave-6-external-work-bridge`)
+
+- **Что сделано:** импорт работы, проделанной вне приложения (сессии ChatGPT,
+  материалы из Google Drive), в формате `architect-external-work-v1`. Внешняя
+  сессия = provenance/audit-конверт + проекция в 9 УЖЕ существующих
+  канонических типов. Второй модели жизни не создаётся: импортированный инсайт
+  — это обычная запись `DB.insights` с тем же набором полей плюс `ext`.
+- **Schema/migration:** `SCHEMA_VERSION` 5→**6**, аддитивно: одна новая
+  коллекция `externalWorkSessions` (журнал импортов) в `DEFAULT_DB` и `IDCOLS`
+  (теперь 26). Существующие данные не мигрируются.
+- **Журнал НЕ является источником событий:** `externalWorkSessions` сознательно
+  отсутствует в `EVENT_SOURCES` — иначе одно и то же содержание давало бы
+  движку Волны 4 двойное evidence. Закреплено обычным тестом и mutation-проверкой.
+- **Дедупликация двухуровневая:** `contentHash` (SHA-256 по канонизированному
+  JSON, независим от порядка ключей) на пакет + `sourceId` на запись в разрезе
+  коллекции. **Дедупа по тексту нет** — два разных события с одинаковой
+  формулировкой остаются двумя записями.
+- **Границы Волны 5 не обходятся:** под recovery-блокировкой импорт запрещён,
+  запись идёт через транзакционный `persist()`; любая ошибка — zero mutation
+  всего batch.
+- **Что importer отказывается делать:** `moment` не создаётся без явных
+  числовых `valence`/`activation` (состояние не выводится из текста);
+  `sphereLog` требует существующей сферы и явного `value`; трактовка сна не
+  подменяет оригинальный рассказ. Импорт полностью локальный — 0 сетевых и 0
+  AI-вызовов.
+- **Focused tests:** `tests/wave6-external-work-bridge.spec.mjs` (85 проверок),
+  `tests/wave6-mutation.mjs` (5 мутаций — доказывают, что проверки не
+  ложнозелёные), `tests/wave6-backup-roundtrip.test.mjs` (20 проверок).
+- **Контракт:** `WAVE6_EXTERNAL_WORK_BRIDGE_CONTRACT.md`.
 
 ---
 
@@ -448,7 +496,9 @@ SCHEMA_CONTRACT_ITEMS_LISTED=true
 EXECUTION_PLAN_WAVES_1_5=drafted
 WAVE_1_COMPLETE=true (issue #148, PR #149, merged)
 WAVE_2_COMPLETE=true (issue #150, PR #151, merged)
-WAVE_4_COMPLETE=true (issue #152, this PR — Draft, awaiting owner review)
-WAVE_3_NOT_STARTED=true
-WAVE_5_NOT_STARTED=true
+WAVE_4_COMPLETE=true (issue #152, PR #153, merged)
+WAVE_3_COMPLETE=true (issue #154, PR #155, merged)
+WAVE_4_1_COMPLETE=true (issue #156, PR #157, merged d832cd9)
+WAVE_5_COMPLETE=true (issue #158, PR #159, merged d5686edc)
+WAVE_6_COMPLETE=true (issue #160, this PR — Draft, awaiting owner review)
 ```
