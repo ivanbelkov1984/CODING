@@ -12976,14 +12976,21 @@ function extPickData(e) {
 //   { coll: 'insights', id: 42 }   — ссылка на уже существующую запись.
 // Произвольный id из payload не легализуется: для внутрипакетной ссылки id
 // берётся из карты, выданной приложением на «проходе 1».
+// Owner review 5234388766: ссылка разрешается в ФАКТИЧЕСКИ обработанную запись
+// (`ctx.refToRec`), а не в предварительно выданный id. Сборка идёт в порядке
+// зависимостей, поэтому к моменту валидации зависимость уже либо создана, либо
+// найдена дедупликацией, либо провалилась — и тогда ссылка честно не
+// разрешается, а весь пакет блокируется. Порядок записей в payload не влияет.
 function extResolveIntraPackageRefs(data, ctx, errors) {
   const map = ctx.psyIds || new Map();
+  const built = ctx.refToRec || new Map();
   const one = (v, path, expectColl) => {
     if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
     const cr = extStr(v.clientRef, 200);
     if (!cr) return v;                       // обычная { coll, id } — не трогаем
-    const hit = map.get(cr);
-    if (!hit) { errors.push(`${path}: clientRef «${cr}» не найден среди записей пакета`); return null; }
+    if (!map.has(cr)) { errors.push(`${path}: clientRef «${cr}» не найден среди записей пакета`); return null; }
+    const hit = built.get(cr);
+    if (!hit) { errors.push(`${path}: зависимость «${cr}» не создана этим пакетом — ссылка не разрешается`); return null; }
     if (expectColl && hit.coll !== expectColl) {
       errors.push(`${path}: clientRef «${cr}» указывает на ${hit.coll}, а здесь требуется ${expectColl}`);
       return null;
@@ -13016,6 +13023,20 @@ function extResolveIntraPackageRefs(data, ctx, errors) {
     const r = one(out.supersedesId, 'supersedesId', 'psyFormulations');
     out.supersedesId = r === null ? undefined : r.id;
   }
+  return out;
+}
+// Какие clientRef'ы использует сущность — нужно, чтобы построить порядок сборки
+// ДО того, как что-либо собрано (owner review 5234388766).
+function extPsyRefClientRefs(data) {
+  const out = [];
+  const take = v => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return;
+    const cr = extStr(v.clientRef, 200);
+    if (cr && !out.includes(cr)) out.push(cr);
+  };
+  PSY_REF_OBJECT_FIELDS.forEach(f => { if (Array.isArray(data[f])) data[f].forEach(take); });
+  Object.keys(PSY_REF_ID_FIELDS).forEach(f => { if (Array.isArray(data[f])) data[f].forEach(take); });
+  take(data.triggerRef); take(data.formulationRef); take(data.supersedesId);
   return out;
 }
 const EXT_ADAPTERS = {
@@ -13417,27 +13438,71 @@ async function extBuildPlan(rawText) {
   // записей, а валидация «висячих» ссылок остаётся полной — на ПРОХОДЕ 2
   // записи реально лежат в кандидате.
   const psyIds = new Map();      // clientRef -> { coll, id }
+  const psyOwnerOf = new Map();  // clientRef -> индекс сущности пакета
   if (pkg.format === EXT_WORK_FORMAT_V2) {
-    pkg.entities.forEach(e => {
+    pkg.entities.forEach((e, i) => {
       const coll = EXT_TARGETS_V2_ONLY[e.type];
       if (!coll) return;
       const ref = extStr(e.clientRef, 200);
-      if (ref && !psyIds.has(ref)) psyIds.set(ref, { coll, id: psyUid(PSY_ID_PREFIX[e.type]) });
+      if (ref && !psyIds.has(ref)) {
+        psyIds.set(ref, { coll, id: psyUid(PSY_ID_PREFIX[e.type]) });
+        psyOwnerOf.set(ref, i);
+      }
     });
   }
   const unresolvedRefs = [];
+
+  // Owner review 5234388766: ПОРЯДОК ЗАПИСЕЙ В ПАКЕТЕ НЕ ЗНАЧИМ.
+  // Сущность собирается только после своих зависимостей — иначе review,
+  // стоящий в массиве раньше цели, ссылался бы на ещё не созданную запись и
+  // молча становился invalid при пустом `unresolvedRefs` (тихий partial import).
+  // Kahn с исходным порядком как tie-break: план детерминирован при любой
+  // перестановке. Цикл не «развязывается» эвристикой — он fail-closed.
+  const psyDeps = pkg.entities.map((e, i) => {
+    if (!EXT_TARGETS_V2_ONLY[e.type]) return [];
+    return extPsyRefClientRefs(extPickData(e))
+      .map(cr => psyOwnerOf.has(cr) ? psyOwnerOf.get(cr) : null)
+      .filter(j => j !== null && j !== i);
+  });
+  const buildOrder = [];
+  const placed = new Set();
+  for (let guard = 0; guard < pkg.entities.length && placed.size < pkg.entities.length; guard++) {
+    let moved = false;
+    pkg.entities.forEach((_, i) => {
+      if (placed.has(i) || !psyDeps[i].every(j => placed.has(j))) return;
+      buildOrder.push(i); placed.add(i); moved = true;
+    });
+    if (!moved) break;
+  }
+  const cyclicIdx = pkg.entities.map((_, i) => i).filter(i => !placed.has(i));
+
+  const items = new Array(pkg.entities.length).fill(null);
+  const refToRec = new Map();   // clientRef -> { coll, id }
 
   const ctx = {
     db,
     nextId: () => ++idSeq,
     createdAt: nowISO(), day: todayKey(), dateRU: dateRU(), dateFull: dateFullRU(),
     srcLabel: extStr((pkg.source || {}).label, 80) || 'Внешняя работа',
-    psyIds, unresolvedRefs,
+    psyIds, unresolvedRefs, refToRec,
   };
 
-  const items = [];
-  const refToRec = new Map();   // clientRef -> { coll, id }
-  for (const e of pkg.entities) {
+  cyclicIdx.forEach(i => {
+    const e = pkg.entities[i];
+    const cr = extStr(e.clientRef, 200);
+    const reason = 'циклическая зависимость внутрипакетных ссылок — порядок сборки невозможен';
+    unresolvedRefs.push({ clientRef: cr, problem: reason });
+    items[i] = {
+      clientRef: cr, type: e.type, coll: extTargetsFor(pkg.format)[e.type],
+      title: extStr(e.title, 120) || '(без заголовка)',
+      sourceId: null, sourceChatId: null, sourceModule: null, date: null,
+      claimClass: null, claimClasses: [], textOrigin: null, sourceRefs: [],
+      status: 'invalid', reason,
+    };
+  });
+
+  for (const eIdx of buildOrder) {
+    const e = pkg.entities[eIdx];
     const coll = extTargetsFor(pkg.format)[e.type];
     const prov = extProvenance(pkg, e, packageHash);
     const base = {
@@ -13451,7 +13516,7 @@ async function extBuildPlan(rawText) {
       sourceRefs: prov.sourceRefs.map(r => r.sourceId),
     };
 
-    if (already) { items.push({ ...base, status: 'already-imported', reason: 'этот пакет уже импортирован' }); continue; }
+    if (already) { items[eIdx] = { ...base, status: 'already-imported', reason: 'этот пакет уже импортирован' }; continue; }
 
     // Совпадение ищется по ЛЮБОЙ ссылке записи, а не только по основной:
     // поздний LIFE-пакет, ссылающийся на тот же DREAM-эпизод, обязан найти
@@ -13467,11 +13532,11 @@ async function extBuildPlan(rawText) {
     // создаётся, пакет помечается конфликтом и коммит отклоняется целиком.
     const cross = found.find(x => x.at.coll !== coll);
     if (cross) {
-      items.push({
+      items[eIdx] = {
         ...base, status: 'conflict',
         conflict: { sourceId: cross.ref.sourceId, existingColl: cross.at.coll, existingId: cross.at.id, requestedColl: coll },
         reason: `конфликт идентичности источника: «${cross.ref.sourceId}» уже импортирован как «${cross.at.coll}», а пакет проецирует его в «${coll}». Один исходный объект не может быть двумя разными типами записи.`,
-      });
+      };
       continue;
     }
 
@@ -13484,13 +13549,13 @@ async function extBuildPlan(rawText) {
       const existingRec = (db[coll] || []).find(r => r && r.id === existingId);
       const known = existingRec ? extRecordSourceIds(existingRec) : [];
       const addRefs = prov.sourceRefs.filter(r => !known.includes(r.sourceId));
-      items.push({
+      items[eIdx] = {
         ...base, status: 'existing-by-provenance',
         reason: addRefs.length
           ? `этот источник уже импортирован (${hit.ref.role === 'primary' ? 'основная ссылка' : 'псевдоним'}); добавляются ссылки: ${addRefs.map(r => r.sourceId).join(', ')}`
           : 'этот источник уже импортирован ранее',
         merge: { coll, id: existingId, addRefs, packageHash },
-      });
+      };
       // Индекс дополняется сразу, чтобы новые псевдонимы участвовали в
       // дедупликации уже внутри ЭТОГО пакета.
       addRefs.forEach(r => {
@@ -13500,7 +13565,7 @@ async function extBuildPlan(rawText) {
       continue;
     }
     const built = EXT_ADAPTERS[e.type](e, extPickData(e), ctx);
-    if (built.reject) { items.push({ ...base, status: 'invalid', reason: built.reject }); continue; }
+    if (built.reject) { items[eIdx] = { ...base, status: 'invalid', reason: built.reject }; continue; }
     built.rec.ext = prov;
     // ПРОХОД 2: собранная запись немедленно попадает в кандидата. Именно
     // поэтому следующая сущность пакета (например review) видит её как
@@ -13508,7 +13573,7 @@ async function extBuildPlan(rawText) {
     // ничего не ослаблено, просто кандидат собран полностью.
     if (!Array.isArray(db[coll])) db[coll] = [];
     db[coll].push(built.rec);
-    items.push({ ...base, status: 'new', rec: built.rec });
+    items[eIdx] = { ...base, status: 'new', rec: built.rec };
     refToRec.set(prov.clientRef, { coll, id: built.rec.id });
     // Все ссылки новой записи сразу попадают в индекс: вторая запись ТОГО ЖЕ
     // пакета, ссылающаяся на тот же эпизод, не создаст дубль.
@@ -13517,6 +13582,10 @@ async function extBuildPlan(rawText) {
       if (k && !provIdx.has(k)) provIdx.set(k, { coll, id: built.rec.id });
     });
   }
+
+  // Сборка шла в порядке зависимостей, а показывается пакет в СВОЁМ порядке:
+  // preview не должен зависеть от внутренней очерёдности планировщика.
+  const orderedItems = items.filter(Boolean);
 
   // Связи проверяются ТЕМ ЖЕ production-валидатором, но на кандидате: чтобы
   // preview показывал ровно тот результат, который даст коммит.
@@ -13537,18 +13606,23 @@ async function extBuildPlan(rawText) {
   });
 
   const counts = {};
-  items.forEach(i => { counts[i.status] = (counts[i.status] || 0) + 1; });
+  orderedItems.forEach(i => { counts[i.status] = (counts[i.status] || 0) + 1; });
   const byTarget = {};
-  items.filter(i => i.status === 'new').forEach(i => { byTarget[i.coll] = (byTarget[i.coll] || 0) + 1; });
+  orderedItems.filter(i => i.status === 'new').forEach(i => { byTarget[i.coll] = (byTarget[i.coll] || 0) + 1; });
 
   return {
-    ok: true, errors: [], packageHash, pkg, items, links: linkItems, counts, byTarget,
+    ok: true, errors: [], packageHash, pkg, items: orderedItems, links: linkItems, counts, byTarget,
     alreadyImported: !!already, existingSessionId: already ? already.id : null,
     // Нерезолвящиеся внутрипакетные ссылки блокируют ВЕСЬ пакет (см. commit).
     unresolvedRefs,
     // Карта разрешённых внутрипакетных ссылок — preview обязан показывать,
-    // во что именно превратился clientRef, ДО подтверждения.
-    intraPackageRefs: [...psyIds.entries()].map(([clientRef, v]) => ({ clientRef, coll: v.coll, id: v.id })),
+    // во что именно превратился clientRef, ДО подтверждения. Показывается
+    // ФАКТИЧЕСКИ разрешённая цель (в т.ч. найденная дедупликацией), а при
+    // несостоявшейся сборке — запланированная.
+    intraPackageRefs: [...psyIds.entries()].map(([clientRef, v]) => {
+      const r = refToRec.get(clientRef) || v;
+      return { clientRef, coll: r.coll, id: r.id };
+    }),
   };
 }
 

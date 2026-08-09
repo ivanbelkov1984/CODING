@@ -116,6 +116,21 @@ const MUTANTS = [
     replace: '    DB[coll].pop();',
     expectFail: 'psyFormulations побайтово идентичны состоянию до попытки',
   },
+  // ── Owner review 5234388766 ──────────────────────────────────────
+  {
+    id: 'sequential-order-dependency',
+    what: 'порядок сборки снова = порядок массива (зависимости игнорируются)',
+    find: '      if (placed.has(i) || !psyDeps[i].every(j => placed.has(j))) return;',
+    replace: '      if (placed.has(i)) return;',
+    expectFail: 'обратный порядок даёт тот же план',
+  },
+  {
+    id: 'cycle-silently-built',
+    what: 'цикл внутрипакетных ссылок перестаёт быть fail-closed',
+    find: '  const cyclicIdx = pkg.entities.map((_, i) => i).filter(i => !placed.has(i));',
+    replace: '  const cyclicIdx = [];',
+    expectFail: 'цикл назван явно',
+  },
   {
     id: 'dbcount-ignores-psychology',
     what: 'dbCount перестаёт считать психологические записи',

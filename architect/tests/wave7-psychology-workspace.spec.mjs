@@ -879,11 +879,9 @@ const V2_BASE = {
 // ── 45. BLOCKER 1: один v2-пакет создаёт полный связанный handoff ────
 // formulation + goal + 2 интервенции + naturalistic observation + review,
 // ссылающийся на НОВЫЕ записи этого же пакета.
-{
-  await reset();
-  const FULL_HANDOFF = {
-    ...V2_BASE,
-    session: { clientRef: 'TEST-PSY-HANDOFF-1', summary: 'Полный синтетический handoff', date: '2026-03-10' },
+const FULL_HANDOFF = {
+  ...V2_BASE,
+  session: { clientRef: 'TEST-PSY-HANDOFF-1', summary: 'Полный синтетический handoff', date: '2026-03-10' },
     entities: [
       { clientRef: 'f1', type: 'psyFormulation', sourceId: 'TEST-PSY-F-1',
         claimClass: 'assistant_summary', textOrigin: 'structured_summary',
@@ -925,8 +923,11 @@ const V2_BASE = {
           interventionEpisodeRefs: [{ clientRef: 'e1' }, { clientRef: 'e2' }],
           observationRefs: [{ clientRef: 'o1' }, { clientRef: 'o2' }, { clientRef: 'onat' }],
           limitations: ['один период не доказывает причинность'] } },
-    ],
-  };
+  ],
+};
+
+{
+  await reset();
   const res = await commit(FULL_HANDOFF);
   ok(res.res.ok, 'один v2-пакет с внутренними ссылками импортируется целиком',
     JSON.stringify((res.plan.items || []).filter(i => i.status !== 'new')));
@@ -1064,6 +1065,136 @@ const V2_BASE = {
   const post = await page.evaluate(() => ({ n: DB.psyFormulations.length, statuses: DB.psyFormulations.map(f => f.status) }));
   ok(v2.ok && post.n === 2 && post.statuses.filter(s => s === 'active').length === 1,
     'после восстановления persist версионирование работает как раньше');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  OWNER REVIEW 5234388766 — порядок записей в v2-пакете не значим.
+// ═══════════════════════════════════════════════════════════════════
+
+// Проекция плана, не зависящая от порядка: что именно пакет собирается сделать.
+// Порядок КЛЮЧЕЙ в counts/byTarget отражает порядок пакета, а не решение
+// планировщика, поэтому сравниваются множества, а не порядок вставки.
+const sortedPairs = o => Object.entries(o || {}).sort((a, b) => a[0].localeCompare(b[0]));
+const planShape = p => JSON.stringify({
+  counts: sortedPairs(p.counts), byTarget: sortedPairs(p.byTarget),
+  items: (p.items || []).map(i => ({ ref: i.clientRef, type: i.type, coll: i.coll, status: i.status }))
+    .sort((a, b) => (a.ref || '').localeCompare(b.ref || '')),
+});
+
+// ── 49. Тот же пакет в обратном и перемешанном порядке ──────────────
+{
+  await reset();
+  const canon = await plan(FULL_HANDOFF);
+  await reset();
+
+  const reversed = { ...FULL_HANDOFF, entities: [...FULL_HANDOFF.entities].reverse() };
+  const revPlan = await plan(reversed);
+  ok(planShape(revPlan) === planShape(canon),
+    'обратный порядок даёт тот же план, что и прямой');
+  ok((revPlan.unresolvedRefs || []).length === 0,
+    `обратный порядок не оставил неразрешённых ссылок (${(revPlan.unresolvedRefs || []).length})`);
+  ok((revPlan.items || []).filter(i => i.status === 'new').length === 8,
+    `все 8 сущностей — new при review первым (${(revPlan.items || []).filter(i => i.status === 'new').length})`);
+  ok((revPlan.items || [])[0] && (revPlan.items || [])[0].clientRef === 'r1',
+    'план показан в порядке пакета, а не в порядке сборки');
+
+  const revRes = await commit(reversed);
+  ok(revRes.res.ok, 'пакет с review первым коммитится целиком',
+    JSON.stringify((revRes.plan.items || []).filter(i => i.status !== 'new')));
+  const st = await page.evaluate(() => {
+    const r = DB.psyReviews[0], e1 = DB.psyInterventionEpisodes.find(x => x.ext.sourceId === 'TEST-INT-501');
+    const g = DB.psyGoals[0];
+    return {
+      counts: [DB.psyFormulations.length, DB.psyGoals.length, DB.psyInterventionEpisodes.length, DB.psyObservations.length, DB.psyReviews.length],
+      reviewResolves: !!r && r.interventionEpisodeRefs.every(id => DB.psyInterventionEpisodes.some(x => x.id === id)) &&
+        r.observationRefs.every(id => DB.psyObservations.some(x => x.id === id)) &&
+        r.goalRefs.every(id => DB.psyGoals.some(x => x.id === id)) &&
+        DB.psyFormulations.some(f => f.id === r.formulationRef),
+      epsRefs: !!e1 && DB.psyObservations.some(o => o.id === e1.preObservationRefs[0].id) &&
+        DB.psyObservations.some(o => o.id === e1.postObservationRefs[0].id),
+      goalToFormulation: !!g && g.sourceRefs.length === 1 &&
+        DB.psyFormulations.some(f => f.id === g.sourceRefs[0].id),
+    };
+  });
+  ok(JSON.stringify(st.counts) === JSON.stringify([1, 1, 2, 3, 1]),
+    `обратный порядок создал те же записи (${st.counts.join('/')})`);
+  ok(st.reviewResolves && st.epsRefs && st.goalToFormulation,
+    'все внутрипакетные ссылки валидны при обратном порядке');
+
+  // Перемешанный порядок — детерминированная перестановка, не случайная.
+  await reset();
+  const order = ['r1', 'e1', 'o2', 'f1', 'onat', 'g1', 'e2', 'o1'];
+  const shuffled = { ...FULL_HANDOFF,
+    entities: order.map(cr => FULL_HANDOFF.entities.find(e => e.clientRef === cr)) };
+  const shufPlan = await plan(shuffled);
+  ok(planShape(shufPlan) === planShape(canon), 'перемешанный порядок даёт тот же план');
+  const shufRes = await commit(shuffled);
+  const shufCounts = await page.evaluate(() => [DB.psyFormulations.length, DB.psyGoals.length,
+    DB.psyInterventionEpisodes.length, DB.psyObservations.length, DB.psyReviews.length]);
+  ok(shufRes.res.ok && JSON.stringify(shufCounts) === JSON.stringify([1, 1, 2, 3, 1]),
+    `перемешанный порядок импортируется целиком (${shufCounts.join('/')})`);
+}
+
+// ── 50. Зависимость есть по clientRef, но сама невалидна ────────────
+// Тихий partial import запрещён: пакет описывает связанную работу.
+{
+  await reset();
+  const BROKEN_DEP = { ...FULL_HANDOFF, session: { ...FULL_HANDOFF.session, clientRef: 'TEST-PSY-HANDOFF-BAD' },
+    entities: FULL_HANDOFF.entities.map(e => e.clientRef === 'g1'
+      // Цель без label — production-валидатор её отклонит.
+      ? { ...e, data: { proximalOutcome: 'наблюдаемый результат', sourceRefs: [{ clientRef: 'f1' }] } }
+      : e) };
+  const p = await plan(BROKEN_DEP);
+  ok((p.unresolvedRefs || []).length > 0,
+    `невалидная зависимость видна в preview как неразрешённая ссылка (${(p.unresolvedRefs || []).length})`);
+  ok((p.items || []).some(i => i.clientRef === 'g1' && i.status === 'invalid'),
+    'сама невалидная цель помечена invalid');
+  ok((p.items || []).some(i => i.clientRef === 'r1' && i.status === 'invalid'),
+    'зависимый review не считается импортируемым');
+
+  const res = await commit(BROKEN_DEP);
+  ok(res.res.ok === false && /внутрипакетные ссылки не разрешены/.test(res.res.error || ''),
+    'пакет с невалидной зависимостью отклонён целиком', JSON.stringify(res.res).slice(0, 300));
+  const after = await page.evaluate(() => [DB.psyFormulations.length, DB.psyGoals.length,
+    DB.psyInterventionEpisodes.length, DB.psyObservations.length, DB.psyReviews.length,
+    (DB.externalWorkSessions || []).length]);
+  ok(after.every(n => n === 0),
+    `zero mutation: валидные сущности того же пакета тоже не импортированы (${after.join('/')})`);
+
+  // Тот же пакет в обратном порядке блокируется так же — не «повезло с порядком».
+  await reset();
+  const revBroken = { ...BROKEN_DEP, entities: [...BROKEN_DEP.entities].reverse() };
+  const resRev = await commit(revBroken);
+  const afterRev = await page.evaluate(() => [DB.psyFormulations.length, DB.psyGoals.length,
+    DB.psyInterventionEpisodes.length, DB.psyObservations.length, DB.psyReviews.length]);
+  ok(resRev.res.ok === false && afterRev.every(n => n === 0),
+    'обратный порядок с той же невалидной зависимостью тоже блокирует пакет');
+}
+
+// ── 51. Цикл внутрипакетных ссылок → явный fail-closed ──────────────
+{
+  await reset();
+  const CYCLE = {
+    ...V2_BASE,
+    session: { clientRef: 'TEST-PSY-CYCLE', summary: 'Синтетический цикл', date: '2026-03-10' },
+    entities: [
+      { clientRef: 'ga', type: 'psyGoal', sourceId: 'TEST-PSY-CYC-A',
+        claimClass: 'user_experience', textOrigin: 'user_words',
+        data: { label: 'Цель А', proximalOutcome: 'результат А', sourceRefs: [{ clientRef: 'gb' }] } },
+      { clientRef: 'gb', type: 'psyGoal', sourceId: 'TEST-PSY-CYC-B',
+        claimClass: 'user_experience', textOrigin: 'user_words',
+        data: { label: 'Цель Б', proximalOutcome: 'результат Б', sourceRefs: [{ clientRef: 'ga' }] } },
+    ],
+  };
+  const p = await plan(CYCLE);
+  ok((p.unresolvedRefs || []).some(u => /циклическая зависимость/.test(u.problem || '')),
+    'цикл назван явно, а не «развязан» эвристикой', JSON.stringify(p.unresolvedRefs));
+  ok((p.items || []).length === 2 && (p.items || []).every(i => i.status === 'invalid'),
+    'обе сущности цикла помечены invalid');
+  const res = await commit(CYCLE);
+  const after = await page.evaluate(() => [DB.psyGoals.length, (DB.externalWorkSessions || []).length]);
+  ok(res.res.ok === false && after.every(n => n === 0),
+    `цикл отклонён целиком, zero mutation (${after.join('/')})`);
 }
 
 ok(errors.length === 0, `JS-ошибок нет за весь прогон (${errors.length})`, errors.slice(0, 3).join('\n'));
