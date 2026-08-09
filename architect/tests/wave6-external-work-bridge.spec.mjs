@@ -1090,6 +1090,190 @@ console.log('\n── Wave 6: External Work Bridge ──');
     'плоский legacy sourceId поднят в набор ссылок, новый псевдоним дописан');
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  BLOCKING OWNER REVIEW 5230472460 — идентичность sourceId ГЛОБАЛЬНА.
+//  Контракт объявляет sourceId единственной идентичностью источника,
+//  значит один исходный объект не может стать двумя canonical-записями
+//  разных типов. Дедуп-ключ больше не ограничен коллекцией.
+// ═══════════════════════════════════════════════════════════════════
+
+const CONFLICT_PKG = (type, sourceId, extra) => ({
+  format: 'architect-external-work-v1',
+  source: { kind: 'chatgpt', label: 'Проверка идентичности', module: 'X-MODULE', chatId: 'chat-x' },
+  session: { clientRef: 's-x-' + sourceId, summary: 'Проверка кросс-типового конфликта', date: '2026-03-10' },
+  entities: [{
+    clientRef: 'c1', type, sourceId,
+    claimClass: 'user_fact', textOrigin: 'user_words',
+    data: { title: 'Один и тот же эпизод', body: 'Синтетический текст эпизода.', text: 'Синтетический текст эпизода.' },
+    ...(extra || {}),
+  }],
+  links: [],
+});
+
+// ── 41. Тот же sourceId в другой canonical-коллекции → явный конфликт ──
+{
+  await reset();
+  await commit(CONFLICT_PKG('spiritual', 'TEST-LIFE-410'));
+  const before = await page.evaluate(() => JSON.stringify(DB));
+  const p = await plan(CONFLICT_PKG('insight', 'TEST-LIFE-410'));
+  const after = await page.evaluate(() => JSON.stringify(DB));
+  ok(p.ok === true && p.items[0].status === 'conflict',
+    `тот же sourceId в другом canonical type помечен как conflict (${p.items[0] && p.items[0].status})`);
+  ok(/уже импортирован как «spiritual»/.test(p.items[0].reason || ''),
+    'причина называет существующую коллекцию явно', p.items[0] && p.items[0].reason);
+  ok(p.items[0].status !== 'new' && p.items[0].status !== 'existing-by-provenance',
+    'конфликт НЕ выдаётся ни за новую запись, ни за дубль');
+  ok(before === after, 'preview конфликта не изменил базу ни на байт');
+
+  const res = await page.evaluate(async (t) => {
+    const pl = await extBuildPlan(t);
+    const snap = JSON.stringify(DB);
+    const r = extCommitPlan(pl);
+    return { ok: r.ok, error: r.error, conflicts: r.conflicts, mutated: JSON.stringify(DB) !== snap };
+  }, JSON.stringify(CONFLICT_PKG('insight', 'TEST-LIFE-410')));
+  ok(res.ok === false && /конфликт идентичности/.test(res.error || ''),
+    'commit отклонён fail-closed', res.error);
+  ok(res.mutated === false, 'zero mutation: конфликтный пакет не изменил ни одной записи');
+  ok(Array.isArray(res.conflicts) && res.conflicts[0].existingColl === 'spiritual' &&
+     res.conflicts[0].requestedColl === 'insights',
+    'отчёт о конфликте содержит обе стороны проекции');
+  const counts = await page.evaluate(() => ({ sp: DB.spiritual.length, ins: DB.insights.length }));
+  ok(counts.sp === 1 && counts.ins === 0,
+    `второй записи не создано (spiritual ${counts.sp}, insights ${counts.ins})`);
+}
+
+// ── 42. Кросс-типовая коллизия ВНУТРИ одного пакета → отказ до коммита ──
+{
+  await reset();
+  const both = {
+    format: 'architect-external-work-v1',
+    source: { kind: 'chatgpt', label: 'Коллизия в пакете', module: 'X-MODULE', chatId: 'chat-x' },
+    session: { clientRef: 's-both', summary: 'Один sourceId двумя типами', date: '2026-03-11' },
+    entities: [
+      { clientRef: 'a', type: 'spiritual', sourceId: 'TEST-PARA-420', claimClass: 'practice_action', textOrigin: 'user_words',
+        data: { text: 'Синтетическая практика.' } },
+      { clientRef: 'b', type: 'insight', sourceId: 'TEST-PARA-420', claimClass: 'user_fact', textOrigin: 'user_words',
+        data: { title: 'Тот же эпизод', body: 'Синтетический вывод из той же практики.' } },
+    ],
+    links: [],
+  };
+  const before = await page.evaluate(() => JSON.stringify(DB));
+  const p = await plan(both);
+  const res = await page.evaluate(async (t) => {
+    const pl = await extBuildPlan(t);
+    const snap = JSON.stringify(DB);
+    const r = extCommitPlan(pl);
+    return { ok: r.ok, mutated: JSON.stringify(DB) !== snap };
+  }, JSON.stringify(both));
+  const after = await page.evaluate(() => JSON.stringify(DB));
+  ok(p.items.some(i => i.status === 'conflict'),
+    'коллизия внутри одного пакета обнаружена в preview');
+  ok(res.ok === false, 'коммит пакета с внутренней коллизией отклонён');
+  ok(res.mutated === false && before === after,
+    'zero mutation: ни первая, ни вторая запись пакета не создана');
+  const n = await page.evaluate(() => DB.spiritual.length + DB.insights.length);
+  ok(n === 0, `частичного импорта не произошло (записей ${n})`);
+}
+
+// ── 43. Входящий ПСЕВДОНИМ указывает на запись другого типа → конфликт ──
+{
+  await reset();
+  await commit(CONFLICT_PKG('spiritual', 'TEST-PARA-430'));
+  const p = await plan(CONFLICT_PKG('dream', 'TEST-DREAM-430', {
+    sourceRefs: [{ sourceId: 'TEST-PARA-430', role: 'alias' }],
+    data: { title: 'Сон', body: 'Синтетический рассказ сна.', tone: 'спокойный' },
+  }));
+  ok(p.items[0].status === 'conflict',
+    `совпадение по псевдониму с записью другого типа — конфликт (${p.items[0].status})`);
+  ok(p.items[0].status !== 'existing-by-provenance',
+    'такой случай НЕ считается дубликатом — типы разные');
+  const n = await page.evaluate(() => DB.dreams.length);
+  ok(n === 0, `запись сна не создана (${n})`);
+}
+
+// ── 44. Разные sourceId по-прежнему проецируются в разные типы ──────
+// Отрицательный контроль: глобальный индекс не запрещает нормальную работу.
+{
+  await reset();
+  await commit({
+    format: 'architect-external-work-v1',
+    source: { kind: 'chatgpt', label: 'Разные объекты', module: 'X-MODULE', chatId: 'chat-x' },
+    session: { clientRef: 's-diff', summary: 'Разные источники — разные типы', date: '2026-03-12' },
+    entities: [
+      { clientRef: 'a', type: 'spiritual', sourceId: 'TEST-PARA-440', claimClass: 'practice_action', textOrigin: 'user_words',
+        data: { text: 'Синтетическая практика.' } },
+      { clientRef: 'b', type: 'insight', sourceId: 'TEST-LIFE-440', claimClass: 'user_fact', textOrigin: 'user_words',
+        data: { title: 'Отдельный вывод', body: 'Синтетический вывод.' } },
+      { clientRef: 'c', type: 'dream', sourceId: 'TEST-DREAM-440', claimClass: 'user_experience', textOrigin: 'user_words',
+        data: { title: 'Отдельный сон', body: 'Синтетический рассказ сна.', tone: 'спокойный' } },
+    ],
+    links: [],
+  });
+  const okCase = await page.evaluate(() => ({
+    sp: DB.spiritual.length, ins: DB.insights.length, dr: DB.dreams.length,
+  }));
+  ok(okCase.sp === 1 && okCase.ins === 1 && okCase.dr === 1,
+    `три разных sourceId легли в три разных типа (${okCase.sp}/${okCase.ins}/${okCase.dr})`);
+}
+
+// ── 45. Legacy плоский ext.sourceId участвует в кросс-типовом конфликте ─
+{
+  await reset();
+  const legacy = await page.evaluate(async (t) => {
+    // Запись «из прошлой версии»: ext только с плоским sourceId, без sourceRefs.
+    DB.spiritual.push({
+      id: 999501, type: 'практика', date: '01.03.2026', text: 'Импортирована предыдущей версией.',
+      createdAt: new Date().toISOString(), day: '2026-03-01', sv: SCHEMA_VERSION,
+      ext: { format: 'architect-external-work-v1', sourceId: 'TEST-PARA-450', claimClass: 'practice_action' },
+    });
+    const snap = JSON.stringify(DB);
+    const pl = await extBuildPlan(t);
+    const r = extCommitPlan(pl);
+    return { status: pl.items[0].status, ok: r.ok, mutated: JSON.stringify(DB) !== snap, ins: DB.insights.length };
+  }, JSON.stringify(CONFLICT_PKG('insight', 'TEST-PARA-450')));
+  ok(legacy.status === 'conflict',
+    `legacy-запись без sourceRefs участвует в кросс-типовом конфликте (${legacy.status})`);
+  ok(legacy.ok === false && legacy.mutated === false && legacy.ins === 0,
+    'коммит отклонён, zero mutation, вторая запись не создана');
+}
+
+// ── 46. Конфликт не блокирует последующий корректный импорт ─────────
+// После отказа состояние остаётся рабочим: исправленный пакет проходит.
+{
+  await reset();
+  await commit(CONFLICT_PKG('spiritual', 'TEST-PARA-460'));
+  await commit(CONFLICT_PKG('insight', 'TEST-PARA-460'));       // конфликт, отклонён
+  const fixed = await commit(CONFLICT_PKG('insight', 'TEST-LIFE-461'));  // исправленный
+  const st = await page.evaluate(() => ({ sp: DB.spiritual.length, ins: DB.insights.length }));
+  ok(fixed.res.ok === true && st.sp === 1 && st.ins === 1,
+    `после отказа исправленный пакет импортируется нормально (${st.sp}/${st.ins})`);
+}
+
+// ── 47. UI: конфликт виден и кнопка импорта заблокирована ───────────
+{
+  await reset();
+  await commit(CONFLICT_PKG('spiritual', 'TEST-PARA-470'));
+  const ui = await page.evaluate(async (t) => {
+    openExtImport();
+    const ta = document.getElementById('ext-text');
+    ta.value = t;
+    await extPreview();
+    const out = document.getElementById('ext-out');
+    const act = document.getElementById('ext-actions');
+    return {
+      outText: (out.textContent || ''),
+      actText: (act.textContent || ''),
+      hasConfirm: !!act.querySelector('button'),
+    };
+  }, JSON.stringify(CONFLICT_PKG('insight', 'TEST-PARA-470')));
+  ok(/конфликт идентичности источника/i.test(ui.outText),
+    'в предпросмотре виден статус «конфликт идентичности источника»');
+  ok(ui.hasConfirm === false, 'кнопка подтверждения отсутствует при конфликте');
+  ok(/Импорт заблокирован/.test(ui.actText),
+    'пользователю объяснено, почему импорт заблокирован', ui.actText.slice(0, 120));
+  await page.evaluate(() => { const o = document.getElementById('ov-ext-import'); if (o) o.classList.remove('on'); });
+}
+
 ok(errors.length === 0, `JS-ошибок нет за весь прогон (${errors.length})`, errors.slice(0, 3).join('\n'));
 
 await browser.close();

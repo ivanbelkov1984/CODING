@@ -12392,6 +12392,9 @@ function extPickFile(ev) {
 const EXT_STATUS_RU = {
   'new': 'новая', 'existing-by-provenance': 'уже импортировано',
   'already-imported': 'пакет уже импортирован', 'invalid': 'отклонено', 'unsupported': 'не поддерживается',
+  // Owner review 5230472460: конфликт идентичности виден отдельным статусом —
+  // он не «дубль» и не «новая», и молчаливого выбора одной проекции здесь нет.
+  'conflict': 'конфликт идентичности источника',
 };
 async function extPreview() {
   const out = $('ext-out'), act = $('ext-actions');
@@ -12439,10 +12442,15 @@ async function extPreview() {
     <div class="sec-lbl">Записи</div><div class="card mb">${rows}</div>
     ${linkRows ? `<div class="sec-lbl">Связи</div><div class="card mb">${linkRows}</div>` : ''}`;
   if (act) {
-    const can = !plan.alreadyImported && plan.items.some(i => i.status === 'new');
-    act.innerHTML = can
-      ? `<button type="button" class="btn btn-p" onclick="extConfirm()">Импортировать выбранное</button>`
-      : `<div class="ai-sp-empty">Нет новых записей для импорта.</div>`;
+    // Конфликт идентичности блокирует ВЕСЬ пакет: кнопки подтверждения нет,
+    // пока источник однозначно не разрешён. Частичный импорт не предлагается.
+    const conflicted = plan.items.filter(i => i.status === 'conflict');
+    const can = !plan.alreadyImported && !conflicted.length && plan.items.some(i => i.status === 'new');
+    act.innerHTML = conflicted.length
+      ? `<div class="ai-sp-empty">Импорт заблокирован: ${conflicted.length} конфликт(ов) идентичности источника. Один исходный объект не может быть двумя разными типами записи — исправь пакет и загрузи заново.</div>`
+      : can
+        ? `<button type="button" class="btn btn-p" onclick="extConfirm()">Импортировать выбранное</button>`
+        : `<div class="ai-sp-empty">Нет новых записей для импорта.</div>`;
   }
 }
 function extToggleItem(n, on) { _extSel.items[n] = !!on; }
@@ -12573,7 +12581,14 @@ function extProvenance(pkg, e, packageHash) {
 // Ключ provenance-дедупликации: один и тот же исходный объект (LIFE/DREAM/PARA)
 // не должен импортироваться дважды в ту же canonical-коллекцию — даже из
 // другого модуля/пакета.
-function extProvenanceKey(coll, sourceId) { return sourceId ? coll + '|' + sourceId : null; }
+// Ключ идентичности исходного объекта. Owner review 5230472460: коллекция в
+// ключ НЕ входит намеренно. Контракт объявляет `sourceId` единственной
+// идентичностью источника, поэтому и индекс обязан быть ГЛОБАЛЬНЫМ: иначе один
+// и тот же эпизод мог бы существовать и как `spiritual`, и как `insight`,
+// поздний псевдоним указывал бы сразу на две записи, а аналитика получила бы
+// двойную проекцию одного события. Параметр `coll` сохранён в сигнатуре ради
+// читаемости вызовов и как явная точка мутационной проверки.
+function extProvenanceKey(coll, sourceId) { return sourceId ? String(sourceId) : null; }
 
 // Все исходные идентификаторы записи: плоский legacy-`sourceId` (записи,
 // импортированные до этого изменения) И весь набор `sourceRefs`. Именно
@@ -12590,13 +12605,16 @@ function extRecordSourceIds(rec) {
   });
   return ids;
 }
+// Глобальный индекс: sourceId → { coll, id }. Хранит и коллекцию, чтобы
+// поздний пакет мог отличить «тот же объект в той же коллекции» (дедуп) от
+// «тот же объект, спроецированный в другой canonical type» (конфликт).
 function extIndexExistingProvenance(db) {
   const idx = new Map();
-  Object.values(EXT_TARGETS).forEach(coll => {
+  [...new Set(Object.values(EXT_TARGETS))].forEach(coll => {
     (db[coll] || []).forEach(r => {
       extRecordSourceIds(r).forEach(sid => {
         const key = extProvenanceKey(coll, sid);
-        if (key && !idx.has(key)) idx.set(key, r.id);
+        if (key && !idx.has(key)) idx.set(key, { coll, id: r.id });
       });
     });
   });
@@ -12651,11 +12669,28 @@ async function extBuildPlan(rawText) {
     // Совпадение ищется по ЛЮБОЙ ссылке записи, а не только по основной:
     // поздний LIFE-пакет, ссылающийся на тот же DREAM-эпизод, обязан найти
     // уже существующую запись. Дедуп по тексту не выполняется никогда.
-    const hit = prov.sourceRefs
+    const found = prov.sourceRefs
       .map(r => ({ ref: r, key: extProvenanceKey(coll, r.sourceId) }))
-      .find(x => x.key && provIdx.has(x.key));
+      .filter(x => x.key && provIdx.has(x.key))
+      .map(x => ({ ...x, at: provIdx.get(x.key) }));
+
+    // Owner review 5230472460, fail-closed: тот же исходный объект уже
+    // спроецирован в ДРУГОЙ canonical type. Молча выбрать одну из проекций
+    // нельзя — это и есть двойная проекция эпизода. Вторая запись не
+    // создаётся, пакет помечается конфликтом и коммит отклоняется целиком.
+    const cross = found.find(x => x.at.coll !== coll);
+    if (cross) {
+      items.push({
+        ...base, status: 'conflict',
+        conflict: { sourceId: cross.ref.sourceId, existingColl: cross.at.coll, existingId: cross.at.id, requestedColl: coll },
+        reason: `конфликт идентичности источника: «${cross.ref.sourceId}» уже импортирован как «${cross.at.coll}», а пакет проецирует его в «${coll}». Один исходный объект не может быть двумя разными типами записи.`,
+      });
+      continue;
+    }
+
+    const hit = found[0];
     if (hit) {
-      const existingId = provIdx.get(hit.key);
+      const existingId = hit.at.id;
       refToRec.set(prov.clientRef, { coll, id: existingId });
       // Новые ссылки того же эпизода не выбрасываются: они дописываются к
       // существующей записи, иначе provenance кросс-модульной связи теряется.
@@ -12673,7 +12708,7 @@ async function extBuildPlan(rawText) {
       // дедупликации уже внутри ЭТОГО пакета.
       addRefs.forEach(r => {
         const k = extProvenanceKey(coll, r.sourceId);
-        if (k && !provIdx.has(k)) provIdx.set(k, existingId);
+        if (k && !provIdx.has(k)) provIdx.set(k, { coll, id: existingId });
       });
       continue;
     }
@@ -12686,7 +12721,7 @@ async function extBuildPlan(rawText) {
     // пакета, ссылающаяся на тот же эпизод, не создаст дубль.
     prov.sourceRefs.forEach(r => {
       const k = extProvenanceKey(coll, r.sourceId);
-      if (k && !provIdx.has(k)) provIdx.set(k, built.rec.id);
+      if (k && !provIdx.has(k)) provIdx.set(k, { coll, id: built.rec.id });
     });
   }
 
@@ -12729,6 +12764,20 @@ function extCommitPlan(plan, selection) {
   if (!plan || !plan.ok) return { ok: false, error: 'план невалиден' };
   if (isWriteLocked()) return { ok: false, error: 'профиль в режиме восстановления — импорт заблокирован' };
   if (plan.alreadyImported) return { ok: false, error: 'этот пакет уже импортирован' };
+
+  // Owner review 5230472460: конфликт идентичности источника отклоняет ВЕСЬ
+  // пакет. Импортировать «всё кроме конфликтных» нельзя: пакет описывает
+  // связанную работу, и частичный импорт оставил бы её в состоянии, которое
+  // владелец не подтверждал. Zero mutation, пока пакет не разрешён однозначно.
+  const conflicts = plan.items.filter(i => i.status === 'conflict');
+  if (conflicts.length) {
+    return {
+      ok: false, conflicts: conflicts.map(i => i.conflict),
+      error: `конфликт идентичности источника (${conflicts.length}): ` +
+        conflicts.map(i => `«${i.conflict.sourceId}» уже импортирован как «${i.conflict.existingColl}», пакет проецирует его в «${i.conflict.requestedColl}»`).join('; ') +
+        '. Импорт отклонён целиком — данные не изменены.',
+    };
+  }
 
   const sel = selection || {};
   // Импортируются только записи со статусом `new` И не снятые пользователем.

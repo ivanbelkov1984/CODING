@@ -26,8 +26,8 @@ const MUTANTS = [
   {
     id: 'provenance-dedup',
     what: 'снят provenance-дедуп: повторный импорт того же sourceId создаёт дубль',
-    find: '      .find(x => x.key && provIdx.has(x.key));',
-    replace: '      .find(() => false);',
+    find: '      .filter(x => x.key && provIdx.has(x.key))',
+    replace: '      .filter(() => false)',
     expectFail: 'один факт остался одним canonical-фактом',
   },
   {
@@ -69,8 +69,8 @@ const MUTANTS = [
   {
     id: 'alias-dedup',
     what: 'дедуп смотрит только на основную ссылку, псевдонимы игнорируются',
-    find: '    const hit = prov.sourceRefs\n      .map(r => ({ ref: r, key: extProvenanceKey(coll, r.sourceId) }))',
-    replace: '    const hit = prov.sourceRefs.filter(r => r.role === \'primary\')\n      .map(r => ({ ref: r, key: extProvenanceKey(coll, r.sourceId) }))',
+    find: '    const found = prov.sourceRefs\n      .map(r => ({ ref: r, key: extProvenanceKey(coll, r.sourceId) }))',
+    replace: '    const found = prov.sourceRefs.filter(r => r.role === \'primary\')\n      .map(r => ({ ref: r, key: extProvenanceKey(coll, r.sourceId) }))',
     expectFail: 'опознана по СВОЕМУ псевдониму',
   },
   {
@@ -79,6 +79,23 @@ const MUTANTS = [
     find: '      extRecordSourceIds(r).forEach(sid => {',
     replace: '      [r && r.ext && r.ext.sourceId].filter(Boolean).forEach(sid => {',
     expectFail: 'PARA↔LIFE cross-link',
+  },
+  // Owner review 5230472460: возврат к collection-scoped ключу обязан
+  // уронить кросс-типовые проверки — иначе один эпизод снова смог бы стать
+  // двумя canonical-записями разных типов.
+  {
+    id: 'collection-scoped-identity',
+    what: 'ключ идентичности снова ограничен коллекцией (coll|sourceId)',
+    find: 'function extProvenanceKey(coll, sourceId) { return sourceId ? String(sourceId) : null; }',
+    replace: 'function extProvenanceKey(coll, sourceId) { return sourceId ? coll + \'|\' + sourceId : null; }',
+    expectFail: 'помечен как conflict',
+  },
+  {
+    id: 'conflict-commit-gate',
+    what: 'коммит перестаёт отклонять пакет с конфликтом идентичности',
+    find: '  const conflicts = plan.items.filter(i => i.status === \'conflict\');\n  if (conflicts.length) {',
+    replace: '  const conflicts = [];\n  if (false) {',
+    expectFail: 'commit отклонён fail-closed',
   },
   {
     id: 'recovery-write-lock',
