@@ -872,6 +872,200 @@ const V2_BASE = {
   ok(typeof ledger === 'number', `AI-вызовов не потребовалось (записей в AI-леджере: ${ledger})`);
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  OWNER REVIEW 5233978523 — два блокера реального 05B/05C dry-run.
+// ═══════════════════════════════════════════════════════════════════
+
+// ── 45. BLOCKER 1: один v2-пакет создаёт полный связанный handoff ────
+// formulation + goal + 2 интервенции + naturalistic observation + review,
+// ссылающийся на НОВЫЕ записи этого же пакета.
+{
+  await reset();
+  const FULL_HANDOFF = {
+    ...V2_BASE,
+    session: { clientRef: 'TEST-PSY-HANDOFF-1', summary: 'Полный синтетический handoff', date: '2026-03-10' },
+    entities: [
+      { clientRef: 'f1', type: 'psyFormulation', sourceId: 'TEST-PSY-F-1',
+        claimClass: 'assistant_summary', textOrigin: 'structured_summary',
+        data: { focus: 'Синтетический фокус', formulation: 'Синтетическая рабочая модель.', status: 'active' } },
+      { clientRef: 'g1', type: 'psyGoal', sourceId: 'TEST-PSY-G-1',
+        claimClass: 'user_experience', textOrigin: 'user_words',
+        data: { label: 'Синтетическая цель', proximalOutcome: 'наблюдаемый результат',
+          sourceRefs: [{ clientRef: 'f1' }] } },
+      { clientRef: 'o1', type: 'psyObservation', sourceId: 'TEST-PSY-O-1',
+        claimClass: 'user_experience', textOrigin: 'user_words',
+        data: { metricId: 'TEST-PSY-METRIC', valueNumber: 6, unit: 'балл', entryMode: 'imported', source: 'user' } },
+      { clientRef: 'o2', type: 'psyObservation', sourceId: 'TEST-PSY-O-2',
+        claimClass: 'user_experience', textOrigin: 'user_words',
+        data: { metricId: 'TEST-PSY-METRIC', valueNumber: 3, unit: 'балл', entryMode: 'imported', source: 'user' } },
+      // Естественное изменение — observation, а не интервенция (реальный 05B).
+      { clientRef: 'onat', type: 'psyObservation', sourceId: 'TEST-PSY-O-NAT',
+        claimClass: 'user_experience', textOrigin: 'user_words',
+        data: { metricId: 'TEST-PSY-CALM', valueText: 'спокойнее после смены обстановки',
+          naturalistic: true, entryMode: 'event_based', source: 'user' } },
+      // Интервенция ссылается на pre/post наблюдения ЭТОГО ЖЕ пакета.
+      { clientRef: 'e1', type: 'psyInterventionEpisode', sourceId: 'TEST-INT-501',
+        claimClass: 'practice_action', textOrigin: 'user_words',
+        data: { methodId: 'behavioral_activation', interventionSummary: 'первое синтетическое применение',
+          adherence: 'done', acceptability: 'helpful', outcomeClass: 'helpful_in_context',
+          preObservationRefs: [{ clientRef: 'o1' }], postObservationRefs: [{ clientRef: 'o2' }],
+          sourceRefs: [{ clientRef: 'g1' }] } },
+      { clientRef: 'e2', type: 'psyInterventionEpisode', sourceId: 'TEST-INT-502',
+        claimClass: 'practice_action', textOrigin: 'user_words',
+        data: { methodId: 'opposite_action', interventionSummary: 'второе синтетическое применение',
+          adherence: 'partial', acceptability: 'irritating', outcomeClass: 'unclear',
+          adverseEffects: ['синтетический эффект'] } },
+      // Review ссылается на ВСЁ новое: цели, эпизоды, наблюдения, формулировку.
+      { clientRef: 'r1', type: 'psyReview', sourceId: 'TEST-PSY-R-1',
+        claimClass: 'assistant_summary', textOrigin: 'structured_summary',
+        data: { periodStart: '2026-03-01T00:00:00.000Z', periodEnd: '2026-03-31T00:00:00.000Z',
+          outcomeSummary: 'синтетический итог периода', decision: 'modify',
+          formulationRef: { clientRef: 'f1' },
+          goalRefs: [{ clientRef: 'g1' }],
+          interventionEpisodeRefs: [{ clientRef: 'e1' }, { clientRef: 'e2' }],
+          observationRefs: [{ clientRef: 'o1' }, { clientRef: 'o2' }, { clientRef: 'onat' }],
+          limitations: ['один период не доказывает причинность'] } },
+    ],
+  };
+  const res = await commit(FULL_HANDOFF);
+  ok(res.res.ok, 'один v2-пакет с внутренними ссылками импортируется целиком',
+    JSON.stringify((res.plan.items || []).filter(i => i.status !== 'new')));
+  const st = await page.evaluate(() => {
+    const r = DB.psyReviews[0], e1 = DB.psyInterventionEpisodes.find(x => x.ext.sourceId === 'TEST-INT-501');
+    const g = DB.psyGoals[0];
+    return {
+      counts: [DB.psyFormulations.length, DB.psyGoals.length, DB.psyInterventionEpisodes.length, DB.psyObservations.length, DB.psyReviews.length],
+      reviewResolves: !!r && r.interventionEpisodeRefs.every(id => DB.psyInterventionEpisodes.some(x => x.id === id)) &&
+        r.observationRefs.every(id => DB.psyObservations.some(x => x.id === id)) &&
+        r.goalRefs.every(id => DB.psyGoals.some(x => x.id === id)) &&
+        DB.psyFormulations.some(f => f.id === r.formulationRef),
+      epsRefs: !!e1 && e1.preObservationRefs.length === 1 && e1.postObservationRefs.length === 1 &&
+        DB.psyObservations.some(o => o.id === e1.preObservationRefs[0].id) &&
+        DB.psyObservations.some(o => o.id === e1.postObservationRefs[0].id),
+      goalToFormulation: !!g && g.sourceRefs.length === 1 &&
+        DB.psyFormulations.some(f => f.id === g.sourceRefs[0].id),
+      natural: DB.psyObservations.filter(o => o.naturalistic).length,
+      idsAreOurs: [...DB.psyGoals, ...DB.psyReviews].every(x => /^psy[A-Za-z]+:/.test(x.id)),
+    };
+  });
+  ok(JSON.stringify(st.counts) === JSON.stringify([1, 1, 2, 3, 1]),
+    `созданы formulation+goal+2 интервенции+3 наблюдения+review (${st.counts.join('/')})`);
+  ok(st.reviewResolves, 'review раскрывается до НОВЫХ записей того же пакета');
+  ok(st.epsRefs, 'интервенция ссылается на pre/post наблюдения того же пакета');
+  ok(st.goalToFormulation, 'цель ссылается на формулировку того же пакета');
+  ok(st.natural === 1, `естественное изменение осталось наблюдением, а не интервенцией (${st.natural})`);
+  ok(st.idsAreOurs, 'все id сгенерированы приложением — payload не задаёт идентификаторы');
+
+  // Preview обязан показывать, во что разрешён каждый clientRef.
+  const prev = await plan(FULL_HANDOFF);
+  ok(Array.isArray(prev.intraPackageRefs) && prev.intraPackageRefs.length === 8,
+    `preview раскрывает карту внутрипакетных ссылок (${(prev.intraPackageRefs || []).length})`);
+  ok((prev.intraPackageRefs || []).every(r => /^psy/.test(r.coll)),
+    'карта показывает целевую коллекцию для каждого clientRef');
+
+  // Повторный импорт того же пакета идемпотентен.
+  const before = await page.evaluate(() => JSON.stringify(DB));
+  const again = await commit(FULL_HANDOFF);
+  const after = await page.evaluate(() => JSON.stringify(DB));
+  ok(again.res.ok === false && before === after,
+    'повторный импорт того же пакета не создал ни одной записи');
+}
+
+// ── 46. BLOCKER 1: битая внутрипакетная ссылка → zero mutation ───────
+{
+  await reset();
+  const broken = {
+    ...V2_BASE,
+    session: { clientRef: 'TEST-PSY-BROKEN', summary: 'битые ссылки', date: '2026-03-11' },
+    entities: [
+      { clientRef: 'g1', type: 'psyGoal', sourceId: 'TEST-PSY-G-9',
+        data: { label: 'Цель', proximalOutcome: 'наблюдаемое' } },
+      { clientRef: 'r1', type: 'psyReview', sourceId: 'TEST-PSY-R-9',
+        data: { periodStart: '2026-03-01T00:00:00.000Z', periodEnd: '2026-03-31T00:00:00.000Z',
+          outcomeSummary: 'итог', goalRefs: [{ clientRef: 'НЕТ-ТАКОГО' }] } },
+    ],
+  };
+  const before = await page.evaluate(() => JSON.stringify(DB));
+  const p = await plan(broken);
+  const afterPreview = await page.evaluate(() => JSON.stringify(DB));
+  ok((p.unresolvedRefs || []).length === 1 && /не найден среди записей пакета/.test(p.unresolvedRefs[0].problem),
+    'нерезолвящийся clientRef виден в preview как ошибка', JSON.stringify(p.unresolvedRefs));
+  ok(before === afterPreview, 'preview с битой ссылкой не изменил базу');
+
+  const res = await commit(broken);
+  const after = await page.evaluate(() => ({ s: JSON.stringify(DB), g: DB.psyGoals.length, r: DB.psyReviews.length }));
+  ok(res.res.ok === false && /внутрипакетные ссылки не разрешены/.test(res.res.error || ''),
+    'коммит пакета с битой ссылкой отклонён целиком', res.res.error);
+  ok(after.s === before && after.g === 0 && after.r === 0,
+    `zero mutation: валидная цель того же пакета тоже не импортирована (${after.g}/${after.r})`);
+
+  // Ссылка на сущность НЕ ТОГО типа тоже отклоняется.
+  const wrongType = await plan({
+    ...V2_BASE,
+    session: { clientRef: 'TEST-PSY-WRONGTYPE', summary: 'x', date: '2026-03-12' },
+    entities: [
+      { clientRef: 'g1', type: 'psyGoal', sourceId: 'TEST-PSY-G-8', data: { label: 'G', proximalOutcome: 'p' } },
+      { clientRef: 'r1', type: 'psyReview', sourceId: 'TEST-PSY-R-8',
+        data: { periodStart: '2026-03-01T00:00:00.000Z', periodEnd: '2026-03-31T00:00:00.000Z',
+          outcomeSummary: 'o', interventionEpisodeRefs: [{ clientRef: 'g1' }] } },
+    ],
+  });
+  ok((wrongType.unresolvedRefs || []).length === 1 && /требуется psyInterventionEpisodes/.test(wrongType.unresolvedRefs[0].problem),
+    'ссылка на сущность другого типа отклонена', JSON.stringify(wrongType.unresolvedRefs));
+}
+
+// ── 47. BLOCKER 1: dangling-валидация НЕ ослаблена ──────────────────
+{
+  await reset();
+  const dangling = await plan({
+    ...V2_BASE,
+    session: { clientRef: 'TEST-PSY-DANGLING', summary: 'x', date: '2026-03-13' },
+    entities: [{ clientRef: 'r1', type: 'psyReview', sourceId: 'TEST-PSY-R-7',
+      data: { periodStart: '2026-03-01T00:00:00.000Z', periodEnd: '2026-03-31T00:00:00.000Z',
+        outcomeSummary: 'o', interventionEpisodeRefs: ['psyIntervention:НЕСУЩЕСТВУЕТ'] } }],
+  });
+  ok(dangling.items[0].status === 'invalid' && /не существует/.test(dangling.items[0].reason || ''),
+    'прямая ссылка на несуществующий id по-прежнему отклоняется', dangling.items[0].reason);
+}
+
+// ── 48. BLOCKER 2: сбой persist откатывает supersede побайтово ───────
+{
+  await reset();
+  const v1 = await save('psyFormulation', { focus: 'Первая версия', formulation: 'т1', status: 'active' });
+  ok(v1.ok, 'исходная активная формулировка сохранена');
+  const roll = await page.evaluate(() => {
+    const before = JSON.stringify(DB.psyFormulations);
+    const beforeAll = JSON.stringify({ f: DB.psyFormulations, g: DB.psyGoals, e: DB.psyInterventionEpisodes });
+    // Принудительный сбой записи через production-путь: persist() вернёт false.
+    const realPersist = window.persist;
+    window.persist = () => false;
+    let res;
+    try { res = psySaveRecord('psyFormulation', { focus: 'Вторая версия', formulation: 'т2', status: 'active' }); }
+    finally { window.persist = realPersist; }
+    return {
+      ok: res.ok, err: (res.errors || [])[0],
+      after: JSON.stringify(DB.psyFormulations),
+      afterAll: JSON.stringify({ f: DB.psyFormulations, g: DB.psyGoals, e: DB.psyInterventionEpisodes }),
+      before, beforeAll,
+      n: DB.psyFormulations.length,
+      statuses: DB.psyFormulations.map(f => f.status),
+    };
+  });
+  ok(roll.ok === false, 'при сбое persist сохранение честно отклонено');
+  ok(roll.n === 1 && JSON.stringify(roll.statuses) === JSON.stringify(['active']),
+    `прежняя формулировка осталась active, новая не добавлена (${roll.statuses.join(',')})`);
+  ok(roll.after === roll.before,
+    'psyFormulations побайтово идентичны состоянию до попытки (включая status и _u)');
+  ok(roll.afterAll === roll.beforeAll,
+    'вся психологическая часть DB побайтово идентична состоянию до попытки');
+
+  // После восстановления persist обычное сохранение по-прежнему работает.
+  const v2 = await save('psyFormulation', { focus: 'Вторая версия', formulation: 'т2', status: 'active' });
+  const post = await page.evaluate(() => ({ n: DB.psyFormulations.length, statuses: DB.psyFormulations.map(f => f.status) }));
+  ok(v2.ok && post.n === 2 && post.statuses.filter(s => s === 'active').length === 1,
+    'после восстановления persist версионирование работает как раньше');
+}
+
 ok(errors.length === 0, `JS-ошибок нет за весь прогон (${errors.length})`, errors.slice(0, 3).join('\n'));
 
 await browser.close();

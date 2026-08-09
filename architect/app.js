@@ -12406,6 +12406,22 @@ const PSY_TYPE_TO_COLL = Object.freeze({
   psyObservation: 'psyObservations',
   psyReview: 'psyReviews',
 });
+// Префикс namespaced id на тип — нужен, чтобы id можно было выдать ДО сборки
+// записи (внутрипакетные ссылки, см. extBuildPlan «проход 1»).
+const PSY_ID_PREFIX = Object.freeze({
+  psyFormulation: 'psyFormulation',
+  psyGoal: 'psyGoal',
+  psyInterventionEpisode: 'psyIntervention',
+  psyObservation: 'psyObservation',
+  psyReview: 'psyReview',
+});
+// Поля ссылок: объектные { coll, id } и «плоские» списки id внутри review.
+const PSY_REF_OBJECT_FIELDS = Object.freeze([
+  'sourceRefs', 'measureRefs', 'preObservationRefs', 'postObservationRefs', 'followUpRefs',
+]);
+const PSY_REF_ID_FIELDS = Object.freeze({
+  goalRefs: 'psyGoals', interventionEpisodeRefs: 'psyInterventionEpisodes', observationRefs: 'psyObservations',
+});
 
 // Единственная точка записи из ручного UI. Импортер идёт через тот же
 // PSY_BUILDERS, но собственным транзакционным коммитом Волны 6.
@@ -12418,6 +12434,22 @@ function psySaveRecord(type, input) {
   const built = PSY_BUILDERS[type](input, DB);
   if (!built.ok) return { ok: false, errors: built.errors };
   if (!Array.isArray(DB[coll])) DB[coll] = [];
+
+  // Owner review 5233978523, BLOCKER 2: сохранение новой активной формулировки
+  // меняет НЕ ТОЛЬКО добавляемую запись — предыдущая active переводится в
+  // superseded с новым `_u`. Откат «pop() последней записи» такие изменения не
+  // возвращал: при неудачном persist() состояние в памяти оставалось изменённым,
+  // хотя вызывающему сообщалось «данные не изменены», и следующий успешный
+  // persist() сохранил бы эту незапрошенную мутацию.
+  // Поэтому снимаем полный снимок ВСЕХ затрагиваемых коллекций и при сбое
+  // восстанавливаем их целиком — побайтово, включая status и _u.
+  const touched = [coll];
+  if (type === 'psyFormulation' && built.rec.status === 'active' && !touched.includes('psyFormulations')) {
+    touched.push('psyFormulations');
+  }
+  const snapshot = {};
+  touched.forEach(c => { snapshot[c] = JSON.parse(JSON.stringify(DB[c] || [])); });
+
   // Одна активная формулировка: предыдущая переводится в superseded, а не
   // переписывается — история стратегии обязана сохраняться.
   if (type === 'psyFormulation' && built.rec.status === 'active') {
@@ -12426,7 +12458,10 @@ function psySaveRecord(type, input) {
     });
   }
   DB[coll].push(built.rec);
-  if (!persist()) { DB[coll].pop(); return { ok: false, errors: ['не удалось сохранить — данные не изменены'] }; }
+  if (!persist()) {
+    touched.forEach(c => { DB[c] = snapshot[c]; });
+    return { ok: false, errors: ['не удалось сохранить — данные не изменены'] };
+  }
   return { ok: true, errors: [], rec: built.rec };
 }
 // Активная формулировка и цепочка версий.
@@ -12935,6 +12970,54 @@ function extPickData(e) {
   }
   return out;
 }
+// Разрешение внутрипакетных ссылок (owner review 5233978523, BLOCKER 1).
+// Принимаются ДВЕ формы:
+//   { clientRef: 'g1' }            — ссылка на сущность этого же пакета;
+//   { coll: 'insights', id: 42 }   — ссылка на уже существующую запись.
+// Произвольный id из payload не легализуется: для внутрипакетной ссылки id
+// берётся из карты, выданной приложением на «проходе 1».
+function extResolveIntraPackageRefs(data, ctx, errors) {
+  const map = ctx.psyIds || new Map();
+  const one = (v, path, expectColl) => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
+    const cr = extStr(v.clientRef, 200);
+    if (!cr) return v;                       // обычная { coll, id } — не трогаем
+    const hit = map.get(cr);
+    if (!hit) { errors.push(`${path}: clientRef «${cr}» не найден среди записей пакета`); return null; }
+    if (expectColl && hit.coll !== expectColl) {
+      errors.push(`${path}: clientRef «${cr}» указывает на ${hit.coll}, а здесь требуется ${expectColl}`);
+      return null;
+    }
+    return { coll: hit.coll, id: hit.id };
+  };
+  const out = { ...data };
+  PSY_REF_OBJECT_FIELDS.forEach(f => {
+    if (!Array.isArray(out[f])) return;
+    out[f] = out[f].map((v, i) => one(v, `${f}[${i}]`, null)).filter(v => v !== null);
+  });
+  if (out.triggerRef) {
+    const r = one(out.triggerRef, 'triggerRef', null);
+    out.triggerRef = r === null ? undefined : r;
+  }
+  // Плоские id-списки review: допускаем { clientRef } вперемешку с готовыми id.
+  Object.entries(PSY_REF_ID_FIELDS).forEach(([f, coll]) => {
+    if (!Array.isArray(out[f])) return;
+    out[f] = out[f].map((v, i) => {
+      if (typeof v === 'string') return v;
+      const r = one(v, `${f}[${i}]`, coll);
+      return r === null ? null : r.id;
+    }).filter(v => v !== null);
+  });
+  if (out.formulationRef && typeof out.formulationRef === 'object') {
+    const r = one(out.formulationRef, 'formulationRef', 'psyFormulations');
+    out.formulationRef = r === null ? undefined : r.id;
+  }
+  if (out.supersedesId && typeof out.supersedesId === 'object') {
+    const r = one(out.supersedesId, 'supersedesId', 'psyFormulations');
+    out.supersedesId = r === null ? undefined : r.id;
+  }
+  return out;
+}
 const EXT_ADAPTERS = {
   insight(e, d, ctx) {
     const body = extStr(d.body || d.text, 8000);
@@ -13024,8 +13107,19 @@ const EXT_ADAPTERS = {
   // Адаптеры НЕ содержат собственной схемы: они делегируют в те же
   // PSY_BUILDERS, что и ручная форма. Второй психологии не существует,
   // и импортер физически не может записать то, что отвергнет UI.
+  //
+  // Перед сборкой внутрипакетные ссылки `{ clientRef }` превращаются в
+  // конкретные { coll, id } / id — и дальше идёт ОБЫЧНАЯ строгая валидация
+  // против кандидата. Нерезолвящаяся ссылка — ошибка, а не «пропустим».
   ...Object.fromEntries(Object.keys(PSY_TYPE_TO_COLL).map(type => [type, (e, d, ctx) => {
-    const built = PSY_BUILDERS[type](d, ctx.db);
+    const refErrors = [];
+    const data = extResolveIntraPackageRefs(d, ctx, refErrors);
+    if (refErrors.length) {
+      refErrors.forEach(x => ctx.unresolvedRefs.push({ clientRef: extStr(e.clientRef, 200), problem: x }));
+      return { reject: refErrors.slice(0, 3).join('; ') };
+    }
+    const preassigned = ctx.psyIds.get(extStr(e.clientRef, 200));
+    const built = PSY_BUILDERS[type]({ ...data, id: preassigned ? preassigned.id : undefined }, ctx.db);
     if (!built.ok) return { reject: built.errors.slice(0, 3).join('; ') };
     return { rec: built.rec };
   }])),
@@ -13102,15 +13196,20 @@ async function extPreview() {
       <div><b>Связей:</b> ${plan.links.filter(l => l.status === 'new').length}</div>
       <div style="color:var(--t4)">До подтверждения ничего не сохраняется.</div>
       ${plan.alreadyImported ? '<div style="color:var(--orange)"><b>Этот пакет уже импортирован</b> — повторный импорт не создаст дублей.</div>' : ''}
+      ${(plan.intraPackageRefs || []).length ? `<div style="color:var(--t4);font-size:.72rem"><b>Ссылки внутри пакета:</b> ${plan.intraPackageRefs.map(r => `${esc(r.clientRef)} → ${esc(r.coll)}`).join(', ')}</div>` : ''}
+      ${(plan.unresolvedRefs || []).length ? `<div style="color:var(--red,#DC2626)"><b>Не разрешены ссылки:</b> ${plan.unresolvedRefs.slice(0, 5).map(u => esc(u.clientRef + ' — ' + u.problem)).join('; ')}</div>` : ''}
     </div>
     <div class="sec-lbl">Записи</div><div class="card mb">${rows}</div>
     ${linkRows ? `<div class="sec-lbl">Связи</div><div class="card mb">${linkRows}</div>` : ''}`;
   if (act) {
-    // Конфликт идентичности блокирует ВЕСЬ пакет: кнопки подтверждения нет,
-    // пока источник однозначно не разрешён. Частичный импорт не предлагается.
+    // Конфликт идентичности и нерезолвящаяся внутрипакетная ссылка блокируют
+    // ВЕСЬ пакет: кнопки подтверждения нет, частичный импорт не предлагается.
     const conflicted = plan.items.filter(i => i.status === 'conflict');
-    const can = !plan.alreadyImported && !conflicted.length && plan.items.some(i => i.status === 'new');
-    act.innerHTML = conflicted.length
+    const unres = (plan.unresolvedRefs || []).length;
+    const can = !plan.alreadyImported && !conflicted.length && !unres && plan.items.some(i => i.status === 'new');
+    act.innerHTML = unres
+      ? `<div class="ai-sp-empty">Импорт заблокирован: ${unres} внутрипакетн(ая/ых) ссылк(а/и) не разрешена. Проверь clientRef в ссылках пакета и загрузи заново.</div>`
+      : conflicted.length
       ? `<div class="ai-sp-empty">Импорт заблокирован: ${conflicted.length} конфликт(ов) идентичности источника. Один исходный объект не может быть двумя разными типами записи — исправь пакет и загрузи заново.</div>`
       : can
         ? `<button type="button" class="btn btn-p" onclick="extConfirm()">Импортировать выбранное</button>`
@@ -13309,11 +13408,31 @@ async function extBuildPlan(rawText) {
   const provIdx = extIndexExistingProvenance(db);
 
   let idSeq = Date.now();
+
+  // Owner review 5233978523, BLOCKER 1: ссылки ВНУТРИ одного пакета.
+  // ПРОХОД 1 — заранее выдаём приложением сгенерированные id психологическим
+  // сущностям пакета и строим карту clientRef → { coll, id }. Payload по-прежнему
+  // НЕ может задать id (он вычищается EXT_RESERVED_FIELDS): идентификатор всегда
+  // наш. Благодаря этому ссылка на сущность того же пакета не зависит от порядка
+  // записей, а валидация «висячих» ссылок остаётся полной — на ПРОХОДЕ 2
+  // записи реально лежат в кандидате.
+  const psyIds = new Map();      // clientRef -> { coll, id }
+  if (pkg.format === EXT_WORK_FORMAT_V2) {
+    pkg.entities.forEach(e => {
+      const coll = EXT_TARGETS_V2_ONLY[e.type];
+      if (!coll) return;
+      const ref = extStr(e.clientRef, 200);
+      if (ref && !psyIds.has(ref)) psyIds.set(ref, { coll, id: psyUid(PSY_ID_PREFIX[e.type]) });
+    });
+  }
+  const unresolvedRefs = [];
+
   const ctx = {
     db,
     nextId: () => ++idSeq,
     createdAt: nowISO(), day: todayKey(), dateRU: dateRU(), dateFull: dateFullRU(),
     srcLabel: extStr((pkg.source || {}).label, 80) || 'Внешняя работа',
+    psyIds, unresolvedRefs,
   };
 
   const items = [];
@@ -13383,6 +13502,12 @@ async function extBuildPlan(rawText) {
     const built = EXT_ADAPTERS[e.type](e, extPickData(e), ctx);
     if (built.reject) { items.push({ ...base, status: 'invalid', reason: built.reject }); continue; }
     built.rec.ext = prov;
+    // ПРОХОД 2: собранная запись немедленно попадает в кандидата. Именно
+    // поэтому следующая сущность пакета (например review) видит её как
+    // РЕАЛЬНО существующую, а проверка «висячих» ссылок остаётся строгой —
+    // ничего не ослаблено, просто кандидат собран полностью.
+    if (!Array.isArray(db[coll])) db[coll] = [];
+    db[coll].push(built.rec);
     items.push({ ...base, status: 'new', rec: built.rec });
     refToRec.set(prov.clientRef, { coll, id: built.rec.id });
     // Все ссылки новой записи сразу попадают в индекс: вторая запись ТОГО ЖЕ
@@ -13395,11 +13520,9 @@ async function extBuildPlan(rawText) {
 
   // Связи проверяются ТЕМ ЖЕ production-валидатором, но на кандидате: чтобы
   // preview показывал ровно тот результат, который даст коммит.
+  // Новые записи уже добавлены в `db` на проходе 2 — повторно класть их сюда
+  // нельзя, иначе кандидат содержал бы дубликаты.
   const candidate = JSON.parse(JSON.stringify(db));
-  items.filter(i => i.status === 'new').forEach(i => {
-    if (!Array.isArray(candidate[i.coll])) candidate[i.coll] = [];
-    candidate[i.coll].push(i.rec);
-  });
   const linkItems = pkg.links.map((l, i) => {
     const from = refToRec.get(extStr(l.from, 200));
     const to = refToRec.get(extStr(l.to, 200));
@@ -13421,6 +13544,11 @@ async function extBuildPlan(rawText) {
   return {
     ok: true, errors: [], packageHash, pkg, items, links: linkItems, counts, byTarget,
     alreadyImported: !!already, existingSessionId: already ? already.id : null,
+    // Нерезолвящиеся внутрипакетные ссылки блокируют ВЕСЬ пакет (см. commit).
+    unresolvedRefs,
+    // Карта разрешённых внутрипакетных ссылок — preview обязан показывать,
+    // во что именно превратился clientRef, ДО подтверждения.
+    intraPackageRefs: [...psyIds.entries()].map(([clientRef, v]) => ({ clientRef, coll: v.coll, id: v.id })),
   };
 }
 
@@ -13437,6 +13565,18 @@ function extCommitPlan(plan, selection) {
   // пакет. Импортировать «всё кроме конфликтных» нельзя: пакет описывает
   // связанную работу, и частичный импорт оставил бы её в состоянии, которое
   // владелец не подтверждал. Zero mutation, пока пакет не разрешён однозначно.
+  // Owner review 5233978523, BLOCKER 1: нерезолвящаяся ссылка внутри пакета
+  // отклоняет ВЕСЬ пакет. Частичный импорт связанной работы оставил бы review
+  // без доказательной базы, на которую он ссылается.
+  if (Array.isArray(plan.unresolvedRefs) && plan.unresolvedRefs.length) {
+    return {
+      ok: false, unresolvedRefs: plan.unresolvedRefs.slice(),
+      error: `внутрипакетные ссылки не разрешены (${plan.unresolvedRefs.length}): ` +
+        plan.unresolvedRefs.slice(0, 3).map(u => `${u.clientRef}: ${u.problem}`).join('; ') +
+        '. Импорт отклонён целиком — данные не изменены.',
+    };
+  }
+
   const conflicts = plan.items.filter(i => i.status === 'conflict');
   if (conflicts.length) {
     return {

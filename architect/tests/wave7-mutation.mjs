@@ -69,8 +69,8 @@ const MUTANTS = [
   {
     id: 'importer-bypasses-write-contract',
     what: 'импортер пишет мимо общего валидатора (своя схема)',
-    find: '    const built = PSY_BUILDERS[type](d, ctx.db);\n    if (!built.ok) return { reject: built.errors.slice(0, 3).join(\'; \') };',
-    replace: '    const built = PSY_BUILDERS[type](d, ctx.db);\n    if (!built.ok) return { rec: { ...built.rec } };',
+    find: "    if (!built.ok) return { reject: built.errors.slice(0, 3).join('; ') };",
+    replace: '    if (!built.ok) return { rec: { ...built.rec } };',
     expectFail: 'общий write contract',
   },
   {
@@ -93,6 +93,28 @@ const MUTANTS = [
     find: "    privacyClass: 'sensitive',\n  };\n}",
     replace: "    privacyClass: input.privacyClass || 'sensitive',\n  };\n}",
     expectFail: 'privacyClass всегда sensitive',
+  },
+  // ── Owner review 5233978523 ──────────────────────────────────────
+  {
+    id: 'no-two-pass-candidate',
+    what: 'собранная запись не попадает в кандидата — внутрипакетные ссылки перестают резолвиться',
+    find: '    if (!Array.isArray(db[coll])) db[coll] = [];\n    db[coll].push(built.rec);',
+    replace: '    if (!Array.isArray(db[coll])) db[coll] = [];',
+    expectFail: 'созданы formulation+goal+2 интервенции+3 наблюдения+review',
+  },
+  {
+    id: 'unresolved-refs-not-fatal',
+    what: 'нерезолвящаяся внутрипакетная ссылка перестаёт отклонять пакет целиком',
+    find: '  if (Array.isArray(plan.unresolvedRefs) && plan.unresolvedRefs.length) {',
+    replace: '  if (false) {',
+    expectFail: 'коммит пакета с битой ссылкой отклонён целиком',
+  },
+  {
+    id: 'psy-save-rollback-partial',
+    what: 'откат при сбое persist снова «pop() последней записи» — supersede прежней формулировки остаётся',
+    find: '    touched.forEach(c => { DB[c] = snapshot[c]; });',
+    replace: '    DB[coll].pop();',
+    expectFail: 'psyFormulations побайтово идентичны состоянию до попытки',
   },
   {
     id: 'dbcount-ignores-psychology',
