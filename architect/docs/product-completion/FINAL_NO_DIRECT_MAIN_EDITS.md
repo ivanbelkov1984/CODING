@@ -1,0 +1,1 @@
+After preparation of these contracts, implementation work must not edit MAIN directly. Use fresh branches and Draft PRs.
