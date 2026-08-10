@@ -1,0 +1,1 @@
+Owner intent: finish the remaining product-completion goals in the strict order Continuous Bridge -> private backfill -> final integration/release audit. Public GitHub must remain free of real personal data. Implementation changes must use Draft PRs and stop before merge for independent owner acceptance.
