@@ -536,5 +536,6 @@ WAVE_3_COMPLETE=true (issue #154, PR #155, merged)
 WAVE_4_1_COMPLETE=true (issue #156, PR #157, merged d832cd9)
 WAVE_5_COMPLETE=true (issue #158, PR #159, merged d5686edc)
 WAVE_6_COMPLETE=true (issue #160, PR #161, merged ff564b2)
-WAVE_7_COMPLETE=true (issue #162, this PR — Draft, awaiting owner review)
+WAVE_7_COMPLETE=true (issue #162, PR #165, merged 6d50dae)
+WAVE_8_COMPLETE=true (issue #163, this PR — Draft, awaiting owner review)
 ```

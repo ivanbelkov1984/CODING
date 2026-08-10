@@ -1446,3 +1446,22 @@ body.navshell .nsh-tab:focus-visible,body.navshell .nsh-fab:focus-visible,
 .psy-fld-chk{display:flex;align-items:center;gap:.55rem}
 .psy-fld-chk input{width:22px;height:22px;min-width:22px}
 .psy-fld-chk .f-lbl{margin-bottom:0;text-transform:none;letter-spacing:0}
+
+/* ── Wave 8 (issue #163): Adaptive Psychology Engine ─────────────────
+   Два слоя доказательности рядом, но визуально раздельно; NO_INTERVENTION —
+   спокойный, а не «ошибочный» исход. Тап-цели ≥44px сохраняются. */
+.psy-prompt{padding:var(--s4)}
+.psy-offer{padding:var(--s3) 0}
+.psy-ctx-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--s2) var(--s3)}
+@media (max-width:520px){.psy-ctx-grid{grid-template-columns:1fr}}
+.psy-explain{margin-top:.35rem}
+.psy-explain>summary{cursor:pointer;font-size:var(--tx2);color:var(--t3);min-height:44px;display:flex;align-items:center}
+.psy-helps{overflow-wrap:anywhere}
+.psy-ctx-row{margin-top:.3rem;padding-left:.5rem;border-left:2px solid var(--bd)}
+.psy-status{display:inline-block;padding:.1rem .45rem;border-radius:6px;font-size:var(--tx1,.7rem);background:var(--bg3,rgba(127,127,127,.12));color:var(--t2)}
+.psy-status-helpful_in_context,.psy-status-probably_helpful{background:var(--green-l);color:var(--green)}
+.psy-status-promising{background:var(--teal-l);color:var(--teal)}
+.psy-status-counterproductive,.psy-status-unsafe_or_out_of_scope,.psy-status-poorly_tolerated{background:var(--red-l,rgba(220,38,38,.12));color:var(--red,#DC2626)}
+.psy-ctxdep{display:inline-block;margin-left:.35rem;padding:.1rem .4rem;border-radius:6px;background:var(--orange-l,rgba(217,119,6,.12));color:var(--orange,#D97706);font-size:var(--tx1,.7rem)}
+.psy-exp-viz{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:.35rem}
+.psy-del{margin-top:.35rem}
