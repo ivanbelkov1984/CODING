@@ -374,9 +374,12 @@ console.log('\n── Wave 8: Adaptive Psychology Engine ──');
   const e1 = await save('psyExperiment', expInput());
   ok(e1.ok && e1.rec.status === 'draft' && e1.rec.consentAt, 'валидный N-of-1 создан в draft с consentAt', JSON.stringify(e1.errors));
 
-  // 23: воспроизводимая рандомизация.
+  // 23: воспроизводимая рандомизация. Последовательность ДЛИННАЯ (4 условия ×
+  // 8 циклов): mutation-проверка подменяет генератор на Math.random, и на
+  // короткой последовательности случайное совпадение (~12%) делало бы мутацию
+  // ложнозелёной — на 32 элементах вероятность совпадения ~1e-11.
   const rnd = await page.evaluate(() => ({
-    a: psyExpRandomSequence(12345, 2, 3), b: psyExpRandomSequence(12345, 2, 3), c: psyExpRandomSequence(54321, 2, 3),
+    a: psyExpRandomSequence(12345, 4, 8), b: psyExpRandomSequence(12345, 4, 8), c: psyExpRandomSequence(54321, 4, 8),
   }));
   ok(JSON.stringify(rnd.a) === JSON.stringify(rnd.b), 'один seed → одна и та же последовательность условий (23)');
   ok(JSON.stringify(rnd.a) !== JSON.stringify(rnd.c) || rnd.a.length === 0, 'другой seed → другая последовательность');
