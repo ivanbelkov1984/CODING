@@ -1,0 +1,1 @@
+Public repository artifacts for the remaining finalization phases must use synthetic data only.
