@@ -136,6 +136,10 @@ const DEFAULT_DB = {
   // («не предлагать снова»). Сливается как документ (последний __ts побеждает),
   // backup/sync переносят генерично — ключ выводится из DEFAULT_DB.
   psyAdaptiveSettings: { promptsEnabled: false, maxPromptsPerDay: 2, promptLog: [], methodExclusions: {} },
+  // Wave 9 (issue #164): mind–body слой полностью derived — хранится ТОЛЬКО
+  // пользовательское «скрыть/не отслеживать». Новый скаляр подхватывается
+  // shallow-merge'ем DEFAULT_DB без миграции и bump'а SCHEMA_VERSION.
+  mindBodySettings: { hiddenAssociations: [], mutedThemes: [] },
   psyAiConsent: null, // Wave 1 AI-помощь (Почему?→Инсайт): отдельное согласие, отзываемо в любой момент
   bots: [
     {id:1, title:'Первая задача — добавь свою', prio:'high', done:false},
@@ -7592,6 +7596,8 @@ function rHealth() {
   html += `<div id="health-today"></div>`;
   html += medsSectionHTML();
   html += bodySectionHTML();
+  // Wave 9 (issue #164): derived-совпадения контекста и тела. Не диагноз.
+  html += mbRenderCards('Совпадения с контекстом');
   html += `<div id="health-lab"></div><div id="health-docs"></div><div id="health-timeline"></div>`;
   html += `<div class="sec-lbl">Опора</div>
     <div class="mx mb"><button class="btn btn-p btn-full" onclick="openCraving()"><i data-lucide="zap"></i>У меня тяга сейчас</button></div>
@@ -10105,6 +10111,7 @@ const SCALAR_REGISTRY = Object.freeze({
   psyAiConsent:        'согласие на AI-помощь в психологии',
   correlationSettings: 'настройки «Закономерностей» + dismissed',
   psyAdaptiveSettings: 'Wave 8: burden EMA-подсказок + жёсткие исключения методов (LWW-документ)',
+  mindBodySettings:    'Wave 9: скрытые mind-body ассоциации + отключённые темы (LWW-документ)',
 });
 function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
 function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
@@ -12707,7 +12714,7 @@ function rPsyWorkspace() {
 
   el.innerHTML = `<div class="sec-lbl">Психология</div>
     <div class="be-note mx">Рабочее пространство самонаблюдения. Это не диагностика и не замена специалисту.</div>
-    ${psyRenderPromptAndSettings()}${now}${psyRenderAdaptiveNow()}${psyRenderHelpsMe()}${map}${goalsBlock}${epsBlock}${obsBlock}${revBlock}${psyRenderExperiments()}`;
+    ${psyRenderPromptAndSettings()}${now}${psyRenderAdaptiveNow()}${psyRenderHelpsMe()}${mbRenderCards('Тело и контекст')}${map}${goalsBlock}${epsBlock}${obsBlock}${revBlock}${psyRenderExperiments()}`;
   try { if (window.lucide) window.lucide.createIcons(); } catch (e) {}
 }
 
@@ -13733,6 +13740,280 @@ function psyRenderPromptAndSettings() {
     <div style="margin-top:.4rem"><button type="button" class="btn btn-s btn-sm" onclick="psySaveEmaSettings($('psy-ema-on').checked, $('psy-ema-max').value)">Сохранить</button></div>
   </details>`;
   return prompt + settings;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  WAVE 9 (issue #164): MIND–BODY CONTEXT LAYER.
+//
+//  Derived-слой временных АССОЦИАЦИЙ между психологическим контекстом и
+//  телесными симптомами. НЕ диагноз, НЕ причинность, НЕ «психосоматическое
+//  объяснение». Слой полностью derived/recomputable: ни новых коллекций,
+//  ни второго ledger'а фактов, ни EVENT_SOURCE — только чтение canonical
+//  записей и пересчёт при каждом рендере.
+//
+//  Научные границы (issue #164 + addendum 5230889736):
+//   - correlation ≠ causation: только co-occurrence/lag/повторяемость;
+//   - никаких polyvagal state machine / TAS-20 / ACE-скорингов / GNM;
+//   - taxonomy тем — независимая transdiagnostic (safety/control/autonomy/
+//     connection/loss/uncertainty), детерминированные словари, не диагноз;
+//   - произвольного confidence 0..1 нет — только evidenceState enum;
+//   - медицинские red flags уходят в health-маршрут, не в психологию;
+//   - отсутствие записи ≠ отсутствие симптома.
+// ═══════════════════════════════════════════════════════════════════
+const MIND_BODY_ENGINE_VERSION = 'mind-body-engine-v1';
+// Независимая transdiagnostic taxonomy. Словари — описательные ключевые
+// корни для сопоставления ПОЛЬЗОВАТЕЛЬСКОГО текста; происхождение тем —
+// общая транстеоретическая психология, не GNM/Hamer/Recall Healing.
+const MB_THEMES = Object.freeze([
+  { theme: 'uncertainty', ru: 'неопределённость', kw: ['неопредел', 'неизвестн', 'непонятн', 'неясн'] },
+  { theme: 'control', ru: 'контроль', kw: ['контрол', 'бессили', 'беспомощ'] },
+  { theme: 'autonomy', ru: 'автономия', kw: ['автоном', 'давлен', 'подчин', 'свобод'] },
+  { theme: 'connection', ru: 'связь', kw: ['близост', 'одиноч', 'отвержен', 'разрыв'] },
+  { theme: 'safety', ru: 'безопасность', kw: ['безопасн', 'тревог', 'страх', 'угроз'] },
+  { theme: 'loss', ru: 'утрата', kw: ['утрат', 'потер', 'горе', 'расстав'] },
+]);
+// Красные флаги: такие симптомы НЕ участвуют в психологических ассоциациях —
+// это медицинский маршрут (fail-closed). Список консервативный.
+const MB_RED_FLAG_KW = Object.freeze([
+  'груд', 'кров', 'обморок', 'сознан', 'онемени', 'одышк', 'удуш', 'температур', 'жар',
+]);
+const MB_WINDOWS = Object.freeze([
+  { id: 'same_day', ru: 'тот же день', offset: 0 },
+  { id: 'psych_before_body', ru: 'симптом на следующий день', offset: 1 },
+  { id: 'body_before_psych', ru: 'симптом днём раньше', offset: -1 },
+]);
+const MB_STATE_RU = {
+  insufficient: 'данных недостаточно', candidate: 'накапливается',
+  repeated_association: 'повторяющееся совпадение', context_dependent: 'зависит от контекста',
+};
+
+function mbCfg(dbArg) {
+  const db = dbArg || DB;
+  return db.mindBodySettings || DEFAULT_DB.mindBodySettings;
+}
+function mbMatchThemes(text) {
+  const t = String(text || '').toLowerCase();
+  return MB_THEMES.filter(th => th.kw.some(k => t.includes(k))).map(th => th.theme);
+}
+// Психологические события с датой дня и темами. Только canonical записи с
+// source IDs; события без темы не участвуют.
+function mbPsychEvents(dbArg) {
+  const db = dbArg || DB;
+  const out = [];
+  (db.psyObservations || []).forEach(o => {
+    if (!o || !o.timestamp) return;
+    const text = [o.metricId, o.contextTag, o.valueText,
+      ...(o.episode ? Object.values(o.episode) : [])].join(' ');
+    const themes = mbMatchThemes(text);
+    if (themes.length) out.push({ coll: 'psyObservations', id: o.id, day: String(o.timestamp).slice(0, 10), themes, contextTag: o.contextTag || null });
+  });
+  (db.psyInterventionEpisodes || []).forEach(e => {
+    if (!e || !e.dateTime) return;
+    const themes = mbMatchThemes([e.targetProblem, e.targetMechanism, e.interventionSummary].join(' '));
+    if (themes.length) out.push({ coll: 'psyInterventionEpisodes', id: e.id, day: String(e.dateTime).slice(0, 10), themes, contextTag: e.targetMechanism || null });
+  });
+  (db.moments || []).forEach(m => {
+    if (!m || !m.day) return;
+    const themes = mbMatchThemes([m.emo, m.note].join(' '));
+    if (themes.length) out.push({ coll: 'moments', id: m.id, day: m.day, themes, contextTag: m.emo || null });
+  });
+  return out;
+}
+function mbSymptomKey(name) { return String(name || '').trim().toLowerCase(); }
+function mbIsRedFlag(key) { return MB_RED_FLAG_KW.some(k => key.includes(k)); }
+// Симптомы группируются ТОЛЬКО по точному нормализованному имени — разные
+// симптомы не сливаются по похожему тексту.
+function mbHealthEvents(dbArg) {
+  const db = dbArg || DB;
+  return (db.symptoms || [])
+    .filter(s => s && s.name && s.day)
+    .map(s => ({ id: s.id, day: s.day, key: mbSymptomKey(s.name), severity: s.severity ?? null, redFlag: mbIsRedFlag(mbSymptomKey(s.name)) }));
+}
+const mbShiftDay = (day, offset) => {
+  const d = new Date(day + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + offset);
+  return d.toISOString().slice(0, 10);
+};
+// Главный derived-движок. Чистая функция: одинаковый DB → одинаковый
+// результат; правка/удаление/tombstone источника меняет вывод при следующем
+// вызове. Никакого Date.now/Math.random, никаких скрытых числовых confidence.
+function mindBodyAssociations(dbArg) {
+  const db = dbArg || DB;
+  const cfg = mbCfg(db);
+  const muted = cfg.mutedThemes || [];
+  const psych = mbPsychEvents(db);
+  const health = mbHealthEvents(db);
+  const redFlagKeys = [...new Set(health.filter(h => h.redFlag).map(h => h.key))].sort();
+  const usable = health.filter(h => !h.redFlag);
+  const sympByDay = new Map();   // key -> Map(day -> [ids])
+  usable.forEach(h => {
+    if (!sympByDay.has(h.key)) sympByDay.set(h.key, new Map());
+    const m = sympByDay.get(h.key);
+    if (!m.has(h.day)) m.set(h.day, []);
+    m.get(h.day).push(h.id);
+  });
+  const medDays = new Set((db.medIntakes || []).filter(x => x && x.status === 'taken')
+    .map(x => String(x.at || x.createdAt || '').slice(0, 10)));
+
+  const out = [];
+  MB_THEMES.forEach(th => {
+    if (muted.includes(th.theme)) return;
+    const evs = psych.filter(e => e.themes.includes(th.theme));
+    // Эпизод = день с психологическим событием темы (уникальные дни).
+    const dayMap = new Map();    // day -> {ids, ctx}
+    evs.forEach(e => {
+      if (!dayMap.has(e.day)) dayMap.set(e.day, { ids: [], ctx: new Set() });
+      dayMap.get(e.day).ids.push({ coll: e.coll, id: e.id });
+      if (e.contextTag) dayMap.get(e.day).ctx.add(psyCtxKey(e.contextTag));
+    });
+    const days = [...dayMap.keys()].sort();
+    if (!days.length) return;
+
+    sympByDay.forEach((dayIds, key) => {
+      // Чувствительность: считаем ВСЕ окна, один выбор окна не выдаётся за истину.
+      const windows = MB_WINDOWS.map(w => {
+        const hits = days.filter(d => dayIds.has(mbShiftDay(d, w.offset)));
+        return { id: w.id, ru: w.ru, n: hits.length, hitDays: hits };
+      });
+      const best = windows.slice().sort((a, b) => b.n - a.n)[0];
+      const nEligible = days.length;
+      const others = windows.filter(w => w.id !== best.id);
+      const lagDirection = best.n === 0 ? 'mixed'
+        : others.some(w => w.n === best.n)
+          ? 'mixed'
+          : best.id === 'same_day' ? 'concurrent' : best.id;
+
+      // evidenceState — детерминированный enum, не число.
+      let evidenceState = 'insufficient';
+      if (best.n >= 3 && nEligible >= 4 && best.n * 2 >= nEligible) evidenceState = 'repeated_association';
+      else if (best.n === 2) evidenceState = 'candidate';
+      // Контекст-зависимость: тема повторяется в одном контексте и явно
+      // отсутствует в другом (по contextTag психологических дней).
+      if (evidenceState === 'repeated_association') {
+        const ctxGroups = new Map();   // ctxKey -> {days, hits}
+        days.forEach(d => {
+          const ctxs = dayMap.get(d).ctx.size ? [...dayMap.get(d).ctx] : ['(без контекста)'];
+          ctxs.forEach(c => {
+            if (!ctxGroups.has(c)) ctxGroups.set(c, { days: 0, hits: 0 });
+            ctxGroups.get(c).days++;
+            if (best.hitDays.includes(d)) ctxGroups.get(c).hits++;
+          });
+        });
+        const groups = [...ctxGroups.values()].filter(g => g.days >= 3);
+        const hasStrong = groups.some(g => g.hits * 2 >= g.days && g.hits >= 2);
+        const hasAbsent = groups.some(g => g.hits === 0);
+        if (groups.length >= 2 && hasStrong && hasAbsent) evidenceState = 'context_dependent';
+      }
+
+      // Confounders — детерминированные флаги, сохраняются всегда.
+      const confounders = [];
+      const coDays = best.hitDays;
+      if (coDays.length) {
+        const otherSymSameDays = coDays.filter(d =>
+          [...sympByDay.keys()].some(k2 => k2 !== key && sympByDay.get(k2).has(d)));
+        if (otherSymSameDays.length * 2 >= coDays.length) confounders.push('в те же дни отмечались и другие симптомы');
+        if (coDays.some(d => medDays.has(d))) confounders.push('в те же дни фиксировался приём препаратов');
+      }
+      confounders.push('сон, нагрузка и внешние события не контролировались');
+
+      const psychologicalSourceIds = days.flatMap(d => dayMap.get(d).ids);
+      const healthSourceIds = [...new Set(windows.flatMap(w => w.hitDays.flatMap(d => dayIds.get(mbShiftDay(d, MB_WINDOWS.find(x => x.id === w.id).offset)) || [])))];
+      out.push({
+        associationId: 'mb:' + th.theme + '|' + key,
+        theme: th.theme, themeRu: th.ru, symptomKey: key,
+        psychologicalSourceIds, healthSourceIds,
+        themeTags: [th.theme],
+        windowDefinition: 'day-level: same_day / ±1 день (все окна показаны)',
+        windows: windows.map(w => ({ id: w.id, ru: w.ru, n: w.n })),
+        nEligibleEpisodes: nEligible,
+        nCooccurrences: best.n,
+        bestWindow: best.id,
+        recurrenceSummary: `${best.n} из ${nEligible} эпизодов (${best.ru})`,
+        lagDirection,
+        confounders,
+        evidenceState,
+        limitations: [
+          'совпадение по дням, а не причинность',
+          'отсутствие записи не означает отсутствие симптома',
+          'чувствительность к выбору окна показана по всем окнам',
+        ],
+        // Только язык совпадения. Никаких «вызвано», «причина», «объясняется».
+        safeReflectionText: `В ${best.n} из ${nEligible} эпизодов с темой «${th.ru}» (${best.ru}) также отмечалось: «${key}». Это повторяющееся совпадение в ваших записях; причинность не установлена.`,
+        engineVersion: MIND_BODY_ENGINE_VERSION,
+      });
+    });
+  });
+  out.sort((a, b) => b.nCooccurrences - a.nCooccurrences || a.associationId.localeCompare(b.associationId));
+  return { associations: out, redFlagSymptoms: redFlagKeys, engineVersion: MIND_BODY_ENGINE_VERSION };
+}
+
+// ── Пользовательские предпочтения (скаляр, sync/backup генерично) ──
+function mbHideAssociation(i) {
+  const t = _mbCardTargets[i]; if (!t) return;
+  const before = JSON.parse(JSON.stringify(DB.mindBodySettings || DEFAULT_DB.mindBodySettings));
+  const hidden = [...new Set([...(before.hiddenAssociations || []), t.associationId])];
+  DB.mindBodySettings = { ...before, hiddenAssociations: hidden, _u: Date.now() };
+  if (!persist()) { DB.mindBodySettings = before; toast('Не удалось сохранить', 'err'); return; }
+  toast('Ассоциация скрыта', 'ok'); rPsyWorkspace(); try { rHealth(); } catch (_) {}
+}
+function mbMuteTheme(i) {
+  const t = _mbCardTargets[i]; if (!t) return;
+  const before = JSON.parse(JSON.stringify(DB.mindBodySettings || DEFAULT_DB.mindBodySettings));
+  const mutedList = [...new Set([...(before.mutedThemes || []), t.theme])];
+  DB.mindBodySettings = { ...before, mutedThemes: mutedList, _u: Date.now() };
+  if (!persist()) { DB.mindBodySettings = before; toast('Не удалось сохранить', 'err'); return; }
+  toast('Тема больше не отслеживается', 'ok'); rPsyWorkspace(); try { rHealth(); } catch (_) {}
+}
+function mbUnmuteAll() {
+  const before = JSON.parse(JSON.stringify(DB.mindBodySettings || DEFAULT_DB.mindBodySettings));
+  DB.mindBodySettings = { ...before, hiddenAssociations: [], mutedThemes: [], _u: Date.now() };
+  if (!persist()) { DB.mindBodySettings = before; toast('Не удалось сохранить', 'err'); return; }
+  toast('Скрытые ассоциации и темы возвращены', 'ok'); rPsyWorkspace(); try { rHealth(); } catch (_) {}
+}
+
+// ── Контекстные карточки (общий рендер для Психологии и Здоровья) ──
+let _mbCardTargets = [];
+function mbRenderCards(title) {
+  const res = mindBodyAssociations(DB);
+  const cfg = mbCfg(DB);
+  const hidden = cfg.hiddenAssociations || [];
+  // Минимум повторяемости до показа: candidate не показывается карточкой.
+  const visible = res.associations.filter(a =>
+    (a.evidenceState === 'repeated_association' || a.evidenceState === 'context_dependent') &&
+    !hidden.includes(a.associationId));
+  const gathering = res.associations.filter(a => a.evidenceState === 'candidate' && !hidden.includes(a.associationId)).length;
+  _mbCardTargets = [];
+  const cards = visible.map(a => {
+    const i = _mbCardTargets.push({ associationId: a.associationId, theme: a.theme }) - 1;
+    return `<div class="psy-item mb-assoc">
+      <span class="psy-status">${esc(MB_STATE_RU[a.evidenceState] || a.evidenceState)}</span>
+      <div class="si-text" style="margin-top:.3rem">${esc(a.safeReflectionText)}</div>
+      <div class="si-text" style="font-size:.72rem;color:var(--t3)">Окна: ${a.windows.map(w => esc(w.ru) + ': ' + w.n).join(' · ')} · направление: ${esc(a.lagDirection)}</div>
+      <div class="si-text" style="font-size:.72rem;color:var(--t4)">Смешивающие факторы: ${a.confounders.map(esc).join('; ')}</div>
+      <details class="psy-explain"><summary>Почему система это заметила?</summary>
+        <div class="si-text" style="font-size:.72rem">Окно: ${esc(a.windowDefinition)} · движок: ${esc(a.engineVersion)}</div>
+        <div class="si-text" style="font-size:.72rem;word-break:break-all">Психологические записи (${a.psychologicalSourceIds.length}): ${a.psychologicalSourceIds.map(x => esc(x.coll + '#' + x.id)).join(', ')}</div>
+        <div class="si-text" style="font-size:.72rem;word-break:break-all">Записи здоровья (${a.healthSourceIds.length}): ${a.healthSourceIds.map(x => esc(String(x))).join(', ')}</div>
+        <div class="si-text" style="font-size:.72rem;color:var(--t4)">Ограничения: ${a.limitations.map(esc).join('; ')}</div>
+      </details>
+      <div class="psy-actions">
+        <button type="button" class="btn btn-s btn-sm" onclick="mbHideAssociation(${i})">Скрыть</button>
+        <button type="button" class="btn btn-s btn-sm" onclick="mbMuteTheme(${i})">Не отслеживать тему</button>
+      </div>
+    </div>`;
+  }).join('');
+  const redNote = res.redFlagSymptoms.length
+    ? `<div class="psy-adv">Симптомы «${res.redFlagSymptoms.map(esc).join('», «')}» относятся к медицинскому маршруту — психологические совпадения для них не рассчитываются. При тревожных симптомах обратись к врачу.</div>`
+    : '';
+  const mutedNote = (cfg.mutedThemes || []).length || hidden.length
+    ? `<div style="margin-top:.4rem"><button type="button" class="btn btn-s btn-sm" onclick="mbUnmuteAll()">Показать скрытое (${hidden.length + (cfg.mutedThemes || []).length})</button></div>` : '';
+  return `<details class="card mx psy-det mb-block"><summary>${esc(title)} (${visible.length})</summary>
+    <div class="be-note" style="margin:.4rem 0">Это повторяющиеся совпадения по дням между записями, а не диагноз и не причинное объяснение. Каждая карточка раскрывается до конкретных записей.</div>
+    ${redNote}
+    ${cards || '<div class="ai-sp-empty">Повторяющихся совпадений пока не найдено.</div>'}
+    ${gathering ? `<div class="si-text" style="font-size:.75rem;color:var(--t3)">Накапливается (пока мало повторов): ${gathering}</div>` : ''}
+    ${mutedNote}
+  </details>`;
 }
 
 // ═══════════════════════════════════════════════════════════════════
