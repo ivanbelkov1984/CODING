@@ -1501,6 +1501,26 @@
   </div>
 </div>
 
+<!-- Wave 8 (issue #163): завершение персонального эксперимента — итог обязан
+     нести ограничения; причинный статус вычисляется движком, не пользователем. -->
+<div class="ov" id="ov-psy-exp-done" onclick="if(event.target===this)closeOv('ov-psy-exp-done')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title">Итог эксперимента</div>
+    <div style="padding:0 var(--s4)">
+      <div class="psy-fld"><label class="f-lbl" for="psy-expd-text">Что наблюдалось (без вывода о причинности сверх дизайна)</label>
+        <textarea id="psy-expd-text" class="field" rows="3"></textarea></div>
+      <div class="psy-fld"><label class="f-lbl" for="psy-expd-lims">Ограничения вывода — по строке (обязательно)</label>
+        <textarea id="psy-expd-lims" class="field" rows="2"></textarea></div>
+    </div>
+    <div id="psy-expd-err" class="si-text" role="alert" aria-live="polite" style="padding:0 var(--s4);color:var(--red,#DC2626)"></div>
+    <div style="padding:var(--s4);display:flex;gap:var(--s2)">
+      <button type="button" class="btn btn-p btn-full" onclick="psyExpDoneSubmit()">Завершить</button>
+      <button type="button" class="btn btn-s" onclick="closeOv('ov-psy-exp-done')">Отмена</button>
+    </div>
+  </div>
+</div>
+
 <div class="ov" id="ov-psy-ai-consent" onclick="if(event.target===this)closeOv('ov-psy-ai-consent')">
   <div class="sheet">
     <div class="sh-pull"></div>

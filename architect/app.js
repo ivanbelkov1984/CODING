@@ -11,7 +11,7 @@ const dateRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:
 const dateFullRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:'long',year:'numeric'});
 const todayKey = () => new Date().toISOString().slice(0,10);
 const nowISO = () => new Date().toISOString();            // UTC ISO 8601 — источник истины для времени
-const SCHEMA_VERSION = 7;   // Wave 7 (issue #162): Psychology Workspace — 5 additive meta-collections
+const SCHEMA_VERSION = 8;   // Wave 8 (issue #163): Adaptive Psychology Engine — psyAdaptivePlans/psyExperiments + скаляр настроек
 
 // ─── RELEASE METADATA (Wave 5, issue #158) ──────────────────────────
 // Плейсхолдеры заменяются ЕДИНСТВЕННЫМ местом — build.mjs. Руками эти
@@ -128,6 +128,14 @@ const DEFAULT_DB = {
   psyInterventionEpisodes: [],  // фактические применения метода
   psyObservations: [],          // наблюдения/EMA, которых нет в canonical записях
   psyReviews: [],               // периодический evidence-linked разбор
+  // Wave 8 (issue #163): адаптивный движок. Персональный «профиль метода»
+  // здесь НЕ хранится — он derived и пересчитывается из реальных эпизодов.
+  psyAdaptivePlans: [],         // JITAI-планы: 6 компонентов + safety gate
+  psyExperiments: [],           // N-of-1: только по условиям допуска, versioned history
+  // Скаляр настроек движка: burden EMA-подсказок и жёсткие исключения методов
+  // («не предлагать снова»). Сливается как документ (последний __ts побеждает),
+  // backup/sync переносят генерично — ключ выводится из DEFAULT_DB.
+  psyAdaptiveSettings: { promptsEnabled: false, maxPromptsPerDay: 2, promptLog: [], methodExclusions: {} },
   psyAiConsent: null, // Wave 1 AI-помощь (Почему?→Инсайт): отдельное согласие, отзываемо в любой момент
   bots: [
     {id:1, title:'Первая задача — добавь свою', prio:'high', done:false},
@@ -248,7 +256,9 @@ function dbCount(db) {
   // психологическая работа, иначе выглядел бы пустым и мог быть перезаписан
   // резервной копией. `bots` намеренно НЕ считается (у него есть значения по
   // умолчанию, иначе любой профиль всегда «непустой»).
-  ['insights','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments',
+  // Wave 8: psyAdaptivePlans/psyExperiments тоже считаются — профиль «только
+  // адаптивная работа» не должен выглядеть пустым.
+  ['insights','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments','psyAdaptivePlans','psyExperiments',
    'psyFormulations','psyGoals','psyInterventionEpisodes','psyObservations','psyReviews']
     .forEach(c => { if (Array.isArray(db[c])) n += db[c].length; });
   return n;
@@ -2242,6 +2252,9 @@ const REC_COLLS = {
   psyInterventionEpisodes: { ru: 'Применения метода', sum: r => `${(r.dateTime || '').slice(0, 10)} · ${r.methodFamily || '—'} · ${PSY_OUTCOME_RU[r.outcomeClass] || r.outcomeClass || 'без исхода'}` },
   psyObservations: { ru: 'Наблюдения / EMA', sum: r => `${(r.timestamp || '').slice(0, 10)} · ${r.metricId || 'метрика'} · ${r.valueNumber != null ? r.valueNumber + (r.unit ? ' ' + r.unit : '') : (r.valueText || 'без значения')}` },
   psyReviews: { ru: 'Психологические review', sum: r => `${(r.periodStart || '').slice(0, 10)}–${(r.periodEnd || '').slice(0, 10)} · ${PSY_DECISION_RU[r.decision] || r.decision || '—'}` },
+  // Wave 8 (issue #163): адаптивный движок — управляемые записи.
+  psyAdaptivePlans: { ru: 'Адаптивные планы (JITAI)', sum: r => `${r.proximalOutcome || 'план'}${r.enabled ? '' : ' (выключен)'}` },
+  psyExperiments: { ru: 'Личные эксперименты (N-of-1)', sum: r => `${(r.createdAt || '').slice(0, 10)} · ${r.question || 'эксперимент'} · ${PSY_EXP_STATUS_RU[r.status] || r.status || '—'}` },
   astroPartners: { ru: 'Партнёры (синастрия)', sum: r => r.label || 'партнёр' },
   psyLinks: { ru: 'Связи (доказательная цепочка)', sum: r => `${PSY_LINK_RELATION_LABELS[r.relation] || r.relation}` },
   relationshipContexts: { ru: 'Контексты отношений', sum: r => `${r.label || ''}${r.status === 'archived' ? ' (архив)' : ''}` },
@@ -10064,7 +10077,7 @@ function genRecoveryKey() {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','astroPartners','bots','digests','spheres','sphereLogs','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments','externalWorkSessions','psyFormulations','psyGoals','psyInterventionEpisodes','psyObservations','psyReviews'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','astroPartners','bots','digests','spheres','sphereLogs','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments','externalWorkSessions','psyFormulations','psyGoals','psyInterventionEpisodes','psyObservations','psyReviews','psyAdaptivePlans','psyExperiments'];
 
 // ─── SCALAR MERGE CONTRACT (Wave 5, issue #158) ─────────────────────
 // Внутренние ключи DB, которые НЕ являются пользовательскими данными и
@@ -10091,6 +10104,7 @@ const SCALAR_REGISTRY = Object.freeze({
   astroRectify:        'ректификация: анкета и результат — Wave 5: добавлен в sync',
   psyAiConsent:        'согласие на AI-помощь в психологии',
   correlationSettings: 'настройки «Закономерностей» + dismissed',
+  psyAdaptiveSettings: 'Wave 8: burden EMA-подсказок + жёсткие исключения методов (LWW-документ)',
 });
 function touch(rec) { if (rec && typeof rec === 'object') rec._u = Date.now(); return rec; }
 function tomb(id) { (DB._del || (DB._del = {}))[id] = Date.now(); }
@@ -12125,43 +12139,54 @@ const PSY_FAMILY_RU = {
 // Детерминированный versioned справочник. Персональные результаты сюда НЕ
 // попадают: рейтинг метода по личным эпизодам — это Волна 8, и смешивать
 // внешнюю доказательность с личным опытом в одно число запрещено.
-const PSY_METHOD_REGISTRY_VERSION = 'psy-method-registry-v1';
+// v2 (Wave 8, issue #163): внешняя доказательность расширена (population,
+// limitations), добавлены riskClass (допуск к N-of-1: только обратимые
+// low-risk методы) и amberSafe (допустим ли метод при safety=amber).
+// Персональные результаты в реестр по-прежнему НЕ попадают.
+const PSY_METHOD_REGISTRY_VERSION = 'psy-method-registry-v2';
 const PSY_METHOD_REGISTRY = Object.freeze([
   { methodId: 'behavioral_activation', name: 'Поведенческая активация', family: 'BEHAVIORAL',
     mechanismTargets: ['избегание', 'снижение активности', 'ангедония'],
     intendedUse: ['сниженное настроение', 'уход от активности'],
     cautions: ['при выраженном истощении начинать с очень малых шагов'],
-    evidenceMetadata: [{ kind: 'clinical_guideline', ref: 'NICE CG90 (депрессия у взрослых)', note: 'внешняя доказательность, не персональный результат' }] },
+    riskClass: 'low_reversible', amberSafe: false,
+    evidenceMetadata: [{ kind: 'clinical_guideline', ref: 'NICE CG90 (депрессия у взрослых)', population: 'взрослые с депрессией (клинические выборки)', limitations: 'групповая доказательность не гарантирует индивидуальный эффект', note: 'внешняя доказательность, не персональный результат' }] },
   { methodId: 'cognitive_restructuring', name: 'Работа с автоматическими мыслями', family: 'CBT',
     mechanismTargets: ['катастрофизация', 'чтение мыслей', 'долженствование'],
     intendedUse: ['тревожные и депрессивные интерпретации'],
     cautions: ['не применять как спор с чувствами; не использовать при остром кризисе'],
-    evidenceMetadata: [{ kind: 'textbook', ref: 'Beck, Cognitive Therapy: Basics and Beyond', note: 'методологический источник' }] },
+    riskClass: 'low_reversible', amberSafe: false,
+    evidenceMetadata: [{ kind: 'textbook', ref: 'Beck, Cognitive Therapy: Basics and Beyond', population: 'амбулаторные взрослые в КПТ-протоколах', limitations: 'методологический источник, не персональная гарантия', note: 'методологический источник' }] },
   { methodId: 'values_clarification', name: 'Прояснение ценностей', family: 'ACT',
     mechanismTargets: ['слияние с мыслями', 'потеря направления'],
     intendedUse: ['выбор действия при неопределённости'],
     cautions: ['не превращать в моральную оценку себя'],
-    evidenceMetadata: [{ kind: 'textbook', ref: 'Hayes et al., Acceptance and Commitment Therapy', note: 'методологический источник' }] },
+    riskClass: 'low_reversible', amberSafe: true,
+    evidenceMetadata: [{ kind: 'textbook', ref: 'Hayes et al., Acceptance and Commitment Therapy', population: 'взрослые в ACT-протоколах', limitations: 'эффект зависит от контекста применения', note: 'методологический источник' }] },
   { methodId: 'opposite_action', name: 'Противоположное действие', family: 'DBT_SKILL',
     mechanismTargets: ['импульс, не соответствующий фактам', 'избегание'],
     intendedUse: ['сильная эмоция с импульсом к вредному действию'],
     cautions: ['не применять, когда эмоция ОБОСНОВАНА фактами и требует действия по границе'],
-    evidenceMetadata: [{ kind: 'textbook', ref: 'Linehan, DBT Skills Training Manual', note: 'методологический источник' }] },
+    riskClass: 'low_reversible', amberSafe: false,
+    evidenceMetadata: [{ kind: 'textbook', ref: 'Linehan, DBT Skills Training Manual', population: 'взрослые в DBT-обучении навыкам', limitations: 'требует различения обоснованной и необоснованной эмоции', note: 'методологический источник' }] },
   { methodId: 'self_compassion_break', name: 'Пауза самосострадания', family: 'CFT',
     mechanismTargets: ['самокритика', 'стыд'],
     intendedUse: ['эпизод резкой самокритики'],
     cautions: ['у части людей вызывает сопротивление/тревогу — это не «неудача», а сигнал темпа'],
-    evidenceMetadata: [{ kind: 'textbook', ref: 'Gilbert, Compassion Focused Therapy', note: 'методологический источник' }] },
+    riskClass: 'low_reversible', amberSafe: true,
+    evidenceMetadata: [{ kind: 'textbook', ref: 'Gilbert, Compassion Focused Therapy', population: 'взрослые с выраженной самокритикой', limitations: 'возможное усиление дистресса на старте (backdraft)', note: 'методологический источник' }] },
   { methodId: 'boundary_script', name: 'Подготовленная формулировка границы', family: 'BEHAVIORAL',
     mechanismTargets: ['уступчивость', 'отложенная граница'],
     intendedUse: ['повторяющееся нарушение границы'],
     cautions: ['при риске насилия сначала безопасность, а не разговор'],
-    evidenceMetadata: [{ kind: 'practice_note', ref: 'ассертивные протоколы', note: 'общая методология' }] },
+    riskClass: 'low_reversible', amberSafe: false,
+    evidenceMetadata: [{ kind: 'practice_note', ref: 'ассертивные протоколы', population: 'общая взрослая практика', limitations: 'не для ситуаций с риском насилия', note: 'общая методология' }] },
   { methodId: 'psychoeducation_cycle', name: 'Объяснение цикла', family: 'PSYCHOEDUCATION',
     mechanismTargets: ['непонимание механизма', 'самообвинение'],
     intendedUse: ['первое знакомство с паттерном'],
     cautions: ['знание механизма само по себе не меняет поведение'],
-    evidenceMetadata: [{ kind: 'practice_note', ref: 'общая психообразовательная практика', note: 'не является доказательством эффективности' }] },
+    riskClass: 'low_reversible', amberSafe: true,
+    evidenceMetadata: [{ kind: 'practice_note', ref: 'общая психообразовательная практика', population: 'общая практика', limitations: 'не является вмешательством с измеримым исходом само по себе', note: 'не является доказательством эффективности' }] },
 ]);
 function psyMethod(id) { return PSY_METHOD_REGISTRY.find(m => m.methodId === id) || null; }
 
@@ -12177,6 +12202,7 @@ const PSY_REF_COLLS = Object.freeze([
   'evolution', 'sphereLogs', 'symptoms', 'measures', 'medIntakes', 'labObservations',
   'healthDocuments', 'cravings', 'checkins', 'chats',
   'psyFormulations', 'psyGoals', 'psyInterventionEpisodes', 'psyObservations', 'psyReviews',
+  'psyAdaptivePlans', 'psyExperiments',   // Wave 8: review/план могут ссылаться на них
 ]);
 function psyNormRefs(list, db, errors, path) {
   const d = db || DB;
@@ -12325,7 +12351,16 @@ const PSY_BUILDERS = {
     if (!metricId) errors.push('observation: отсутствует metricId');
     const hasNum = typeof input.valueNumber === 'number' && isFinite(input.valueNumber);
     const valueText = psyStr(input.valueText, 4000);
-    if (!hasNum && !valueText) errors.push('observation: нужно значение — число или текст (пустое наблюдение не сохраняется)');
+    // Wave 8 (issue #163): low-friction EMA-эпизод. Все поля цепочки опциональны;
+    // структура пишется как есть, числа из текста НЕ извлекаются.
+    const episode = (input.episode && typeof input.episode === 'object' && !Array.isArray(input.episode)) ? (() => {
+      const out = {};
+      ['event', 'firstThought', 'body', 'emotion', 'impulse', 'action', 'result'].forEach(k => {
+        const v = psyStr(input.episode[k], 2000); if (v) out[k] = v;
+      });
+      return Object.keys(out).length ? out : null;
+    })() : null;
+    if (!hasNum && !valueText && !episode) errors.push('observation: нужно значение — число, текст или заполненный эпизод (пустое наблюдение не сохраняется)');
     const source = psyEnum(input.source, PSY_OBS_SOURCES, 'user');
     // Явный запрет: ИИ не порождает измерения. Числовое значение из
     // ai-источника отклоняется fail-closed.
@@ -12338,6 +12373,7 @@ const PSY_BUILDERS = {
       metricId,
       valueNumber: hasNum ? input.valueNumber : null,
       valueText: valueText || null,
+      episode,
       unit: psyStr(input.unit, 40) || null,
       contextTag: psyStr(input.contextTag, 120) || null,
       triggerRef: (() => {
@@ -12425,13 +12461,27 @@ const PSY_REF_ID_FIELDS = Object.freeze({
 
 // Единственная точка записи из ручного UI. Импортер идёт через тот же
 // PSY_BUILDERS, но собственным транзакционным коммитом Волны 6.
+// Wave 8: типы адаптивного движка сохраняются ТЕМ ЖЕ транзакционным путём,
+// но НЕ добавляются в PSY_TYPE_TO_COLL — от него зависит список типов
+// external-work v2, и формат v2 не должен молча расшириться (обратная
+// совместимость v1/v2 — контракт Волны 7). Планы и эксперименты — локальные
+// решения пользователя, они не импортируются извне.
+const PSY_SAVE_COLLS = Object.freeze({
+  psyAdaptivePlan: 'psyAdaptivePlans',
+  psyExperiment: 'psyExperiments',
+});
+function psySaveBuilder(type) {
+  if (type === 'psyAdaptivePlan') return psyBuildAdaptivePlan;
+  if (type === 'psyExperiment') return psyBuildExperiment;
+  return PSY_BUILDERS[type];
+}
 function psySaveRecord(type, input) {
-  const coll = PSY_TYPE_TO_COLL[type];
+  const coll = PSY_TYPE_TO_COLL[type] || PSY_SAVE_COLLS[type];
   if (!coll) return { ok: false, errors: ['неизвестный тип психологической записи'] };
   if (typeof isWriteLocked === 'function' && isWriteLocked()) {
     return { ok: false, errors: ['профиль в режиме восстановления — запись заблокирована'] };
   }
-  const built = PSY_BUILDERS[type](input, DB);
+  const built = psySaveBuilder(type)(input, DB);
   if (!built.ok) return { ok: false, errors: built.errors };
   if (!Array.isArray(DB[coll])) DB[coll] = [];
 
@@ -12495,6 +12545,7 @@ function psyRefLine(refs) {
 }
 function rPsyWorkspace() {
   const el = $('psy-ws'); if (!el) return;
+  _psyDelTargets = [];   // Wave 8: цели кнопок удаления — только числовые индексы в inline-обработчиках
   const F = psyActiveFormulation();
   const goals = (DB.psyGoals || []).filter(g => g && g.status === 'active').slice(0, 3);
   const allGoals = (DB.psyGoals || []).slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
@@ -12512,7 +12563,8 @@ function rPsyWorkspace() {
     ${goals.length ? `<div class="psy-goals-inline">${goals.map(g => `<span class="psy-chip">${esc(g.label)}</span>`).join('')}</div>` : ''}
     <div class="si-text" style="margin-top:.4rem;color:var(--t3)">${nextReview ? 'Следующий review: ' + esc(String(nextReview).slice(0, 10)) : 'Дата review не назначена'}</div>
     <div class="psy-actions">
-      <button type="button" class="btn btn-s btn-sm" onclick="openPsyObservation()">Наблюдать эпизод</button>
+      <button type="button" class="btn btn-s btn-sm" onclick="openPsyForm('psyEma')">Наблюдать эпизод</button>
+      <button type="button" class="btn btn-s btn-sm" onclick="openPsyObservation()">Замер</button>
       <button type="button" class="btn btn-s btn-sm" onclick="openPsyIntervention()">Записать метод</button>
       <button type="button" class="btn btn-s btn-sm" onclick="openPsyReview()">Review</button>
     </div>
@@ -12560,6 +12612,7 @@ function rPsyWorkspace() {
         ${e.confounders.length ? `<div style="font-size:.72rem;color:var(--t4)">Смешивающие факторы: ${esc(e.confounders.join('; '))}</div>` : ''}
         <div style="font-size:.72rem">${psyRefLine(e.sourceRefs)}</div>
         <div style="font-size:.72rem;color:var(--t4)">${psyProvLine(e)}</div>
+        <button type="button" class="btn btn-s btn-sm psy-del" onclick="psyUiDelete(${_psyDelTargets.push({ coll: 'psyInterventionEpisodes', id: e.id }) - 1})">Удалить (профиль пересчитается)</button>
       </div>`;
     }).join('') : '<div class="ai-sp-empty">Пока нет записанных применений метода.</div>'}
     <div class="be-note" style="margin-top:.5rem">Один эпизод не доказывает эффективность метода. Здесь фиксируется, что было сделано и что наблюдалось после — без вывода о причинности.</div>
@@ -12571,7 +12624,9 @@ function rPsyWorkspace() {
       <b>${esc(o.metricId)}</b> · ${esc(String(o.timestamp).slice(0, 16).replace('T', ' '))}<br>
       <span class="si-text">${o.valueNumber != null ? esc(String(o.valueNumber)) + (o.unit ? ' ' + esc(o.unit) : '') : esc(o.valueText || '')}</span>
       ${o.naturalistic ? '<span class="psy-nat">естественное изменение (техника не применялась)</span>' : ''}
+      ${o.episode ? `<div class="si-text" style="font-size:.75rem;color:var(--t3)">${['event', 'firstThought', 'body', 'emotion', 'impulse', 'action', 'result'].filter(k => o.episode[k]).map(k => esc(o.episode[k])).join(' → ')}</div>` : ''}
       <br><span style="font-size:.72rem;color:var(--t4)">режим: ${esc(o.entryMode)} · источник: ${esc(o.source)}</span>
+      <button type="button" class="btn btn-s btn-sm psy-del" onclick="psyUiDelete(${_psyDelTargets.push({ coll: 'psyObservations', id: o.id }) - 1})">Удалить</button>
     </div>`).join('') : '<div class="ai-sp-empty">Наблюдений пока нет.</div>'}
     <div class="be-note" style="margin-top:.5rem">Отсутствие замера — это отсутствие данных, а не ноль. Числа вводит только человек или детерминированный подсчёт.</div>
   </details>`;
@@ -12588,7 +12643,7 @@ function rPsyWorkspace() {
 
   el.innerHTML = `<div class="sec-lbl">Психология</div>
     <div class="be-note mx">Рабочее пространство самонаблюдения. Это не диагностика и не замена специалисту.</div>
-    ${now}${map}${goalsBlock}${epsBlock}${obsBlock}${revBlock}`;
+    ${psyRenderPromptAndSettings()}${now}${psyRenderAdaptiveNow()}${psyRenderHelpsMe()}${map}${goalsBlock}${epsBlock}${obsBlock}${revBlock}${psyRenderExperiments()}`;
   try { if (window.lucide) window.lucide.createIcons(); } catch (e) {}
 }
 
@@ -12641,11 +12696,58 @@ const PSY_FORM_SPECS = {
     { k: 'decision', l: 'Решение', t: 'sel', opts: PSY_DECISIONS.map(d => [d, PSY_DECISION_RU[d]]) },
     { k: '_limitations', l: 'Ограничения вывода — по строке', t: 'area' },
   ] },
+  // ── Wave 8 (issue #163) ───────────────────────────────────────────
+  // Low-friction EMA: цепочка «что произошло → мысль → тело → эмоция →
+  // импульс → действие → результат». ВСЕ поля опциональны — достаточно
+  // одного. Сохраняется как обычное psyObservation (saveAs), вторых схем нет.
+  psyEma: { title: 'Наблюдать эпизод (EMA)', saveAs: 'psyObservation', fields: [
+    { k: '_event', l: 'Что произошло', t: 'area' },
+    { k: '_firstThought', l: 'Первая мысль / смысл', t: 'text' },
+    { k: '_body', l: 'Тело', t: 'text' },
+    { k: '_emotion', l: 'Эмоция', t: 'text' },
+    { k: '_impulse', l: 'Импульс', t: 'text' },
+    { k: '_action', l: 'Что сделал(а)', t: 'text' },
+    { k: '_result', l: 'Результат', t: 'text' },
+    { k: 'valueNumber', l: 'Интенсивность 0–10 (если хочется оценить)', t: 'num' },
+    { k: 'contextTag', l: 'Контекст', t: 'text' },
+    { k: 'naturalistic', l: 'Изменение произошло само, техника не применялась', t: 'chk' },
+  ] },
+  psyAdaptivePlan: { title: 'Адаптивный план (JITAI)', fields: [
+    { k: 'goalId', l: 'К какой цели относится', t: 'sel', req: true,
+      opts: () => (DB.psyGoals || []).filter(g => g && g.status === 'active').map(g => [g.id, g.label]) },
+    { k: 'proximalOutcome', l: 'Ближайший измеримый результат (пусто = из цели)', t: 'text' },
+    { k: '_decisionPoint', l: 'Когда принимается решение (точка решения)', t: 'text', req: true },
+    { k: '_ruleTrigger', l: 'Правило: тип триггера (пусто = любой)', t: 'text' },
+    { k: '_ruleMechanism', l: 'Правило: механизм (пусто = любой)', t: 'text' },
+    { k: '_ruleArousalMin', l: 'Правило: возбуждение от (0–10, пусто = без порога)', t: 'num' },
+    { k: '_ruleArousalMax', l: 'Правило: возбуждение до (0–10, пусто = без порога)', t: 'num' },
+    { k: '_ruleMethod', l: 'Тогда предложить', t: 'sel',
+      opts: () => PSY_METHOD_REGISTRY.map(m => [m.methodId, m.name]).concat([['NO_INTERVENTION', 'Ничего не предлагать (NO_INTERVENTION)']]) },
+  ] },
+  psyExperiment: { title: 'Персональный эксперимент (N-of-1)', fields: [
+    { k: 'question', l: 'Простой вопрос эксперимента', t: 'text', req: true },
+    { k: 'methodId', l: 'Метод (только обратимые low-risk)', t: 'sel',
+      opts: () => PSY_METHOD_REGISTRY.filter(m => m.riskClass === 'low_reversible').map(m => [m.methodId, m.name]) },
+    { k: '_metric', l: 'Что измеряем (метрика)', t: 'text', req: true },
+    { k: 'designType', l: 'Дизайн', t: 'sel', opts: () => PSY_EXP_DESIGNS.map(d => [d, PSY_EXP_DESIGN_RU[d]]) },
+    { k: '_conditions', l: 'Условия сравнения — по строке', t: 'area' },
+    { k: '_baselinePoints', l: 'Запланировано baseline-замеров', t: 'num', req: true },
+    { k: '_baselineWhy', l: 'Почему этого достаточно', t: 'area', req: true },
+    { k: 'washoutPlan', l: 'Washout / перенос эффекта между условиями', t: 'area' },
+    { k: '_stopRules', l: 'Stop-правила — по строке', t: 'area', req: true },
+    { k: 'fidelityPlan', l: 'Как фиксируется точность выполнения (fidelity)', t: 'area', req: true },
+    { k: 'measurementSchedule', l: 'График измерений', t: 'text', req: true },
+    { k: '_seed', l: 'Seed рандомизации (для рандомизированных дизайнов)', t: 'num' },
+    { k: '_cycles', l: 'Число циклов рандомизации (≥2)', t: 'num' },
+    { k: '_safetyOk', l: 'Подтверждаю: я сейчас в порядке (safety green)', t: 'chk' },
+    { k: '_consent', l: 'Я понимаю ограничения и даю согласие на эксперимент', t: 'chk' },
+  ] },
 };
 let _psyFormType = null;
-function openPsyForm(type) {
+function openPsyForm(type, prefill) {
   const spec = PSY_FORM_SPECS[type]; if (!spec) return;
   _psyFormType = type;
+  _psyFormPrefill = prefill || null;
   const t = $('psy-form-title'); if (t) t.textContent = spec.title;
   const err = $('psy-form-err'); if (err) err.textContent = '';
   const body = $('psy-form-body');
@@ -12653,14 +12755,19 @@ function openPsyForm(type) {
     const id = 'psyf-' + f.k;
     const lbl = `<label class="f-lbl" for="${id}">${esc(f.l)}${f.req ? ' *' : ''}</label>`;
     if (f.t === 'area') return `<div class="psy-fld">${lbl}<textarea id="${id}" class="field" rows="3"></textarea></div>`;
-    if (f.t === 'sel') return `<div class="psy-fld">${lbl}<select id="${id}" class="field">${f.opts.map(o => `<option value="${esc(o[0])}">${esc(o[1] || o[0])}</option>`).join('')}</select></div>`;
+    if (f.t === 'sel') { const opts = typeof f.opts === 'function' ? f.opts() : f.opts; return `<div class="psy-fld">${lbl}<select id="${id}" class="field">${opts.map(o => `<option value="${esc(o[0])}">${esc(o[1] || o[0])}</option>`).join('')}</select></div>`; }
     if (f.t === 'chk') return `<div class="psy-fld psy-fld-chk"><input type="checkbox" id="${id}">${lbl}</div>`;
     if (f.t === 'num') return `<div class="psy-fld">${lbl}<input type="number" step="any" id="${id}" class="field"></div>`;
     if (f.t === 'date') return `<div class="psy-fld">${lbl}<input type="date" id="${id}" class="field"></div>`;
     return `<div class="psy-fld">${lbl}<input type="text" id="${id}" class="field"></div>`;
   }).join('');
+  // Wave 8: детерминированное предзаполнение (например, метод из решения движка).
+  if (_psyFormPrefill) Object.entries(_psyFormPrefill).forEach(([k, v]) => {
+    const el = $('psyf-' + k); if (el && el.type !== 'checkbox') el.value = String(v == null ? '' : v);
+  });
   openOv('ov-psy-form');
 }
+let _psyFormPrefill = null;
 function openPsyFormulation() { openPsyForm('psyFormulation'); }
 function openPsyGoal() { openPsyForm('psyGoal'); }
 function openPsyIntervention() { openPsyForm('psyInterventionEpisode'); }
@@ -12712,12 +12819,832 @@ function psyFormSubmit() {
   }
   if (type === 'psyGoal' && input.reviewAt) input.reviewAt = input.reviewAt + 'T00:00:00.000Z';
 
-  const res = psySaveRecord(type, input);
+  // ── Wave 8 (issue #163) ──────────────────────────────────────────
+  if (type === 'psyEma') {
+    // Цепочка эпизода — структура, а не «извлечённые ИИ числа».
+    input.episode = {
+      event: val('_event'), firstThought: val('_firstThought'), body: val('_body'),
+      emotion: val('_emotion'), impulse: val('_impulse'), action: val('_action'), result: val('_result'),
+    };
+    const n = String(val('valueNumber') || '').trim();
+    input.valueNumber = n === '' ? null : Number(n);   // пусто = missing, не ноль
+    input.metricId = 'ema_episode';
+    input.entryMode = 'event_based';
+    input.timestamp = nowISO();
+    input.source = 'user';
+  }
+  if (type === 'psyAdaptivePlan') {
+    input.decisionPoints = [String(val('_decisionPoint') || '').trim()].filter(Boolean);
+    const toNum = k => { const s = String(val(k) || '').trim(); return s === '' ? null : Number(s); };
+    const methodId = String(val('_ruleMethod') || '');
+    input.interventionOptions = methodId === 'NO_INTERVENTION' ? [] : [methodId];
+    input.decisionRules = [{
+      if: {
+        triggerType: String(val('_ruleTrigger') || '').trim() || null,
+        mechanism: String(val('_ruleMechanism') || '').trim() || null,
+        arousalMin: toNum('_ruleArousalMin'), arousalMax: toNum('_ruleArousalMax'),
+      },
+      then: { methodId },
+    }];
+    // NO_INTERVENTION как единственное правило допустим, но плану всё равно
+    // нужен хотя бы один метод-вариант — иначе план бессмыслен.
+    if (methodId === 'NO_INTERVENTION') input.interventionOptions = ['psychoeducation_cycle'];
+    input.tailoringVariables = [{ varId: 'arousal' }, { varId: 'triggerType' }, { varId: 'receptivity' }];
+  }
+  if (type === 'psyExperiment') {
+    input.targetOutcomeMetricIds = [String(val('_metric') || '').trim()].filter(Boolean);
+    input.conditions = psyLines(val('_conditions'));
+    const toNum = k => { const s = String(val(k) || '').trim(); return s === '' ? null : Number(s); };
+    input.baselinePlan = { plannedPoints: toNum('_baselinePoints'), rationale: String(val('_baselineWhy') || '') };
+    input.stopRules = psyLines(val('_stopRules'));
+    const seed = toNum('_seed'), cycles = toNum('_cycles');
+    if (seed != null || cycles != null) input.randomizationPlan = { seed, cycles };
+    input.consentConfirmed = !!val('_consent');
+    input.safetySelfReport = val('_safetyOk') ? 'ok' : null;   // без явного «в порядке» — не green
+  }
+
+  const saveType = spec.saveAs || type;
+  const res = psySaveRecord(saveType, input);
   const err = $('psy-form-err');
   if (!res.ok) { if (err) err.textContent = res.errors.slice(0, 4).join('; '); return; }
   closeOv('ov-psy-form');
   toast('Сохранено', 'ok');
   rPsyWorkspace();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  WAVE 8 (issue #163): ADAPTIVE PSYCHOLOGY ENGINE.
+//
+//  Три уровня науки, не смешиваются:
+//   A. practice-based monitoring (default) — без causal claims;
+//   B. EMA — event-based/scheduled/manual, missing ≠ zero;
+//   C. N-of-1 — только по условиям допуска, observational ≠ causal.
+//
+//  Персональный «профиль метода» — ЧИСТАЯ derived-функция от реальных
+//  psyInterventionEpisodes/psyObservations/psyReviews текущего профиля.
+//  Он не хранится и не редактируется: удаление/правка эпизода меняет
+//  профиль детерминированно при следующем чтении. Внешняя доказательность
+//  (Method Registry) и персональные данные — два слоя, никогда не одно число.
+//
+//  Движок решений детерминированный и объяснимый: safety gate →
+//  receptivity gate → явные if/then правила → предложение ИЛИ
+//  NO_INTERVENTION. ИИ не участвует в выборе; скрытых confidence 0..1 нет.
+// ═══════════════════════════════════════════════════════════════════
+
+// ── Enums / словари ─────────────────────────────────────────────────
+const PSY_EXP_STATUSES = Object.freeze(['draft', 'active', 'stopped', 'completed', 'abandoned']);
+const PSY_EXP_STATUS_RU = { draft: 'черновик', active: 'идёт', stopped: 'остановлен', completed: 'завершён', abandoned: 'отменён' };
+const PSY_EXP_DESIGNS = Object.freeze(['observational', 'AB', 'ABA', 'ABAB', 'alternating', 'randomized_crossover']);
+// Только дизайны с репликацией/чередованием могут дать причинно-подобный
+// вывод. observational и одиночный AB — НИКОГДА (нет репликации).
+const PSY_EXP_CAUSAL_DESIGNS = Object.freeze(['ABA', 'ABAB', 'alternating', 'randomized_crossover']);
+const PSY_EXP_DESIGN_RU = {
+  observational: 'наблюдательный (без causal-вывода)', AB: 'A→B (без репликации)',
+  ABA: 'A–B–A', ABAB: 'A–B–A–B', alternating: 'чередование условий', randomized_crossover: 'рандомизированный кроссовер',
+};
+// Позитивный/негативный сигнал исхода эпизода (для derived-профиля).
+// «promising» — слабый позитив: одного яркого раза мало (addendum 5230792191 §3).
+const PSY_POSITIVE_OUTCOMES = Object.freeze(['promising', 'helpful_in_context', 'probably_helpful']);
+const PSY_STRONG_POSITIVE_OUTCOMES = Object.freeze(['helpful_in_context', 'probably_helpful']);
+// Tailoring variables: закрытый реестр. Health-переменные допустимы ТОЛЬКО
+// со ссылками на реальные записи здоровья (addendum 5230889736 §2) и не
+// доказывают психологическую причину симптома. Никаких polyvagal/ACE/TAS-20.
+const PSY_TAILORING_VARS = Object.freeze([
+  { varId: 'arousal', label: 'возбуждение/активация (0–10, самоотчёт)', health: false },
+  { varId: 'affect', label: 'аффект (самоотчёт)', health: false },
+  { varId: 'triggerType', label: 'тип триггера', health: false },
+  { varId: 'contextTag', label: 'контекст', health: false },
+  { varId: 'receptivity', label: 'готовность применить технику', health: false },
+  { varId: 'symptom_signal', label: 'телесный симптом (по записям здоровья)', health: true },
+  { varId: 'measure_signal', label: 'измерение (по записям здоровья)', health: true },
+]);
+
+// ── Derived personal method profile ────────────────────────────────
+// psyMethodProfiles(db) — чистая функция: одинаковый DB → одинаковый результат.
+// Контекст = targetMechanism эпизода: один метод может помогать при руминации
+// и плохо переноситься в другом контексте (context dependence обязательна).
+// Naturalistic-наблюдения сюда НЕ попадают: изменение без интервенции не
+// приписывается методу (addendum 5230889736 §1).
+function psyCtxKey(mechanism) { return (String(mechanism || '').trim().toLowerCase()) || '(механизм не указан)'; }
+function psyProfileStatus(st) {
+  // Детерминированный, объяснимый порядок правил (документирован в контракте):
+  // безопасность и вред всегда приоритетнее пользы.
+  if (st.unsafe > 0) return 'unsafe_or_out_of_scope';
+  if (st.counterproductive > 0) return 'counterproductive';
+  if (st.evaluable > 0 && st.adverse * 2 >= st.evaluable) return 'poorly_tolerated';
+  if (st.evaluable === 0) return 'unclear';
+  if (st.negatives >= 2 && st.positives === 0) return 'not_helpful';
+  if (st.positives >= 3 && st.negatives === 0 && st.strongPositives >= 1) return 'helpful_in_context';
+  if (st.positives >= 1 && st.negatives === 0) return 'promising';
+  return 'unclear';
+}
+function psyMethodProfiles(dbArg) {
+  const db = dbArg || DB;
+  const eps = (db.psyInterventionEpisodes || []).filter(e => e && e.methodId);
+  const byMethod = new Map();
+  eps.forEach(e => {
+    if (!byMethod.has(e.methodId)) byMethod.set(e.methodId, []);
+    byMethod.get(e.methodId).push(e);
+  });
+  const reviews = db.psyReviews || [];
+  const out = [];
+  [...byMethod.keys()].sort().forEach(methodId => {
+    const list = byMethod.get(methodId);
+    const byCtx = new Map();
+    list.forEach(e => {
+      const k = psyCtxKey(e.targetMechanism);
+      if (!byCtx.has(k)) byCtx.set(k, []);
+      byCtx.get(k).push(e);
+    });
+    const contexts = [...byCtx.keys()].sort().map(ctxKey => {
+      const ce = byCtx.get(ctxKey);
+      // adherence-слой и outcome-слой РАЗДЕЛЕНЫ: невыполненная техника не
+      // участвует в оценке исхода (not_done ≠ not_helpful), но видна как
+      // проблема выполнения.
+      const evaluable = ce.filter(e => e.adherence === 'done' || e.adherence === 'partial');
+      const st = {
+        attempts: ce.length,
+        completed: ce.filter(e => e.adherence === 'done').length,
+        partial: ce.filter(e => e.adherence === 'partial').length,
+        notDone: ce.filter(e => e.adherence === 'not_done').length,
+        evaluable: evaluable.length,
+        positives: evaluable.filter(e => PSY_POSITIVE_OUTCOMES.includes(e.outcomeClass)).length,
+        strongPositives: evaluable.filter(e => PSY_STRONG_POSITIVE_OUTCOMES.includes(e.outcomeClass)).length,
+        negatives: evaluable.filter(e => e.outcomeClass === 'not_helpful').length,
+        counterproductive: evaluable.filter(e => e.outcomeClass === 'counterproductive').length,
+        unsafe: ce.filter(e => e.outcomeClass === 'unsafe_or_out_of_scope').length,
+        // Нежелательный эффект учитывается независимо от исхода и приоритетнее
+        // краткосрочного улучшения.
+        adverse: ce.filter(e => (e.adverseEffects || []).length > 0).length,
+        withProximal: ce.filter(e => (e.postObservationRefs || []).length > 0).length,
+        withFollowUp: ce.filter(e => (e.followUpRefs || []).length > 0).length,
+      };
+      const status = psyProfileStatus(st);
+      return {
+        contextKey: ctxKey, status,
+        insufficient: st.evaluable === 0,
+        adherenceIssue: st.evaluable === 0 && st.attempts > 0,
+        counts: st,
+        acceptability: ce.reduce((m, e) => { m[e.acceptability] = (m[e.acceptability] || 0) + 1; return m; }, {}),
+        adverseEffects: [...new Set(ce.flatMap(e => e.adverseEffects || []))].slice(0, 20),
+        outcomeTally: evaluable.reduce((m, e) => { m[e.outcomeClass] = (m[e.outcomeClass] || 0) + 1; return m; }, {}),
+        contributingEpisodeIds: ce.map(e => e.id),
+      };
+    });
+    // Свод по методу: конфликт сигналов между контекстами = context dependence,
+    // а НЕ усреднение в одно число.
+    const evalCtx = contexts.filter(c => !c.insufficient);
+    const statuses = [...new Set(evalCtx.map(c => c.status))];
+    const negativeish = ['not_helpful', 'poorly_tolerated', 'counterproductive', 'unsafe_or_out_of_scope'];
+    const hasPos = evalCtx.some(c => PSY_POSITIVE_OUTCOMES.includes(c.status));
+    const hasNeg = evalCtx.some(c => negativeish.includes(c.status));
+    const contextDependence = statuses.length > 1;
+    let rollup;
+    if (contexts.some(c => c.status === 'unsafe_or_out_of_scope')) rollup = 'unsafe_or_out_of_scope';
+    else if (contexts.some(c => c.status === 'counterproductive')) rollup = 'counterproductive';
+    else if (hasPos && hasNeg) rollup = 'unclear';
+    else if (evalCtx.length === 0) rollup = 'unclear';
+    else if (statuses.length === 1) rollup = statuses[0];
+    else rollup = 'unclear';
+    const allIds = list.map(e => e.id);
+    const lastReview = reviews
+      .filter(r => (r.interventionEpisodeRefs || []).some(id => allIds.includes(id)))
+      .map(r => r.periodEnd).sort().pop() || null;
+    out.push({
+      methodId, status: rollup, contextDependence, contexts,
+      nEpisodes: list.length,
+      nCompleted: list.filter(e => e.adherence === 'done').length,
+      insufficient: evalCtx.length === 0,
+      lastReviewedAt: lastReview,
+      contributingEpisodeIds: allIds,
+    });
+  });
+  return out;
+}
+function psyMethodProfileFor(methodId, mechanism, dbArg) {
+  const p = psyMethodProfiles(dbArg).find(x => x.methodId === methodId) || null;
+  if (!p) return null;
+  if (mechanism == null) return p;
+  const c = p.contexts.find(x => x.contextKey === psyCtxKey(mechanism)) || null;
+  return { ...p, contextProfile: c };
+}
+
+// ── Safety gate ─────────────────────────────────────────────────────
+// Явный детерминированный гейт ДО любого adaptive-решения. Fail-closed:
+// green требует ЯВНОГО «я в порядке»; неизвестное состояние — amber.
+// Агрессивная/тяжёлая мысль сама по себе не диагноз — red ставится по
+// кризисной лексике/самоотчёту, и тогда движок остановлен полностью.
+function psySafetyGate(ctx) {
+  const c = ctx || {};
+  const reasons = [];
+  const text = String(c.safetyText || '');
+  if (detectCrisisLanguage(text)) { reasons.push('кризисная лексика в описании состояния'); return { level: 'red', reasons }; }
+  if (c.selfReport === 'crisis') { reasons.push('самоотчёт: кризис'); return { level: 'red', reasons }; }
+  if (c.selfReport === 'strained') { reasons.push('самоотчёт: на пределе — интенсивность ограничена'); return { level: 'amber', reasons }; }
+  if (c.selfReport === 'ok') { reasons.push('самоотчёт: в порядке'); return { level: 'green', reasons }; }
+  reasons.push('состояние не подтверждено — по умолчанию ограниченный режим (fail-closed)');
+  return { level: 'amber', reasons };
+}
+
+// ── Жёсткое исключение метода («не предлагать снова») ───────────────
+function psyAdaptiveCfg(dbArg) {
+  const db = dbArg || DB;
+  return db.psyAdaptiveSettings || DEFAULT_DB.psyAdaptiveSettings;
+}
+function psyMethodExcluded(methodId, dbArg) {
+  const ex = (psyAdaptiveCfg(dbArg).methodExclusions || {})[methodId];
+  return ex ? { excluded: true, at: ex.at || null, note: ex.note || '' } : { excluded: false };
+}
+function psyToggleMethodExclusion(methodId) {
+  if (typeof isWriteLocked === 'function' && isWriteLocked()) { toast('Профиль в режиме восстановления', 'err'); return; }
+  const before = JSON.parse(JSON.stringify(DB.psyAdaptiveSettings || DEFAULT_DB.psyAdaptiveSettings));
+  const cfg = { ...before, methodExclusions: { ...(before.methodExclusions || {}) } };
+  if (cfg.methodExclusions[methodId]) delete cfg.methodExclusions[methodId];
+  else cfg.methodExclusions[methodId] = { at: nowISO(), note: 'пользовательское исключение' };
+  DB.psyAdaptiveSettings = { ...cfg, _u: Date.now() };
+  if (!persist()) { DB.psyAdaptiveSettings = before; toast('Не удалось сохранить — настройка не изменена', 'err'); return; }
+  rPsyWorkspace();
+}
+
+// ── Deterministic adaptive decision engine ─────────────────────────
+// Тот же вход → то же решение. Никакого Date.now/Math.random внутри.
+// Порядок: план включён → safety → receptivity → правила по порядку →
+// пригодность метода (реестр, amber-ограничение, исключения пользователя,
+// персональный вред) → предложение ОДНОЙ техники ИЛИ NO_INTERVENTION.
+function psyAdaptiveDecide(planOrId, ctx, dbArg) {
+  const db = dbArg || DB;
+  const plan = typeof planOrId === 'string'
+    ? (db.psyAdaptivePlans || []).find(p => p && p.id === planOrId) || null
+    : planOrId;
+  const c = ctx || {};
+  const explain = {
+    inputs: {
+      triggerType: c.triggerType || null, mechanism: c.mechanism || null,
+      arousal: (typeof c.arousal === 'number' && isFinite(c.arousal)) ? c.arousal : null,
+      contextTag: c.contextTag || null, selfReport: c.selfReport || null,
+      receptivity: c.receptivity || null,
+    },
+    safety: null, receptivity: null, rulesTrace: [], exclusions: [],
+  };
+  if (!plan) return { decision: 'no_plan', reason: 'план не найден', explain };
+  explain.planId = plan.id;
+  if (!plan.enabled) return { decision: 'plan_disabled', reason: 'план выключен пользователем', explain };
+
+  const safety = psySafetyGate(c);
+  explain.safety = safety;
+  if (safety.level === 'red') {
+    return { decision: 'safety_stop', reason: 'критический уровень безопасности — адаптивный движок остановлен, только кризисный/профессиональный путь', explain };
+  }
+  // Receptivity: система не навязывает технику. Неизвестно = не готов.
+  explain.receptivity = c.receptivity === 'yes' ? 'yes' : (c.receptivity || 'unknown');
+  if (c.receptivity !== 'yes') {
+    return { decision: 'no_intervention', reason: 'нет готовности применять технику сейчас — это нормальный исход, не ошибка', explain };
+  }
+
+  const arousal = explain.inputs.arousal;
+  for (const rule of (plan.decisionRules || [])) {
+    const why = [];
+    let matched = true;
+    if (rule.if.triggerType && rule.if.triggerType !== (c.triggerType || '')) { matched = false; why.push(`triggerType ≠ «${rule.if.triggerType}»`); }
+    if (matched && rule.if.mechanism && psyCtxKey(rule.if.mechanism) !== psyCtxKey(c.mechanism)) { matched = false; why.push(`mechanism ≠ «${rule.if.mechanism}»`); }
+    if (matched && rule.if.contextTag && rule.if.contextTag !== (c.contextTag || '')) { matched = false; why.push(`contextTag ≠ «${rule.if.contextTag}»`); }
+    // missing ≠ zero: правило с порогом возбуждения не срабатывает без замера.
+    if (matched && (rule.if.arousalMin != null || rule.if.arousalMax != null)) {
+      if (arousal == null) { matched = false; why.push('arousal не измерен — пороговое правило не применяется'); }
+      else if (rule.if.arousalMin != null && arousal < rule.if.arousalMin) { matched = false; why.push(`arousal ${arousal} < ${rule.if.arousalMin}`); }
+      else if (rule.if.arousalMax != null && arousal > rule.if.arousalMax) { matched = false; why.push(`arousal ${arousal} > ${rule.if.arousalMax}`); }
+    }
+    if (!matched) { explain.rulesTrace.push({ ruleId: rule.id, matched: false, why: why.join('; ') }); continue; }
+
+    if (rule.then.methodId === 'NO_INTERVENTION') {
+      explain.rulesTrace.push({ ruleId: rule.id, matched: true, why: 'правило выбрало NO_INTERVENTION' });
+      return { decision: 'no_intervention', reason: 'по правилу плана сейчас лучше ничего не предлагать', ruleId: rule.id, explain };
+    }
+    const m = psyMethod(rule.then.methodId);
+    if (!m) {
+      explain.rulesTrace.push({ ruleId: rule.id, matched: true, why: `метод «${rule.then.methodId}» отсутствует в реестре — правило пропущено` });
+      continue;
+    }
+    if (safety.level === 'amber' && !m.amberSafe) {
+      explain.exclusions.push({ methodId: m.methodId, source: 'safety_amber', detail: 'интенсивность ограничена (amber): метод не помечен как допустимый' });
+      explain.rulesTrace.push({ ruleId: rule.id, matched: true, why: 'метод исключён amber-ограничением — переход к следующему правилу' });
+      continue;
+    }
+    const ex = psyMethodExcluded(m.methodId, db);
+    if (ex.excluded) {
+      explain.exclusions.push({ methodId: m.methodId, source: 'user_pref', detail: 'жёсткое пользовательское «не предлагать снова»' });
+      explain.rulesTrace.push({ ruleId: rule.id, matched: true, why: 'метод исключён пользователем — переход к следующему правилу' });
+      continue;
+    }
+    const prof = psyMethodProfileFor(m.methodId, c.mechanism, db);
+    const ctxProf = prof && prof.contextProfile;
+    if (ctxProf && ['counterproductive', 'unsafe_or_out_of_scope', 'poorly_tolerated'].includes(ctxProf.status)) {
+      explain.exclusions.push({ methodId: m.methodId, source: 'personal_profile', detail: `персональный опыт в этом контексте: ${PSY_OUTCOME_RU[ctxProf.status] || ctxProf.status}`, contributingEpisodeIds: ctxProf.contributingEpisodeIds });
+      explain.rulesTrace.push({ ruleId: rule.id, matched: true, why: 'метод исключён персональным профилем — переход к следующему правилу' });
+      continue;
+    }
+    explain.rulesTrace.push({ ruleId: rule.id, matched: true, why: 'правило сработало, метод допущен' });
+    // Недостаток личных данных — честный статус, а не выдуманная уверенность:
+    // предложение опирается на внешнюю доказательность как стартовую точку.
+    const personalEvidence = ctxProf
+      ? { status: ctxProf.status, insufficient: ctxProf.insufficient, contributingEpisodeIds: ctxProf.contributingEpisodeIds, counts: ctxProf.counts }
+      : { status: 'unclear', insufficient: true, contributingEpisodeIds: [], note: 'insufficient personal evidence — личных применений в этом контексте нет' };
+    return {
+      decision: 'offer', methodId: m.methodId, ruleId: rule.id,
+      reason: `правило «${rule.id}» выбрало метод «${m.name}»`,
+      personalEvidence,
+      externalEvidence: { registryVersion: PSY_METHOD_REGISTRY_VERSION, evidenceMetadata: m.evidenceMetadata, cautions: m.cautions },
+      explain,
+    };
+  }
+  return { decision: 'no_intervention', reason: 'ни одно правило не применимо или все варианты исключены — техника не предлагается', explain };
+}
+
+// ── Adaptive plan builder (через общий транзакционный psySaveRecord) ─
+function psyBuildAdaptivePlan(input, db) {
+  const errors = [];
+  const d = db || DB;
+  const goalId = psyStr(input.goalId, 120);
+  const goal = (d.psyGoals || []).find(g => g && g.id === goalId) || null;
+  if (!goal) errors.push('plan: goalId обязателен и должен указывать на существующую цель');
+  const proximalOutcome = psyStr(input.proximalOutcome, 1000) || (goal ? goal.proximalOutcome : '');
+  if (!proximalOutcome) errors.push('plan: нужен ближайший измеримый результат (proximalOutcome)');
+  const decisionPoints = psyArr(input.decisionPoints).slice(0, 20).map(x => psyStr(x, 300)).filter(Boolean);
+  if (!decisionPoints.length) errors.push('plan: нужна хотя бы одна точка принятия решения (decisionPoints)');
+  const tailoringVariables = psyArr(input.tailoringVariables).slice(0, 20).map((tv, i) => {
+    const varId = psyStr(tv && tv.varId, 60);
+    const known = PSY_TAILORING_VARS.find(v => v.varId === varId);
+    if (!known) { errors.push(`plan.tailoringVariables[${i}]: неизвестная переменная «${varId || '—'}»`); return null; }
+    const out = { varId };
+    if (known.health) {
+      // Health-сигнал допустим только со ссылками на реальные записи здоровья
+      // и не доказывает психологическую причину симптома.
+      const refs = psyNormRefs(tv.healthRefs, db, errors, `plan.tailoringVariables[${i}].healthRefs`);
+      const healthColls = ['symptoms', 'measures', 'medIntakes', 'labObservations'];
+      const bad = refs.filter(r => !healthColls.includes(r.coll));
+      if (bad.length) errors.push(`plan.tailoringVariables[${i}]: health-переменная может ссылаться только на записи здоровья`);
+      if (!refs.length) errors.push(`plan.tailoringVariables[${i}]: health-переменная требует sourceRefs на реальные записи здоровья`);
+      out.healthRefs = refs;
+    }
+    return out;
+  }).filter(Boolean);
+  const interventionOptions = [...new Set(psyArr(input.interventionOptions).slice(0, 20).map(x => psyStr(x, 120)).filter(Boolean))];
+  interventionOptions.forEach(mid => {
+    if (mid !== 'NO_INTERVENTION' && !psyMethod(mid)) errors.push(`plan: метод «${mid}» отсутствует в Method Registry`);
+  });
+  if (!interventionOptions.filter(x => x !== 'NO_INTERVENTION').length) errors.push('plan: нужен хотя бы один метод из реестра');
+  if (!interventionOptions.includes('NO_INTERVENTION')) interventionOptions.push('NO_INTERVENTION');
+  const rules = psyArr(input.decisionRules).slice(0, 30).map((r, i) => {
+    if (!r || typeof r !== 'object' || !r.then) { errors.push(`plan.decisionRules[${i}]: правило должно быть {if, then}`); return null; }
+    const cond = r.if || {};
+    const toInt = v => { const n = Number(v); return Number.isInteger(n) && n >= 0 && n <= 10 ? n : null; };
+    const rule = {
+      id: psyStr(r.id, 60) || ('rule-' + (i + 1)),
+      if: {
+        triggerType: psyStr(cond.triggerType, 120) || null,
+        mechanism: psyStr(cond.mechanism, 200) || null,
+        contextTag: psyStr(cond.contextTag, 120) || null,
+        arousalMin: toInt(cond.arousalMin), arousalMax: toInt(cond.arousalMax),
+      },
+      then: { methodId: psyStr(r.then.methodId, 120) },
+    };
+    if (rule.then.methodId !== 'NO_INTERVENTION' && !interventionOptions.includes(rule.then.methodId)) {
+      errors.push(`plan.decisionRules[${i}]: метод «${rule.then.methodId}» не входит в interventionOptions`);
+    }
+    return rule;
+  }).filter(Boolean);
+  if (!rules.length) errors.push('plan: нужно хотя бы одно объяснимое правило (decisionRules)');
+  const rec = {
+    ...psyBase('psyPlan', input),
+    goalId: goalId || null,
+    distalOutcome: psyStr(input.distalOutcome, 1000) || (goal ? goal.distalOutcome : '') || '',
+    proximalOutcome,
+    decisionPoints, tailoringVariables, interventionOptions,
+    decisionRules: rules,
+    // Гейты не настраиваются в обход: одна политика, применяется всегда.
+    safetyGateId: 'psy-safety-gate-v1',
+    enabled: input.enabled !== false,
+    sourceRefs: psyNormRefs(input.sourceRefs, db, errors, 'plan.sourceRefs'),
+  };
+  return { ok: !errors.length, errors, rec };
+}
+
+// ── N-of-1: допуск, воспроизводимая рандомизация, версионируемая история ──
+function psyMulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+// Детерминированная последовательность условий: один seed → одна и та же
+// последовательность (воспроизводимость плана рандомизации).
+function psyExpRandomSequence(seed, nConditions, cycles) {
+  const rnd = psyMulberry32(seed);
+  const seq = [];
+  for (let cyc = 0; cyc < cycles; cyc++) {
+    const block = [...Array(nConditions).keys()];
+    for (let i = block.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      [block[i], block[j]] = [block[j], block[i]];
+    }
+    seq.push(...block);
+  }
+  return seq;
+}
+function psyBuildExperiment(input, db) {
+  const errors = [];
+  const question = psyStr(input.question, 500);
+  if (!question) errors.push('experiment: нужен простой вопрос эксперимента');
+  // N-of-1 не для кризисных/необратимых тем — fail closed по лексике.
+  if (detectCrisisLanguage(question + ' ' + psyStr(input.targetNote, 1000))) {
+    errors.push('experiment: тема относится к зоне риска — персональный эксперимент недопустим, нужен кризисный/профессиональный путь');
+  }
+  const methodId = psyStr(input.methodId, 120);
+  const m = psyMethod(methodId);
+  if (!m) errors.push('experiment: methodId обязателен и должен быть в Method Registry');
+  else if (m.riskClass !== 'low_reversible') errors.push('experiment: допустимы только обратимые low-risk методы');
+  const metricIds = psyArr(input.targetOutcomeMetricIds).slice(0, 10).map(x => psyStr(x, 120)).filter(Boolean);
+  if (!metricIds.length) errors.push('experiment: нужен повторяемый измеримый outcome (targetOutcomeMetricIds)');
+  const designType = psyEnum(input.designType, PSY_EXP_DESIGNS, null);
+  if (!designType) errors.push(`experiment: designType должен быть одним из: ${PSY_EXP_DESIGNS.join(', ')}`);
+  const conditions = psyArr(input.conditions).slice(0, 6).map(x => psyStr(x && x.label != null ? x.label : x, 120)).filter(Boolean);
+  const comparative = designType && designType !== 'observational';
+  if (comparative && conditions.length < 2) errors.push('experiment: сравнительному дизайну нужны минимум два условия');
+  if (!comparative && !conditions.length) conditions.push('наблюдение');
+  const bp = input.baselinePlan || {};
+  const plannedPoints = Number.isInteger(Number(bp.plannedPoints)) ? Number(bp.plannedPoints) : 0;
+  const baselineRationale = psyStr(bp.rationale, 1000);
+  if (!baselineRationale) errors.push('experiment: baselinePlan.rationale обязателен — система должна показать, почему данных достаточно');
+  const causalCapable = PSY_EXP_CAUSAL_DESIGNS.includes(designType);
+  if (causalCapable && plannedPoints < 3) {
+    errors.push('experiment: для причинно-способного дизайна нужна baseline-плотность ≥3 повторных измерений на фазу — иначе сравнение фаз неотличимо от шума');
+  }
+  if (!causalCapable && plannedPoints < 1) errors.push('experiment: нужен хотя бы один запланированный baseline-замер');
+  let randomizationPlan = null;
+  if (designType === 'randomized_crossover' || (designType === 'alternating' && input.randomizationPlan)) {
+    const rp = input.randomizationPlan || {};
+    const seed = Number.isInteger(Number(rp.seed)) ? Number(rp.seed) : null;
+    const cycles = Number.isInteger(Number(rp.cycles)) && Number(rp.cycles) >= 2 ? Number(rp.cycles) : null;
+    if (seed == null || cycles == null) errors.push('experiment: рандомизации нужны целый seed и cycles ≥ 2 — план обязан быть воспроизводимым');
+    else randomizationPlan = { seed, cycles, sequence: psyExpRandomSequence(seed, Math.max(conditions.length, 2), cycles) };
+  }
+  const washoutPlan = psyStr(input.washoutPlan, 1000);
+  if (comparative && !washoutPlan) {
+    errors.push('experiment: при смене условий обязателен washout/carryover-план — без него перенос эффекта делает сравнение невалидным');
+  }
+  const stopRules = psyArr(input.stopRules).slice(0, 10).map(x => psyStr(x, 300)).filter(Boolean);
+  if (!stopRules.length) errors.push('experiment: нужно хотя бы одно stop-правило');
+  const fidelityPlan = psyStr(input.fidelityPlan, 1000);
+  if (!fidelityPlan) errors.push('experiment: нужен план фиксации fidelity (как именно выполняется метод)');
+  const measurementSchedule = psyStr(input.measurementSchedule, 1000);
+  if (!measurementSchedule) errors.push('experiment: нужен график измерений');
+  if (!input.consentConfirmed) errors.push('experiment: требуется явное согласие пользователя');
+  // Эксперимент создаётся только при подтверждённом green.
+  const gate = psySafetyGate({ selfReport: input.safetySelfReport, safetyText: psyStr(input.safetyText, 2000) });
+  if (gate.level !== 'green') errors.push(`experiment: допуск только при safety=green (сейчас: ${gate.level} — ${gate.reasons.join('; ')})`);
+  const rec = {
+    ...psyBase('psyExperiment', input),
+    question,
+    methodId: methodId || null,
+    targetOutcomeMetricIds: metricIds,
+    conditions,
+    designType: designType || 'observational',
+    baselinePlan: { plannedPoints, rationale: baselineRationale },
+    randomizationPlan,
+    washoutPlan: washoutPlan || null,
+    measurementSchedule, fidelityPlan, stopRules,
+    safetyGateId: 'psy-safety-gate-v1',
+    consentAt: input.consentConfirmed ? nowISO() : null,
+    status: 'draft',
+    // История неизменяемая: только дописывается, никогда не переписывается.
+    history: [{ at: nowISO(), from: null, to: 'draft', note: 'эксперимент создан' }],
+    analysisPlan: 'детерминированное описательное сравнение по условиям: количество замеров и среднее ТОЛЬКО по фактически введённым значениям (missing ≠ zero); без статистических выводов о причинности сверх допущенного дизайном',
+    resultSummary: null,
+    limitations: [],
+    sourceRefs: psyNormRefs(input.sourceRefs, db, errors, 'experiment.sourceRefs'),
+  };
+  return { ok: !errors.length, errors, rec };
+}
+const PSY_EXP_TRANSITIONS = Object.freeze({
+  draft: ['active', 'abandoned'],
+  active: ['stopped', 'completed', 'abandoned'],
+  stopped: ['completed'],
+  completed: [], abandoned: [],
+});
+function psyExpTransition(id, to, note) {
+  if (typeof isWriteLocked === 'function' && isWriteLocked()) return { ok: false, errors: ['профиль в режиме восстановления'] };
+  const exp = (DB.psyExperiments || []).find(e => e && e.id === id);
+  if (!exp) return { ok: false, errors: ['эксперимент не найден'] };
+  if (!(PSY_EXP_TRANSITIONS[exp.status] || []).includes(to)) {
+    return { ok: false, errors: [`переход ${exp.status} → ${to} недопустим`] };
+  }
+  if (to === 'active' && !exp.consentAt) return { ok: false, errors: ['запуск без явного согласия невозможен'] };
+  const snapshot = JSON.parse(JSON.stringify(DB.psyExperiments));
+  exp.history = [...(exp.history || []), { at: nowISO(), from: exp.status, to, note: psyStr(note, 500) || null }];
+  exp.status = to;
+  exp._u = Date.now();
+  if (!persist()) { DB.psyExperiments = snapshot; return { ok: false, errors: ['не удалось сохранить — состояние не изменено'] }; }
+  return { ok: true, errors: [], exp };
+}
+// Завершение: итог обязан нести ограничения; причинно-подобный статус —
+// только валидный дизайн + baseline + fidelity, иначе принудительно not_causal.
+function psyExpComplete(id, resultText, limitations) {
+  const exp = (DB.psyExperiments || []).find(e => e && e.id === id);
+  if (!exp) return { ok: false, errors: ['эксперимент не найден'] };
+  const lims = psyArr(limitations).map(x => psyStr(x, 300)).filter(Boolean);
+  if (!lims.length) return { ok: false, errors: ['нужно указать ограничения вывода — они показываются рядом с результатом'] };
+  const text = psyStr(resultText, 4000);
+  if (!text) return { ok: false, errors: ['нужен текст итога'] };
+  const causalCapable = PSY_EXP_CAUSAL_DESIGNS.includes(exp.designType);
+  const wasStopped = (exp.history || []).some(h => h.to === 'stopped');
+  const causalStatus = (causalCapable && !wasStopped && (exp.baselinePlan || {}).plannedPoints >= 3 && exp.fidelityPlan)
+    ? 'supported_within_design' : 'not_causal';
+  const snapshot = JSON.parse(JSON.stringify(DB.psyExperiments));
+  exp.resultSummary = { text, causalStatus, limitations: lims };
+  exp.limitations = lims;
+  const tr = psyExpTransition(id, 'completed', 'итог зафиксирован');
+  if (!tr.ok) { DB.psyExperiments = snapshot; return tr; }
+  return { ok: true, errors: [], exp };
+}
+// Детерминированный описательный разбор: наблюдения группируются по условию
+// (contextTag наблюдения = метка условия). Считаются только введённые значения.
+function psyExpAnalysis(exp, dbArg) {
+  const db = dbArg || DB;
+  const obs = (db.psyObservations || []).filter(o => o && exp.targetOutcomeMetricIds.includes(o.metricId));
+  return exp.conditions.map(cond => {
+    const rows = obs.filter(o => (o.contextTag || '') === cond);
+    const nums = rows.map(o => o.valueNumber).filter(v => typeof v === 'number' && isFinite(v));
+    return {
+      condition: cond, n: rows.length, nNumeric: nums.length,
+      mean: nums.length ? Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 100) / 100 : null,
+    };
+  });
+}
+
+// ── Удаление психологической записи (детерминированный пересчёт) ────
+// Профиль derived — после удаления эпизода он пересчитывается сам при
+// следующем чтении. Транзакционно: сбой persist() возвращает и запись,
+// и надгробие.
+const PSY_DELETABLE_COLLS = Object.freeze([
+  'psyFormulations', 'psyGoals', 'psyInterventionEpisodes', 'psyObservations', 'psyReviews',
+  'psyAdaptivePlans', 'psyExperiments',
+]);
+function psyDeleteRecord(coll, id) {
+  if (!PSY_DELETABLE_COLLS.includes(coll)) return { ok: false, errors: ['коллекция не поддерживает удаление'] };
+  if (typeof isWriteLocked === 'function' && isWriteLocked()) return { ok: false, errors: ['профиль в режиме восстановления — удаление заблокировано'] };
+  const idx = (DB[coll] || []).findIndex(r => r && r.id === id);
+  if (idx < 0) return { ok: false, errors: ['запись не найдена'] };
+  const collSnap = JSON.parse(JSON.stringify(DB[coll]));
+  const delSnap = JSON.parse(JSON.stringify(DB._del || {}));
+  tomb(id);
+  DB[coll].splice(idx, 1);
+  if (!persist()) {
+    DB[coll] = collSnap; DB._del = delSnap;
+    return { ok: false, errors: ['не удалось сохранить — запись не удалена'] };
+  }
+  return { ok: true, errors: [] };
+}
+
+// ── EMA prompt burden ───────────────────────────────────────────────
+// Prompt stream по умолчанию ВЫКЛЮЧЕН (приложение не превращается в поток
+// опросов). Пропуск — missing, не ноль; пропуски видимы как сигнал нагрузки.
+function psyPromptState() {
+  const cfg = psyAdaptiveCfg();
+  if (!cfg.promptsEnabled) return { show: false, reason: 'disabled' };
+  const today = todayKey();
+  const shownToday = (cfg.promptLog || []).filter(x => x && x.day === today && x.action !== 'answered').length +
+    (cfg.promptLog || []).filter(x => x && x.day === today && x.action === 'answered').length;
+  if (shownToday >= (cfg.maxPromptsPerDay || 2)) return { show: false, reason: 'budget' };
+  return { show: true, reason: null };
+}
+function psyPromptLogAction(action) {
+  const before = JSON.parse(JSON.stringify(DB.psyAdaptiveSettings || DEFAULT_DB.psyAdaptiveSettings));
+  const log = [...(before.promptLog || []), { day: todayKey(), at: nowISO(), action }].slice(-60);
+  DB.psyAdaptiveSettings = { ...before, promptLog: log, _u: Date.now() };
+  if (!persist()) { DB.psyAdaptiveSettings = before; return false; }
+  return true;
+}
+function psyPromptSkip() { psyPromptLogAction('skipped'); rPsyWorkspace(); }
+function psyPromptAnswer() { psyPromptLogAction('answered'); openPsyForm('psyEma'); }
+function psyPromptBurden() {
+  const cfg = psyAdaptiveCfg();
+  const cutoff = Date.now() - 14 * 86400000;
+  const recent = (cfg.promptLog || []).filter(x => x && Date.parse(x.at || 0) >= cutoff);
+  return { skipped: recent.filter(x => x.action === 'skipped').length, answered: recent.filter(x => x.action === 'answered').length };
+}
+function psySaveEmaSettings(enabled, maxPerDay) {
+  const before = JSON.parse(JSON.stringify(DB.psyAdaptiveSettings || DEFAULT_DB.psyAdaptiveSettings));
+  const n = Number(maxPerDay);
+  DB.psyAdaptiveSettings = {
+    ...before, promptsEnabled: !!enabled,
+    maxPromptsPerDay: Number.isInteger(n) && n >= 1 && n <= 6 ? n : (before.maxPromptsPerDay || 2),
+    _u: Date.now(),
+  };
+  if (!persist()) { DB.psyAdaptiveSettings = before; toast('Не удалось сохранить', 'err'); return; }
+  toast('Настройки EMA сохранены', 'ok'); rPsyWorkspace();
+}
+
+// ── Wave 8 UI ───────────────────────────────────────────────────────
+// Контекст «Сейчас» задаётся пользователем явно (самоотчёт). Решение
+// пересчитывается детерминированно от этих входов.
+let _psyCtx = { triggerType: '', mechanism: '', arousal: null, selfReport: null, receptivity: null };
+let _psyDelTargets = [];
+let _psyExpTargets = [];
+function psyUiCtxSet(key, value) {
+  if (key === 'arousal') { const n = Number(value); _psyCtx.arousal = (value === '' || !isFinite(n)) ? null : Math.max(0, Math.min(10, Math.round(n))); }
+  else _psyCtx[key] = value || null;
+  psyUiDecide();
+}
+function psyUiCtxText(key, value) { _psyCtx[key] = String(value || '').trim(); }
+function psyUiDecide() {
+  const out = $('psy-adaptive-decision'); if (!out) return;
+  const plan = (DB.psyAdaptivePlans || []).find(p => p && p.enabled) || null;
+  if (!plan) { out.innerHTML = '<div class="ai-sp-empty">Активного адаптивного плана нет.</div>'; return; }
+  const res = psyAdaptiveDecide(plan, { ..._psyCtx }, DB);
+  const ex = res.explain || {};
+  const safety = ex.safety || { level: '—', reasons: [] };
+  const explainHtml = `<details class="psy-explain"><summary>Почему система решила так</summary>
+    <div class="si-text" style="font-size:.75rem">Входы: триггер=«${esc(ex.inputs.triggerType || '—')}», механизм=«${esc(ex.inputs.mechanism || '—')}», возбуждение=${ex.inputs.arousal == null ? 'не измерено' : esc(String(ex.inputs.arousal))}, готовность=${esc(String(ex.receptivity || '—'))}</div>
+    <div class="si-text" style="font-size:.75rem">Safety: <b>${esc(safety.level)}</b> — ${esc((safety.reasons || []).join('; '))}</div>
+    ${(ex.rulesTrace || []).map(t => `<div class="si-text" style="font-size:.72rem">• правило «${esc(t.ruleId || '')}»: ${t.matched ? 'совпало' : 'не совпало'} — ${esc(t.why || '')}</div>`).join('')}
+    ${(ex.exclusions || []).length ? `<div class="si-text" style="font-size:.72rem;color:var(--t3)">Исключения: ${ex.exclusions.map(x => esc(x.methodId + ' (' + x.source + ')')).join(', ')}</div>` : ''}
+  </details>`;
+  if (res.decision === 'safety_stop') {
+    out.innerHTML = `<div class="psy-adv" role="alert">Адаптивный движок остановлен: ${esc(res.reason)}</div>
+      <div style="margin-top:.4rem"><button type="button" class="btn btn-s btn-sm" onclick="showCrisisSafetyPanel()">Кризисная поддержка</button></div>${explainHtml}`;
+    return;
+  }
+  if (res.decision !== 'offer') {
+    out.innerHTML = `<div class="si-text"><b>Сейчас — без техники.</b> ${esc(res.reason)}</div>${explainHtml}`;
+    return;
+  }
+  const m = psyMethod(res.methodId);
+  const pe = res.personalEvidence || {};
+  const peLine = pe.insufficient
+    ? 'Личных данных в этом контексте недостаточно (insufficient personal evidence) — предложение опирается на внешнюю доказательность.'
+    : `Личный опыт в этом контексте: ${PSY_OUTCOME_RU[pe.status] || pe.status} · эпизодов: ${(pe.contributingEpisodeIds || []).length}`;
+  out.innerHTML = `<div class="psy-offer">
+      <div><b>${esc(m.name)}</b> <span style="color:var(--t3);font-size:.75rem">(${esc(PSY_FAMILY_RU[m.family] || m.family)})</span></div>
+      <div class="si-text" style="font-size:.78rem">${esc(res.reason)}</div>
+      <div class="si-text" style="font-size:.75rem;color:var(--t3)">Внешняя база: ${esc((m.evidenceMetadata[0] || {}).ref || '—')}. ${esc(peLine)}</div>
+      <div class="psy-actions">
+        <button type="button" class="btn btn-p btn-sm" onclick="psyUiAcceptOffer()">Сделать</button>
+        <button type="button" class="btn btn-s btn-sm" onclick="psyUiDeclineOffer()">Не сейчас</button>
+        <button type="button" class="btn btn-s btn-sm" onclick="psyUiOtherMethod()">Другая техника</button>
+      </div>
+    </div>${explainHtml}`;
+  _psyOfferMethodId = res.methodId;
+}
+let _psyOfferMethodId = null;
+function psyUiAcceptOffer() {
+  if (!_psyOfferMethodId) return;
+  openPsyForm('psyInterventionEpisode', { methodId: _psyOfferMethodId, targetMechanism: _psyCtx.mechanism || '' });
+}
+function psyUiDeclineOffer() {
+  const out = $('psy-adaptive-decision');
+  if (out) out.innerHTML = '<div class="si-text">Хорошо — сейчас ничего не предлагается. Отказ не записывается против метода.</div>';
+}
+function psyUiOtherMethod() { openPsyForm('psyInterventionEpisode', { targetMechanism: _psyCtx.mechanism || '' }); }
+function psyUiDelete(i) {
+  const t = _psyDelTargets[i]; if (!t) return;
+  const res = psyDeleteRecord(t.coll, t.id);
+  if (!res.ok) { toast(res.errors[0] || 'Не удалось удалить', 'err'); return; }
+  toast('Запись удалена — производный профиль пересчитан', 'ok');
+  rPsyWorkspace();
+}
+function psyUiExpAction(i, action) {
+  const t = _psyExpTargets[i]; if (!t) return;
+  if (action === 'complete') { _psyExpCompleteTarget = t.id; openOv('ov-psy-exp-done'); return; }
+  const map = { start: ['active', 'запущен пользователем'], stop: ['stopped', 'stop-правило/решение пользователя'], abandon: ['abandoned', 'отменён пользователем'] };
+  const [to, note] = map[action] || [];
+  if (!to) return;
+  const res = psyExpTransition(t.id, to, note);
+  if (!res.ok) { toast(res.errors[0], 'err'); return; }
+  rPsyWorkspace();
+}
+let _psyExpCompleteTarget = null;
+function psyExpDoneSubmit() {
+  const text = ($('psy-expd-text') || {}).value || '';
+  const lims = psyLines(($('psy-expd-lims') || {}).value || '');
+  const res = psyExpComplete(_psyExpCompleteTarget, text, lims);
+  const err = $('psy-expd-err');
+  if (!res.ok) { if (err) err.textContent = res.errors.slice(0, 3).join('; '); return; }
+  closeOv('ov-psy-exp-done'); toast('Эксперимент завершён', 'ok'); rPsyWorkspace();
+}
+
+// «Что помогает мне»: два слоя доказательности рядом, но НИКОГДА не одним числом.
+function psyRenderHelpsMe() {
+  const profiles = psyMethodProfiles(DB);
+  const excl = psyAdaptiveCfg().methodExclusions || {};
+  const body = profiles.length ? profiles.map(p => {
+    const m = psyMethod(p.methodId);
+    const name = m ? m.name : p.methodId;
+    const ext = m ? (m.evidenceMetadata[0] || {}) : {};
+    const isExcl = !!excl[p.methodId];
+    return `<div class="psy-item psy-helps">
+      <b>${esc(name)}</b> · <span class="psy-status psy-status-${esc(p.status)}">${esc(PSY_OUTCOME_RU[p.status] || p.status)}</span>
+      ${p.contextDependence ? '<span class="psy-ctxdep">зависит от контекста</span>' : ''}
+      ${p.insufficient ? '<span class="psy-ctxdep">данных недостаточно</span>' : ''}
+      <div class="si-text" style="font-size:.75rem;color:var(--t3)">Внешняя база: ${esc(ext.kind || '—')} · ${esc(ext.ref || '—')}${ext.limitations ? ' · ' + esc(ext.limitations) : ''}</div>
+      <div class="si-text" style="font-size:.78rem">Мои данные: применений ${p.nEpisodes}, выполнено полностью ${p.nCompleted}${p.lastReviewedAt ? ' · последний review: ' + esc(String(p.lastReviewedAt).slice(0, 10)) : ''}</div>
+      ${p.contexts.map(c => `<div class="psy-ctx-row">
+        <span class="si-text" style="font-size:.75rem">контекст «${esc(c.contextKey)}»: ${esc(PSY_OUTCOME_RU[c.status] || c.status)}${c.adherenceIssue ? ' (проблема выполнения, не оценка метода)' : ''}
+        · исход оценивался в ${c.counts.evaluable} из ${c.counts.attempts}
+        · с замером после: ${c.counts.withProximal} · follow-up: ${c.counts.withFollowUp}</span>
+        ${c.adverseEffects.length ? `<div class="psy-adv">Нежелательные эффекты (сохраняются всегда): ${esc(c.adverseEffects.join('; '))}</div>` : ''}
+        <details class="psy-explain"><summary>Почему так — вклад эпизодов (${c.contributingEpisodeIds.length})</summary>
+          <div class="si-text" style="font-size:.7rem;word-break:break-all">${c.contributingEpisodeIds.map(esc).join('<br>')}</div>
+        </details>
+      </div>`).join('')}
+      <button type="button" class="btn btn-s btn-sm" onclick="psyToggleMethodExclusion('${esc(p.methodId)}')">${isExcl ? 'Снова разрешить предлагать' : 'Не предлагать мне это снова'}</button>
+    </div>`;
+  }).join('') : '<div class="ai-sp-empty">Личных применений методов пока нет — профиль строится только из реальных эпизодов.</div>';
+  return `<details class="card mx psy-det" id="psy-helps-me"><summary>Что помогает мне (${profiles.length})</summary>
+    <div class="be-note" style="margin:.4rem 0">Внешняя доказательность и личный опыт показаны отдельно и никогда не складываются в одну «эффективность N%». Статус раскрывается до конкретных эпизодов.</div>
+    ${body}</details>`;
+}
+
+function psyRenderAdaptiveNow() {
+  const plans = (DB.psyAdaptivePlans || []);
+  const active = plans.filter(p => p && p.enabled);
+  const sel = (id, key, opts, lbl) => `<label class="f-lbl" for="${id}">${lbl}</label>
+    <select id="${id}" class="field" onchange="psyUiCtxSet('${key}', this.value)">${opts.map(o => `<option value="${esc(o[0])}">${esc(o[1])}</option>`).join('')}</select>`;
+  return `<details class="card mx psy-det" id="psy-adaptive-now"><summary>Сейчас: подобрать шаг (${active.length ? 'план активен' : 'плана нет'})</summary>
+    ${active.length ? `
+    <div class="psy-ctx-grid">
+      <div class="psy-fld"><label class="f-lbl" for="psy-ctx-trigger">Тип триггера</label>
+        <input type="text" id="psy-ctx-trigger" class="field" onchange="psyUiCtxText('triggerType', this.value); psyUiDecide()"></div>
+      <div class="psy-fld"><label class="f-lbl" for="psy-ctx-mech">Механизм (из формулировки)</label>
+        <input type="text" id="psy-ctx-mech" class="field" onchange="psyUiCtxText('mechanism', this.value); psyUiDecide()"></div>
+      <div class="psy-fld">${sel('psy-ctx-arousal', 'arousal', [['', 'возбуждение: не измерено']].concat([...Array(11).keys()].map(i => [String(i), 'возбуждение: ' + i])), 'Возбуждение (0–10)')}</div>
+      <div class="psy-fld">${sel('psy-ctx-safety', 'selfReport', [['', 'состояние: не указано'], ['ok', 'я в порядке'], ['strained', 'на пределе'], ['crisis', 'кризис']], 'Состояние (safety)')}</div>
+      <div class="psy-fld">${sel('psy-ctx-recept', 'receptivity', [['', 'готовность: не указана'], ['yes', 'готов(а) применить технику'], ['no', 'не сейчас']], 'Готовность')}</div>
+    </div>
+    <div id="psy-adaptive-decision" aria-live="polite"><div class="ai-sp-empty">Заполни контекст — решение пересчитается автоматически.</div></div>
+    <div class="be-note" style="margin-top:.5rem">NO_INTERVENTION — нормальный результат. Система не предлагает технику без готовности и при небезопасном состоянии.</div>`
+      : '<div class="ai-sp-empty">Создай адаптивный план: он связывает цель, точки решения и объяснимые правила выбора.</div>'}
+    ${plans.length ? plans.map(p => `<div class="psy-item" style="font-size:.78rem">
+        <b>План:</b> ${esc(p.proximalOutcome)} · правил: ${p.decisionRules.length} · ${p.enabled ? 'включён' : 'выключен'}
+        <div style="color:var(--t4);font-size:.72rem">Дистальная цель: ${esc(p.distalOutcome || '—')} · точки решения: ${esc(p.decisionPoints.join('; '))}</div>
+      </div>`).join('') : ''}
+    <div style="margin-top:.5rem"><button type="button" class="btn btn-s btn-sm" onclick="openPsyForm('psyAdaptivePlan')">Создать план</button></div>
+  </details>`;
+}
+
+function psyRenderExperiments() {
+  _psyExpTargets = [];
+  const exps = (DB.psyExperiments || []).slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const rows = exps.map(e => {
+    const i = _psyExpTargets.push({ id: e.id }) - 1;
+    const analysis = (e.status === 'active' || e.status === 'completed' || e.status === 'stopped') ? psyExpAnalysis(e, DB) : [];
+    const btns = [];
+    if (e.status === 'draft') { btns.push(`<button type="button" class="btn btn-s btn-sm" onclick="psyUiExpAction(${i},'start')">Запустить</button>`); btns.push(`<button type="button" class="btn btn-s btn-sm" onclick="psyUiExpAction(${i},'abandon')">Отменить</button>`); }
+    if (e.status === 'active') { btns.push(`<button type="button" class="btn btn-s btn-sm" onclick="psyUiExpAction(${i},'stop')">Стоп</button>`); btns.push(`<button type="button" class="btn btn-s btn-sm" onclick="psyUiExpAction(${i},'complete')">Завершить</button>`); }
+    if (e.status === 'stopped') btns.push(`<button type="button" class="btn btn-s btn-sm" onclick="psyUiExpAction(${i},'complete')">Зафиксировать итог</button>`);
+    return `<div class="psy-item">
+      <b>${esc(e.question)}</b> · ${esc(PSY_EXP_STATUS_RU[e.status] || e.status)} · ${esc(PSY_EXP_DESIGN_RU[e.designType] || e.designType)}
+      <div class="si-text" style="font-size:.75rem;color:var(--t3)">метод: ${esc((psyMethod(e.methodId) || {}).name || e.methodId)} · метрики: ${esc(e.targetOutcomeMetricIds.join(', '))} · baseline: ${e.baselinePlan.plannedPoints} замера(ов)</div>
+      ${e.washoutPlan ? `<div class="si-text" style="font-size:.72rem;color:var(--t4)">Carryover/washout: ${esc(e.washoutPlan)}</div>` : ''}
+      ${e.randomizationPlan ? `<div class="si-text" style="font-size:.72rem;color:var(--t4)">Рандомизация: seed=${e.randomizationPlan.seed}, последовательность: ${e.randomizationPlan.sequence.map(x => esc(e.conditions[x] || String(x))).join(' → ')}</div>` : ''}
+      ${analysis.length ? `<div class="psy-exp-viz">${analysis.map(a => `<span class="psy-chip">${esc(a.condition)}: n=${a.n}${a.mean != null ? ', среднее ' + a.mean : ''}</span>`).join('')}</div>` : ''}
+      ${e.resultSummary ? `<div class="si-text"><b>Итог:</b> ${esc(e.resultSummary.text)}<br>
+        <span style="font-size:.72rem">причинный статус: <b>${e.resultSummary.causalStatus === 'not_causal' ? 'причинность НЕ установлена' : 'поддержано в рамках дизайна (не «доказано»)'}</b></span><br>
+        <span style="font-size:.72rem;color:var(--t4)">Ограничения: ${esc(e.resultSummary.limitations.join('; '))}</span></div>` : ''}
+      <details class="psy-explain"><summary>История (${(e.history || []).length})</summary>
+        ${(e.history || []).map(h => `<div class="si-text" style="font-size:.7rem">${esc(String(h.at).slice(0, 16).replace('T', ' '))}: ${esc(h.from || '—')} → ${esc(h.to)}${h.note ? ' · ' + esc(h.note) : ''}</div>`).join('')}
+      </details>
+      <div class="psy-actions">${btns.join('')}</div>
+    </div>`;
+  }).join('');
+  return `<details class="card mx psy-det" id="psy-experiments"><summary>Персональный эксперимент — advanced (${exps.length})</summary>
+    <div class="be-note" style="margin:.4rem 0">Это НЕ клиническое исследование. Допуск только для обратимых low-risk методов при safety=green, с согласием, stop-правилами и планом измерений. Наблюдательный дизайн и одиночный «до→после» причинность не устанавливают.</div>
+    ${rows || '<div class="ai-sp-empty">Экспериментов нет. Обычный режим наблюдения — достаточный путь по умолчанию.</div>'}
+    <div style="margin-top:.5rem"><button type="button" class="btn btn-s btn-sm" onclick="openPsyForm('psyExperiment')">Создать эксперимент</button></div>
+  </details>`;
+}
+
+function psyRenderPromptAndSettings() {
+  const cfg = psyAdaptiveCfg();
+  const burden = psyPromptBurden();
+  const ps = psyPromptState();
+  const prompt = ps.show ? `<div class="card mx psy-prompt" role="region" aria-label="EMA-подсказка">
+    <div class="si-text"><b>Короткая фиксация состояния?</b> Это добровольно — пропуск ничего не портит.</div>
+    <div class="psy-actions">
+      <button type="button" class="btn btn-p btn-sm" onclick="psyPromptAnswer()">Записать</button>
+      <button type="button" class="btn btn-s btn-sm" onclick="psyPromptSkip()">Пропустить</button>
+    </div></div>` : '';
+  const settings = `<details class="card mx psy-det" id="psy-ema-settings"><summary>EMA-подсказки: настройки</summary>
+    <div class="psy-fld psy-fld-chk"><input type="checkbox" id="psy-ema-on" ${cfg.promptsEnabled ? 'checked' : ''}>
+      <label class="f-lbl" for="psy-ema-on">Показывать плановые подсказки (по умолчанию выключено)</label></div>
+    <div class="psy-fld"><label class="f-lbl" for="psy-ema-max">Максимум подсказок в день</label>
+      <input type="number" id="psy-ema-max" class="field" min="1" max="6" value="${Number(cfg.maxPromptsPerDay) || 2}"></div>
+    <div class="si-text" style="font-size:.75rem;color:var(--t3)">За 14 дней: отвечено ${burden.answered}, пропущено ${burden.skipped}.${burden.skipped > burden.answered && burden.skipped >= 3 ? ' Много пропусков — возможно, стоит снизить частоту или выключить подсказки.' : ''}</div>
+    <div style="margin-top:.4rem"><button type="button" class="btn btn-s btn-sm" onclick="psySaveEmaSettings($('psy-ema-on').checked, $('psy-ema-max').value)">Сохранить</button></div>
+  </details>`;
+  return prompt + settings;
 }
 
 // ═══════════════════════════════════════════════════════════════════

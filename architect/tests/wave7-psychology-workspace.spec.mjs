@@ -73,7 +73,8 @@ console.log('\n── Wave 7: Psychology Workspace ──');
   ok(st.inDefault, 'все 5 коллекций объявлены в DEFAULT_DB');
   ok(st.inIdcols, 'все 5 коллекций входят в IDCOLS (sync/tombstone/merge работают генерично)');
   ok(st.inRec, 'все 5 коллекций входят в REC_COLLS («Мои записи», удаление)');
-  ok(st.schema === 7, `SCHEMA_VERSION поднята до 7 (${st.schema})`);
+  // Wave 8 подняла схему до 8 аддитивно; для Волны 7 важно «не ниже 7».
+  ok(st.schema >= 7, `SCHEMA_VERSION не ниже 7 (${st.schema})`);
 }
 
 // ── 2. dbCount учитывает психологию: профиль «только психология» не пуст ──
@@ -294,7 +295,8 @@ console.log('\n── Wave 7: Psychology Workspace ──');
     frozen: Object.isFrozen(PSY_METHOD_REGISTRY),
     hasCautions: PSY_METHOD_REGISTRY.every(m => Array.isArray(m.cautions)),
   }));
-  ok(reg.n >= 5 && reg.version === 'psy-method-registry-v1', `Method Registry версионирован (${reg.n} методов, ${reg.version})`);
+  // Wave 8 расширила внешнюю доказательность реестра → версия v2 (bump явный).
+  ok(reg.n >= 5 && /^psy-method-registry-v\d+$/.test(reg.version), `Method Registry версионирован (${reg.n} методов, ${reg.version})`);
   ok(reg.hasEvidenceMeta, 'у каждого метода есть source metadata, а не фраза «научно доказано»');
   ok(reg.noPersonal, 'в реестре НЕТ персонального рейтинга/эффективности — это Волна 8');
   ok(reg.hasCautions && reg.frozen, 'у методов есть предостережения, реестр неизменяем в рантайме');
