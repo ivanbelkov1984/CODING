@@ -107,6 +107,21 @@ const MUTANTS = [
     replace: '  const rnd = Math.random;',
     expectFail: 'один seed → одна и та же последовательность',
   },
+  // ── Owner review 5238287152: external evidence schema ────────────
+  {
+    id: 'evidence-review-date-removed',
+    what: 'у evidence-элемента исчезают reviewedAt/evidenceVersion',
+    find: "      limitations: 'групповая доказательность не гарантирует индивидуальный эффект',\n      note: 'внешняя доказательность, не персональный результат',\n      reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },",
+    replace: "      limitations: 'групповая доказательность не гарантирует индивидуальный эффект',\n      note: 'внешняя доказательность, не персональный результат' }] },",
+    expectFail: 'соответствует схеме',
+  },
+  {
+    id: 'evidence-stale-source',
+    what: 'источник BA откатывается на отозванную CG90',
+    find: "      ref: 'NICE NG222 — Depression in adults: treatment and management',\n      publisher: 'NICE', identifier: 'NG222', year: 2022,",
+    replace: "      ref: 'NICE CG90 (депрессия у взрослых)',\n      publisher: 'NICE', identifier: 'CG90', year: 2009,",
+    expectFail: 'NICE NG222',
+  },
   {
     id: 'w8-meta-in-event-sources',
     what: 'psyAdaptivePlans добавлена в EVENT_SOURCES (двойной счёт)',

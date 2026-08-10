@@ -12139,54 +12139,118 @@ const PSY_FAMILY_RU = {
 // Детерминированный versioned справочник. Персональные результаты сюда НЕ
 // попадают: рейтинг метода по личным эпизодам — это Волна 8, и смешивать
 // внешнюю доказательность с личным опытом в одно число запрещено.
-// v2 (Wave 8, issue #163): внешняя доказательность расширена (population,
-// limitations), добавлены riskClass (допуск к N-of-1: только обратимые
-// low-risk методы) и amberSafe (допустим ли метод при safety=amber).
-// Персональные результаты в реестр по-прежнему НЕ попадают.
+// v2 (Wave 8, issue #163): внешняя доказательность расширена по контракту
+// issue #163 + owner review 5238287152. КАЖДЫЙ элемент evidenceMetadata несёт
+// явную, тестируемую схему:
+//   kind          — тип источника (clinical_guideline | textbook | practice_note)
+//   ref           — стабильное название/ссылка
+//   publisher     — издатель (обязателен для guideline/textbook)
+//   identifier    — публикационный идентификатор (обязателен для guideline)
+//   year          — год публикации (обязателен для guideline/textbook; только
+//                   проверенные данные, библиография не выдумывается)
+//   population    — популяция/контекст источника
+//   target        — целевая проблема/механизм источника
+//   limitations   — ограничения переноса на индивидуальный случай
+//   reviewedAt    — когда этот элемент доказательности пересматривался
+//   evidenceVersion — версия/ревизия элемента (целое, с 1)
+// riskClass — допуск к N-of-1 (только обратимые low-risk методы),
+// amberSafe — допустим ли метод при safety=amber.
+// Персональные результаты в реестр НЕ попадают.
 const PSY_METHOD_REGISTRY_VERSION = 'psy-method-registry-v2';
+const PSY_EVIDENCE_REVIEWED_AT = '2026-08-10';
 const PSY_METHOD_REGISTRY = Object.freeze([
   { methodId: 'behavioral_activation', name: 'Поведенческая активация', family: 'BEHAVIORAL',
     mechanismTargets: ['избегание', 'снижение активности', 'ангедония'],
     intendedUse: ['сниженное настроение', 'уход от активности'],
     cautions: ['при выраженном истощении начинать с очень малых шагов'],
     riskClass: 'low_reversible', amberSafe: false,
-    evidenceMetadata: [{ kind: 'clinical_guideline', ref: 'NICE CG90 (депрессия у взрослых)', population: 'взрослые с депрессией (клинические выборки)', limitations: 'групповая доказательность не гарантирует индивидуальный эффект', note: 'внешняя доказательность, не персональный результат' }] },
+    // Owner review 5238287152: CG90 заменён NICE актуальной NG222 (CG90 отозвана).
+    evidenceMetadata: [{ kind: 'clinical_guideline',
+      ref: 'NICE NG222 — Depression in adults: treatment and management',
+      publisher: 'NICE', identifier: 'NG222', year: 2022,
+      population: 'взрослые с депрессией (клинические выборки)',
+      target: 'депрессия: снижение активности и избегание',
+      limitations: 'групповая доказательность не гарантирует индивидуальный эффект',
+      note: 'внешняя доказательность, не персональный результат',
+      reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },
   { methodId: 'cognitive_restructuring', name: 'Работа с автоматическими мыслями', family: 'CBT',
     mechanismTargets: ['катастрофизация', 'чтение мыслей', 'долженствование'],
     intendedUse: ['тревожные и депрессивные интерпретации'],
     cautions: ['не применять как спор с чувствами; не использовать при остром кризисе'],
     riskClass: 'low_reversible', amberSafe: false,
-    evidenceMetadata: [{ kind: 'textbook', ref: 'Beck, Cognitive Therapy: Basics and Beyond', population: 'амбулаторные взрослые в КПТ-протоколах', limitations: 'методологический источник, не персональная гарантия', note: 'методологический источник' }] },
+    evidenceMetadata: [{ kind: 'textbook',
+      ref: 'J. S. Beck — Cognitive Behavior Therapy: Basics and Beyond (3rd ed.)',
+      publisher: 'Guilford Press', identifier: null, year: 2020,
+      population: 'амбулаторные взрослые в КПТ-протоколах',
+      target: 'искажённые автоматические интерпретации',
+      limitations: 'методологический источник, не персональная гарантия',
+      note: 'методологический источник',
+      reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },
   { methodId: 'values_clarification', name: 'Прояснение ценностей', family: 'ACT',
     mechanismTargets: ['слияние с мыслями', 'потеря направления'],
     intendedUse: ['выбор действия при неопределённости'],
     cautions: ['не превращать в моральную оценку себя'],
     riskClass: 'low_reversible', amberSafe: true,
-    evidenceMetadata: [{ kind: 'textbook', ref: 'Hayes et al., Acceptance and Commitment Therapy', population: 'взрослые в ACT-протоколах', limitations: 'эффект зависит от контекста применения', note: 'методологический источник' }] },
+    evidenceMetadata: [{ kind: 'textbook',
+      ref: 'Hayes, Strosahl, Wilson — Acceptance and Commitment Therapy (2nd ed.)',
+      publisher: 'Guilford Press', identifier: null, year: 2012,
+      population: 'взрослые в ACT-протоколах',
+      target: 'ценностная дезориентация и когнитивное слияние',
+      limitations: 'эффект зависит от контекста применения',
+      note: 'методологический источник',
+      reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },
   { methodId: 'opposite_action', name: 'Противоположное действие', family: 'DBT_SKILL',
     mechanismTargets: ['импульс, не соответствующий фактам', 'избегание'],
     intendedUse: ['сильная эмоция с импульсом к вредному действию'],
     cautions: ['не применять, когда эмоция ОБОСНОВАНА фактами и требует действия по границе'],
     riskClass: 'low_reversible', amberSafe: false,
-    evidenceMetadata: [{ kind: 'textbook', ref: 'Linehan, DBT Skills Training Manual', population: 'взрослые в DBT-обучении навыкам', limitations: 'требует различения обоснованной и необоснованной эмоции', note: 'методологический источник' }] },
+    evidenceMetadata: [{ kind: 'textbook',
+      ref: 'M. Linehan — DBT Skills Training Manual (2nd ed.)',
+      publisher: 'Guilford Press', identifier: null, year: 2015,
+      population: 'взрослые в DBT-обучении навыкам',
+      target: 'эмоциональный импульс, не соответствующий фактам',
+      limitations: 'требует различения обоснованной и необоснованной эмоции',
+      note: 'методологический источник',
+      reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },
   { methodId: 'self_compassion_break', name: 'Пауза самосострадания', family: 'CFT',
     mechanismTargets: ['самокритика', 'стыд'],
     intendedUse: ['эпизод резкой самокритики'],
     cautions: ['у части людей вызывает сопротивление/тревогу — это не «неудача», а сигнал темпа'],
     riskClass: 'low_reversible', amberSafe: true,
-    evidenceMetadata: [{ kind: 'textbook', ref: 'Gilbert, Compassion Focused Therapy', population: 'взрослые с выраженной самокритикой', limitations: 'возможное усиление дистресса на старте (backdraft)', note: 'методологический источник' }] },
+    evidenceMetadata: [{ kind: 'textbook',
+      ref: 'P. Gilbert — Compassion Focused Therapy: Distinctive Features',
+      publisher: 'Routledge', identifier: null, year: 2010,
+      population: 'взрослые с выраженной самокритикой',
+      target: 'самокритика и стыд',
+      limitations: 'возможное усиление дистресса на старте (backdraft)',
+      note: 'методологический источник',
+      reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },
   { methodId: 'boundary_script', name: 'Подготовленная формулировка границы', family: 'BEHAVIORAL',
     mechanismTargets: ['уступчивость', 'отложенная граница'],
     intendedUse: ['повторяющееся нарушение границы'],
     cautions: ['при риске насилия сначала безопасность, а не разговор'],
     riskClass: 'low_reversible', amberSafe: false,
-    evidenceMetadata: [{ kind: 'practice_note', ref: 'ассертивные протоколы', population: 'общая взрослая практика', limitations: 'не для ситуаций с риском насилия', note: 'общая методология' }] },
+    evidenceMetadata: [{ kind: 'practice_note',
+      ref: 'ассертивные протоколы (общая практика)',
+      publisher: null, identifier: null, year: null,
+      population: 'общая взрослая практика',
+      target: 'откладывание/размывание личной границы',
+      limitations: 'не для ситуаций с риском насилия; публикационного источника нет',
+      note: 'общая методология',
+      reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },
   { methodId: 'psychoeducation_cycle', name: 'Объяснение цикла', family: 'PSYCHOEDUCATION',
     mechanismTargets: ['непонимание механизма', 'самообвинение'],
     intendedUse: ['первое знакомство с паттерном'],
     cautions: ['знание механизма само по себе не меняет поведение'],
     riskClass: 'low_reversible', amberSafe: true,
-    evidenceMetadata: [{ kind: 'practice_note', ref: 'общая психообразовательная практика', population: 'общая практика', limitations: 'не является вмешательством с измеримым исходом само по себе', note: 'не является доказательством эффективности' }] },
+    evidenceMetadata: [{ kind: 'practice_note',
+      ref: 'общая психообразовательная практика',
+      publisher: null, identifier: null, year: null,
+      population: 'общая практика',
+      target: 'непонимание собственного паттерна',
+      limitations: 'не является вмешательством с измеримым исходом; публикационного источника нет',
+      note: 'не является доказательством эффективности',
+      reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },
 ]);
 function psyMethod(id) { return PSY_METHOD_REGISTRY.find(m => m.methodId === id) || null; }
 
@@ -12940,11 +13004,17 @@ function psyProfileStatus(st) {
 }
 function psyMethodProfiles(dbArg) {
   const db = dbArg || DB;
-  const eps = (db.psyInterventionEpisodes || []).filter(e => e && e.methodId);
+  // Ключ профиля: конкретный methodId, а для эпизодов БЕЗ methodId (свой
+  // метод / только семейство) — `family:<FAMILY>`. Реальный эпизод не должен
+  // исчезать из «Что помогает мне» только потому, что метода нет в реестре
+  // (real-data acceptance: второй фактический intervention отражается
+  // отдельно). Ключи не пересекаются: id реестра не начинаются с «family:».
+  const eps = (db.psyInterventionEpisodes || []).filter(e => e && (e.methodId || e.methodFamily));
   const byMethod = new Map();
   eps.forEach(e => {
-    if (!byMethod.has(e.methodId)) byMethod.set(e.methodId, []);
-    byMethod.get(e.methodId).push(e);
+    const key = e.methodId || ('family:' + e.methodFamily);
+    if (!byMethod.has(key)) byMethod.set(key, []);
+    byMethod.get(key).push(e);
   });
   const reviews = db.psyReviews || [];
   const out = [];
@@ -13489,7 +13559,8 @@ function psyUiDecide() {
   out.innerHTML = `<div class="psy-offer">
       <div><b>${esc(m.name)}</b> <span style="color:var(--t3);font-size:.75rem">(${esc(PSY_FAMILY_RU[m.family] || m.family)})</span></div>
       <div class="si-text" style="font-size:.78rem">${esc(res.reason)}</div>
-      <div class="si-text" style="font-size:.75rem;color:var(--t3)">Внешняя база: ${esc((m.evidenceMetadata[0] || {}).ref || '—')}. ${esc(peLine)}</div>
+      <div class="si-text" style="font-size:.75rem;color:var(--t3)">${psyExtEvidenceLine(m)}</div>
+      <div class="si-text" style="font-size:.75rem;color:var(--t3)">${esc(peLine)}</div>
       <div class="psy-actions">
         <button type="button" class="btn btn-p btn-sm" onclick="psyUiAcceptOffer()">Сделать</button>
         <button type="button" class="btn btn-s btn-sm" onclick="psyUiDeclineOffer()">Не сейчас</button>
@@ -13536,19 +13607,36 @@ function psyExpDoneSubmit() {
 }
 
 // «Что помогает мне»: два слоя доказательности рядом, но НИКОГДА не одним числом.
+// Owner review 5238287152: внешний слой показывает идентификатор/год источника,
+// дату пересмотра и версию элемента доказательности — без утверждений о
+// персональной эффективности.
+function psyExtEvidenceLine(m) {
+  if (!m) return 'Внешняя база: — (метода нет в реестре; только личные наблюдения)';
+  const ev = m.evidenceMetadata[0] || {};
+  const pub = [ev.publisher, ev.year].filter(Boolean).join(', ');
+  return `Внешняя база: ${esc(ev.kind || '—')} · ${esc(ev.ref || '—')}${pub ? ' (' + esc(pub) + ')' : ''}` +
+    ` · пересмотрено ${esc(ev.reviewedAt || '—')} · v${esc(String(ev.evidenceVersion || '—'))}` +
+    (ev.limitations ? ' · ' + esc(ev.limitations) : '');
+}
+let _psyExclTargets = [];
+function psyUiToggleExclusion(i) {
+  const t = _psyExclTargets[i]; if (!t) return;
+  psyToggleMethodExclusion(t.methodId);
+}
 function psyRenderHelpsMe() {
   const profiles = psyMethodProfiles(DB);
   const excl = psyAdaptiveCfg().methodExclusions || {};
+  _psyExclTargets = [];
   const body = profiles.length ? profiles.map(p => {
     const m = psyMethod(p.methodId);
-    const name = m ? m.name : p.methodId;
-    const ext = m ? (m.evidenceMetadata[0] || {}) : {};
+    const isFamily = p.methodId.startsWith('family:');
+    const name = m ? m.name : (isFamily ? (PSY_FAMILY_RU[p.methodId.slice(7)] || p.methodId.slice(7)) + ' (свой метод)' : p.methodId);
     const isExcl = !!excl[p.methodId];
     return `<div class="psy-item psy-helps">
       <b>${esc(name)}</b> · <span class="psy-status psy-status-${esc(p.status)}">${esc(PSY_OUTCOME_RU[p.status] || p.status)}</span>
       ${p.contextDependence ? '<span class="psy-ctxdep">зависит от контекста</span>' : ''}
       ${p.insufficient ? '<span class="psy-ctxdep">данных недостаточно</span>' : ''}
-      <div class="si-text" style="font-size:.75rem;color:var(--t3)">Внешняя база: ${esc(ext.kind || '—')} · ${esc(ext.ref || '—')}${ext.limitations ? ' · ' + esc(ext.limitations) : ''}</div>
+      <div class="si-text" style="font-size:.75rem;color:var(--t3)">${psyExtEvidenceLine(m)}</div>
       <div class="si-text" style="font-size:.78rem">Мои данные: применений ${p.nEpisodes}, выполнено полностью ${p.nCompleted}${p.lastReviewedAt ? ' · последний review: ' + esc(String(p.lastReviewedAt).slice(0, 10)) : ''}</div>
       ${p.contexts.map(c => `<div class="psy-ctx-row">
         <span class="si-text" style="font-size:.75rem">контекст «${esc(c.contextKey)}»: ${esc(PSY_OUTCOME_RU[c.status] || c.status)}${c.adherenceIssue ? ' (проблема выполнения, не оценка метода)' : ''}
@@ -13559,7 +13647,7 @@ function psyRenderHelpsMe() {
           <div class="si-text" style="font-size:.7rem;word-break:break-all">${c.contributingEpisodeIds.map(esc).join('<br>')}</div>
         </details>
       </div>`).join('')}
-      <button type="button" class="btn btn-s btn-sm" onclick="psyToggleMethodExclusion('${esc(p.methodId)}')">${isExcl ? 'Снова разрешить предлагать' : 'Не предлагать мне это снова'}</button>
+      ${m ? `<button type="button" class="btn btn-s btn-sm" onclick="psyUiToggleExclusion(${_psyExclTargets.push({ methodId: p.methodId }) - 1})">${isExcl ? 'Снова разрешить предлагать' : 'Не предлагать мне это снова'}</button>` : ''}
     </div>`;
   }).join('') : '<div class="ai-sp-empty">Личных применений методов пока нет — профиль строится только из реальных эпизодов.</div>';
   return `<details class="card mx psy-det" id="psy-helps-me"><summary>Что помогает мне (${profiles.length})</summary>

@@ -134,6 +134,91 @@ console.log('\n── Wave 8: Adaptive Psychology Engine ──');
   ok(dc.a === 1 && dc.b === 1, 'dbCount() считает планы и эксперименты — профиль «только Wave 8» не пуст');
 }
 
+// ═══ 1b. EXTERNAL EVIDENCE SCHEMA (owner review 5238287152) ════════
+{
+  const reg = await page.evaluate(() => ({
+    version: PSY_METHOD_REGISTRY_VERSION,
+    items: JSON.parse(JSON.stringify(PSY_METHOD_REGISTRY)),
+  }));
+  ok(reg.version === 'psy-method-registry-v2', `версия реестра стабильна (${reg.version})`);
+
+  // Каждый evidence-элемент удовлетворяет явной схеме.
+  const bad = [];
+  reg.items.forEach(m => (m.evidenceMetadata || []).forEach((ev, i) => {
+    const path = m.methodId + '[' + i + ']';
+    if (!['clinical_guideline', 'textbook', 'practice_note'].includes(ev.kind)) bad.push(path + ':kind');
+    if (!ev.ref) bad.push(path + ':ref');
+    if (!ev.population) bad.push(path + ':population');
+    if (!ev.target) bad.push(path + ':target');
+    if (!ev.limitations) bad.push(path + ':limitations');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(ev.reviewedAt || ''))) bad.push(path + ':reviewedAt');
+    if (!Number.isInteger(ev.evidenceVersion) || ev.evidenceVersion < 1) bad.push(path + ':evidenceVersion');
+    if (!('publisher' in ev) || !('identifier' in ev) || !('year' in ev)) bad.push(path + ':pubfields');
+    // Публикационные метаданные обязательны там, где источник — публикация.
+    if (ev.kind === 'clinical_guideline' && (!ev.publisher || !ev.identifier || !Number.isInteger(ev.year))) bad.push(path + ':guideline-pub');
+    if (ev.kind === 'textbook' && (!ev.publisher || !Number.isInteger(ev.year))) bad.push(path + ':textbook-pub');
+  }));
+  ok(bad.length === 0, `каждый evidence-элемент реестра соответствует схеме (нарушений: ${bad.length})`, bad.join(', '));
+
+  // Устаревшая CG90 заменена актуальной NICE NG222.
+  const ba = reg.items.find(m => m.methodId === 'behavioral_activation');
+  const ev0 = ba.evidenceMetadata[0];
+  ok(ev0.identifier === 'NG222' && /NG222/.test(ev0.ref) && ev0.publisher === 'NICE' && ev0.year === 2022,
+    'behavioral_activation ссылается на NICE NG222 (2022) с полным публикационным идентификатором');
+  ok(!JSON.stringify(reg.items).includes('CG90'), 'отозванной CG90 в production-реестре нет');
+  ok(/групповая доказательность/.test(ev0.limitations),
+    'ограничение «групповая доказательность ≠ индивидуальная гарантия» сохранено');
+
+  // UI: внешний слой раскрывает источник/версию/дату и отделён от личного.
+  await reset();
+  await save('psyInterventionEpisode', episode({ methodId: 'behavioral_activation', methodFamily: 'BEHAVIORAL' }));
+  await page.evaluate(() => { goTo('map'); if (typeof openPsyWorkspace === 'function') openPsyWorkspace(); else rPsyWorkspace(); });
+  await page.waitForTimeout(120);
+  const extUi = await page.evaluate(() => {
+    const el = document.getElementById('psy-helps-me');
+    el.open = true;
+    const t = el.textContent;
+    return { ng: t.includes('NG222'), pub: t.includes('NICE, 2022'),
+      rev: /пересмотрено \d{4}-\d{2}-\d{2}/.test(t), ver: /· v\d+/.test(t),
+      separate: t.includes('Внешняя база') && t.includes('Мои данные'), pct: /\d+\s?%/.test(t) };
+  });
+  ok(extUi.ng && extUi.pub && extUi.rev && extUi.ver,
+    'UI показывает идентификатор источника, издателя/год, дату пересмотра и версию evidence-элемента');
+  ok(extUi.separate && !extUi.pct, 'внешний слой по-прежнему отделён от личного, без «эффективности N%»');
+
+  // Self-review fix: свой метод (OTHER) с враждебным methodId не даёт инъекции
+  // в inline-обработчики «Что помогает мне».
+  await reset();
+  const hostile = await page.evaluate(() => {
+    window.__w8xss2 = false;
+    const r = psySaveRecord('psyInterventionEpisode', {
+      methodId: "x'),window.__w8xss2=true,('", methodFamily: 'OTHER',
+      interventionSummary: 'синтетический свой метод', adherence: 'done',
+    });
+    rPsyWorkspace();
+    const el = document.getElementById('psy-helps-me'); el.open = true;
+    const btns = [...el.querySelectorAll('button')];
+    btns.forEach(b => { try { b.click(); } catch (_) {} });
+    // Текст methodId легально виден (экранированным), но НЕ в обработчиках.
+    const badInline = [...el.querySelectorAll('[onclick]')]
+      .some(x => (x.getAttribute('onclick') || '').includes('__w8xss2'));
+    return { saved: r.ok, fired: window.__w8xss2, badInline };
+  });
+  ok(hostile.saved && !hostile.fired && !hostile.badInline,
+    'враждебный methodId своего метода не попадает в inline-обработчики (индексы вместо строк)');
+
+  // Self-review fix: эпизод БЕЗ methodId (только семейство) отражается
+  // отдельным family-профилем, а не исчезает и не склеивается с реестровым.
+  await reset();
+  await save('psyInterventionEpisode', episode());   // opposite_action
+  await save('psyInterventionEpisode', episode({ methodId: '', methodFamily: 'CBT', targetMechanism: 'TEST-W8-cbt-mech' }));
+  const famProf = await page.evaluate(() => JSON.parse(JSON.stringify(psyMethodProfiles(DB))));
+  const fam = famProf.find(p => p.methodId === 'family:CBT');
+  const reg2 = famProf.find(p => p.methodId === 'opposite_action');
+  ok(fam && fam.nEpisodes === 1 && reg2 && reg2.nEpisodes === 1 && famProf.length === 2,
+    'эпизод без methodId виден отдельным family-профилем и не смешан с реестровым методом');
+}
+
 // ═══ 2. DERIVED PROFILE (тесты 14–19) ══════════════════════════════
 {
   await reset();
