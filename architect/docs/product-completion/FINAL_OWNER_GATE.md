@@ -1,0 +1,1 @@
+Owner gate: no implementation merge/auto-merge before independent acceptance.
