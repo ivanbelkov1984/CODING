@@ -1,0 +1,1 @@
+Execution contracts are ready. Implementation must now proceed through issues, not direct MAIN edits.
