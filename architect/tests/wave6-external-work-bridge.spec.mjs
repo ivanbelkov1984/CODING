@@ -329,9 +329,15 @@ console.log('\n── Wave 6: External Work Bridge ──');
       data: { body: 'текст', id: 'ПОДДЕЛКА', sv: 999, _u: 1, _del: { x: 1 }, ext: { fake: true }, privacyClass: 'public' } }],
     links: [],
   });
-  const rec = await page.evaluate(() => DB.insights.find(i => i.ext && i.ext.sourceId === 'TEST-LIFE-Z'));
+  // sv сверяется с ТЕКУЩЕЙ SCHEMA_VERSION, а не с числом: инвариант —
+  // «схема ставится приложением», и он не должен ломаться при каждом бампе.
+  const rec = await page.evaluate(() => {
+    const r = DB.insights.find(i => i.ext && i.ext.sourceId === 'TEST-LIFE-Z');
+    return r ? { ...r, __schema: SCHEMA_VERSION } : null;
+  });
   ok(rec && rec.id !== 'ПОДДЕЛКА' && typeof rec.id === 'number', 'payload не может задать id записи');
-  ok(rec && rec.sv === 6 && rec.ext.fake === undefined, 'payload не может подменить sv/ext');
+  ok(rec && rec.sv === rec.__schema && rec.ext.fake === undefined,
+    `payload не может подменить sv/ext (sv=${rec && rec.sv})`);
   const noDel = await page.evaluate(() => Object.keys(DB._del || {}).length);
   ok(noDel === 0, 'payload не может писать надгробия');
 }

@@ -1415,3 +1415,34 @@ body.navshell .nsh-tab:focus-visible,body.navshell .nsh-fab:focus-visible,
 .si-src-astro{display:inline-flex;align-items:center;gap:.25rem;font-size:.68rem;line-height:1;
   padding:.28rem .45rem;border-radius:.4rem;white-space:nowrap;
   color:var(--t3);background:var(--s2);border:1px solid var(--bd)}
+
+/* ═══ WAVE 7 (issue #162): Psychology Workspace ═══════════════════
+   Прогрессивное раскрытие: landing не должен выглядеть как больничная
+   информационная система. Тап-цели ≥44px, переносы длинных ID. */
+.psy-now{padding:var(--s4)}
+.psy-focus{font-size:var(--tx5);font-weight:560;line-height:1.35;margin-bottom:.15rem}
+.psy-goals-inline{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:var(--s3)}
+.psy-chip{display:inline-block;padding:.28rem .6rem;border-radius:999px;background:var(--teal-l);color:var(--teal);font-size:var(--tx2);font-weight:510;max-width:100%;overflow-wrap:anywhere}
+.psy-actions{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:var(--s4)}
+.psy-actions .btn{min-height:44px}
+.psy-det .btn{min-height:44px}
+.psy-det{padding:0}
+.psy-det>summary{cursor:pointer;list-style:none;padding:var(--s4);min-height:44px;display:flex;align-items:center;font-weight:540;font-size:var(--tx3)}
+.psy-det>summary::-webkit-details-marker{display:none}
+.psy-det>summary::after{content:'▾';margin-left:auto;color:var(--t4)}
+.psy-det[open]>summary::after{content:'▴'}
+.psy-det>*:not(summary){padding-left:var(--s4);padding-right:var(--s4)}
+.psy-det>*:last-child{padding-bottom:var(--s4)}
+.psy-item{padding:var(--s3) 0;border-top:1px solid var(--bd);overflow-wrap:anywhere}
+.psy-hyp{padding:var(--s3) 0;border-top:1px solid var(--bd);overflow-wrap:anywhere}
+.psy-hist{padding:.3rem 0;font-size:var(--tx2);color:var(--t3);overflow-wrap:anywhere}
+.psy-ref{display:inline-block;padding:.12rem .4rem;margin:.1rem .2rem .1rem 0;border-radius:6px;background:var(--bg3,rgba(127,127,127,.12));font-size:var(--tx1,.7rem);color:var(--t3);overflow-wrap:anywhere}
+.psy-src-own{color:var(--t4);font-size:var(--tx1,.7rem)}
+.psy-adv{margin-top:.25rem;font-size:var(--tx2);color:var(--orange,#D97706)}
+.psy-nat{display:inline-block;margin-left:.35rem;padding:.1rem .4rem;border-radius:6px;background:var(--green-l);color:var(--green);font-size:var(--tx1,.7rem)}
+.psy-fld{margin-bottom:var(--s4)}
+.psy-fld .field{width:100%;min-height:44px;padding:.6rem .7rem;border:1px solid var(--bd);border-radius:10px;background:var(--bg2);color:var(--t1)}
+.psy-fld textarea.field{min-height:76px;resize:vertical}
+.psy-fld-chk{display:flex;align-items:center;gap:.55rem}
+.psy-fld-chk input{width:22px;height:22px;min-width:22px}
+.psy-fld-chk .f-lbl{margin-bottom:0;text-transform:none;letter-spacing:0}

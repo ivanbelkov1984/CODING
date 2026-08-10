@@ -677,6 +677,13 @@
         <div class="snpill" data-sub="graph" onclick="msub('graph',this)"><i data-lucide="share-2" style="width:13px;height:13px"></i>Карта</div>
         <div class="snpill" data-sub="patterns" onclick="msub('patterns',this)"><i data-lucide="git-branch" style="width:13px;height:13px"></i>Паттерны</div>
       </div></div>
+    <!-- Wave 7 (issue #162): «Психология» — first-class subroute внутри
+         существующего контура Дневника. Глобальный redesign навигации в этой
+         волне намеренно НЕ выполняется (контракт §10). -->
+    <div class="sn-grp"><span class="sn-glbl">Психология</span>
+      <div class="sn-row">
+        <button type="button" class="snpill" data-sub="psychology" onclick="msub('psychology',this)"><i data-lucide="compass" style="width:13px;height:13px"></i>Психология</button>
+      </div></div>
     <div class="sn-grp"><span class="sn-glbl">Развитие</span>
       <div class="sn-row">
         <div class="snpill" data-sub="book" onclick="msub('book',this)"><i data-lucide="book-open" style="width:13px;height:13px"></i>Книга</div>
@@ -770,6 +777,12 @@
          вкладки «Психика», без новой top-level навигации. Рендерится rPsyWorkflow()
          только при STATE.mapView==='psy' (см. rMap()). -->
     <div id="psy-workflow"></div>
+    <div style="height:5rem"></div>
+  </div>
+  <!-- Wave 7 (issue #162): Psychology Workspace. Весь контент рендерится
+       rPsyWorkspace() — прогрессивное раскрытие, mobile-first. -->
+  <div id="ms-psychology" style="display:none">
+    <div id="psy-ws"></div>
     <div style="height:5rem"></div>
   </div>
   <div id="ms-evolution" style="display:none">
@@ -1473,6 +1486,21 @@
 </div>
 
 <!-- Wave 1 (issue #148): согласие на AI-помощь по психологическим данным -->
+<!-- Wave 7 (issue #162): единая форма психологического workspace. Поля
+     задаются PSY_FORM_SPECS, запись идёт через общий psySaveRecord(). -->
+<div class="ov" id="ov-psy-form" onclick="if(event.target===this)closeOv('ov-psy-form')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title" id="psy-form-title">Психология</div>
+    <div id="psy-form-body" style="padding:0 var(--s4)"></div>
+    <div id="psy-form-err" class="si-text" role="alert" aria-live="polite" style="padding:0 var(--s4);color:var(--red,#DC2626)"></div>
+    <div style="padding:var(--s4);display:flex;gap:var(--s2)">
+      <button type="button" class="btn btn-p btn-full" id="psy-form-save" onclick="psyFormSubmit()">Сохранить</button>
+      <button type="button" class="btn btn-s" onclick="closeOv('ov-psy-form')">Отмена</button>
+    </div>
+  </div>
+</div>
+
 <div class="ov" id="ov-psy-ai-consent" onclick="if(event.target===this)closeOv('ov-psy-ai-consent')">
   <div class="sheet">
     <div class="sh-pull"></div>
@@ -2034,6 +2062,9 @@
       <div class="srow" onclick="closeOv('ov-more');goTo('vit')"><div class="sic" style="background:var(--green-l)"><svg style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></div><span class="sl2">Сферы</span><span class="sv2">Трекеры жизни</span></div>
       <div class="srow" onclick="closeOv('ov-more');goTo('health')"><div class="sic" style="background:rgba(251,113,133,.16)"><svg style="color:#FB7185" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg></div><span class="sl2">Здоровье</span><span class="sv2">Приём, симптомы, измерения</span></div>
       <div class="srow" onclick="closeOv('ov-more');goTo('astro')"><div class="sic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l1.9 5.8H20l-4.9 3.6 1.9 5.8L12 14.6 7 18.2l1.9-5.8L4 8.8h6.1z"/></svg></div><span class="sl2">Астрология</span><span class="sv2">Карта, периоды, отношения</span></div>
+      <!-- Wave 7: прямой вход в «Психологию» — пользователь не должен угадывать,
+           что раздел спрятан под «Паттернами» или «Зачем?». -->
+      <div class="srow" onclick="closeOv('ov-more');openPsyWorkspace()"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><polygon points="15.5 8.5 10.5 10.5 8.5 15.5 13.5 13.5"/></svg></div><span class="sl2">Психология</span><span class="sv2">Формулировка, цели, методы, review</span></div>
     </div>
     <div class="sec-lbl" style="padding-left:var(--s4)">Здоровье — быстро</div>
     <div class="more-list">
