@@ -53,8 +53,11 @@ console.log('\n── Brand v3: интеграция фирменного сти
 }
 
 // ═══ 2. Манифест ссылается на существующие файлы ════════════════════
+// Читаем ИСХОДНЫЙ manifest.json/sw.js: они попадают в dist только при полной
+// сборке (`node build.mjs`), а эта сюита работает и на combined-артефакте.
+// Что полная сборка реально их копирует — проверяет wave5-artifact-integrity.
 {
-  const man = JSON.parse(readFileSync(join(DIST, 'manifest.json'), 'utf8'));
+  const man = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8'));
   ok(man.name === 'Архитектор жизни', `manifest name = «Архитектор жизни» (${man.name})`);
   ok(man.short_name === 'Архитектор', `short_name — короткий корректный вариант (${man.short_name})`);
   ok(man.start_url === './' && man.scope === './' && man.display === 'standalone',
@@ -65,8 +68,8 @@ console.log('\n── Brand v3: интеграция фирменного сти
   ok(has(512, 'any'), 'manifest: иконка 512 any');
   ok(has(192, 'maskable'), 'manifest: иконка 192 maskable');
   ok(has(512, 'maskable'), 'manifest: иконка 512 maskable');
-  const missing = icons.map(i => i.src).filter(src => !existsSync(join(DIST, src)));
-  ok(missing.length === 0, 'все файлы из манифеста реально существуют в сборке', missing.join('\n'));
+  const missing = icons.map(i => i.src).filter(src => !existsSync(join(ROOT, src)));
+  ok(missing.length === 0, 'все файлы из манифеста реально существуют', missing.join('\n'));
   const anySrc = icons.filter(i => (i.purpose || 'any').includes('any')).map(i => i.src);
   const maskSrc = icons.filter(i => (i.purpose || '').includes('maskable')).map(i => i.src);
   ok(anySrc.every(s => !maskSrc.includes(s)),
@@ -75,17 +78,18 @@ console.log('\n── Brand v3: интеграция фирменного сти
 
 // ═══ 3. Сборка и service worker ═════════════════════════════════════
 {
-  const sw = readFileSync(join(DIST, 'sw.js'), 'utf8');
+  const sw = readFileSync(join(ROOT, 'sw.js'), 'utf8');
   const shell = (sw.match(/const SHELL = \[([\s\S]*?)\];/) || [])[1] || '';
   const paths = [...shell.matchAll(/'\.\/([^']+)'/g)].map(m => m[1]);
   const brandInShell = paths.filter(p => p.startsWith('brand/'));
   ok(brandInShell.length >= 8, `фирменные ассеты precache'атся существующим SW-механизмом (${brandInShell.length})`);
-  const missing = brandInShell.filter(p => !existsSync(join(DIST, p)));
-  ok(missing.length === 0, 'все брендовые пути из SHELL существуют в сборке', missing.join('\n'));
+  const missing = brandInShell.filter(p => !existsSync(join(ROOT, p)));
+  ok(missing.length === 0, 'все брендовые пути из SHELL существуют', missing.join('\n'));
   ok(!/'\.\/icon-192\.png'|'\.\/icon-512\.png'|'\.\/apple-touch-icon-180\.png'/.test(sw),
     'старые корневые пути иконок больше не упоминаются в service worker');
-  ok(!existsSync(join(DIST, 'icon-192.png')) && !existsSync(join(DIST, 'icon-512.png')),
-    'старые иконки не попадают в сборку (заменены, а не продублированы)');
+  ok(!existsSync(join(ROOT, 'icon-192.png')) && !existsSync(join(ROOT, 'icon-512.png')) &&
+     !existsSync(join(ROOT, 'apple-touch-icon-180.png')),
+    'старые иконки удалены из репозитория (заменены, а не продублированы)');
   ok(!/<link rel="manifest"[\s\S]{0,400}<link rel="manifest"/.test(readFileSync(join(DIST, 'app.html'), 'utf8')),
     'второй манифест не создан');
 }
