@@ -11,8 +11,9 @@
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { readFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { createHash } from 'crypto';
+import { inflateSync } from 'zlib';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(DIR, '..');
@@ -26,6 +27,51 @@ const ok = (cond, msg, detail) => {
   if (cond) { pass++; console.log('  ✓ ' + msg); }
   else { fail++; console.log('  ✗ ' + msg); if (detail) console.log('      ' + String(detail).split('\n').join('\n      ')); }
 };
+
+// ── Доля ширины изображения, занятая рисунком (без фоновых полей) ───
+// Нужна, чтобы кандидатом srcset нельзя было подсунуть другую композицию:
+// у splash-канваса с большим внутренним полем эта доля заметно меньше.
+function artworkExtent(file) {
+  const d = readFileSync(file);
+  const w = d.readUInt32BE(16), h = d.readUInt32BE(20);
+  const bitDepth = d[24], colorType = d[25];
+  if (bitDepth !== 8 || ![2, 6].includes(colorType)) return -1;   // только 8-битные RGB/RGBA
+  const ch = colorType === 6 ? 4 : 3;
+  const idat = [];
+  for (let i = 8; i < d.length;) {
+    const len = d.readUInt32BE(i);
+    if (d.toString('ascii', i + 4, i + 8) === 'IDAT') idat.push(d.subarray(i + 8, i + 8 + len));
+    i += 12 + len;
+  }
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = w * ch;
+  const cur = Buffer.alloc(stride), prev = Buffer.alloc(stride);
+  let p = 0, minX = w, maxX = -1, bg = null;
+  for (let y = 0; y < h; y++) {
+    const f = raw[p++];
+    raw.copy(cur, 0, p, p + stride); p += stride;
+    for (let x = 0; x < stride; x++) {
+      const a = x >= ch ? cur[x - ch] : 0, b = prev[x], c = x >= ch ? prev[x - ch] : 0;
+      if (f === 1) cur[x] = (cur[x] + a) & 255;
+      else if (f === 2) cur[x] = (cur[x] + b) & 255;
+      else if (f === 3) cur[x] = (cur[x] + ((a + b) >> 1)) & 255;
+      else if (f === 4) {
+        const pp = a + b - c, pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c);
+        cur[x] = (cur[x] + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c)) & 255;
+      }
+    }
+    if (!bg) bg = [cur[0], cur[1], cur[2]];
+    for (let x = 0; x < w; x++) {
+      const o = x * ch;
+      if (Math.abs(cur[o] - bg[0]) + Math.abs(cur[o + 1] - bg[1]) + Math.abs(cur[o + 2] - bg[2]) > 24) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+      }
+    }
+    cur.copy(prev);
+  }
+  return maxX < 0 ? 0 : (maxX - minX + 1) / w;
+}
 
 console.log('\n── Brand v3: интеграция фирменного стиля ──');
 
@@ -136,10 +182,33 @@ const dismissSplash = page => page.evaluate(() => {
     };
   });
   ok(splash.hasImg && /brand\//.test(splash.src || ''), 'splash использует фирменный знак');
+
+  // FIX 1: все кандидаты srcset обязаны быть derivative'ами ОДНОГО мастера с
+  // одинаковой геометрией. 12-splash-brand-1024 — другая композиция (большое
+  // внутреннее поле), кандидатом того же <img> он быть не может.
+  const cands = await page.evaluate(() => {
+    const img = document.getElementById('splash').querySelector('img');
+    return (img.getAttribute('srcset') || '').split(',').map(x => x.trim().split(/\s+/)[0]).filter(Boolean);
+  });
+  ok(cands.length >= 2 && !cands.some(c => /12-splash-brand-1024/.test(c)),
+    `srcset splash состоит только из derivative'ов иконочного мастера (${cands.join(', ')})`);
+  await page.close();
+  // Геометрию меряем детерминированно в Node: декодируем PNG и считаем долю
+  // ширины, занятую рисунком (фон берётся из угла). Браузер тут не нужен.
+  const extents = cands.map(c => ({ c, e: artworkExtent(join(DIST, c)) }));
+  const vals = extents.map(x => x.e).filter(v => v > 0);
+  const spread = vals.length ? Math.max(...vals) - Math.min(...vals) : 1;
+  ok(vals.length === cands.length && spread < 0.06,
+    `видимый масштаб рисунка одинаков у всех кандидатов srcset (разброс ${spread.toFixed(3)})`,
+    JSON.stringify(extents));
+  // Контроль чувствительности: у splash-композиции доля рисунка ЗАМЕТНО иная —
+  // значит проверка действительно поймала бы смешение композиций.
+  const splashExtent = artworkExtent(join(ROOT, 'brand', '12-splash-brand-1024.png'));
+  ok(Math.abs(splashExtent - vals[0]) > 0.06,
+    `проверка чувствительна: у splash-композиции масштаб рисунка иной (${splashExtent.toFixed(3)} против ${vals[0].toFixed(3)})`);
   ok(splash.alt === '' && splash.hidden === 'true',
     'splash-знак декоративный (рядом живое название) — скринридер не дублирует');
   ok(splash.interactive && Date.now() - t0 < 5000, 'splash не задерживает запуск приложения');
-  await page.close();
 }
 
 // ═══ 5. Шапка: только знак, без растрового названия ═════════════════
@@ -220,9 +289,51 @@ const dismissSplash = page => page.evaluate(() => {
     };
   });
   ok(ab.loaded && /09-about-brand-icon-256/.test(ab.src), '«О приложении»: фирменный знак загружен');
-  ok(ab.name === 'Архитектор жизни' && ab.version, 'рядом живое название продукта и версия сборки');
+  ok(ab.name === 'Архитектор жизни', 'рядом живое название продукта');
+
+  // FIX 2: показанные данные сборки берутся из releaseInfo(), а не из статики.
+  const rel = await page.evaluate(() => {
+    const r = releaseInfo();
+    const card = document.querySelector('.about-card');
+    return {
+      injected: r.injected, build: r.build, schema: r.schemaVersion,
+      sha: r.sha, builtAt: r.builtAt,
+      sub: (document.getElementById('about-release') || {}).textContent || '',
+      bld: (document.getElementById('about-build') || {}).textContent || '',
+      det: (document.getElementById('about-detail') || {}).textContent || '',
+      cardText: card.textContent || '',
+    };
+  });
+  const shown = rel.injected ? rel.build : 'не собрана';
+  ok(rel.sub.includes(shown) && rel.bld.includes(shown),
+    `в «О приложении» показана живая сборка из releaseInfo() (${rel.bld.trim()})`);
+  ok(rel.det.includes('schema ' + rel.schema) &&
+     (!rel.sha || rel.det.includes(String(rel.sha).slice(0, 10))),
+    `подробности сборки совпадают с releaseInfo() (${rel.det.slice(0, 60)})`);
+  ok(!/v5\.0/.test(rel.cardText),
+    'захардкоженной версии v5.0 в блоке больше нет — единственный источник правды releaseInfo()');
   ok(ab.alt === '' && ab.hidden === 'true', 'знак декоративный — название не произносится дважды');
   ok(ab.fit === 'contain' && ab.size <= 64, `знак компактный, не гигантский логотип (${ab.size}px)`);
+  await page.close();
+}
+
+// ═══ 7b. Идентичность продукта в HTML и iOS-подписи ═════════════════
+{
+  const page = await boot({ width: 390, height: 844 });
+  const meta = await page.evaluate(() => ({
+    title: document.title,
+    desc: (document.querySelector('meta[name="description"]') || {}).content || '',
+    iosTitle: (document.querySelector('meta[name="apple-mobile-web-app-title"]') || {}).content || '',
+  }));
+  const man = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8'));
+  ok(meta.title === 'Архитектор жизни', `<title> = «Архитектор жизни» (${meta.title})`);
+  ok(/^Архитектор жизни/.test(meta.desc), 'meta description начинается с полного названия продукта');
+  // iOS обрезает подпись значка примерно на 11–12 знаках: «Архитектор жизни»
+  // (16) превратилось бы в «Архитектор ж…». Осознанно короткая подпись,
+  // совпадающая с manifest.short_name.
+  ok(meta.iosTitle === 'Архитектор' && meta.iosTitle === man.short_name,
+    `apple-mobile-web-app-title — намеренно короткая подпись, равная short_name (${meta.iosTitle})`);
+  ok(meta.iosTitle.length <= 12, `подпись значка iOS укладывается в лимит без многоточия (${meta.iosTitle.length} знаков)`);
   await page.close();
 }
 
@@ -367,8 +478,12 @@ const dismissSplash = page => page.evaluate(() => {
 
 // ═══ 9c. Maskable: системная маска не режет смысловые элементы ══════
 {
-  const page = await boot({ width: 600, height: 400 });
-  await page.setContent(`<body style="margin:0;background:#20242e;display:flex;gap:24px;padding:24px">
+  // Отдельный файл рядом со сборкой: нужен file://-origin для локальных
+  // картинок, но БЕЗ приложения — его скрипты продолжали бы работать на
+  // подменённом DOM и падали бы на отсутствующих узлах.
+  const maskFile = join(DIST, '_mask-preview.html');
+  const page = await browser.newPage({ viewport: { width: 600, height: 400 } });
+  writeFileSync(maskFile, `<!doctype html><meta charset="utf-8"><body style="margin:0;background:#20242e;display:flex;gap:24px;padding:24px">
     <div style="text-align:center;color:#fff;font:12px system-ui">
       <div style="width:180px;height:180px;border-radius:50%;overflow:hidden">
         <img src="${'file://' + join(DIST, 'brand', '10-app-icon-maskable-512.png')}" style="width:100%;height:100%;object-fit:contain">
@@ -382,6 +497,7 @@ const dismissSplash = page => page.evaluate(() => {
         <img src="${'file://' + join(DIST, 'brand', '02-app-icon-512.png')}" style="width:100%;height:100%;object-fit:contain">
       </div>any (без маски)</div>
   </body>`);
+  await page.goto('file://' + maskFile);
   await page.waitForTimeout(200);
   await page.screenshot({ path: join(SHOTS, 'maskable-under-mask.png') });
   // 72% safe zone: содержимое за её пределами маска имеет право срезать.
@@ -391,6 +507,7 @@ const dismissSplash = page => page.evaluate(() => {
   });
   ok(safe, 'maskable 512 — квадрат 512×512, пригодный для системной маски');
   await page.close();
+  rmSync(maskFile, { force: true });
 }
 
 // ═══ 10. Офлайн-запуск и локальность ассетов ════════════════════════

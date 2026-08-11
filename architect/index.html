@@ -6,14 +6,16 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#08090a">
-<meta name="description" content="Архитектор — система управления знаниями и жизнью">
+<meta name="description" content="Архитектор жизни — личный дневник жизни, психологии, здоровья и астрологии. Данные остаются на устройстве.">
+<!-- iOS режет подпись значка примерно на 11–12 знаках: «Архитектор жизни»
+     превратилось бы в «Архитектор ж…». Осознанно короткая подпись = short_name. -->
 <meta name="apple-mobile-web-app-title" content="Архитектор">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="brand/04-apple-touch-icon-180.png">
 <link rel="icon" type="image/png" sizes="32x32" href="brand/06-favicon-32.png">
 <link rel="icon" type="image/png" sizes="64x64" href="brand/05-favicon-64.png">
 <link rel="icon" type="image/png" sizes="192x192" href="brand/03-app-icon-192.png">
-<title>Архитектор</title>
+<title>Архитектор жизни</title>
 <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
 <script>
 /*ARCH_RECOVERY_BOOTSTRAP_START*/
@@ -175,10 +177,12 @@
 <!-- ══ SPLASH ════════════════════════════════════════════════════ -->
 <div id="splash">
   <div class="sp-icon">
-    <!-- Рядом живое название, поэтому знак декоративный. Мелким экранам
-         достаётся 256px-вариант, 1024 берётся только очень плотными. -->
+    <!-- Рядом живое название, поэтому знак декоративный. В srcset только
+         derivative'ы ОДНОГО мастера с одинаковой геометрией: 256 и 512.
+         12-splash-brand-1024 — отдельная композиция с большим внутренним
+         полем, кандидатом того же изображения она быть не может. -->
     <img class="brand-mark" src="brand/09-about-brand-icon-256.png"
-         srcset="brand/09-about-brand-icon-256.png 256w, brand/12-splash-brand-1024.png 1024w"
+         srcset="brand/09-about-brand-icon-256.png 256w, brand/02-app-icon-512.png 512w"
          sizes="76px" width="256" height="256" alt="" aria-hidden="true" decoding="async">
   </div>
   <div class="sp-eyebrow">Архитектор жизни</div>
@@ -667,10 +671,15 @@
            width="256" height="256" alt="" aria-hidden="true" decoding="async">
       <div class="about-col">
         <div class="about-name">Архитектор жизни</div>
-        <div class="about-sub" id="about-release">v5.0 · офлайн-first · данные на устройстве</div>
+        <!-- Значения проставляет rAbout() из releaseInfo() — единственного
+             источника правды о сборке (Wave 5 release metadata contract). -->
+        <div class="about-sub" id="about-release">—</div>
       </div>
     </div>
-    <div class="srow"><div class="sic" style="background:var(--bg2)"><svg style="color:var(--t3)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></div><span class="sl2">Версия</span><span class="sv2">v5.0 · Архитектор</span></div>
+    <div class="srow"><div class="sic" style="background:var(--bg2)"><svg style="color:var(--t3)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></div><span class="sl2">Версия</span><span class="sv2" id="about-build">—</span></div>
+    <details class="about-det"><summary class="si-text" style="font-size:.75rem;color:var(--t3)">Подробности сборки</summary>
+      <div class="si-text" style="font-size:.72rem;color:var(--t4)" id="about-detail">—</div>
+    </details>
   </div>
   <div style="height:5rem"></div>
 </section>

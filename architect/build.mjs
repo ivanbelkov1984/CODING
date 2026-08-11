@@ -31,7 +31,7 @@ const BRAND_RUNTIME = [
   '05-favicon-64.png', '06-favicon-32.png', '07-header-brand-icon-96.png',
   '08-header-brand-icon-64.png', '09-about-brand-icon-256.png',
   '10-app-icon-maskable-512.png', '11-app-icon-maskable-192.png',
-  '12-splash-brand-1024.png', '26-brand-lockup-icon-title-subtitle-safe.png',
+  '26-brand-lockup-icon-title-subtitle-safe.png',
 ];
 async function copyBrand(outDir) {
   await mkdir(join(outDir, 'brand'), { recursive: true });

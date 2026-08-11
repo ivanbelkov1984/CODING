@@ -21,6 +21,24 @@ const SCHEMA_VERSION = 8;   // Wave 8 (issue #163): Adaptive Psychology Engine �
 const BUILD_ID = '__ARCH_BUILD__';
 const BUILD_SHA = '__ARCH_SHA__';
 const BUILT_AT = '__ARCH_BUILT_AT__';
+// «О приложении»: живые данные сборки. Никаких вторых захардкоженных
+// версий — всё берётся из releaseInfo() (Wave 5 release metadata contract).
+function rAbout() {
+  const rel = releaseInfo();
+  const sub = $('about-release');
+  const bld = $('about-build');
+  const det = $('about-detail');
+  const build = rel.injected ? rel.build : 'не собрана (dev)';
+  if (sub) sub.textContent = `Сборка ${build} · офлайн-first · данные на устройстве`;
+  if (bld) bld.textContent = build;
+  if (det) {
+    const parts = [`schema ${rel.schemaVersion}`];
+    if (rel.sha) parts.push(`SHA ${String(rel.sha).slice(0, 10)}`);
+    if (rel.builtAt) parts.push(`собрана ${String(rel.builtAt).slice(0, 16).replace('T', ' ')} UTC`);
+    if (rel.swVersion) parts.push(`SW ${rel.swVersion}`);
+    det.textContent = parts.join(' · ');
+  }
+}
 function releaseInfo() {
   const injected = BUILD_ID.indexOf('__ARCH_') !== 0;
   let swVersion;
@@ -1276,7 +1294,7 @@ function goTo(tab, el) {
   if (tab==='map') { if (document.body.classList.contains('navshell')) msub('overview'); else rIns(); }
   if (tab==='health') rHealth();
   if (tab==='astro') asub('menu');
-  if (tab==='settings') { rProfileRow(); checkApiStatus(); rPushStatus(); const kc=$('keys-cnt'); if (kc) kc.textContent = KEY_SERVICES.filter(s=>getAiKeyFor(s.p)).length + ' из ' + KEY_SERVICES.length; }
+  if (tab==='settings') { rAbout(); rProfileRow(); checkApiStatus(); rPushStatus(); const kc=$('keys-cnt'); if (kc) kc.textContent = KEY_SERVICES.filter(s=>getAiKeyFor(s.p)).length + ' из ' + KEY_SERVICES.length; }
   if (document.body.classList.contains('navshell')) { nshHighlight(tab); nshWriteHash(tab); }
 }
 function msub(tab, el) {
