@@ -14924,7 +14924,14 @@ function extPickFile(ev) {
   if (!file) return;
   if (file.size > EXT_LIMITS.maxBytes) { toast('Файл слишком большой', 'warn'); return; }
   const fr = new FileReader();
-  fr.onload = () => { const t = $('ext-text'); if (t) t.value = String(fr.result || ''); extPreview(); };
+  // Если выбран источник — файл идёт через универсальный мост (человеческий
+  // предпросмотр, чекпойнт, атомарный импорт). Без выбранного источника
+  // остаётся разовая техническая проверка пакета.
+  fr.onload = () => {
+    const t = $('ext-text'); if (t) t.value = String(fr.result || '');
+    if (_extConnActive && extConnFind(_extConnActive)) extConnUiRefresh();
+    else extPreview();
+  };
   fr.onerror = () => toast('Не удалось прочитать файл', 'err');
   fr.readAsText(file);
 }

@@ -1915,9 +1915,14 @@
       <input type="file" id="ext-file" accept="application/json,.json" onchange="extPickFile(event)">
       <label class="f-lbl" for="ext-text">…или вставить данные</label>
       <textarea id="ext-text" rows="5" placeholder='Вставь сюда содержимое файла'></textarea>
-      <button type="button" class="btn btn-p" onclick="extPreview()">Проверить данные</button>
-      <div id="ext-out" aria-live="polite"></div>
-      <div id="ext-actions"></div>
+      <!-- Разовая техническая проверка пакета (путь Волны 6) остаётся для
+           продвинутых: обычный путь — выбрать источник выше и импортировать. -->
+      <details>
+        <summary style="font-size:var(--tx2);color:var(--t3)">Разовая проверка пакета без источника (для продвинутых)</summary>
+        <button type="button" class="btn btn-p" onclick="extPreview()">Проверить данные</button>
+        <div id="ext-out" aria-live="polite"></div>
+        <div id="ext-actions"></div>
+      </details>
     </div>
   </div>
 </div>

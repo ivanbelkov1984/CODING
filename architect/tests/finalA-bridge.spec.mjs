@@ -627,6 +627,29 @@ console.log('\n── FINAL A: Universal External Sources Bridge ──');
   ok(before === await snapshot(), 'до подтверждения canonical DB не изменилась');
   const applied = await page.evaluate(() => { extConnUiApply(); return DB.insights.length; });
   ok(applied === 1, 'после подтверждения импорт применён');
+
+  // Выбор файла при выбранном источнике идёт ЧЕРЕЗ мост (а не в техническую
+  // разовую проверку): пользователь видит человеческий предпросмотр.
+  const viaFile = await page.evaluate(async (t) => {
+    document.getElementById('ext-text').value = '';
+    const file = new File([t], 'TEST-FA-подача.json', { type: 'application/json' });
+    extPickFile({ target: { files: [file] } });
+    await new Promise(r => setTimeout(r, 400));
+    const out = document.getElementById('ext-conn-out');
+    const det = out.querySelector('details');
+    const plain = det ? out.textContent.replace(det.textContent, '') : out.textContent;
+    return {
+      bridge: out.textContent, plain,
+      advanced: det ? det.textContent : '',
+      legacy: (document.getElementById('ext-out') || {}).textContent || '',
+    };
+  }, JSON.stringify(feed([pkg(121)])));
+  ok(/Новых записей/.test(viaFile.bridge) && !/claimClass|sourceId/.test(viaFile.plain),
+    'выбор файла при выбранном источнике открывает человеческий предпросмотр моста (без техтерминов на виду)');
+  ok(/sourceId/.test(viaFile.advanced),
+    'технические подробности доступны, но только в раскрывающемся блоке');
+  ok(!/Пакет не принят|статус:/.test(viaFile.legacy),
+    'разовая техническая проверка не перехватывает файл, когда выбран источник');
   await page.evaluate(() => closeOv('ov-ext-import'));
 }
 
