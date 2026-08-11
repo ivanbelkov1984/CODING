@@ -1,5 +1,5 @@
 {
-  "name": "Архитектор",
+  "name": "Архитектор жизни",
   "short_name": "Архитектор",
   "description": "Личная операционная система: инсайты, состояние, карта жизни",
   "start_url": "./",
@@ -10,8 +10,9 @@
   "orientation": "portrait",
   "lang": "ru",
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "brand/03-app-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "brand/02-app-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "brand/11-app-icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "brand/10-app-icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

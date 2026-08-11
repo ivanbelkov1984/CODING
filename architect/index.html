@@ -9,8 +9,10 @@
 <meta name="description" content="Архитектор — система управления знаниями и жизнью">
 <meta name="apple-mobile-web-app-title" content="Архитектор">
 <link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="apple-touch-icon-180.png">
-<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="brand/04-apple-touch-icon-180.png">
+<link rel="icon" type="image/png" sizes="32x32" href="brand/06-favicon-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="brand/05-favicon-64.png">
+<link rel="icon" type="image/png" sizes="192x192" href="brand/03-app-icon-192.png">
 <title>Архитектор</title>
 <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
 <script>
@@ -108,8 +110,10 @@
 <div class="scrim" id="scrim" onclick="closeNav()"></div>
 <aside class="sidebar" id="sidebar">
   <div class="side-brand">
-    <div class="top-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="12,2 22,8.5 22,15.5 12,22 2,15.5 2,8.5"/><line x1="12" y1="2" x2="12" y2="22" opacity=".45"/></svg></div>
-    <span>Архитектор</span>
+    <img class="brand-mark top-dot" src="brand/08-header-brand-icon-64.png"
+         srcset="brand/08-header-brand-icon-64.png 64w, brand/07-header-brand-icon-96.png 96w"
+         sizes="36px" width="64" height="64" alt="" aria-hidden="true" decoding="async">
+    <span>Архитектор жизни</span>
   </div>
   <div class="acct" onclick="openProfiles()" role="button" aria-label="Профиль">
     <div class="acct-ava" id="acct-ava">А<span class="acct-dot" id="acct-dot"></span></div>
@@ -135,8 +139,11 @@
 <!-- ══ ONBOARDING ════════════════════════════════════════════════ -->
 <div class="ov" id="ov-onboard">
   <div class="onboard-sheet">
-    <div class="onboard-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="12,2 22,8.5 22,15.5 12,22 2,15.5 2,8.5"/><line x1="12" y1="2" x2="12" y2="22" opacity=".45"/><line x1="2" y1="8.5" x2="22" y2="8.5" opacity=".45"/></svg></div>
-    <div class="onboard-h">Архитектор</div>
+    <!-- Первый запуск — единственное место с полным фирменным блоком:
+         знак + название + подзаголовок одним изображением, поэтому
+         отдельного текстового заголовка здесь нет (иначе дубль). -->
+    <img class="brand-lockup onboard-lockup" src="brand/26-brand-lockup-icon-title-subtitle-safe.png"
+         width="917" height="264" alt="Архитектор жизни" decoding="async">
     <div class="onboard-d">Система управления знаниями, жизнью и творчеством. Настрой под себя — имя, оси жизни, домен работы.</div>
     <div class="sh-form">
       <div>
@@ -168,13 +175,13 @@
 <!-- ══ SPLASH ════════════════════════════════════════════════════ -->
 <div id="splash">
   <div class="sp-icon">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-      <polygon points="12,2 22,8.5 22,15.5 12,22 2,15.5 2,8.5"/>
-      <line x1="12" y1="2" x2="12" y2="22" opacity=".45"/>
-      <line x1="2" y1="8.5" x2="22" y2="8.5" opacity=".45"/>
-    </svg>
+    <!-- Рядом живое название, поэтому знак декоративный. Мелким экранам
+         достаётся 256px-вариант, 1024 берётся только очень плотными. -->
+    <img class="brand-mark" src="brand/09-about-brand-icon-256.png"
+         srcset="brand/09-about-brand-icon-256.png 256w, brand/12-splash-brand-1024.png 1024w"
+         sizes="76px" width="256" height="256" alt="" aria-hidden="true" decoding="async">
   </div>
-  <div class="sp-eyebrow">Архитектор</div>
+  <div class="sp-eyebrow">Архитектор жизни</div>
   <div class="sp-badge" id="sp-wn">Неделя ·</div>
   <div class="sp-hl">Система <em id="sp-focus-word">активна</em></div>
   <div class="sp-div"></div>
@@ -189,12 +196,11 @@
 <header class="topbar">
   <button class="ib burger" id="burger" onclick="toggleNav()" aria-label="Меню"><i data-lucide="menu"></i></button>
   <div class="top-brand">
-    <div class="top-dot">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-        <polygon points="12,2 22,8.5 22,15.5 12,22 2,15.5 2,8.5"/>
-        <line x1="12" y1="2" x2="12" y2="22" opacity=".45"/>
-      </svg>
-    </div>
+    <!-- Brand v3: рядом живой заголовок раздела, поэтому только знак (без
+         растрового названия) — иначе название дублируется. -->
+    <img class="brand-mark top-dot" src="brand/08-header-brand-icon-64.png"
+         srcset="brand/08-header-brand-icon-64.png 64w, brand/07-header-brand-icon-96.png 96w"
+         sizes="40px" width="64" height="64" alt="" aria-hidden="true" decoding="async">
     <span id="ptitle" class="top-title">Архитектор</span>
   </div>
   <div class="top-acts">
@@ -654,7 +660,16 @@
     <div class="cmd-ac" id="cmd-ac"></div>
   </div>
   <div id="cmd-out" class="mx"><div class="card"><div style="padding:1rem" id="cmd-res"></div></div></div>
-  <div class="card mx" style="margin-top:var(--s3)">
+  <!-- О приложении: фирменный знак + живое название и версия сборки. -->
+  <div class="card mx about-card" style="margin-top:var(--s3)">
+    <div class="about-id">
+      <img class="brand-mark about-mark" src="brand/09-about-brand-icon-256.png"
+           width="256" height="256" alt="" aria-hidden="true" decoding="async">
+      <div class="about-col">
+        <div class="about-name">Архитектор жизни</div>
+        <div class="about-sub" id="about-release">v5.0 · офлайн-first · данные на устройстве</div>
+      </div>
+    </div>
     <div class="srow"><div class="sic" style="background:var(--bg2)"><svg style="color:var(--t3)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></div><span class="sl2">Версия</span><span class="sv2">v5.0 · Архитектор</span></div>
   </div>
   <div style="height:5rem"></div>
