@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────
-//  finalA-backup-roundtrip.test.mjs — FINAL A (continuous bridge): роундтрип
+//  finalA-backup-roundtrip.test.mjs — FINAL A (universal bridge): роундтрип
 //  коллекции externalConnections (подключения + checkpoint c
 //  committedPackageHashes) через зашифрованную резервную копию.
 //
@@ -27,19 +27,21 @@ function makeMedia() {
 const NOW = '2026-08-11T09:00:00.000Z';
 const CONNS = [
   {
-    id: 'extConn:test-fa-backup-1', label: 'TEST-FA-источник-A', kind: 'gpt_export',
-    status: 'connected', createdAt: '2026-08-01T10:00:00.000Z', day: '2026-08-01', sv: 9, _u: 5,
+    id: 'extConn:test-fa-backup-1', label: 'TEST-FA-источник-A', kind: 'chatgpt_export',
+    status: 'ready', createdAt: '2026-08-01T10:00:00.000Z', day: '2026-08-01', sv: 9, _u: 5,
     privacyClass: 'sensitive',
     checkpoint: { committedPackageHashes: ['aaaa1111', 'bbbb2222'], lastRefreshAt: '2026-08-02T10:00:00.000Z', lastError: null },
     stats: { refreshes: 2, packagesCommitted: 2, recordsCreated: 3 },
+    container: { kind: 'chatgpt_export_archive', id: 'TEST-FA-ARCHIVE-1', label: 'TEST-FA-архив' },
     sourceStatusNote: null,
   },
   {
-    id: 'extConn:test-fa-backup-2', label: 'TEST-FA-источник-B', kind: 'google_drive',
+    id: 'extConn:test-fa-backup-2', label: 'TEST-FA-источник-B', kind: 'google_drive_export',
     status: 'error_requires_user', createdAt: '2026-08-03T10:00:00.000Z', day: '2026-08-03', sv: 9, _u: 6,
     privacyClass: 'sensitive',
     checkpoint: { committedPackageHashes: ['cccc3333'], lastRefreshAt: '2026-08-04T10:00:00.000Z', lastError: 'TEST-FA-ошибка разбора' },
     stats: { refreshes: 1, packagesCommitted: 1, recordsCreated: 1 },
+    container: { kind: 'google_drive_file', id: 'TEST-FA-CONTAINER-9', label: 'TEST-FA-выгрузка' },
     sourceStatusNote: 'TEST-FA-источник недоступен',
   },
 ];
@@ -74,8 +76,9 @@ async function main() {
   // 3. В сериализованном файле нет открытого содержимого.
   const serialized = serializeEnvelope(env);
   ok(!serialized.includes('TEST-FA-источник') && !serialized.includes('aaaa1111')
-    && !serialized.includes('test-fa-src-1') && !serialized.includes('TEST-FA-ошибка'),
-    'в файле копии нет названий источников, hashes чекпойнта, sourceId и ошибок в открытом виде');
+    && !serialized.includes('test-fa-src-1') && !serialized.includes('TEST-FA-ошибка')
+    && !serialized.includes('TEST-FA-CONTAINER-9') && !serialized.includes('TEST-FA-ARCHIVE-1'),
+    'в файле копии нет названий источников, hashes чекпойнта, sourceId, контейнеров и ошибок в открытом виде');
 
   // 4. Production restore восстанавливает подключения точно.
   const dest = { storage: makeStorage({ [KEYS.PKEY]: '[]', [KEYS.AKEY]: '' }), media: makeMedia() };
@@ -84,7 +87,7 @@ async function main() {
   const result = await restoreBackup({ adapter: destAdapter, file, password, mode: 'new', genProfileId: () => 'pNew1', now: () => NOW });
   const db = JSON.parse(dest.storage.getItem(KEYS.db('pNew1')));
   ok(result.ok && JSON.stringify(db.externalConnections) === JSON.stringify(CONNS),
-    'production restore: подключения, checkpoint и статус error_requires_user восстановлены точно');
+    'production restore: источники, checkpoint, контейнеры и статус error_requires_user восстановлены точно');
   ok(JSON.stringify(db.insights[0].ext) === JSON.stringify({ sourceId: 'test-fa-src-1', origin: 'external_import' }),
     'production restore: ext-provenance записи пережил роундтрип (dedup по sourceId продолжит работать)');
 

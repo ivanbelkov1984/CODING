@@ -1,4 +1,4 @@
-// FINAL A (FINAL_BRIDGE_CONTRACT) — Continuous GPT / Google Drive Bridge.
+// FINAL A — Universal External Sources Bridge (provider-neutral).
 //
 // ВСЕ фикстуры синтетические (TEST-FA-*). Реальные данные владельца в
 // репозиторий не попадают ни в каком виде (privacy canary внизу).
@@ -53,7 +53,7 @@ const reset = () => page.evaluate(() => {
 // Синтетический v2-пакет.
 const pkg = (n, over) => ({
   format: 'architect-external-work-v2',
-  source: { kind: 'google_drive', label: 'TEST-FA источник', module: 'TEST-FA-MODULE' },
+  source: { kind: 'google_drive', label: 'TEST-FA источник', module: 'TEST-FA-MODULE' },   // provenance пакета (Волна 6) — не идентичность
   session: { clientRef: 'TEST-FA-SESSION-' + n, summary: 'синтетическая сессия ' + n, date: '2026-04-0' + ((n % 9) + 1) },
   entities: [
     { clientRef: 'i' + n, type: 'insight', sourceId: 'TEST-FA-SRC-' + n,
@@ -65,10 +65,10 @@ const pkg = (n, over) => ({
 });
 const feed = (packages) => ({ format: 'architect-external-work-feed-v1', packages });
 
-const connCreate = (label) => page.evaluate((l) => {
-  const r = extConnCreate(l, 'google_drive');
+const connCreate = (label, kind) => page.evaluate(({ l, k }) => {
+  const r = extConnCreate(l, k);
   return { ok: r.ok, id: r.rec && r.rec.id, errors: r.errors };
-}, label || 'TEST-FA подключение');
+}, { l: label || 'TEST-FA источник', k: kind || 'manual_file' });
 const refresh = (id, obj) => page.evaluate(async ({ i, t }) => {
   const r = await extBridgeRefresh(i, t);
   return JSON.parse(JSON.stringify(r));
@@ -78,7 +78,7 @@ const snapshot = () => page.evaluate(() =>
   JSON.stringify({ ins: DB.insights, dre: DB.dreams, ews: DB.externalWorkSessions }));
 const connState = (id) => page.evaluate((i) => JSON.parse(JSON.stringify(extConnFind(i))), id);
 
-console.log('\n── FINAL A: Continuous Bridge ──');
+console.log('\n── FINAL A: Universal External Sources Bridge ──');
 
 // ═══ 1. Схема/модель ════════════════════════════════════════════════
 {
@@ -103,28 +103,28 @@ console.log('\n── FINAL A: Continuous Bridge ──');
 {
   await reset();
   const c = await connCreate();
-  ok(c.ok && /^extConn:/.test(c.id), 'подключение создаётся с namespaced id');
+  ok(c.ok && /^extConn:/.test(c.id), 'источник создаётся с namespaced id');
   const empty = await page.evaluate(() => extConnCreate('', 'other'));
-  ok(!empty.ok, 'подключение без названия отклонено');
+  ok(!empty.ok, 'источник без названия отклонён');
   const st = await connState(c.id);
-  ok(st.status === 'connected' && st.privacyClass === 'sensitive' &&
+  ok(st.status === 'ready' && st.privacyClass === 'sensitive' && st.container === null &&
      Array.isArray(st.checkpoint.committedPackageHashes) && st.checkpoint.lastRefreshAt === null,
-    'новое подключение: connected, sensitive, пустой чекпойнт');
+    'новый источник: ready (НЕ «подключён»), sensitive, пустой чекпойнт, контейнер пуст');
 
   const dis = await page.evaluate((i) => { extConnDisconnect(i); return extConnFind(i).status; }, c.id);
-  ok(dis === 'disconnected', 'disconnect переводит в disconnected');
+  ok(dis === 'disconnected', 'отключение переводит в disconnected');
   const refuse = await refresh(c.id, pkg(1));
-  ok(!refuse.ok && /отключён/.test(refuse.errors[0]), 'refresh отключённого источника отклонён с причиной');
-  const rec = await page.evaluate((i) => { extConnReconnect(i); return extConnFind(i).status; }, c.id);
-  ok(rec === 'connected', 'reconnect возвращает connected');
+  ok(!refuse.ok && /отключён/.test(refuse.errors[0]), 'импорт отключённого источника отклонён с причиной');
+  const rec = await page.evaluate((i) => { extConnResume(i); return extConnFind(i).status; }, c.id);
+  ok(rec === 'ready', 'включение снова возвращает ready');
 
-  const rev = await page.evaluate((i) => { extConnMarkRevoked(i); return JSON.parse(JSON.stringify(extConnFind(i))); }, c.id);
-  ok(rev.status === 'permission_revoked' && /отозван/.test(rev.checkpoint.lastError),
-    'permission_revoked — отдельное состояние с причиной');
+  const rev = await page.evaluate((i) => { extConnMarkUnavailable(i); return JSON.parse(JSON.stringify(extConnFind(i))); }, c.id);
+  ok(rev.status === 'source_unavailable' && /недоступен/.test(rev.checkpoint.lastError),
+    'source_unavailable — отдельное provider-neutral состояние с причиной');
   const refuseRev = await refresh(c.id, pkg(1));
-  ok(!refuseRev.ok && /отозван/.test(refuseRev.errors[0]),
-    'refresh при отозванном доступе отклонён — НЕ «новых данных нет»');
-  await page.evaluate((i) => extConnReconnect(i), c.id);
+  ok(!refuseRev.ok && /недоступ/.test(refuseRev.errors[0]),
+    'импорт при недоступном источнике отклонён — НЕ «новых данных нет»');
+  await page.evaluate((i) => extConnResume(i), c.id);
 
   // Forget: tombstone, canonical записи не тронуты. Одна запись остаётся в
   // DB, иначе сработает штатная Wave-5 защита «не затирать непустое пустым».
@@ -134,7 +134,7 @@ console.log('\n── FINAL A: Continuous Bridge ──');
     const r = extConnForget(i);
     return { ok: r.ok, tomb: !!DB._del[i], left: DB.externalConnections.length };
   }, c.id);
-  ok(fg.ok && fg.tomb && fg.left === 0, 'forget удаляет ТОЛЬКО состояние подключения (tombstone)');
+  ok(fg.ok && fg.tomb && fg.left === 0, 'forget удаляет ТОЛЬКО состояние источника (tombstone)');
   ok(before === await snapshot(), 'forget не тронул canonical записи');
 }
 
@@ -153,7 +153,7 @@ console.log('\n── FINAL A: Continuous Bridge ──');
   ok(before === await snapshot(), 'ошибки разбора не тронули canonical DB (zero mutation)');
   const bad3 = await refresh(c.id, { format: 'что-то-другое-v9', packages: [] });
   ok(!bad3.ok && /неизвестный format/.test(bad3.errors[0]), 'неизвестный формат отклонён с указанием ожидаемого');
-  await page.evaluate((i) => extConnReconnect(i), c.id);
+  await page.evaluate((i) => extConnResume(i), c.id);
 }
 
 // ═══ 4. Initial import → checkpoint ПОСЛЕ commit ════════════════════
@@ -269,7 +269,7 @@ console.log('\n── FINAL A: Continuous Bridge ──');
     'чекпойнт НЕ продвинут за ошибочный пакет; статус ошибки с причиной');
 
   // Сбой persist во время commit → zero mutation пакета, чекпойнт на месте.
-  await page.evaluate((i) => extConnReconnect(i), c.id);
+  await page.evaluate((i) => extConnResume(i), c.id);
   const persistFail = await page.evaluate(async ({ i, t }) => {
     const r0 = await extBridgeRefresh(i, t);
     if (!r0.ok) return { setup: false };
@@ -459,12 +459,12 @@ console.log('\n── FINAL A: Continuous Bridge ──');
   // Источник «исчез»: новый feed его не содержит + владелец пометил revoked.
   const prev = await refresh(c.id, feed([pkg(51)]));
   await apply(c.id);
-  await page.evaluate((i) => extConnMarkRevoked(i), c.id);
+  await page.evaluate((i) => extConnMarkUnavailable(i), c.id);
   const cnt = await page.evaluate(() => ({ ins: DB.insights.length, del: Object.keys(DB._del).filter(k => String(k).includes('TEST')).length }));
-  ok(cnt.ins === 2, 'исчезновение объекта из источника/revoke НЕ удаляет canonical записи');
+  ok(cnt.ins === 2, 'исчезновение объекта из источника/недоступность НЕ удаляет canonical записи');
   const st = await connState(c.id);
-  ok(st.status === 'permission_revoked' && st.sourceStatusNote === null,
-    'недоступность источника — статус подключения, не операция над данными');
+  ok(st.status === 'source_unavailable',
+    'недоступность источника — статус канала, не операция над данными');
 }
 
 // ═══ 10. Изоляция профилей + recovery lock ══════════════════════════
@@ -517,7 +517,120 @@ console.log('\n── FINAL A: Continuous Bridge ──');
   ok(!fired && !xss.bad, 'враждебное имя источника не исполняется в UI подключений');
 }
 
-// ═══ 12. Privacy canary ═════════════════════════════════════════════
+// ═══ 12. Provider-neutral ядро: канал ≠ идентичность ════════════════
+{
+  await reset();
+  // Один и тот же семантический sourceId приходит ТРЕМЯ разными каналами.
+  const cDrive = await connCreate('TEST-FA Drive-подача', 'google_drive_export');
+  const cChat = await connCreate('TEST-FA ChatGPT-экспорт', 'chatgpt_export');
+  const cFile = await connCreate('TEST-FA файл', 'manual_file');
+  const same = (n, sid, srcKind) => {
+    const p = pkg(n, { source: { kind: srcKind, label: 'TEST-FA канал ' + srcKind, module: 'TEST-FA-' + srcKind } });
+    p.entities[0].sourceId = sid;
+    return p;
+  };
+  await refresh(cDrive.id, same(100, 'TEST-FA-UNIVERSAL-1', 'google_drive'));
+  await apply(cDrive.id);
+  const prevChat = await refresh(cChat.id, same(101, 'TEST-FA-UNIVERSAL-1', 'chatgpt'));
+  ok(prevChat.ok && prevChat.totals.new === 0 && prevChat.totals.existing === 1,
+    'тот же sourceId другим каналом (ChatGPT) → существующая запись, НЕ новая');
+  await apply(cChat.id);
+  const prevFile = await refresh(cFile.id, same(102, 'TEST-FA-UNIVERSAL-1', 'other'));
+  await apply(cFile.id);
+  const one = await page.evaluate(() => DB.insights.filter(r => r.ext && (r.ext.sourceId === 'TEST-FA-UNIVERSAL-1' ||
+    (r.ext.sourceRefs || []).some(x => x.sourceId === 'TEST-FA-UNIVERSAL-1'))).length);
+  ok(prevFile.ok && one === 1,
+    `один семантический sourceId через три канала (Drive/ChatGPT/файл) → ОДНА canonical запись (${one})`);
+
+  // Один контейнер (файл Drive) с несколькими sourceId → несколько записей.
+  // Подачи ПОСЛЕДОВАТЕЛЬНЫЕ: вторая планируется, когда первая уже в canonical
+  // DB — склейка по контейнеру дала бы здесь ложное «уже существует».
+  const contFeed = (p) => ({
+    format: 'architect-external-work-feed-v1',
+    container: { kind: 'google_drive_file', id: 'TEST-FA-CONTAINER-1', label: 'TEST-FA папка выгрузки' },
+    packages: [p],
+  });
+  await refresh(cDrive.id, contFeed(pkg(110)));
+  await apply(cDrive.id);
+  const prevMulti = await refresh(cDrive.id, contFeed(pkg(111)));
+  await apply(cDrive.id);
+  const st = await connState(cDrive.id);
+  const cnt = await page.evaluate(() => DB.insights.filter(r => r.ext && /TEST-FA-SRC-11/.test(r.ext.sourceId || '')).length);
+  ok(prevMulti.ok && cnt === 2,
+    `один контейнер источника с двумя sourceId → ДВЕ canonical записи (${cnt}) — контейнер не склеивает идентичности`);
+  ok(st.container && st.container.id === 'TEST-FA-CONTAINER-1' && st.container.kind === 'google_drive_file',
+    'контейнер сохранён как provenance канала (id файла/архива), отдельно от идентичности записей');
+  const recIds = await page.evaluate(() => DB.insights.filter(r => r.ext && /TEST-FA-SRC-11/.test(r.ext.sourceId || ''))
+    .map(r => JSON.stringify(r.ext)).join('|'));
+  ok(!recIds.includes('TEST-FA-CONTAINER-1'),
+    'идентификатор контейнера НЕ попал в identity записей (sourceId остаётся семантическим)');
+}
+
+// ═══ 13. Никаких провайдерских учётных данных и сети ════════════════
+{
+  const bundle = readFileSync(FILE.replace('file://', ''), 'utf8');
+  const providerEndpoints = ['accounts.google.com', 'oauth2.googleapis.com', 'www.googleapis.com/drive', 'drive.googleapis.com'];
+  ok(providerEndpoints.every(u => !bundle.includes(u)),
+    'в бандле нет обращений к Google OAuth/Drive API (ядро provider-neutral)');
+  const adapters = await page.evaluate(() => ({
+    kinds: EXT_CHANNEL_KINDS.slice(),
+    reads: Object.values(EXT_CHANNEL_ADAPTERS).map(a => a.read),
+  }));
+  ok(adapters.kinds.length === 5 && adapters.reads.every(r => r === 'owner_mediated'),
+    'все каналы читаются owner-mediated (файл/вставка/готовая подача) — единый интерфейс адаптера');
+  const creds = await page.evaluate(() => {
+    const c = DB.externalConnections[0] || {};
+    const keys = JSON.stringify(Object.keys(c));
+    const ls = Object.keys(localStorage).filter(k => /token|oauth|credential|refresh_token|client_secret/i.test(k));
+    return { keys, ls, hasToken: /token|credential|secret|oauth/i.test(keys) };
+  });
+  ok(!creds.hasToken && creds.ls.length === 0,
+    'учётные данные провайдеров не хранятся ни в записи источника, ни в localStorage');
+}
+
+// ═══ 14. Честный UI: ручной источник не называется «подключён» ══════
+{
+  await reset();
+  const ui = await page.evaluate(async () => {
+    const r = extConnCreate('TEST-FA Drive-подача', 'google_drive_export');
+    _extConnActive = r.rec.id;
+    openExtImport();
+    const el = document.getElementById('ext-connections');
+    return { html: el.innerHTML, text: el.textContent };
+  });
+  ok(!/подключ[её]н\b/i.test(ui.text) && !/connected/i.test(ui.text),
+    'источник Google Drive не назван «подключён»/«connected» — постоянного соединения нет');
+  ok(/источник настроен/i.test(ui.text), 'состояние показано честно: «источник настроен»');
+  ok(/файл/i.test(ui.text) && /встав/i.test(ui.text),
+    'пользователю объяснено, что данные приходят файлом или вставкой');
+  ok(/ChatGPT/i.test(ui.text) && /Google Drive/i.test(ui.text) && /JSON/i.test(ui.text),
+    'перечислены поддерживаемые источники человеческим языком');
+  ok(!/architect-external-work|sourceRefs|claimClasses/.test(ui.text),
+    'технические термины не вынесены в основной интерфейс');
+
+  // Предпросмотр человеческим языком + обязательное подтверждение перед мутацией.
+  const before = await snapshot();
+  const prev = await page.evaluate(async (t) => {
+    document.getElementById('ext-text').value = t;
+    await extConnUiRefresh();
+    return document.getElementById('ext-conn-out').textContent;
+  }, JSON.stringify(feed([pkg(120)])));
+  ok(/Новых записей/.test(prev) && /Уже существуют/.test(prev) &&
+     /Будут объединены источники/.test(prev) && /Конфликты/.test(prev) && /Отклонено/.test(prev),
+    'предпросмотр показан человеческим языком (новые/существуют/объединения/конфликты/отклонено)');
+  ok(/Подробности для продвинутых/.test(prev), 'технические детали спрятаны в раскрывающийся блок');
+  const confirmStep = await page.evaluate(() => {
+    extConnUiConfirm();
+    return document.getElementById('ext-conn-out').textContent;
+  });
+  ok(/Импортировать эти записи/.test(confirmStep), 'перед применением требуется явное подтверждение');
+  ok(before === await snapshot(), 'до подтверждения canonical DB не изменилась');
+  const applied = await page.evaluate(() => { extConnUiApply(); return DB.insights.length; });
+  ok(applied === 1, 'после подтверждения импорт применён');
+  await page.evaluate(() => closeOv('ov-ext-import'));
+}
+
+// ═══ 15. Privacy canary ═════════════════════════════════════════════
 {
   // Канарейка: этот файл и бандл не должны содержать реальные приватные
   // маркеры владельца. Образцы собраны конкатенацией, чтобы канарейка не

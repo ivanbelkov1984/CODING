@@ -1,4 +1,4 @@
-// FINAL A — MUTATION SANITY для continuous bridge.
+// FINAL A — MUTATION SANITY для universal external sources bridge.
 //
 // Ломается РОВНО ОДНА защита в собранном бандле — обязан упасть именно тот
 // сценарий finalA-bridge.spec.mjs, который её сторожит.
@@ -88,18 +88,18 @@ const MUTANTS = [
     expectFail: 'checkpoint recovery',
   },
   {
-    id: 'error-hidden-as-connected',
-    what: 'ошибка разбора маскируется под «всё в порядке»',
+    id: 'error-hidden-as-ready',
+    what: 'ошибка чтения маскируется под «всё в порядке»',
     find: "    extConnUpdate(connId, c => { c.status = 'error_requires_user'; c.checkpoint.lastError = parsed.errors[0]; });",
-    replace: "    extConnUpdate(connId, c => { c.status = 'connected'; c.checkpoint.lastError = null; });",
+    replace: "    extConnUpdate(connId, c => { c.status = 'ready'; c.checkpoint.lastError = null; });",
     expectFail: 'ошибка разбора видна статусом',
   },
   {
     // FINAL contract: disappearance != delete.
-    id: 'revoke-deletes-canonical',
-    what: 'отзыв доступа к источнику удаляет canonical записи',
-    find: "function extConnMarkRevoked(id) { return extConnUpdate(id, c => { c.status = 'permission_revoked';",
-    replace: "function extConnMarkRevoked(id) { DB.insights = []; return extConnUpdate(id, c => { c.status = 'permission_revoked';",
+    id: 'unavailable-deletes-canonical',
+    what: 'недоступность источника удаляет canonical записи',
+    find: "function extConnMarkUnavailable(id, note) {\n  return extConnUpdate(id, c => {",
+    replace: "function extConnMarkUnavailable(id, note) {\n  DB.insights = [];\n  return extConnUpdate(id, c => {",
     expectFail: 'НЕ удаляет canonical записи',
   },
   {
@@ -124,6 +124,23 @@ const MUTANTS = [
     find: '    built.rec.ext = prov;',
     replace: '',
     expectFail: 'existing-by-provenance, НЕ новая запись',
+  },
+  {
+    // Universal bridge: канал/контейнер НЕ могут подменить семантическую
+    // идентичность записи.
+    id: 'channel-identity-override',
+    what: 'канал/модуль источника подмешивается в identity (та же запись из другого канала становится новой)',
+    find: '      .map(r => ({ ref: r, key: extProvenanceKey(coll, r.sourceId) }))',
+    replace: "      .map(r => ({ ref: r, key: extProvenanceKey(coll, r.sourceId + '|' + ((pkg.source || {}).module || '')) }))",
+    expectFail: 'ОДНА canonical запись',
+  },
+  {
+    // Universal bridge: контейнер источника (файл Drive/архив) — provenance.
+    id: 'container-becomes-identity',
+    what: 'контейнер источника (файл/архив) работает как identity — записи из одного файла склеиваются',
+    find: '    const built = EXT_ADAPTERS[e.type](e, extPickData(e), ctx);',
+    replace: "    if ((db[coll] || []).some(r => r && r.ext && r.ext.sourceLabel && r.ext.sourceLabel === ctx.srcLabel)) { items[eIdx] = { ...base, status: 'existing-by-provenance', reason: 'container-dedup', merge: null }; refToRec.set(prov.clientRef, { coll, id: 'cont' }); continue; }\n    const built = EXT_ADAPTERS[e.type](e, extPickData(e), ctx);",
+    expectFail: 'ДВЕ canonical записи',
   },
   {
     // FINAL contract: profile isolation.

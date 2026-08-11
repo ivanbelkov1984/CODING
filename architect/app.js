@@ -1029,6 +1029,17 @@ function rBackups() {
 function migrateRecords() { return migrateRecordsOn(DB); }
 function migrateRecordsOn(DB) {
   let changed = false;
+  // Final A: приведение внешних источников к provider-neutral модели.
+  // Идемпотентно и без потерь: старые значения канала/состояния (эпоха
+  // «Google-центричного» черновика) переводятся в универсальные.
+  const CH_LEGACY = { google_drive: 'google_drive_export', gpt_export: 'chatgpt_export', file: 'manual_file' };
+  const ST_LEGACY = { connected: 'ready', syncing: 'refreshing', permission_revoked: 'source_unavailable' };
+  (DB.externalConnections || []).forEach(c => {
+    if (!c || typeof c !== 'object') return;
+    if (CH_LEGACY[c.kind]) { c.kind = CH_LEGACY[c.kind]; changed = true; }
+    if (ST_LEGACY[c.status]) { c.status = ST_LEGACY[c.status]; changed = true; }
+    if (!('container' in c)) { c.container = null; changed = true; }
+  });
   IDCOLS.forEach(c => {
     (DB[c] || []).forEach(r => {
       if (r && !r.createdAt) {
@@ -2265,7 +2276,7 @@ const REC_COLLS = {
   psyAdaptivePlans: { ru: 'Адаптивные планы (JITAI)', sum: r => `${r.proximalOutcome || 'план'}${r.enabled ? '' : ' (выключен)'}` },
   psyExperiments: { ru: 'Личные эксперименты (N-of-1)', sum: r => `${(r.createdAt || '').slice(0, 10)} · ${r.question || 'эксперимент'} · ${PSY_EXP_STATUS_RU[r.status] || r.status || '—'}` },
   // Final A: подключения внешних источников (bridge) — управляемые записи.
-  externalConnections: { ru: 'Внешние источники (bridge)', sum: r => `${r.label || 'источник'} · ${EXT_CONN_STATUS_RU[r.status] || r.status || '—'}` },
+  externalConnections: { ru: 'Внешние источники', sum: r => `${r.label || 'источник'} · ${EXT_SOURCE_STATUS_RU[r.status] || r.status || '—'}` },
   astroPartners: { ru: 'Партнёры (синастрия)', sum: r => r.label || 'партнёр' },
   psyLinks: { ru: 'Связи (доказательная цепочка)', sum: r => `${PSY_LINK_RELATION_LABELS[r.relation] || r.relation}` },
   relationshipContexts: { ru: 'Контексты отношений', sum: r => `${r.label || ''}${r.status === 'archived' ? ' (архив)' : ''}` },
@@ -14024,13 +14035,21 @@ function mbRenderCards(title) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  FINAL A (FINAL_BRIDGE_CONTRACT): CONTINUOUS GPT / DRIVE BRIDGE.
+//  FINAL A: UNIVERSAL EXTERNAL SOURCES BRIDGE.
 //
-//  Минимальная архитектура БЕЗ ослабления privacy-границы браузера:
-//  никакого OAuth/Drive API/фоновой сети — ingestion остаётся
-//  owner-controlled (файл/вставка), а «continuous» дают: именованные
-//  подключения с явными состояниями, инкрементальный чекпойнт
-//  (хэши закоммиченных пакетов) и feed-обёртка для пачки пакетов.
+//  Ядро provider-neutral: приложение полностью работает без Google,
+//  ChatGPT и любого внешнего провайдера. Google Drive / ChatGPT-экспорт /
+//  файл / внешний коннектор — ТОЛЬКО каналы приёма (adapters) одного
+//  универсального моста:
+//
+//    источник → канал (adapter) → normalize → canonical external-work
+//    feed → preview/provenance/dedup/claim safety → атомарный commit →
+//    canonical коллекции приложения.
+//
+//  Канал и контейнер источника (id файла Drive, архив экспорта, имя
+//  файла) — ТОЛЬКО provenance. Идентичность записи всегда семантический
+//  sourceId: один и тот же sourceId, пришедший разными каналами, — ОДНА
+//  запись; разные sourceId с одинаковым текстом — РАЗНЫЕ записи.
 //
 //  Вся семантика импорта — НЕТРОНУТЫЕ контракты Волн 6–8:
 //  extParsePackage/extBuildPlan/extCommitPlan, глобальная identity по
@@ -14038,29 +14057,62 @@ function mbRenderCards(title) {
 //  идемпотентный повтор. v1/v2 форматы не изменены; feed — тонкая
 //  обёртка НАД ними, не новый протокол записи.
 //
-//  Чекпойнт продвигается ТОЛЬКО после успешного commit пакета. Если
-//  commit прошёл, а чекпойнт не успел (сбой/крэш) — повтор пакета
-//  упирается в ledger (already-imported): 0 дублей, чекпойнт догоняет.
-//  Исчезновение объекта из источника НИКОГДА не удаляет canonical
-//  запись — только пользовательское действие удаляет данные.
+//  Чекпойнт продвигается ТОЛЬКО после успешного атомарного commit всего
+//  подтверждённого feed. Если commit прошёл, а чекпойнт не сохранился —
+//  честное degraded-состояние: повтор упирается в ledger (0 дублей) и
+//  чекпойнт догоняет. Исчезновение объекта из источника НИКОГДА не
+//  удаляет canonical запись — только действие пользователя удаляет данные.
+//
+//  Учётных данных провайдеров (token/OAuth/credential) приложение НЕ
+//  хранит и не запрашивает. Прямой Google Drive OAuth-адаптер —
+//  OPTIONAL/FUTURE и может быть добавлен поверх этого моста без
+//  изменения canonical-модели.
 // ═══════════════════════════════════════════════════════════════════
 const EXT_FEED_FORMAT = 'architect-external-work-feed-v1';
-const EXT_CONN_KINDS = Object.freeze(['google_drive', 'gpt_export', 'other']);
-const EXT_CONN_KIND_RU = { google_drive: 'Google Drive (экспорт)', gpt_export: 'ChatGPT (экспорт)', other: 'Другой источник' };
-// Состояния подключения (машинные значения — по FINAL_BRIDGE_CONTRACT).
-// ВАЖНО (честность интерфейса): authenticated-приём из Drive/GPT НЕ
-// реализован (см. FINALA_CONTINUOUS_BRIDGE_IMPLEMENTATION.md, BLOCKER —
-// нужны owner-provisioned OAuth-креденшлы/backend-контракт). Пока канал
-// работает через owner-mediated файл/вставку, «connected» отображается
-// пользователю как «канал активен (приём вручную)», а не как живое
-// авторизованное подключение. Ошибка разбора НИКОГДА не выдаётся за
-// «новых данных нет».
-const EXT_CONN_STATUSES = Object.freeze(['connected', 'syncing', 'error_requires_user', 'permission_revoked', 'disconnected']);
-const EXT_CONN_STATUS_RU = {
-  connected: 'канал активен (приём вручную)', syncing: 'идёт разбор', error_requires_user: 'ошибка — нужно вмешательство',
-  permission_revoked: 'доступ отозван', disconnected: 'отключён',
+// Каналы приёма (provenance-слой). Ядро моста от них НЕ зависит.
+const EXT_CHANNEL_KINDS = Object.freeze(['manual_file', 'chatgpt_export', 'google_drive_export', 'external_connector', 'other']);
+const EXT_CHANNEL_RU = {
+  manual_file: 'Файл или вставка (JSON Архитектора)',
+  chatgpt_export: 'Экспорт ChatGPT',
+  google_drive_export: 'Подготовленные данные Google Drive',
+  external_connector: 'Внешний коннектор (готовый feed)',
+  other: 'Другой совместимый источник',
+};
+// Состояния источника. Слово «подключён» НЕ используется: постоянного
+// авторизованного соединения с провайдером нет — данные приходят файлом,
+// вставкой или готовым feed по действию пользователя. Ошибка разбора
+// НИКОГДА не выдаётся за «новых данных нет».
+const EXT_SOURCE_STATUSES = Object.freeze(['ready', 'refreshing', 'preview_ready', 'source_unavailable', 'error_requires_user', 'disconnected']);
+const EXT_SOURCE_STATUS_RU = {
+  ready: 'источник настроен', refreshing: 'идёт разбор', preview_ready: 'предпросмотр готов',
+  source_unavailable: 'источник недоступен', error_requires_user: 'ошибка — нужно вмешательство',
+  disconnected: 'отключён',
 };
 const EXT_CONN_MAX_HASHES = 200;   // чекпойнт ограничен; страховка от дублей — provenance-ledger, не этот список
+
+// Интерфейс канала-адаптера (концепт, без plugin-механики): read →
+// normalize → canonical feed. Сейчас ВСЕ каналы читаются owner-mediated
+// (файл/вставка/готовый feed) и используют общий normalize. Будущий
+// адаптер (например прямой Drive OAuth) приносит только свой read —
+// normalize, importer и canonical-контракты остаются прежними.
+const EXT_CHANNEL_ADAPTERS = Object.freeze(Object.fromEntries(EXT_CHANNEL_KINDS.map(k => [k, Object.freeze({
+  kind: k, ru: EXT_CHANNEL_RU[k],
+  read: 'owner_mediated',          // единственный способ чтения в этом релизе
+  normalize: text => extBridgeParseFeed(text),
+})])));
+function extChannelNormalize(kind, text) {
+  const ad = EXT_CHANNEL_ADAPTERS[kind] || EXT_CHANNEL_ADAPTERS.other;
+  return ad.normalize(text);
+}
+// Контейнер источника (файл Drive, архив экспорта, имя файла) — ТОЛЬКО
+// provenance: он НЕ участвует в identity записей и не может её подменить.
+function extNormalizeContainer(c) {
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return null;
+  const kind = extStr(c.kind, 40) || null;
+  const id = extStr(c.id, 200) || null;
+  const label = extStr(c.label, 120) || null;
+  return (kind || id || label) ? { kind, id, label } : null;
+}
 
 function extConnUid() { return 'extConn:' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
 function extConnFind(id, dbArg) { return ((dbArg || DB).externalConnections || []).find(c => c && c.id === id) || null; }
@@ -14068,13 +14120,14 @@ function extConnCreate(label, kind) {
   if (typeof isWriteLocked === 'function' && isWriteLocked()) return { ok: false, errors: ['профиль в режиме восстановления'] };
   const lbl = String(label || '').trim().slice(0, 120);
   if (!lbl) return { ok: false, errors: ['нужно название источника'] };
-  const k = EXT_CONN_KINDS.includes(kind) ? kind : 'other';
+  const k = EXT_CHANNEL_KINDS.includes(kind) ? kind : 'other';
   const rec = {
-    id: extConnUid(), label: lbl, kind: k, status: 'connected',
+    id: extConnUid(), label: lbl, kind: k, status: 'ready',
     createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
     privacyClass: 'sensitive',
     checkpoint: { committedPackageHashes: [], lastRefreshAt: null, lastError: null },
     stats: { refreshes: 0, packagesCommitted: 0, recordsCreated: 0 },
+    container: null,          // provenance-контейнер (файл/архив), НЕ идентичность записей
     sourceStatusNote: null,   // «источник недоступен» — provenance-статус, НЕ удаление данных
   };
   const snap = JSON.parse(JSON.stringify(DB.externalConnections || []));
@@ -14093,11 +14146,19 @@ function extConnUpdate(id, mut) {
   if (!persist()) { DB.externalConnections = snap; return { ok: false, errors: ['не удалось сохранить'] }; }
   return { ok: true, errors: [], rec: conn };
 }
-// Disconnect: связь разорвана, но ВСЕ импортированные canonical записи
-// остаются — это данные пользователя, а не кэш источника.
+// Отключение канала: приём остановлен, но ВСЕ импортированные canonical
+// записи остаются — это данные пользователя, а не кэш источника.
 function extConnDisconnect(id) { return extConnUpdate(id, c => { c.status = 'disconnected'; }); }
-function extConnMarkRevoked(id) { return extConnUpdate(id, c => { c.status = 'permission_revoked'; c.checkpoint.lastError = 'доступ к источнику отозван владельцем источника'; }); }
-function extConnReconnect(id) { return extConnUpdate(id, c => { c.status = 'connected'; c.checkpoint.lastError = null; }); }
+// Источник стал недоступен (файл удалён, доступ к экспорту закрыт, коннектор
+// не отвечает). Это provenance-статус канала, НЕ операция над данными.
+function extConnMarkUnavailable(id, note) {
+  return extConnUpdate(id, c => {
+    c.status = 'source_unavailable';
+    c.sourceStatusNote = extStr(note, 200) || null;
+    c.checkpoint.lastError = 'источник сейчас недоступен — импортированные записи не затронуты';
+  });
+}
+function extConnResume(id) { return extConnUpdate(id, c => { c.status = 'ready'; c.checkpoint.lastError = null; }); }
 // Forget: удаляется ТОЛЬКО состояние подключения (tombstone). Canonical
 // записи не трогаются; повторный импорт после forget безопасен через ledger.
 function extConnForget(id) {
@@ -14126,9 +14187,12 @@ function extBridgeParseFeed(text) {
     if (obj.packages.length > 50) return { ok: false, errors: ['слишком много пакетов в одном feed (максимум 50)'] };
     const bad = obj.packages.findIndex(p => !p || typeof p !== 'object' || !EXT_FORMATS.includes(p.format));
     if (bad >= 0) return { ok: false, errors: [`packages[${bad}]: не является пакетом architect-external-work (v1/v2)`] };
-    return { ok: true, errors: [], packages: obj.packages };
+    // container — необязательный provenance-контейнер feed (файл/архив/папка).
+    // Никогда не участвует в identity: две записи из одного контейнера с
+    // разными sourceId остаются двумя записями.
+    return { ok: true, errors: [], packages: obj.packages, container: extNormalizeContainer(obj.container) };
   }
-  if (EXT_FORMATS.includes(obj.format)) return { ok: true, errors: [], packages: [obj] };
+  if (EXT_FORMATS.includes(obj.format)) return { ok: true, errors: [], packages: [obj], container: null };
   return { ok: false, errors: [`неизвестный format «${String(obj.format).slice(0, 60)}» — ожидается ${EXT_FEED_FORMAT} или пакет v1/v2`] };
 }
 
@@ -14139,11 +14203,12 @@ function extBridgeParseFeed(text) {
 let _bridgePending = null;   // { connId, batches: [{pkgIndex, plan, hash, skipped}] }
 async function extBridgeRefresh(connId, text) {
   const conn = extConnFind(connId);
-  if (!conn) return { ok: false, errors: ['подключение не найдено'] };
-  if (conn.status === 'disconnected') return { ok: false, errors: ['источник отключён — сначала переподключи'] };
-  if (conn.status === 'permission_revoked') return { ok: false, errors: ['доступ к источнику отозван — обнови доступ и переподключи'] };
-  extConnUpdate(connId, c => { c.status = 'syncing'; });
-  const parsed = extBridgeParseFeed(text);
+  if (!conn) return { ok: false, errors: ['источник не найден'] };
+  if (conn.status === 'disconnected') return { ok: false, errors: ['источник отключён — сначала включи его снова'] };
+  if (conn.status === 'source_unavailable') return { ok: false, errors: ['источник помечен как недоступный — восстанови доступ и включи его снова'] };
+  extConnUpdate(connId, c => { c.status = 'refreshing'; });
+  // Канал-адаптер: read (owner-mediated) → normalize → canonical feed.
+  const parsed = extChannelNormalize(conn.kind, text);
   if (!parsed.ok) {
     extConnUpdate(connId, c => { c.status = 'error_requires_user'; c.checkpoint.lastError = parsed.errors[0]; });
     return { ok: false, errors: parsed.errors };
@@ -14173,9 +14238,16 @@ async function extBridgeRefresh(connId, text) {
     }
     batches.push({ pkgIndex: i, plan, hash: plan.packageHash, skipped, inCheckpoint });
   }
-  extConnUpdate(connId, c => { c.status = 'connected'; c.checkpoint.lastError = null; c.stats.refreshes = (c.stats.refreshes || 0) + 1; c.checkpoint.lastRefreshAt = nowISO(); });
+  extConnUpdate(connId, c => {
+    c.status = 'preview_ready';
+    c.checkpoint.lastError = null;
+    c.stats.refreshes = (c.stats.refreshes || 0) + 1;
+    c.checkpoint.lastRefreshAt = nowISO();
+    // Контейнер запоминается как provenance (что именно приносили), не как identity.
+    if (parsed.container) c.container = parsed.container;
+  });
   _bridgePending = { connId, batches };
-  return { ok: true, errors: [], totals, batches };
+  return { ok: true, errors: [], totals, batches, container: parsed.container || null };
 }
 
 // ── Apply: ОДИН previewed feed = ОДНА транзакция ────────────────────
@@ -14195,7 +14267,7 @@ function extBridgeRestoreFeedSnapshot(feedSnap) {
   return persist();
 }
 function extBridgeApply(connId) {
-  if (!_bridgePending || _bridgePending.connId !== connId) return { ok: false, errors: ['нет подготовленного preview — сначала Refresh'] };
+  if (!_bridgePending || _bridgePending.connId !== connId) return { ok: false, errors: ['нет готового предпросмотра — сначала загрузи данные источника'] };
   const pending = _bridgePending;
   _bridgePending = null;   // preview одноразовый: и успех, и откат требуют нового Refresh
   const feedSnap = JSON.stringify(DB);
@@ -14244,6 +14316,7 @@ function extBridgeApply(connId) {
     c.checkpoint.committedPackageHashes = [...(c.checkpoint.committedPackageHashes || []), ...doneHashes].slice(-EXT_CONN_MAX_HASHES);
     c.stats.packagesCommitted = (c.stats.packagesCommitted || 0) + committedPkgs;
     c.stats.recordsCreated = (c.stats.recordsCreated || 0) + createdRecs;
+    c.status = 'ready';   // предпросмотр применён — источник снова в обычном состоянии
   });
   if (!ck.ok) {
     // Canonical пакеты применены и сохранены, но чекпойнт/состояние НЕ
@@ -14258,7 +14331,16 @@ function extBridgeApply(connId) {
   }
   return { ok: true, errors: [], results };
 }
-function extBridgeCancel() { _bridgePending = null; }
+function extBridgeCancel() {
+  const pending = _bridgePending;
+  _bridgePending = null;
+  // Отмена предпросмотра — ноль мутаций canonical; источник возвращается в
+  // обычное состояние (если он не в ошибке/недоступности).
+  if (pending) {
+    const c = extConnFind(pending.connId);
+    if (c && c.status === 'preview_ready') extConnUpdate(pending.connId, x => { x.status = 'ready'; });
+  }
+}
 
 // ── UI подключений (внутри существующего экрана импорта) ────────────
 let _extConnTargets = [];
@@ -14275,52 +14357,77 @@ function extConnUiAction(i, action) {
   const t = _extConnTargets[i]; if (!t) return;
   if (action === 'select') { _extConnActive = t.id; extRenderConnections(); return; }
   if (action === 'disconnect') { extConnDisconnect(t.id); toast('Источник отключён. Импортированные записи остаются в приложении.', 'ok'); }
-  if (action === 'reconnect') { extConnReconnect(t.id); }
-  if (action === 'revoked') { extConnMarkRevoked(t.id); }
-  if (action === 'forget') { extConnForget(t.id); toast('Подключение забыто. Записи в приложении не тронуты.', 'ok'); if (_extConnActive === t.id) _extConnActive = null; }
+  if (action === 'resume') { extConnResume(t.id); }
+  if (action === 'unavailable') { extConnMarkUnavailable(t.id); }
+  if (action === 'forget') { extConnForget(t.id); toast('Источник забыт. Записи в приложении не тронуты.', 'ok'); if (_extConnActive === t.id) _extConnActive = null; }
   extRenderConnections();
 }
 async function extConnUiRefresh() {
-  if (!_extConnActive) { toast('Выбери источник', 'warn'); return; }
+  if (!_extConnActive) { toast('Сначала выбери источник', 'warn'); return; }
   const text = ($('ext-text') || {}).value || '';
-  if (!String(text).trim()) { toast('Вставь feed/пакет или выбери файл', 'warn'); return; }
+  if (!String(text).trim()) { toast('Выбери файл или вставь данные', 'warn'); return; }
   const r = await extBridgeRefresh(_extConnActive, text);
+  // Список источников перерисовывается ПЕРВЫМ: он пересоздаёт контейнер
+  // вывода, поэтому предпросмотр всегда пишется после перерисовки.
+  extRenderConnections();
   const out = $('ext-conn-out');
   if (!r.ok) {
-    if (out) out.innerHTML = `<div class="psy-adv" role="alert">Ошибка источника: ${esc(r.errors[0])}. Это ошибка разбора, а НЕ «новых данных нет».</div>`;
-    extRenderConnections(); return;
+    if (out) out.innerHTML = `<div class="psy-adv" role="alert">Не удалось прочитать данные: ${esc(r.errors[0])}.<br>Это ошибка чтения, а не «новых данных нет» — файл можно исправить и загрузить снова.</div>`;
+    return;
   }
   const t = r.totals;
+  const merges = (r.batches || []).reduce((n, b) => n + (b.skipped ? 0 :
+    (b.plan.items || []).filter(x => x.status === 'existing-by-provenance' && x.merge && x.merge.addRefs.length).length), 0);
   if (out) out.innerHTML = `<div class="card mx" style="padding:.8rem">
-    <b>Preview обновления</b>
-    <div class="si-text" style="font-size:.8rem">Пакетов: ${t.packages} · уже закоммичено (пропущено): ${t.skippedByCheckpoint}</div>
-    <div class="si-text" style="font-size:.8rem">Новых записей: <b>${t.new}</b> · уже существуют: ${t.existing} · конфликтов: ${t.conflicts} · отклонено: ${t.rejected}${t.unresolved ? ' · неразрешённых ссылок: ' + t.unresolved : ''}</div>
-    ${t.conflicts || t.unresolved ? '<div class="psy-adv">Есть конфликты/неразрешённые ссылки — их пакеты не будут применены.</div>' : ''}
+    <b>Что будет добавлено</b>
+    <div class="si-text">Новых записей: <b>${t.new}</b></div>
+    <div class="si-text">Уже существуют: ${t.existing + t.skippedByCheckpoint}</div>
+    <div class="si-text">Будут объединены источники: ${merges}</div>
+    <div class="si-text">Конфликты: ${t.conflicts}</div>
+    <div class="si-text">Отклонено: ${t.rejected}${t.unresolved ? ' · нераспознанных ссылок: ' + t.unresolved : ''}</div>
+    ${t.conflicts || t.unresolved ? '<div class="psy-adv">Есть конфликты — импорт не будет применён частично: либо всё целиком, либо ничего.</div>' : ''}
     <div class="psy-actions">
-      <button type="button" class="btn btn-p btn-sm" onclick="extConnUiApply()">Применить</button>
-      <button type="button" class="btn btn-s btn-sm" onclick="extBridgeCancel();$('ext-conn-out').innerHTML=''">Отмена</button>
+      <button type="button" class="btn btn-p btn-sm" onclick="extConnUiConfirm()">Импортировать</button>
+      <button type="button" class="btn btn-s btn-sm" onclick="extBridgeCancel();$('ext-conn-out').innerHTML='';extRenderConnections()">Отмена</button>
     </div>
-    <div class="si-text" style="font-size:.72rem;color:var(--t4)">До «Применить» база не меняется. Каждый пакет коммитится транзакционно; чекпойнт источника двигается только после успешного коммита.</div>
+    <div class="si-text" style="font-size:.72rem;color:var(--t4)">Пока ты не подтвердил импорт, в приложении ничего не меняется.</div>
+    <details style="margin-top:.5rem"><summary class="si-text" style="font-size:.72rem;color:var(--t4)">Подробности для продвинутых</summary>
+      <div class="si-text" style="font-size:.72rem;color:var(--t4)">Формат: architect-external-work v1/v2 (feed ${esc(EXT_FEED_FORMAT)}). Пакетов в подаче: ${t.packages} · пропущено по журналу импорта: ${t.skippedByCheckpoint}. Идентичность записи — семантический sourceId; канал и контейнер (файл/архив) хранятся только как происхождение. Подтверждённая подача применяется одной транзакцией; чекпойнт двигается только после успешного импорта.</div>
+    </details>
   </div>`;
-  extRenderConnections();
+}
+// Обязательное подтверждение перед любой мутацией canonical.
+function extConnUiConfirm() {
+  const out = $('ext-conn-out'); if (!out) return;
+  const box = document.createElement('div');
+  box.className = 'psy-adv';
+  box.setAttribute('role', 'alert');
+  box.innerHTML = `Импортировать эти записи в приложение? Действие применит подачу целиком.
+    <div class="psy-actions">
+      <button type="button" class="btn btn-p btn-sm" onclick="extConnUiApply()">Да, импортировать</button>
+      <button type="button" class="btn btn-s btn-sm" onclick="extBridgeCancel();$('ext-conn-out').innerHTML='';extRenderConnections()">Отмена</button>
+    </div>`;
+  out.appendChild(box);
 }
 function extConnUiApply() {
   const r = extBridgeApply(_extConnActive);
-  const out = $('ext-conn-out');
   if (!r.ok) {
     // Два честных не-успеха: rolledBack — весь feed откатен (canonical не
     // изменён); degraded — записи применены, но чекпойнт не сохранён.
     const msg = r.degraded
       ? `${esc(r.errors[0])}`
-      : `${esc(r.errors[0] || 'ошибка применения')}. Исправь feed и повтори его целиком (Refresh → Применить).`;
-    if (out) out.innerHTML = `<div class="psy-adv" role="alert">${msg}</div>`;
-    extRenderConnections(); return;
+      : `${esc(r.errors[0] || 'ошибка импорта')}. Ничего не импортировано — исправь данные и загрузи их целиком заново.`;
+    extRenderConnections();
+    const out2 = $('ext-conn-out');
+    if (out2) out2.innerHTML = `<div class="psy-adv" role="alert">${msg}</div>`;
+    return;
   }
   const committed = r.results.filter(x => x.status === 'committed').length;
   const skipped = r.results.filter(x => x.status === 'skipped').length;
-  if (out) out.innerHTML = `<div class="si-text">Готово: применено пакетов ${committed}, пропущено (уже были) ${skipped}. Повторный Refresh того же feed создаст 0 дублей.</div>`;
-  toast('Импорт применён', 'ok');
   extRenderConnections();
+  const out3 = $('ext-conn-out');
+  if (out3) out3.innerHTML = `<div class="si-text">Готово: импортировано ${committed}, пропущено (уже были в приложении) ${skipped}. Повторная загрузка тех же данных не создаст дублей.</div>`;
+  toast('Данные импортированы', 'ok');
   try { rPsyWorkspace(); } catch (_) {}
 }
 function extRenderConnections() {
@@ -14332,27 +14439,27 @@ function extRenderConnections() {
     const active = _extConnActive === c.id;
     const cp = c.checkpoint || {};
     return `<div class="psy-item" style="${active ? 'border-left:3px solid var(--teal);padding-left:.5rem' : ''}">
-      <b>${esc(c.label)}</b> · ${esc(EXT_CONN_KIND_RU[c.kind] || c.kind)} · <span class="psy-status">${esc(EXT_CONN_STATUS_RU[c.status] || c.status)}</span>
-      <div class="si-text" style="font-size:.72rem;color:var(--t3)">Последний refresh: ${cp.lastRefreshAt ? esc(String(cp.lastRefreshAt).slice(0, 16).replace('T', ' ')) : 'ещё не было'} · пакетов закоммичено: ${(c.stats || {}).packagesCommitted || 0} · записей создано: ${(c.stats || {}).recordsCreated || 0}</div>
-      ${cp.lastError ? `<div class="psy-adv">Ошибка: ${esc(cp.lastError)}</div>` : ''}
+      <b>${esc(c.label)}</b> · ${esc(EXT_CHANNEL_RU[c.kind] || c.kind)} · <span class="psy-status">${esc(EXT_SOURCE_STATUS_RU[c.status] || c.status)}</span>
+      <div class="si-text" style="font-size:.72rem;color:var(--t3)">Последний импорт: ${cp.lastRefreshAt ? esc(String(cp.lastRefreshAt).slice(0, 16).replace('T', ' ')) : 'ещё не было'} · записей добавлено: ${(c.stats || {}).recordsCreated || 0}${c.container && (c.container.label || c.container.id) ? ' · откуда: ' + esc(c.container.label || c.container.id) : ''}</div>
+      ${cp.lastError ? `<div class="psy-adv">${esc(cp.lastError)}</div>` : ''}
       <div class="psy-actions">
         ${!active ? `<button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'select')">Выбрать</button>` : ''}
-        ${c.status === 'connected' || c.status === 'syncing' ? `<button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'disconnect')">Отключить</button>` : ''}
-        ${c.status === 'disconnected' || c.status === 'permission_revoked' || c.status === 'error_requires_user' ? `<button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'reconnect')">Переподключить</button>` : ''}
-        ${c.status !== 'permission_revoked' ? `<button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'revoked')">Доступ отозван</button>` : ''}
-        <button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'forget')">Забыть подключение</button>
+        ${c.status === 'disconnected' || c.status === 'source_unavailable' || c.status === 'error_requires_user' ? `<button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'resume')">Включить снова</button>` : `<button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'disconnect')">Отключить</button>`}
+        ${c.status !== 'source_unavailable' ? `<button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'unavailable')">Источник недоступен</button>` : ''}
+        <button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'forget')">Забыть источник</button>
       </div>
     </div>`;
   }).join('');
-  el.innerHTML = `<div class="sec-lbl" style="padding-left:0">Постоянные источники (bridge)</div>
-    <div class="be-note">Подключение — это имя источника и чекпойнт, не доступ к сети: данные приходят только файлом/вставкой по твоему действию. Отключение/«забыть» никогда не удаляет импортированные записи.</div>
+  el.innerHTML = `<div class="sec-lbl" style="padding-left:0">Внешние источники</div>
+    <div class="be-note">Источник — это имя канала и отметка о том, что уже импортировано. Приложению не нужны учётные записи Google или ChatGPT: данные приходят файлом, вставкой или готовой подачей по твоему действию. «Отключить» и «забыть» никогда не удаляют импортированные записи.</div>
+    <div class="si-text" style="font-size:.75rem;color:var(--t3)">Поддерживаются: экспорт ChatGPT · подготовленные данные Google Drive · JSON Архитектора · другие совместимые источники.</div>
     ${rows || '<div class="ai-sp-empty">Источников пока нет.</div>'}
     <div class="psy-fld" style="margin-top:.5rem"><label class="f-lbl" for="extc-label">Название источника</label>
-      <input type="text" id="extc-label" class="field" placeholder="например: Экспорт GPT — психология"></div>
-    <div class="psy-fld"><label class="f-lbl" for="extc-kind">Тип</label>
-      <select id="extc-kind" class="field">${EXT_CONN_KINDS.map(k => `<option value="${k}">${esc(EXT_CONN_KIND_RU[k])}</option>`).join('')}</select></div>
-    <button type="button" class="btn btn-s" onclick="extConnUiCreate()">Подключить источник</button>
-    ${_extConnActive ? `<div style="margin-top:.6rem"><button type="button" class="btn btn-p" onclick="extConnUiRefresh()">Refresh выбранного источника (из поля ниже)</button></div>` : ''}
+      <input type="text" id="extc-label" class="field" placeholder="например: Экспорт ChatGPT — психология"></div>
+    <div class="psy-fld"><label class="f-lbl" for="extc-kind">Откуда приходят данные</label>
+      <select id="extc-kind" class="field">${EXT_CHANNEL_KINDS.map(k => `<option value="${k}">${esc(EXT_CHANNEL_RU[k])}</option>`).join('')}</select></div>
+    <button type="button" class="btn btn-s" onclick="extConnUiCreate()">Добавить источник</button>
+    ${_extConnActive ? `<div style="margin-top:.6rem"><button type="button" class="btn btn-p" onclick="extConnUiRefresh()">Импортировать данные выбранного источника (файл или поле ниже)</button></div>` : ''}
     <div id="ext-conn-out" aria-live="polite"></div>`;
 }
 
