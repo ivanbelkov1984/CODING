@@ -103,12 +103,14 @@ console.log('\n── Wave 8: Adaptive Psychology Engine ──');
     settings: DB.psyAdaptiveSettings || DEFAULT_DB.psyAdaptiveSettings,
     scalar: SCALAR_KEYS.includes('psyAdaptiveSettings') && ('psyAdaptiveSettings' in SCALAR_REGISTRY),
   }));
-  ok(st.schema === 8, `SCHEMA_VERSION = 8 (${st.schema})`);
+  // Final A подняла схему до 9 аддитивно; для Волны 8 важно «не ниже 8».
+  ok(st.schema >= 8, `SCHEMA_VERSION не ниже 8 (${st.schema})`);
   ok(st.hasPlans && st.hasExps && st.inId, 'psyAdaptivePlans/psyExperiments существуют и входят в IDCOLS');
   ok(st.settings.promptsEnabled === false, 'EMA prompt stream по умолчанию ВЫКЛЮЧЕН');
   ok(st.scalar, 'psyAdaptiveSettings — зарегистрированный скаляр (sync/backup генерично)');
 
   // Миграция аддитивна и идемпотентна: v7-профиль получает пустые коллекции.
+  const SCHEMA_VERSION_EXPECTED = await page.evaluate(() => SCHEMA_VERSION);
   const mig = await page.evaluate(() => {
     const legacy = JSON.parse(JSON.stringify(DEFAULT_DB));
     delete legacy.psyAdaptivePlans; delete legacy.psyExperiments; delete legacy.psyAdaptiveSettings;
@@ -124,7 +126,7 @@ console.log('\n── Wave 8: Adaptive Psychology Engine ──');
     };
   });
   ok(mig.plans && mig.exps && mig.kept, 'legacy-профиль получает новые коллекции, записи не тронуты');
-  ok(mig.sv === 8 && mig.idempotent, `миграция проставляет sv=8 и идемпотентна (${mig.sv})`);
+  ok(mig.sv === SCHEMA_VERSION_EXPECTED && mig.idempotent, `миграция проставляет актуальный sv и идемпотентна (${mig.sv})`);
 
   const dc = await page.evaluate(() => {
     const a = dbCount({ psyAdaptivePlans: [{ id: 'x' }], psyExperiments: [] });

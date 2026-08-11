@@ -1908,7 +1908,9 @@
     <div class="sh-pull"></div>
     <div class="sh-title">Импорт внешней работы</div>
     <div class="sh-form">
-      <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5">Пакет формата <code>architect-external-work-v1</code>: структурированные выводы внешней работы попадают в обычные записи приложения с полным происхождением. Разбор идёт локально — без сети и без ИИ.</div>
+      <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5">Пакет формата <code>architect-external-work-v1/v2</code> или feed <code>architect-external-work-feed-v1</code>: структурированные выводы внешней работы попадают в обычные записи приложения с полным происхождением. Разбор идёт локально — без сети и без ИИ.</div>
+      <!-- Final A: постоянные источники с чекпойнтом (continuous bridge). -->
+      <div id="ext-connections"></div>
       <label class="f-lbl" for="ext-file">Файл пакета (.json)</label>
       <input type="file" id="ext-file" accept="application/json,.json" onchange="extPickFile(event)">
       <label class="f-lbl" for="ext-text">…или вставь JSON</label>

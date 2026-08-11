@@ -11,7 +11,7 @@ const dateRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:
 const dateFullRU = (d=new Date()) => d.toLocaleDateString('ru',{day:'numeric',month:'long',year:'numeric'});
 const todayKey = () => new Date().toISOString().slice(0,10);
 const nowISO = () => new Date().toISOString();            // UTC ISO 8601 — источник истины для времени
-const SCHEMA_VERSION = 8;   // Wave 8 (issue #163): Adaptive Psychology Engine — psyAdaptivePlans/psyExperiments + скаляр настроек
+const SCHEMA_VERSION = 9;   // Final A (issue #164→#145): continuous bridge — externalConnections (состояния/чекпойнт источников)
 
 // ─── RELEASE METADATA (Wave 5, issue #158) ──────────────────────────
 // Плейсхолдеры заменяются ЕДИНСТВЕННЫМ местом — build.mjs. Руками эти
@@ -140,6 +140,11 @@ const DEFAULT_DB = {
   // пользовательское «скрыть/не отслеживать». Новый скаляр подхватывается
   // shallow-merge'ем DEFAULT_DB без миграции и bump'а SCHEMA_VERSION.
   mindBodySettings: { hiddenAssociations: [], mutedThemes: [] },
+  // Final A: именованные внешние источники (GPT/Drive) для continuous bridge.
+  // Это НЕ второй ledger жизни: только состояние подключения и чекпойнт
+  // (хэши уже закоммиченных пакетов). Canonical записи живут в своих
+  // коллекциях; в EVENT_SOURCES не входит; извне не импортируется.
+  externalConnections: [],
   psyAiConsent: null, // Wave 1 AI-помощь (Почему?→Инсайт): отдельное согласие, отзываемо в любой момент
   bots: [
     {id:1, title:'Первая задача — добавь свою', prio:'high', done:false},
@@ -262,7 +267,7 @@ function dbCount(db) {
   // умолчанию, иначе любой профиль всегда «непустой»).
   // Wave 8: psyAdaptivePlans/psyExperiments тоже считаются — профиль «только
   // адаптивная работа» не должен выглядеть пустым.
-  ['insights','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments','psyAdaptivePlans','psyExperiments',
+  ['insights','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','spheres','sphereLogs','dreams','patterns','evolution','spiritual','digests','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments','psyAdaptivePlans','psyExperiments','externalConnections',
    'psyFormulations','psyGoals','psyInterventionEpisodes','psyObservations','psyReviews']
     .forEach(c => { if (Array.isArray(db[c])) n += db[c].length; });
   return n;
@@ -2259,6 +2264,8 @@ const REC_COLLS = {
   // Wave 8 (issue #163): адаптивный движок — управляемые записи.
   psyAdaptivePlans: { ru: 'Адаптивные планы (JITAI)', sum: r => `${r.proximalOutcome || 'план'}${r.enabled ? '' : ' (выключен)'}` },
   psyExperiments: { ru: 'Личные эксперименты (N-of-1)', sum: r => `${(r.createdAt || '').slice(0, 10)} · ${r.question || 'эксперимент'} · ${PSY_EXP_STATUS_RU[r.status] || r.status || '—'}` },
+  // Final A: подключения внешних источников (bridge) — управляемые записи.
+  externalConnections: { ru: 'Внешние источники (bridge)', sum: r => `${r.label || 'источник'} · ${EXT_CONN_STATUS_RU[r.status] || r.status || '—'}` },
   astroPartners: { ru: 'Партнёры (синастрия)', sum: r => r.label || 'партнёр' },
   psyLinks: { ru: 'Связи (доказательная цепочка)', sum: r => `${PSY_LINK_RELATION_LABELS[r.relation] || r.relation}` },
   relationshipContexts: { ru: 'Контексты отношений', sum: r => `${r.label || ''}${r.status === 'archived' ? ' (архив)' : ''}` },
@@ -10083,7 +10090,7 @@ function genRecoveryKey() {
 // Каждая правка помечает запись меткой времени `_u`; удаление кладёт
 // «надгробие» в DB._del. Слияние — union по id, где новейшая метка
 // побеждает, а надгробие удаляет запись на всех устройствах.
-const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','astroPartners','bots','digests','spheres','sphereLogs','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments','externalWorkSessions','psyFormulations','psyGoals','psyInterventionEpisodes','psyObservations','psyReviews','psyAdaptivePlans','psyExperiments'];
+const IDCOLS = ['insights','dreams','patterns','evolution','spiritual','checkins','moments','whys','corrections','meds','medIntakes','symptoms','measures','astroCharts','astroPartners','bots','digests','spheres','sphereLogs','chats','cravings','psyLinks','relationshipContexts','labObservations','healthDocuments','externalWorkSessions','psyFormulations','psyGoals','psyInterventionEpisodes','psyObservations','psyReviews','psyAdaptivePlans','psyExperiments','externalConnections'];
 
 // ─── SCALAR MERGE CONTRACT (Wave 5, issue #158) ─────────────────────
 // Внутренние ключи DB, которые НЕ являются пользовательскими данными и
@@ -14017,6 +14024,289 @@ function mbRenderCards(title) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  FINAL A (FINAL_BRIDGE_CONTRACT): CONTINUOUS GPT / DRIVE BRIDGE.
+//
+//  Минимальная архитектура БЕЗ ослабления privacy-границы браузера:
+//  никакого OAuth/Drive API/фоновой сети — ingestion остаётся
+//  owner-controlled (файл/вставка), а «continuous» дают: именованные
+//  подключения с явными состояниями, инкрементальный чекпойнт
+//  (хэши закоммиченных пакетов) и feed-обёртка для пачки пакетов.
+//
+//  Вся семантика импорта — НЕТРОНУТЫЕ контракты Волн 6–8:
+//  extParsePackage/extBuildPlan/extCommitPlan, глобальная identity по
+//  sourceId, sourceRefs/claimClasses, транзакционный zero-mutation,
+//  идемпотентный повтор. v1/v2 форматы не изменены; feed — тонкая
+//  обёртка НАД ними, не новый протокол записи.
+//
+//  Чекпойнт продвигается ТОЛЬКО после успешного commit пакета. Если
+//  commit прошёл, а чекпойнт не успел (сбой/крэш) — повтор пакета
+//  упирается в ledger (already-imported): 0 дублей, чекпойнт догоняет.
+//  Исчезновение объекта из источника НИКОГДА не удаляет canonical
+//  запись — только пользовательское действие удаляет данные.
+// ═══════════════════════════════════════════════════════════════════
+const EXT_FEED_FORMAT = 'architect-external-work-feed-v1';
+const EXT_CONN_KINDS = Object.freeze(['google_drive', 'gpt_export', 'other']);
+const EXT_CONN_KIND_RU = { google_drive: 'Google Drive (экспорт)', gpt_export: 'ChatGPT (экспорт)', other: 'Другой источник' };
+// Состояния подключения. Сетевых вызовов нет, поэтому DEGRADED/SYNCING —
+// состояния owner-mediated конвейера, а не скрытого коннектора. Ошибка
+// разбора НИКОГДА не выдаётся за «новых данных нет».
+const EXT_CONN_STATUSES = Object.freeze(['connected', 'syncing', 'error_requires_user', 'permission_revoked', 'disconnected']);
+const EXT_CONN_STATUS_RU = {
+  connected: 'подключён', syncing: 'идёт разбор', error_requires_user: 'ошибка — нужно вмешательство',
+  permission_revoked: 'доступ отозван', disconnected: 'отключён',
+};
+const EXT_CONN_MAX_HASHES = 200;   // чекпойнт ограничен; страховка от дублей — provenance-ledger, не этот список
+
+function extConnUid() { return 'extConn:' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
+function extConnFind(id, dbArg) { return ((dbArg || DB).externalConnections || []).find(c => c && c.id === id) || null; }
+function extConnCreate(label, kind) {
+  if (typeof isWriteLocked === 'function' && isWriteLocked()) return { ok: false, errors: ['профиль в режиме восстановления'] };
+  const lbl = String(label || '').trim().slice(0, 120);
+  if (!lbl) return { ok: false, errors: ['нужно название источника'] };
+  const k = EXT_CONN_KINDS.includes(kind) ? kind : 'other';
+  const rec = {
+    id: extConnUid(), label: lbl, kind: k, status: 'connected',
+    createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+    privacyClass: 'sensitive',
+    checkpoint: { committedPackageHashes: [], lastRefreshAt: null, lastError: null },
+    stats: { refreshes: 0, packagesCommitted: 0, recordsCreated: 0 },
+    sourceStatusNote: null,   // «источник недоступен» — provenance-статус, НЕ удаление данных
+  };
+  const snap = JSON.parse(JSON.stringify(DB.externalConnections || []));
+  if (!Array.isArray(DB.externalConnections)) DB.externalConnections = [];
+  DB.externalConnections.push(rec);
+  if (!persist()) { DB.externalConnections = snap; return { ok: false, errors: ['не удалось сохранить'] }; }
+  return { ok: true, errors: [], rec };
+}
+// Транзакционное обновление подключения: снимок + откат при сбое persist.
+function extConnUpdate(id, mut) {
+  const conn = extConnFind(id);
+  if (!conn) return { ok: false, errors: ['подключение не найдено'] };
+  const snap = JSON.parse(JSON.stringify(DB.externalConnections));
+  mut(conn);
+  conn._u = Date.now();
+  if (!persist()) { DB.externalConnections = snap; return { ok: false, errors: ['не удалось сохранить'] }; }
+  return { ok: true, errors: [], rec: conn };
+}
+// Disconnect: связь разорвана, но ВСЕ импортированные canonical записи
+// остаются — это данные пользователя, а не кэш источника.
+function extConnDisconnect(id) { return extConnUpdate(id, c => { c.status = 'disconnected'; }); }
+function extConnMarkRevoked(id) { return extConnUpdate(id, c => { c.status = 'permission_revoked'; c.checkpoint.lastError = 'доступ к источнику отозван владельцем источника'; }); }
+function extConnReconnect(id) { return extConnUpdate(id, c => { c.status = 'connected'; c.checkpoint.lastError = null; }); }
+// Forget: удаляется ТОЛЬКО состояние подключения (tombstone). Canonical
+// записи не трогаются; повторный импорт после forget безопасен через ledger.
+function extConnForget(id) {
+  if (typeof isWriteLocked === 'function' && isWriteLocked()) return { ok: false, errors: ['профиль в режиме восстановления'] };
+  const idx = (DB.externalConnections || []).findIndex(c => c && c.id === id);
+  if (idx < 0) return { ok: false, errors: ['подключение не найдено'] };
+  const snap = JSON.parse(JSON.stringify(DB.externalConnections));
+  const delSnap = JSON.parse(JSON.stringify(DB._del || {}));
+  tomb(id);
+  DB.externalConnections.splice(idx, 1);
+  if (!persist()) { DB.externalConnections = snap; DB._del = delSnap; return { ok: false, errors: ['не удалось сохранить'] }; }
+  return { ok: true, errors: [] };
+}
+
+// ── Feed: тонкая обёртка над НЕИЗМЕНЁННЫМИ v1/v2 пакетами ───────────
+// Принимает либо feed {format, packages:[…]}, либо одиночный пакет
+// (оборачивается в feed из одного). Malformed → fail closed, ноль мутаций.
+function extBridgeParseFeed(text) {
+  const raw = String(text || '');
+  if (raw.length > EXT_LIMITS.maxBytes * 4) return { ok: false, errors: ['feed слишком большой'] };
+  let obj;
+  try { obj = JSON.parse(raw); } catch (e) { return { ok: false, errors: ['это не корректный JSON: ' + String(e.message).slice(0, 120)] }; }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { ok: false, errors: ['ожидается объект feed или пакета'] };
+  if (obj.format === EXT_FEED_FORMAT) {
+    if (!Array.isArray(obj.packages) || !obj.packages.length) return { ok: false, errors: ['feed не содержит пакетов'] };
+    if (obj.packages.length > 50) return { ok: false, errors: ['слишком много пакетов в одном feed (максимум 50)'] };
+    const bad = obj.packages.findIndex(p => !p || typeof p !== 'object' || !EXT_FORMATS.includes(p.format));
+    if (bad >= 0) return { ok: false, errors: [`packages[${bad}]: не является пакетом architect-external-work (v1/v2)`] };
+    return { ok: true, errors: [], packages: obj.packages };
+  }
+  if (EXT_FORMATS.includes(obj.format)) return { ok: true, errors: [], packages: [obj] };
+  return { ok: false, errors: [`неизвестный format «${String(obj.format).slice(0, 60)}» — ожидается ${EXT_FEED_FORMAT} или пакет v1/v2`] };
+}
+
+// ── Refresh: discovery/preview БЕЗ мутаций ──────────────────────────
+// Возвращает агрегированный preview по всем пакетам feed. Canonical DB не
+// меняется; ошибка разбора переводит подключение в error_requires_user с
+// причиной — это НЕ «новых данных нет».
+let _bridgePending = null;   // { connId, batches: [{pkgIndex, plan, hash, skipped}] }
+async function extBridgeRefresh(connId, text) {
+  const conn = extConnFind(connId);
+  if (!conn) return { ok: false, errors: ['подключение не найдено'] };
+  if (conn.status === 'disconnected') return { ok: false, errors: ['источник отключён — сначала переподключи'] };
+  if (conn.status === 'permission_revoked') return { ok: false, errors: ['доступ к источнику отозван — обнови доступ и переподключи'] };
+  extConnUpdate(connId, c => { c.status = 'syncing'; });
+  const parsed = extBridgeParseFeed(text);
+  if (!parsed.ok) {
+    extConnUpdate(connId, c => { c.status = 'error_requires_user'; c.checkpoint.lastError = parsed.errors[0]; });
+    return { ok: false, errors: parsed.errors };
+  }
+  const committed = new Set((conn.checkpoint.committedPackageHashes || []));
+  const batches = [];
+  const totals = { packages: parsed.packages.length, skippedByCheckpoint: 0, new: 0, existing: 0, conflicts: 0, rejected: 0, unresolved: 0, alreadyImported: 0 };
+  for (let i = 0; i < parsed.packages.length; i++) {
+    const pkgText = JSON.stringify(parsed.packages[i]);
+    const plan = await extBuildPlan(pkgText);
+    if (!plan.ok) {
+      extConnUpdate(connId, c => { c.status = 'error_requires_user'; c.checkpoint.lastError = `пакет ${i + 1}: ${plan.errors[0]}`; });
+      return { ok: false, errors: [`пакет ${i + 1}: ${plan.errors.join('; ')}`] };
+    }
+    // Быстрый пропуск по чекпойнту — но ledger остаётся страховкой истины.
+    const skipped = committed.has(plan.packageHash) || plan.alreadyImported;
+    if (skipped) { totals.skippedByCheckpoint++; totals.alreadyImported++; }
+    else {
+      totals.new += (plan.counts.new || 0);
+      totals.existing += (plan.counts['existing-by-provenance'] || 0);
+      totals.conflicts += (plan.counts.conflict || 0);
+      totals.rejected += (plan.counts.invalid || 0) + (plan.counts.unsupported || 0);
+      totals.unresolved += (plan.unresolvedRefs || []).length;
+    }
+    batches.push({ pkgIndex: i, plan, hash: plan.packageHash, skipped });
+  }
+  extConnUpdate(connId, c => { c.status = 'connected'; c.checkpoint.lastError = null; c.stats.refreshes = (c.stats.refreshes || 0) + 1; c.checkpoint.lastRefreshAt = nowISO(); });
+  _bridgePending = { connId, batches };
+  return { ok: true, errors: [], totals, batches };
+}
+
+// ── Apply: bounded batches, чекпойнт ПОСЛЕ commit ───────────────────
+// Каждый пакет — отдельная транзакция существующего extCommitPlan (zero
+// mutation при ошибке). Чекпойнт подключения обновляется только после
+// успешного commit этого пакета. Ошибка пакета останавливает feed: ранее
+// закоммиченные пакеты остаются (bounded batches), остальное не трогается.
+function extBridgeApply(connId) {
+  if (!_bridgePending || _bridgePending.connId !== connId) return { ok: false, errors: ['нет подготовленного preview — сначала Refresh'] };
+  const results = [];
+  for (const b of _bridgePending.batches) {
+    if (b.skipped) { results.push({ pkgIndex: b.pkgIndex, status: 'skipped' }); continue; }
+    // Пакет без нового содержимого (всё уже существует, псевдонимов и связей
+    // нет) — честный no-op: коммитить нечего, но чекпойнт продвигается, чтобы
+    // следующий refresh не разбирал его заново.
+    const hasNew = (b.plan.counts.new || 0) > 0 ||
+      (b.plan.links || []).some(l => l.status === 'new') ||
+      (b.plan.items || []).some(x => x.status === 'existing-by-provenance' && x.merge && x.merge.addRefs.length);
+    // Конфликт/ошибка — НЕ no-op: такой пакет обязан пройти через commit и
+    // честно упасть (fail-closed), а чекпойнт остаться на месте.
+    const hasProblems = (b.plan.counts.conflict || 0) > 0 || (b.plan.counts.invalid || 0) > 0 ||
+      (b.plan.counts.unsupported || 0) > 0 || (b.plan.unresolvedRefs || []).length > 0;
+    if (!hasNew && !hasProblems) {
+      extConnUpdate(connId, c => {
+        c.checkpoint.committedPackageHashes = [...(c.checkpoint.committedPackageHashes || []), b.hash].slice(-EXT_CONN_MAX_HASHES);
+      });
+      results.push({ pkgIndex: b.pkgIndex, status: 'noop' });
+      continue;
+    }
+    const res = extCommitPlan(b.plan, null);
+    if (!res.ok) {
+      results.push({ pkgIndex: b.pkgIndex, status: 'failed', error: res.error });
+      _bridgePending = null;
+      extConnUpdate(connId, c => { c.status = 'error_requires_user'; c.checkpoint.lastError = `пакет ${b.pkgIndex + 1}: ${res.error}`; });
+      return { ok: false, errors: [`пакет ${b.pkgIndex + 1}: ${res.error}`], results };
+    }
+    // Чекпойнт двигается ТОЛЬКО здесь — после успешного commit пакета.
+    extConnUpdate(connId, c => {
+      const list = [...(c.checkpoint.committedPackageHashes || []), b.hash].slice(-EXT_CONN_MAX_HASHES);
+      c.checkpoint.committedPackageHashes = list;
+      c.stats.packagesCommitted = (c.stats.packagesCommitted || 0) + 1;
+      c.stats.recordsCreated = (c.stats.recordsCreated || 0) + (Array.isArray(res.created) ? res.created.length : 0);
+    });
+    results.push({ pkgIndex: b.pkgIndex, status: 'committed', created: Array.isArray(res.created) ? res.created.length : 0 });
+  }
+  _bridgePending = null;
+  return { ok: true, errors: [], results };
+}
+function extBridgeCancel() { _bridgePending = null; }
+
+// ── UI подключений (внутри существующего экрана импорта) ────────────
+let _extConnTargets = [];
+let _extConnActive = null;
+function extConnUiCreate() {
+  const lbl = ($('extc-label') || {}).value || '';
+  const kind = ($('extc-kind') || {}).value || 'other';
+  const r = extConnCreate(lbl, kind);
+  if (!r.ok) { toast(r.errors[0], 'warn'); return; }
+  if ($('extc-label')) $('extc-label').value = '';
+  toast('Источник подключён', 'ok'); extRenderConnections();
+}
+function extConnUiAction(i, action) {
+  const t = _extConnTargets[i]; if (!t) return;
+  if (action === 'select') { _extConnActive = t.id; extRenderConnections(); return; }
+  if (action === 'disconnect') { extConnDisconnect(t.id); toast('Источник отключён. Импортированные записи остаются в приложении.', 'ok'); }
+  if (action === 'reconnect') { extConnReconnect(t.id); }
+  if (action === 'revoked') { extConnMarkRevoked(t.id); }
+  if (action === 'forget') { extConnForget(t.id); toast('Подключение забыто. Записи в приложении не тронуты.', 'ok'); if (_extConnActive === t.id) _extConnActive = null; }
+  extRenderConnections();
+}
+async function extConnUiRefresh() {
+  if (!_extConnActive) { toast('Выбери источник', 'warn'); return; }
+  const text = ($('ext-text') || {}).value || '';
+  if (!String(text).trim()) { toast('Вставь feed/пакет или выбери файл', 'warn'); return; }
+  const r = await extBridgeRefresh(_extConnActive, text);
+  const out = $('ext-conn-out');
+  if (!r.ok) {
+    if (out) out.innerHTML = `<div class="psy-adv" role="alert">Ошибка источника: ${esc(r.errors[0])}. Это ошибка разбора, а НЕ «новых данных нет».</div>`;
+    extRenderConnections(); return;
+  }
+  const t = r.totals;
+  if (out) out.innerHTML = `<div class="card mx" style="padding:.8rem">
+    <b>Preview обновления</b>
+    <div class="si-text" style="font-size:.8rem">Пакетов: ${t.packages} · уже закоммичено (пропущено): ${t.skippedByCheckpoint}</div>
+    <div class="si-text" style="font-size:.8rem">Новых записей: <b>${t.new}</b> · уже существуют: ${t.existing} · конфликтов: ${t.conflicts} · отклонено: ${t.rejected}${t.unresolved ? ' · неразрешённых ссылок: ' + t.unresolved : ''}</div>
+    ${t.conflicts || t.unresolved ? '<div class="psy-adv">Есть конфликты/неразрешённые ссылки — их пакеты не будут применены.</div>' : ''}
+    <div class="psy-actions">
+      <button type="button" class="btn btn-p btn-sm" onclick="extConnUiApply()">Применить</button>
+      <button type="button" class="btn btn-s btn-sm" onclick="extBridgeCancel();$('ext-conn-out').innerHTML=''">Отмена</button>
+    </div>
+    <div class="si-text" style="font-size:.72rem;color:var(--t4)">До «Применить» база не меняется. Каждый пакет коммитится транзакционно; чекпойнт источника двигается только после успешного коммита.</div>
+  </div>`;
+  extRenderConnections();
+}
+function extConnUiApply() {
+  const r = extBridgeApply(_extConnActive);
+  const out = $('ext-conn-out');
+  if (!r.ok) { if (out) out.innerHTML = `<div class="psy-adv" role="alert">${esc(r.errors[0])} — этот пакет не применён (ноль мутаций), применённые ранее пакеты сохранены.</div>`; extRenderConnections(); return; }
+  const committed = r.results.filter(x => x.status === 'committed').length;
+  const skipped = r.results.filter(x => x.status === 'skipped').length;
+  if (out) out.innerHTML = `<div class="si-text">Готово: применено пакетов ${committed}, пропущено (уже были) ${skipped}. Повторный Refresh того же feed создаст 0 дублей.</div>`;
+  toast('Импорт применён', 'ok');
+  extRenderConnections();
+  try { rPsyWorkspace(); } catch (_) {}
+}
+function extRenderConnections() {
+  const el = $('ext-connections'); if (!el) return;
+  _extConnTargets = [];
+  const conns = (DB.externalConnections || []).slice().sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  const rows = conns.map(c => {
+    const i = _extConnTargets.push({ id: c.id }) - 1;
+    const active = _extConnActive === c.id;
+    const cp = c.checkpoint || {};
+    return `<div class="psy-item" style="${active ? 'border-left:3px solid var(--teal);padding-left:.5rem' : ''}">
+      <b>${esc(c.label)}</b> · ${esc(EXT_CONN_KIND_RU[c.kind] || c.kind)} · <span class="psy-status">${esc(EXT_CONN_STATUS_RU[c.status] || c.status)}</span>
+      <div class="si-text" style="font-size:.72rem;color:var(--t3)">Последний refresh: ${cp.lastRefreshAt ? esc(String(cp.lastRefreshAt).slice(0, 16).replace('T', ' ')) : 'ещё не было'} · пакетов закоммичено: ${(c.stats || {}).packagesCommitted || 0} · записей создано: ${(c.stats || {}).recordsCreated || 0}</div>
+      ${cp.lastError ? `<div class="psy-adv">Ошибка: ${esc(cp.lastError)}</div>` : ''}
+      <div class="psy-actions">
+        ${!active ? `<button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'select')">Выбрать</button>` : ''}
+        ${c.status === 'connected' || c.status === 'syncing' ? `<button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'disconnect')">Отключить</button>` : ''}
+        ${c.status === 'disconnected' || c.status === 'permission_revoked' || c.status === 'error_requires_user' ? `<button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'reconnect')">Переподключить</button>` : ''}
+        ${c.status !== 'permission_revoked' ? `<button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'revoked')">Доступ отозван</button>` : ''}
+        <button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'forget')">Забыть подключение</button>
+      </div>
+    </div>`;
+  }).join('');
+  el.innerHTML = `<div class="sec-lbl" style="padding-left:0">Постоянные источники (bridge)</div>
+    <div class="be-note">Подключение — это имя источника и чекпойнт, не доступ к сети: данные приходят только файлом/вставкой по твоему действию. Отключение/«забыть» никогда не удаляет импортированные записи.</div>
+    ${rows || '<div class="ai-sp-empty">Источников пока нет.</div>'}
+    <div class="psy-fld" style="margin-top:.5rem"><label class="f-lbl" for="extc-label">Название источника</label>
+      <input type="text" id="extc-label" class="field" placeholder="например: Экспорт GPT — психология"></div>
+    <div class="psy-fld"><label class="f-lbl" for="extc-kind">Тип</label>
+      <select id="extc-kind" class="field">${EXT_CONN_KINDS.map(k => `<option value="${k}">${esc(EXT_CONN_KIND_RU[k])}</option>`).join('')}</select></div>
+    <button type="button" class="btn btn-s" onclick="extConnUiCreate()">Подключить источник</button>
+    ${_extConnActive ? `<div style="margin-top:.6rem"><button type="button" class="btn btn-p" onclick="extConnUiRefresh()">Refresh выбранного источника (из поля ниже)</button></div>` : ''}
+    <div id="ext-conn-out" aria-live="polite"></div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  WAVE 6 (issue #160): EXTERNAL WORK BRIDGE — импорт внешней работы.
 //
 //  Принцип: внешняя сессия = provenance/audit envelope + проекция в УЖЕ
@@ -14197,6 +14487,12 @@ function extValidatePackage(raw) {
     }
     if (e.claimClass != null && !EXT_CLAIM_CLASSES.includes(e.claimClass)) errors.push(`entities[${i}]: неизвестный claimClass "${extStr(e.claimClass, 60)}"`);
     if (e.textOrigin != null && !EXT_TEXT_ORIGINS.includes(e.textOrigin)) errors.push(`entities[${i}]: неизвестный textOrigin "${extStr(e.textOrigin, 60)}"`);
+    // Final A (claim safety, A7): слова ассистента не могут быть объявлены
+    // фактом пользователя. Несочетаемая пара отклоняется fail-closed — пакет
+    // не может «повысить» интерпретацию до факта декларацией.
+    if (e.claimClass === 'user_fact' && e.textOrigin === 'assistant_interpretation') {
+      errors.push(`entities[${i}]: claimClass "user_fact" несовместим с textOrigin "assistant_interpretation" — интерпретация ассистента не является фактом пользователя`);
+    }
     if (e.sourceDate != null && !extIsIsoDay(e.sourceDate)) errors.push(`entities[${i}]: sourceDate должна быть YYYY-MM-DD`);
     if (e.data != null && (typeof e.data !== 'object' || Array.isArray(e.data))) errors.push(`entities[${i}]: data должна быть объектом`);
 
@@ -14453,6 +14749,7 @@ function openExtImport() {
   const f = $('ext-file'); if (f) f.value = '';
   const out = $('ext-out'); if (out) out.innerHTML = '';
   const act = $('ext-actions'); if (act) act.innerHTML = '';
+  extRenderConnections();   // Final A: постоянные источники
   openOv('ov-ext-import');
 }
 function extPickFile(ev) {

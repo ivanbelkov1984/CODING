@@ -1,0 +1,411 @@
+// FINAL A (FINAL_BRIDGE_CONTRACT) — Continuous GPT / Google Drive Bridge.
+//
+// ВСЕ фикстуры синтетические (TEST-FA-*). Реальные данные владельца в
+// репозиторий не попадают ни в каком виде (privacy canary внизу).
+//
+// Гоняет РЕАЛЬНЫЙ собранный бандл (dist/app.html) в Chromium.
+
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { readFileSync } from 'fs';
+
+const DIR = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(DIR, '..');
+const FILE = 'file://' + (process.env.FINALA_BUNDLE || join(ROOT, 'dist', 'app.html'));
+let pass = 0, fail = 0;
+const errors = [];
+const ok = (cond, msg, detail) => {
+  if (cond) { pass++; console.log('  ✓ ' + msg); }
+  else { fail++; console.log('  ✗ ' + msg); if (detail) console.log('      ' + String(detail).split('\n').join('\n      ')); }
+};
+
+const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
+const netRequests = [];
+async function boot() {
+  const p = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+  p.on('pageerror', e => errors.push(e.message));
+  await p.route('**/*', r => {
+    const u = r.request().url();
+    if (!u.startsWith('file://')) { netRequests.push(u); return r.abort(); }
+    return r.continue();
+  });
+  await p.goto(FILE);
+  await p.waitForSelector('#nsh-tabbar', { state: 'attached' });
+  await p.evaluate(() => {
+    const s = document.getElementById('splash'); if (s) s.style.display = 'none';
+    document.querySelectorAll('.ov.on').forEach(e => e.classList.remove('on'));
+  });
+  await p.waitForTimeout(120);
+  return p;
+}
+const page = await boot();
+
+const reset = () => page.evaluate(() => {
+  ['externalConnections', 'externalWorkSessions', 'insights', 'dreams', 'patterns', 'whys', 'moments',
+    'psyFormulations', 'psyGoals', 'psyInterventionEpisodes', 'psyObservations', 'psyReviews',
+    'psyLinks', 'relationshipContexts', 'spiritual', 'evolution', 'sphereLogs'].forEach(c => { DB[c] = []; });
+  DB._del = {};
+  try { resolveRecovery('discarded'); } catch (_) {}
+  if (typeof extBridgeCancel === 'function') extBridgeCancel();
+});
+
+// Синтетический v2-пакет.
+const pkg = (n, over) => ({
+  format: 'architect-external-work-v2',
+  source: { kind: 'google_drive', label: 'TEST-FA источник', module: 'TEST-FA-MODULE' },
+  session: { clientRef: 'TEST-FA-SESSION-' + n, summary: 'синтетическая сессия ' + n, date: '2026-04-0' + ((n % 9) + 1) },
+  entities: [
+    { clientRef: 'i' + n, type: 'insight', sourceId: 'TEST-FA-SRC-' + n,
+      claimClass: 'user_experience', textOrigin: 'user_words',
+      data: { title: 'TEST-FA инсайт ' + n, body: 'синтетический текст инсайта номер ' + n, tag: 'personal' } },
+  ],
+  links: [],
+  ...over,
+});
+const feed = (packages) => ({ format: 'architect-external-work-feed-v1', packages });
+
+const connCreate = (label) => page.evaluate((l) => {
+  const r = extConnCreate(l, 'google_drive');
+  return { ok: r.ok, id: r.rec && r.rec.id, errors: r.errors };
+}, label || 'TEST-FA подключение');
+const refresh = (id, obj) => page.evaluate(async ({ i, t }) => {
+  const r = await extBridgeRefresh(i, t);
+  return JSON.parse(JSON.stringify(r));
+}, { i: id, t: JSON.stringify(obj) });
+const apply = (id) => page.evaluate((i) => JSON.parse(JSON.stringify(extBridgeApply(i))), id);
+const snapshot = () => page.evaluate(() =>
+  JSON.stringify({ ins: DB.insights, dre: DB.dreams, ews: DB.externalWorkSessions }));
+const connState = (id) => page.evaluate((i) => JSON.parse(JSON.stringify(extConnFind(i))), id);
+
+console.log('\n── FINAL A: Continuous Bridge ──');
+
+// ═══ 1. Схема/модель ════════════════════════════════════════════════
+{
+  const st = await page.evaluate(() => ({
+    schema: SCHEMA_VERSION,
+    coll: Array.isArray(DB.externalConnections),
+    inId: IDCOLS.includes('externalConnections'),
+    notEventSource: !('externalConnections' in EVENT_SOURCES),
+    notImportable: !('externalConnection' in (typeof PSY_TYPE_TO_COLL === 'object' ? PSY_TYPE_TO_COLL : {})) &&
+      !Object.values(EXT_TARGETS_V2).includes('externalConnections'),
+    dc: dbCount({ externalConnections: [{ id: 'x' }] }),
+    v1len: Object.keys(EXT_TARGETS).length, v2len: Object.keys(EXT_TARGETS_V2).length,
+  }));
+  ok(st.schema === 9 && st.coll && st.inId, `SCHEMA_VERSION=9, externalConnections в IDCOLS (${st.schema})`);
+  ok(st.notEventSource, 'externalConnections НЕ входит в EVENT_SOURCES (не второй ledger)');
+  ok(st.notImportable, 'подключения нельзя импортировать извне (не в EXT_TARGETS v1/v2)');
+  ok(st.dc === 1, 'dbCount() считает подключения');
+  ok(st.v1len === 9 && st.v2len === 14, `v1/v2 контракты НЕ изменены (${st.v1len}/${st.v2len} типов)`);
+}
+
+// ═══ 2. Connection lifecycle ════════════════════════════════════════
+{
+  await reset();
+  const c = await connCreate();
+  ok(c.ok && /^extConn:/.test(c.id), 'подключение создаётся с namespaced id');
+  const empty = await page.evaluate(() => extConnCreate('', 'other'));
+  ok(!empty.ok, 'подключение без названия отклонено');
+  const st = await connState(c.id);
+  ok(st.status === 'connected' && st.privacyClass === 'sensitive' &&
+     Array.isArray(st.checkpoint.committedPackageHashes) && st.checkpoint.lastRefreshAt === null,
+    'новое подключение: connected, sensitive, пустой чекпойнт');
+
+  const dis = await page.evaluate((i) => { extConnDisconnect(i); return extConnFind(i).status; }, c.id);
+  ok(dis === 'disconnected', 'disconnect переводит в disconnected');
+  const refuse = await refresh(c.id, pkg(1));
+  ok(!refuse.ok && /отключён/.test(refuse.errors[0]), 'refresh отключённого источника отклонён с причиной');
+  const rec = await page.evaluate((i) => { extConnReconnect(i); return extConnFind(i).status; }, c.id);
+  ok(rec === 'connected', 'reconnect возвращает connected');
+
+  const rev = await page.evaluate((i) => { extConnMarkRevoked(i); return JSON.parse(JSON.stringify(extConnFind(i))); }, c.id);
+  ok(rev.status === 'permission_revoked' && /отозван/.test(rev.checkpoint.lastError),
+    'permission_revoked — отдельное состояние с причиной');
+  const refuseRev = await refresh(c.id, pkg(1));
+  ok(!refuseRev.ok && /отозван/.test(refuseRev.errors[0]),
+    'refresh при отозванном доступе отклонён — НЕ «новых данных нет»');
+  await page.evaluate((i) => extConnReconnect(i), c.id);
+
+  // Forget: tombstone, canonical записи не тронуты. Одна запись остаётся в
+  // DB, иначе сработает штатная Wave-5 защита «не затирать непустое пустым».
+  await page.evaluate(() => { DB.insights.push({ id: 7001, title: 'TEST-FA якорь', body: 'x', sv: SCHEMA_VERSION, _u: Date.now() }); persist(); });
+  const before = await snapshot();
+  const fg = await page.evaluate((i) => {
+    const r = extConnForget(i);
+    return { ok: r.ok, tomb: !!DB._del[i], left: DB.externalConnections.length };
+  }, c.id);
+  ok(fg.ok && fg.tomb && fg.left === 0, 'forget удаляет ТОЛЬКО состояние подключения (tombstone)');
+  ok(before === await snapshot(), 'forget не тронул canonical записи');
+}
+
+// ═══ 3. Malformed feed → fail closed, ошибка ≠ «нет данных» ════════
+{
+  await reset();
+  const c = await connCreate();
+  const before = await snapshot();
+  const bad1 = await refresh(c.id, { format: 'architect-external-work-feed-v1', packages: [] });
+  ok(!bad1.ok, 'пустой feed отклонён');
+  const bad2 = await page.evaluate(async (i) => JSON.parse(JSON.stringify(await extBridgeRefresh(i, 'не json {'))), c.id);
+  ok(!bad2.ok && /JSON/.test(bad2.errors[0]), 'битый JSON → явная ошибка разбора');
+  const st = await connState(c.id);
+  ok(st.status === 'error_requires_user' && st.checkpoint.lastError,
+    'ошибка разбора видна статусом error_requires_user с причиной (parser fail ≠ 0 новых)');
+  ok(before === await snapshot(), 'ошибки разбора не тронули canonical DB (zero mutation)');
+  const bad3 = await refresh(c.id, { format: 'что-то-другое-v9', packages: [] });
+  ok(!bad3.ok && /неизвестный format/.test(bad3.errors[0]), 'неизвестный формат отклонён с указанием ожидаемого');
+  await page.evaluate((i) => extConnReconnect(i), c.id);
+}
+
+// ═══ 4. Initial import → checkpoint ПОСЛЕ commit ════════════════════
+{
+  await reset();
+  const c = await connCreate();
+  const before = await snapshot();
+  const prev = await refresh(c.id, feed([pkg(1), pkg(2)]));
+  ok(prev.ok && prev.totals.packages === 2 && prev.totals.new === 2 && prev.totals.skippedByCheckpoint === 0,
+    `preview: 2 пакета, 2 новых записи (${prev.ok && prev.totals.new})`);
+  ok(before === await snapshot(), 'preview НЕ мутирует canonical DB (discovery ≠ commit)');
+  let st = await connState(c.id);
+  ok(st.checkpoint.committedPackageHashes.length === 0, 'чекпойнт НЕ двигается на preview');
+  ok(st.checkpoint.lastRefreshAt !== null && st.stats.refreshes === 1, 'lastRefreshAt/статистика refresh обновлены');
+
+  const ap = await apply(c.id);
+  ok(ap.ok && ap.results.filter(r => r.status === 'committed').length === 2, 'apply закоммитил оба пакета');
+  const cnt = await page.evaluate(() => ({ ins: DB.insights.length, ews: DB.externalWorkSessions.length }));
+  ok(cnt.ins === 2 && cnt.ews === 2, 'canonical записи созданы через штатный importer (2 инсайта, 2 сессии-леджера)');
+  st = await connState(c.id);
+  ok(st.checkpoint.committedPackageHashes.length === 2 && st.stats.packagesCommitted === 2 && st.stats.recordsCreated === 2,
+    'чекпойнт продвинут ПОСЛЕ commit: 2 хэша, статистика верна');
+}
+
+// ═══ 5. Incremental + replay: 0 дублей ══════════════════════════════
+{
+  // Продолжение состояния из §4: тот же connection, повтор того же feed.
+  const c = await page.evaluate(() => DB.externalConnections[0].id);
+  const prev = await refresh(c, feed([pkg(1), pkg(2), pkg(3)]));
+  ok(prev.ok && prev.totals.skippedByCheckpoint === 2 && prev.totals.new === 1,
+    `инкрементальный refresh: 2 старых пакета пропущены чекпойнтом, 1 новый (${prev.totals.new})`);
+  const ap = await apply(c);
+  const cnt = await page.evaluate(() => DB.insights.length);
+  ok(ap.ok && cnt === 3, 'применён только новый пакет — записей стало 3');
+
+  // Полный replay всего feed.
+  const replayPrev = await refresh(c, feed([pkg(1), pkg(2), pkg(3)]));
+  ok(replayPrev.ok && replayPrev.totals.skippedByCheckpoint === 3 && replayPrev.totals.new === 0,
+    'полный replay: все пакеты пропущены, 0 новых');
+  const replayAp = await apply(c);
+  const cnt2 = await page.evaluate(() => ({ ins: DB.insights.length, ews: DB.externalWorkSessions.length }));
+  ok(replayAp.ok && cnt2.ins === 3 && cnt2.ews === 3, 'replay создал 0 дублей (записей по-прежнему 3)');
+
+  // Stale cursor: чекпойнт обнулён (симуляция потери) — ledger страхует.
+  const stale = await page.evaluate(async (i) => {
+    extConnUpdate(i, x => { x.checkpoint.committedPackageHashes = []; });
+    return null;
+  }, c);
+  const stalePrev = await refresh(c, feed([pkg(1), pkg(2), pkg(3)]));
+  ok(stalePrev.ok && stalePrev.totals.skippedByCheckpoint === 3,
+    'stale/потерянный cursor безопасен: ledger (already-imported) даёт те же 0 новых');
+  const staleAp = await apply(c);
+  const cnt3 = await page.evaluate(() => DB.insights.length);
+  ok(staleAp.ok && cnt3 === 3, 'apply после stale cursor: 0 дублей');
+}
+
+// ═══ 6. Изменённый источник: same sourceId ≠ дубль ═════════════════
+{
+  await reset();
+  const c = await connCreate();
+  await refresh(c.id, pkg(7));
+  await apply(c.id);
+  // Тот же sourceId приходит из ДРУГОЙ сессии (другой пакет/хэш) — identity одна.
+  const changed = pkg(8, { session: { clientRef: 'TEST-FA-SESSION-CH', summary: 'другая сессия', date: '2026-04-09' } });
+  changed.entities[0].sourceId = 'TEST-FA-SRC-7';   // тот же семантический объект
+  changed.entities[0].data.body = 'обновлённый синтетический текст';
+  const prev = await refresh(c.id, changed);
+  ok(prev.ok && prev.totals.existing === 1 && prev.totals.new === 0,
+    'same sourceId из другой сессии → existing-by-provenance, НЕ новая запись (identity = sourceId)');
+  const ap = await apply(c.id);
+  const cnt = await page.evaluate(() => DB.insights.length);
+  ok(ap.ok && ap.results.some(r => r.status === 'noop') && cnt === 1,
+    'controlled поведение: пакет без нового содержимого — no-op, дубль не создан, чекпойнт продвинут');
+
+  // Одинаковый текст + разные sourceId → ДВЕ записи (запрет text-dedup).
+  // Импорт ПОСЛЕДОВАТЕЛЬНЫЙ: второй пакет планируется, когда первый текст
+  // уже в canonical DB — text-dedup здесь дал бы ложный existing.
+  const t1 = pkg(20); t1.entities[0].data.body = 'абсолютно одинаковый синтетический текст';
+  const t2 = pkg(21); t2.entities[0].data.body = 'абсолютно одинаковый синтетический текст';
+  await refresh(c.id, t1);
+  await apply(c.id);
+  const prevT = await refresh(c.id, t2);
+  ok(prevT.ok && prevT.totals.new === 1, 'второй пакет с тем же текстом, но другим sourceId виден как НОВЫЙ');
+  await apply(c.id);
+  const cnt2 = await page.evaluate(() => DB.insights.length);
+  ok(cnt2 === 3, 'одинаковый текст + разные sourceId → две записи (text-dedup запрещён)');
+}
+
+// ═══ 7. Interrupted transaction: пакет-ошибка не двигает чекпойнт ═══
+{
+  await reset();
+  const c = await connCreate();
+  const good = pkg(30);
+  const conflictPkg = pkg(31);
+  // Конфликт: тот же sourceId проецируется в ДРУГОЙ canonical тип.
+  conflictPkg.entities[0] = {
+    clientRef: 'd31', type: 'dream', sourceId: 'TEST-FA-SRC-30',
+    claimClass: 'user_experience', textOrigin: 'user_words',
+    data: { title: 'TEST-FA сон', body: 'синтетический сон' } };
+  const after = pkg(32);
+  await refresh(c.id, feed([good]));
+  await apply(c.id);
+  const prev = await refresh(c.id, feed([conflictPkg, after]));
+  ok(prev.ok && prev.totals.conflicts === 1, 'cross-type конфликт идентичности виден в preview');
+  const ap = await apply(c.id);
+  ok(!ap.ok, 'apply останавливается на конфликтном пакете');
+  const st = await connState(c.id);
+  const cnt = await page.evaluate(() => ({ ins: DB.insights.length, dre: DB.dreams.length }));
+  ok(cnt.dre === 0 && cnt.ins === 1, 'конфликтный пакет: zero mutation (сон не создан)');
+  ok(st.checkpoint.committedPackageHashes.length === 1 && st.status === 'error_requires_user',
+    'чекпойнт НЕ продвинут за ошибочный пакет; статус ошибки с причиной');
+
+  // Сбой persist во время commit → zero mutation пакета, чекпойнт на месте.
+  await page.evaluate((i) => extConnReconnect(i), c.id);
+  const persistFail = await page.evaluate(async ({ i, t }) => {
+    const r0 = await extBridgeRefresh(i, t);
+    if (!r0.ok) return { setup: false };
+    const before = JSON.stringify({ ins: DB.insights, ews: DB.externalWorkSessions });
+    const real = window.persist;
+    window.persist = () => false;
+    let ap2;
+    try { ap2 = extBridgeApply(i); } finally { window.persist = real; }
+    const afterS = JSON.stringify({ ins: DB.insights, ews: DB.externalWorkSessions });
+    return { setup: true, apOk: ap2.ok, same: before === afterS,
+      hashes: extConnFind(i).checkpoint.committedPackageHashes.length };
+  }, { i: c.id, t: JSON.stringify(pkg(33)) });
+  ok(persistFail.setup && !persistFail.apOk && persistFail.same && persistFail.hashes === 1,
+    'сбой persist при commit: canonical byte-identical, чекпойнт не двигался');
+}
+
+// ═══ 8. Claim safety: интерпретации не становятся фактами ═══════════
+{
+  await reset();
+  const c = await connCreate();
+  // Adversarial: сон пользователя + утверждение ассистента «это инициация».
+  const adv = pkg(40);
+  adv.entities = [
+    { clientRef: 'dr1', type: 'dream', sourceId: 'TEST-FA-DREAM-1',
+      claimClass: 'user_experience', textOrigin: 'user_words',
+      data: { title: 'TEST-FA сон', body: 'мне приснился синтетический полёт' } },
+    { clientRef: 'in1', type: 'spiritual', sourceId: 'TEST-FA-INTERP-1',
+      claimClass: 'symbolic_interpretation', textOrigin: 'assistant_interpretation',
+      data: { text: 'это означает синтетическую инициацию', type: 'интерпретация' } },
+  ];
+  await refresh(c.id, adv);
+  const ap = await apply(c.id);
+  const claims = await page.evaluate(() => ({
+    dream: DB.dreams[0] && DB.dreams[0].ext.claimClass,
+    interp: DB.spiritual[0] && DB.spiritual[0].ext.claimClass,
+    interpOrigin: DB.spiritual[0] && DB.spiritual[0].ext.textOrigin,
+  }));
+  ok(ap.ok && claims.dream === 'user_experience', 'сон сохранён как опыт пользователя');
+  ok(claims.interp === 'symbolic_interpretation' && claims.interpOrigin === 'assistant_interpretation',
+    'интерпретация ассистента осталась symbolic_interpretation/assistant_interpretation — НЕ повышена до факта');
+
+  // Попытка пакета объявить слова ассистента фактом: класс+origin сохранены
+  // как есть в provenance и видимы; повышения в movе-инвариантах нет.
+  const promo = pkg(41);
+  promo.entities = [{ clientRef: 'p1', type: 'insight', sourceId: 'TEST-FA-PROMO-1',
+    claimClass: 'user_fact', textOrigin: 'assistant_interpretation',
+    data: { title: 'TEST-FA', body: 'ассистент решил, что это факт' } }];
+  const prev = await refresh(c.id, promo);
+  const item = prev.ok ? null : prev.errors[0];
+  ok(!prev.ok && /не является фактом/.test(String(item)),
+    'пакет, объявляющий слова ассистента фактом, отклонён fail-closed (новое правило A7)', String(item));
+}
+
+// ═══ 9. Source disappearance ≠ canonical delete ═════════════════════
+{
+  await reset();
+  const c = await connCreate();
+  await refresh(c.id, pkg(50));
+  await apply(c.id);
+  // Источник «исчез»: новый feed его не содержит + владелец пометил revoked.
+  const prev = await refresh(c.id, feed([pkg(51)]));
+  await apply(c.id);
+  await page.evaluate((i) => extConnMarkRevoked(i), c.id);
+  const cnt = await page.evaluate(() => ({ ins: DB.insights.length, del: Object.keys(DB._del).filter(k => String(k).includes('TEST')).length }));
+  ok(cnt.ins === 2, 'исчезновение объекта из источника/revoke НЕ удаляет canonical записи');
+  const st = await connState(c.id);
+  ok(st.status === 'permission_revoked' && st.sourceStatusNote === null,
+    'недоступность источника — статус подключения, не операция над данными');
+}
+
+// ═══ 10. Изоляция профилей + recovery lock ══════════════════════════
+{
+  await reset();
+  const c = await connCreate();
+  await refresh(c.id, pkg(60));
+  await apply(c.id);
+  const iso = await page.evaluate(async () => {
+    const origin = activeId();
+    const a = { conns: DB.externalConnections.length, ins: DB.insights.length };
+    const list = loadProfiles();
+    const nid = 'pTESTFA' + Date.now();
+    list.push({ id: nid, name: 'TEST-FA-B', color: '#1056CC' });
+    saveProfiles(list); setActiveId(nid); hydrate();
+    const b = { conns: (DB.externalConnections || []).length, ins: (DB.insights || []).length };
+    setActiveId(origin); hydrate();
+    const back = { conns: DB.externalConnections.length, ins: DB.insights.length };
+    saveProfiles(loadProfiles().filter(p2 => p2.id !== nid));
+    try { localStorage.removeItem('arch5_db_' + nid); localStorage.removeItem('arch5_cfg_' + nid); } catch (_) {}
+    return { a, b, back };
+  });
+  ok(iso.b.conns === 0 && iso.b.ins === 0, 'подключения и импортированные записи не пересекают границу профиля');
+  ok(iso.back.conns === 1 && iso.back.ins === 1, 'возврат в профиль — всё на месте');
+
+  const lock = await page.evaluate(() => {
+    enterCriticalState(activeId(), []);
+    const r1 = extConnCreate('TEST-FA lock', 'other');
+    const r2 = extConnForget(DB.externalConnections[0].id);
+    resolveRecovery('discarded');
+    return { create: r1.ok, forget: r2.ok };
+  });
+  ok(!lock.create && !lock.forget, 'recovery lock блокирует изменение подключений');
+}
+
+// ═══ 11. XSS в имени источника и содержимом feed ════════════════════
+{
+  await reset();
+  const xss = await page.evaluate(async () => {
+    window.__faxss = false;
+    extConnCreate('<img src=x onerror="window.__faxss=true">', 'other');
+    openExtImport();
+    const el = document.getElementById('ext-connections');
+    const bad = !!el.querySelector('img[src="x"]');
+    closeOv('ov-ext-import');
+    return { fired: window.__faxss, bad };
+  });
+  await page.waitForTimeout(120);
+  const fired = await page.evaluate(() => window.__faxss);
+  ok(!fired && !xss.bad, 'враждебное имя источника не исполняется в UI подключений');
+}
+
+// ═══ 12. Privacy canary ═════════════════════════════════════════════
+{
+  // Канарейка: этот файл и бандл не должны содержать реальные приватные
+  // маркеры владельца. Образцы собраны конкатенацией, чтобы канарейка не
+  // ловила саму себя.
+  const own = readFileSync(new URL(import.meta.url)).toString();
+  const bundle = readFileSync(FILE.replace('file://', ''), 'utf8');
+  const priv = ['МОЯ ЖИЗ' + 'НЬ →', 'GDRIVE:1eRP' + 'F3a', 'MIGRATION-RUN-' + '2026-08'];
+  const leakSpec = priv.filter(s => own.includes(s));
+  const leakBundle = priv.filter(s => bundle.includes(s));
+  ok(leakSpec.length === 0 && leakBundle.length === 0,
+    `privacy canary: приватных маркеров нет ни в тесте, ни в бандле (${leakSpec.length}/${leakBundle.length})`);
+}
+
+const nonBoot = netRequests.filter(u => !u.includes('/health'));
+ok(nonBoot.length === 0, `bridge не делает сетевых вызовов (${nonBoot.length})`, nonBoot.slice(0, 3).join('\n'));
+ok(errors.length === 0, `JS-ошибок нет за весь прогон (${errors.length})`, errors.slice(0, 3).join('\n'));
+
+await browser.close();
+console.log(`\nFINAL A (continuous bridge): ${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);
