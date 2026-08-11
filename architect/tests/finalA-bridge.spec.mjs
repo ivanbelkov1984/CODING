@@ -208,6 +208,8 @@ console.log('\n── FINAL A: Continuous Bridge ──');
   const staleAp = await apply(c);
   const cnt3 = await page.evaluate(() => DB.insights.length);
   ok(staleAp.ok && cnt3 === 3, 'apply после stale cursor: 0 дублей');
+  const recovered = await page.evaluate((i) => extConnFind(i).checkpoint.committedPackageHashes.length, c);
+  ok(recovered === 3, 'checkpoint recovery: apply догоняет потерянный чекпойнт по ledger (3 хэша)');
 }
 
 // ═══ 6. Изменённый источник: same sourceId ≠ дубль ═════════════════
@@ -284,6 +286,92 @@ console.log('\n── FINAL A: Continuous Bridge ──');
     'сбой persist при commit: canonical byte-identical, чекпойнт не двигался');
 }
 
+// ═══ 7b. Atomic feed: good A + merge M + failing B + good C → полный откат ═══
+{
+  await reset();
+  const c = await connCreate();
+  // База: SRC-80 закоммичен как insight.
+  await refresh(c.id, pkg(80));
+  await apply(c.id);
+  const A = pkg(81);   // хороший новый пакет ДО ошибки
+  const M = pkg(83, { session: { clientRef: 'TEST-FA-SESSION-M83', summary: 'псевдоним', date: '2026-04-05' } });
+  M.entities[0].sourceId = 'TEST-FA-SRC-80';   // тот же объект + новый alias → addRefs-merge
+  M.entities[0].sourceRefs = [{ sourceId: 'TEST-FA-ALIAS-80', role: 'alias' }];
+  const B = pkg(84);   // детерминированный конфликт: SRC-80 другим canonical типом
+  B.entities[0] = { clientRef: 'd84', type: 'dream', sourceId: 'TEST-FA-SRC-80',
+    claimClass: 'user_experience', textOrigin: 'user_words',
+    data: { title: 'TEST-FA конфликт', body: 'синтетический конфликт типов' } };
+  const C = pkg(82);   // хороший пакет ПОСЛЕ ошибки
+  const canonicalSnap = (id) => page.evaluate((i) => JSON.stringify({
+    ins: DB.insights, dre: DB.dreams, ews: DB.externalWorkSessions,
+    ck: extConnFind(i).checkpoint.committedPackageHashes,
+  }), id);
+  const beforeAll = await canonicalSnap(c.id);
+  const prev = await refresh(c.id, feed([A, M, B, C]));
+  ok(prev.ok && prev.totals.conflicts === 1, 'atomic feed: конфликтный пакет виден в preview');
+  const ap = await apply(c.id);
+  ok(!ap.ok && ap.rolledBack === true &&
+     ap.results.some(r => r.status === 'rolled_back') && ap.results.some(r => r.status === 'failed'),
+    'atomic feed: apply падает и честно сообщает об откате уже применённых пакетов');
+  ok(beforeAll === await canonicalSnap(c.id),
+    'atomic feed: canonical, ledger, sourceRefs и checkpoint byte-identical после сбоя (A и merge M откатены, partial import отсутствует)');
+  const stored = await page.evaluate((i) => {
+    const raw = JSON.parse(localStorage.getItem('arch5_db_' + activeId()) || '{}');
+    return JSON.stringify({ ins: raw.insights, dre: raw.dreams, ews: raw.externalWorkSessions,
+      ck: ((raw.externalConnections || []).find(x => x.id === i) || { checkpoint: {} }).checkpoint.committedPackageHashes });
+  }, c.id);
+  ok(stored === beforeAll, 'atomic feed: откат сохранён и в localStorage (persisted rollback)');
+  // Пользователь исправляет feed (без B) и повторяет его ЦЕЛИКОМ.
+  const prev2 = await refresh(c.id, feed([A, M, C]));
+  const ap2 = await apply(c.id);
+  const after2 = await page.evaluate((i) => ({
+    ins: DB.insights.length,
+    refs: ((DB.insights.find(r => r.ext && r.ext.sourceId === 'TEST-FA-SRC-80') || { ext: {} }).ext.sourceRefs || []).length,
+    ck: extConnFind(i).checkpoint.committedPackageHashes.length,
+  }), c.id);
+  ok(prev2.ok && ap2.ok && after2.ins === 3 && after2.ck === 4,
+    `исправленный feed применяется целиком: 3 записи, чекпойнт 4 хэша (${after2.ins}/${after2.ck})`);
+  ok(after2.refs >= 2, `merge M применился только в успешном feed: у SRC-80 несколько sourceRefs (${after2.refs})`);
+}
+
+// ═══ 7c. Commit прошёл, чекпойнт не сохранился → честное degraded ═══
+{
+  await reset();
+  const c = await connCreate();
+  const deg = await page.evaluate(async ({ i, t }) => {
+    const r0 = await extBridgeRefresh(i, t);
+    if (!r0.ok) return { setup: false };
+    // persist №1 — commit пакета (успех), №2 — сохранение чекпойнта (сбой).
+    const real = window.persist;
+    let n = 0;
+    window.persist = () => { n++; return n === 2 ? false : real(); };
+    let ap;
+    try { ap = extBridgeApply(i); } finally { window.persist = real; }
+    const conn = extConnFind(i);
+    return { setup: true, apOk: ap.ok, degraded: ap.degraded === true, msg: ap.errors[0] || '',
+      ins: DB.insights.length, ews: DB.externalWorkSessions.length,
+      hashes: conn.checkpoint.committedPackageHashes.length,
+      status: conn.status, lastError: conn.checkpoint.lastError || '' };
+  }, { i: c.id, t: JSON.stringify(pkg(90)) });
+  ok(deg.setup && !deg.apOk && deg.degraded && deg.ins === 1 && deg.ews === 1 && deg.hashes === 0,
+    'commit прошёл, а чекпойнт не сохранился: НЕ full success — canonical применён, checkpoint не сохранён (degraded)');
+  ok(/контрольная точка|checkpoint/.test(deg.msg) && /дубли исключены/.test(deg.msg),
+    'degraded-сообщение честно объясняет состояние и безопасность повтора');
+  ok(deg.status === 'error_requires_user' && /не сохранена/.test(deg.lastError),
+    'подключение видно как требующее вмешательства, не как «всё в порядке»');
+  // Replay: ledger даёт 0 дублей, apply догоняет чекпойнт.
+  const replay = await refresh(c.id, pkg(90));
+  ok(replay.ok && replay.totals.skippedByCheckpoint === 1 && replay.totals.new === 0,
+    'replay после degraded: пакет узнан ledger\'ом (0 новых)');
+  const replayAp = await apply(c.id);
+  const rec = await page.evaluate((i) => ({
+    ins: DB.insights.length, hashes: extConnFind(i).checkpoint.committedPackageHashes.length,
+    status: extConnFind(i).status,
+  }), c.id);
+  ok(replayAp.ok && rec.ins === 1 && rec.hashes === 1,
+    'replay: 0 дублей и checkpoint recovery — чекпойнт догнал ledger');
+}
+
 // ═══ 8. Claim safety: интерпретации не становятся фактами ═══════════
 {
   await reset();
@@ -319,6 +407,47 @@ console.log('\n── FINAL A: Continuous Bridge ──');
   const item = prev.ok ? null : prev.errors[0];
   ok(!prev.ok && /не является фактом/.test(String(item)),
     'пакет, объявляющий слова ассистента фактом, отклонён fail-closed (новое правило A7)', String(item));
+
+  // Adversarial multi-claim: primary честный (symbolic_interpretation), но
+  // фактический слой протаскивается ВТОРЫМ элементом claimClasses[].
+  const layered = pkg(43);
+  layered.entities = [{ clientRef: 'l1', type: 'spiritual', sourceId: 'TEST-FA-LAYER-1',
+    claimClass: 'symbolic_interpretation', claimClasses: ['symbolic_interpretation', 'user_fact'],
+    textOrigin: 'assistant_interpretation',
+    data: { text: 'интерпретация с протащенным фактом', type: 'интерпретация' } }];
+  const beforeL = await snapshot();
+  const prevL = await refresh(c.id, layered);
+  ok(!prevL.ok && /не является фактом/.test(String(prevL.errors[0])),
+    'multi-claim: слой user_fact при textOrigin ассистента отклонён (full-set guard, не только primary)');
+  ok(beforeL === await snapshot(), 'multi-claim promotion: zero mutation');
+
+  // То же для других фактических классов taxonomy (external_event, practice_action).
+  const layered2 = pkg(44);
+  layered2.entities = [{ clientRef: 'l2', type: 'spiritual', sourceId: 'TEST-FA-LAYER-2',
+    claimClass: 'symbolic_interpretation', claimClasses: ['symbolic_interpretation', 'external_event'],
+    textOrigin: 'assistant_interpretation',
+    data: { text: 'интерпретация с протащенным событием', type: 'интерпретация' } }];
+  const prevL2 = await refresh(c.id, layered2);
+  const layered3 = pkg(45);
+  layered3.entities = [{ clientRef: 'l3', type: 'spiritual', sourceId: 'TEST-FA-LAYER-3',
+    claimClass: 'practice_action', textOrigin: 'assistant_interpretation',
+    data: { text: 'ассистент утверждает действие практики', type: 'интерпретация' } }];
+  const prevL3 = await refresh(c.id, layered3);
+  ok(!prevL2.ok && !prevL3.ok,
+    'фактические классы external_event/practice_action тоже не совместимы со словами ассистента');
+
+  // Честная многослойность БЕЗ фактических классов по-прежнему проходит.
+  const honest = pkg(46);
+  honest.entities = [{ clientRef: 'h1', type: 'spiritual', sourceId: 'TEST-FA-HONEST-1',
+    claimClass: 'symbolic_interpretation', claimClasses: ['symbolic_interpretation', 'working_hypothesis'],
+    textOrigin: 'assistant_interpretation',
+    data: { text: 'интерпретация и гипотеза, честно помеченные', type: 'интерпретация' } }];
+  const prevH = await refresh(c.id, honest);
+  const apH = await apply(c.id);
+  const hRec = await page.evaluate(() =>
+    JSON.parse(JSON.stringify((DB.spiritual.find(r => r.ext && r.ext.sourceId === 'TEST-FA-HONEST-1') || { ext: {} }).ext)));
+  ok(prevH.ok && apH.ok && JSON.stringify(hRec.claimClasses) === JSON.stringify(['symbolic_interpretation', 'working_hypothesis']),
+    'многослойная честная интерпретация проходит со всеми слоями (guard не сломал Wave 6 контракт)');
 }
 
 // ═══ 9. Source disappearance ≠ canonical delete ═════════════════════

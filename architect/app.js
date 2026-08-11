@@ -14047,12 +14047,17 @@ function mbRenderCards(title) {
 const EXT_FEED_FORMAT = 'architect-external-work-feed-v1';
 const EXT_CONN_KINDS = Object.freeze(['google_drive', 'gpt_export', 'other']);
 const EXT_CONN_KIND_RU = { google_drive: 'Google Drive (экспорт)', gpt_export: 'ChatGPT (экспорт)', other: 'Другой источник' };
-// Состояния подключения. Сетевых вызовов нет, поэтому DEGRADED/SYNCING —
-// состояния owner-mediated конвейера, а не скрытого коннектора. Ошибка
-// разбора НИКОГДА не выдаётся за «новых данных нет».
+// Состояния подключения (машинные значения — по FINAL_BRIDGE_CONTRACT).
+// ВАЖНО (честность интерфейса): authenticated-приём из Drive/GPT НЕ
+// реализован (см. FINALA_CONTINUOUS_BRIDGE_IMPLEMENTATION.md, BLOCKER —
+// нужны owner-provisioned OAuth-креденшлы/backend-контракт). Пока канал
+// работает через owner-mediated файл/вставку, «connected» отображается
+// пользователю как «канал активен (приём вручную)», а не как живое
+// авторизованное подключение. Ошибка разбора НИКОГДА не выдаётся за
+// «новых данных нет».
 const EXT_CONN_STATUSES = Object.freeze(['connected', 'syncing', 'error_requires_user', 'permission_revoked', 'disconnected']);
 const EXT_CONN_STATUS_RU = {
-  connected: 'подключён', syncing: 'идёт разбор', error_requires_user: 'ошибка — нужно вмешательство',
+  connected: 'канал активен (приём вручную)', syncing: 'идёт разбор', error_requires_user: 'ошибка — нужно вмешательство',
   permission_revoked: 'доступ отозван', disconnected: 'отключён',
 };
 const EXT_CONN_MAX_HASHES = 200;   // чекпойнт ограничен; страховка от дублей — provenance-ledger, не этот список
@@ -14155,6 +14160,9 @@ async function extBridgeRefresh(connId, text) {
     }
     // Быстрый пропуск по чекпойнту — но ledger остаётся страховкой истины.
     const skipped = committed.has(plan.packageHash) || plan.alreadyImported;
+    // Пакет известен ledger'у, но НЕ чекпойнту (потерянный/отставший cursor,
+    // сбой сохранения чекпойнта) — apply догонит чекпойнт без re-commit.
+    const inCheckpoint = committed.has(plan.packageHash);
     if (skipped) { totals.skippedByCheckpoint++; totals.alreadyImported++; }
     else {
       totals.new += (plan.counts.new || 0);
@@ -14163,26 +14171,48 @@ async function extBridgeRefresh(connId, text) {
       totals.rejected += (plan.counts.invalid || 0) + (plan.counts.unsupported || 0);
       totals.unresolved += (plan.unresolvedRefs || []).length;
     }
-    batches.push({ pkgIndex: i, plan, hash: plan.packageHash, skipped });
+    batches.push({ pkgIndex: i, plan, hash: plan.packageHash, skipped, inCheckpoint });
   }
   extConnUpdate(connId, c => { c.status = 'connected'; c.checkpoint.lastError = null; c.stats.refreshes = (c.stats.refreshes || 0) + 1; c.checkpoint.lastRefreshAt = nowISO(); });
   _bridgePending = { connId, batches };
   return { ok: true, errors: [], totals, batches };
 }
 
-// ── Apply: bounded batches, чекпойнт ПОСЛЕ commit ───────────────────
-// Каждый пакет — отдельная транзакция существующего extCommitPlan (zero
-// mutation при ошибке). Чекпойнт подключения обновляется только после
-// успешного commit этого пакета. Ошибка пакета останавливает feed: ранее
-// закоммиченные пакеты остаются (bounded batches), остальное не трогается.
+// ── Apply: ОДИН previewed feed = ОДНА транзакция ────────────────────
+// Пользователь видит один Preview и жмёт одну кнопку «Применить», поэтому
+// весь bounded feed атомарен: перед применением снимается полный снимок
+// canonical состояния; ошибка ЛЮБОГО пакета откатывает ВСЁ (записи, ledger
+// externalWorkSessions, sourceRefs-merges, чекпойнт) byte-identical к
+// состоянию до Apply. Никаких partial import. Пользователь исправляет feed
+// и повторяет его целиком. Чекпойнт двигается ОДИН раз — после успешного
+// commit всего feed; если canonical применён, а чекпойнт не сохранился —
+// это ЧЕСТНОЕ degraded-состояние (не full success): повтор безопасен через
+// ledger, следующий apply догоняет чекпойнт.
+function extBridgeRestoreFeedSnapshot(feedSnap) {
+  const before = JSON.parse(feedSnap);
+  Object.keys(DB).forEach(k => { delete DB[k]; });
+  Object.assign(DB, before);
+  return persist();
+}
 function extBridgeApply(connId) {
   if (!_bridgePending || _bridgePending.connId !== connId) return { ok: false, errors: ['нет подготовленного preview — сначала Refresh'] };
+  const pending = _bridgePending;
+  _bridgePending = null;   // preview одноразовый: и успех, и откат требуют нового Refresh
+  const feedSnap = JSON.stringify(DB);
   const results = [];
-  for (const b of _bridgePending.batches) {
-    if (b.skipped) { results.push({ pkgIndex: b.pkgIndex, status: 'skipped' }); continue; }
+  const doneHashes = [];   // хэши для ЕДИНСТВЕННОГО продвижения чекпойнта после успеха всего feed
+  let committedPkgs = 0, createdRecs = 0;
+  for (const b of pending.batches) {
+    if (b.skipped) {
+      // Известен ledger'у, но не чекпойнту (stale cursor / прошлый сбой
+      // сохранения чекпойнта) — чекпойнт догоняет без повторного commit.
+      if (!b.inCheckpoint) doneHashes.push(b.hash);
+      results.push({ pkgIndex: b.pkgIndex, status: 'skipped' });
+      continue;
+    }
     // Пакет без нового содержимого (всё уже существует, псевдонимов и связей
-    // нет) — честный no-op: коммитить нечего, но чекпойнт продвигается, чтобы
-    // следующий refresh не разбирал его заново.
+    // нет) — честный no-op: коммитить нечего, чекпойнт продвинется вместе со
+    // всем feed, чтобы следующий refresh не разбирал его заново.
     const hasNew = (b.plan.counts.new || 0) > 0 ||
       (b.plan.links || []).some(l => l.status === 'new') ||
       (b.plan.items || []).some(x => x.status === 'existing-by-provenance' && x.merge && x.merge.addRefs.length);
@@ -14191,29 +14221,41 @@ function extBridgeApply(connId) {
     const hasProblems = (b.plan.counts.conflict || 0) > 0 || (b.plan.counts.invalid || 0) > 0 ||
       (b.plan.counts.unsupported || 0) > 0 || (b.plan.unresolvedRefs || []).length > 0;
     if (!hasNew && !hasProblems) {
-      extConnUpdate(connId, c => {
-        c.checkpoint.committedPackageHashes = [...(c.checkpoint.committedPackageHashes || []), b.hash].slice(-EXT_CONN_MAX_HASHES);
-      });
+      doneHashes.push(b.hash);
       results.push({ pkgIndex: b.pkgIndex, status: 'noop' });
       continue;
     }
     const res = extCommitPlan(b.plan, null);
     if (!res.ok) {
       results.push({ pkgIndex: b.pkgIndex, status: 'failed', error: res.error });
-      _bridgePending = null;
-      extConnUpdate(connId, c => { c.status = 'error_requires_user'; c.checkpoint.lastError = `пакет ${b.pkgIndex + 1}: ${res.error}`; });
-      return { ok: false, errors: [`пакет ${b.pkgIndex + 1}: ${res.error}`], results };
+      // Атомарность feed: откатываем ВСЕ уже применённые пакеты этого feed.
+      results.forEach(r => { if (r.status === 'committed') r.status = 'rolled_back'; });
+      extBridgeRestoreFeedSnapshot(feedSnap);
+      extConnUpdate(connId, c => { c.status = 'error_requires_user'; c.checkpoint.lastError = `пакет ${b.pkgIndex + 1}: ${res.error} — feed откатен целиком, canonical не изменён`; });
+      return { ok: false, rolledBack: true, errors: [`пакет ${b.pkgIndex + 1}: ${res.error} — feed откатен целиком, canonical не изменён`], results };
     }
-    // Чекпойнт двигается ТОЛЬКО здесь — после успешного commit пакета.
-    extConnUpdate(connId, c => {
-      const list = [...(c.checkpoint.committedPackageHashes || []), b.hash].slice(-EXT_CONN_MAX_HASHES);
-      c.checkpoint.committedPackageHashes = list;
-      c.stats.packagesCommitted = (c.stats.packagesCommitted || 0) + 1;
-      c.stats.recordsCreated = (c.stats.recordsCreated || 0) + (Array.isArray(res.created) ? res.created.length : 0);
-    });
+    doneHashes.push(b.hash);
+    committedPkgs++;
+    createdRecs += Array.isArray(res.created) ? res.created.length : 0;
     results.push({ pkgIndex: b.pkgIndex, status: 'committed', created: Array.isArray(res.created) ? res.created.length : 0 });
   }
-  _bridgePending = null;
+  // Чекпойнт двигается ТОЛЬКО здесь — после успешного commit ВСЕГО feed.
+  const ck = extConnUpdate(connId, c => {
+    c.checkpoint.committedPackageHashes = [...(c.checkpoint.committedPackageHashes || []), ...doneHashes].slice(-EXT_CONN_MAX_HASHES);
+    c.stats.packagesCommitted = (c.stats.packagesCommitted || 0) + committedPkgs;
+    c.stats.recordsCreated = (c.stats.recordsCreated || 0) + createdRecs;
+  });
+  if (!ck.ok) {
+    // Canonical пакеты применены и сохранены, но чекпойнт/состояние НЕ
+    // сохранились. Это НЕ full success — честное recoverable-состояние:
+    // повтор feed безопасен (ledger даёт 0 дублей), следующий успешный
+    // apply догонит чекпойнт. Статус — best-effort в памяти (persist
+    // только что отказал), UI получает явное сообщение из результата.
+    const degradedMsg = 'записи применены, но контрольная точка (checkpoint) не сохранена — повтори обновление источника: дубли исключены журналом импорта, чекпойнт догонит';
+    const live = extConnFind(connId);
+    if (live) { live.status = 'error_requires_user'; live.checkpoint.lastError = degradedMsg; }
+    return { ok: false, degraded: true, errors: [degradedMsg], results };
+  }
   return { ok: true, errors: [], results };
 }
 function extBridgeCancel() { _bridgePending = null; }
@@ -14227,7 +14269,7 @@ function extConnUiCreate() {
   const r = extConnCreate(lbl, kind);
   if (!r.ok) { toast(r.errors[0], 'warn'); return; }
   if ($('extc-label')) $('extc-label').value = '';
-  toast('Источник подключён', 'ok'); extRenderConnections();
+  toast('Канал источника создан. Данные принимаются вручную (файл/вставка).', 'ok'); extRenderConnections();
 }
 function extConnUiAction(i, action) {
   const t = _extConnTargets[i]; if (!t) return;
@@ -14265,7 +14307,15 @@ async function extConnUiRefresh() {
 function extConnUiApply() {
   const r = extBridgeApply(_extConnActive);
   const out = $('ext-conn-out');
-  if (!r.ok) { if (out) out.innerHTML = `<div class="psy-adv" role="alert">${esc(r.errors[0])} — этот пакет не применён (ноль мутаций), применённые ранее пакеты сохранены.</div>`; extRenderConnections(); return; }
+  if (!r.ok) {
+    // Два честных не-успеха: rolledBack — весь feed откатен (canonical не
+    // изменён); degraded — записи применены, но чекпойнт не сохранён.
+    const msg = r.degraded
+      ? `${esc(r.errors[0])}`
+      : `${esc(r.errors[0] || 'ошибка применения')}. Исправь feed и повтори его целиком (Refresh → Применить).`;
+    if (out) out.innerHTML = `<div class="psy-adv" role="alert">${msg}</div>`;
+    extRenderConnections(); return;
+  }
   const committed = r.results.filter(x => x.status === 'committed').length;
   const skipped = r.results.filter(x => x.status === 'skipped').length;
   if (out) out.innerHTML = `<div class="si-text">Готово: применено пакетов ${committed}, пропущено (уже были) ${skipped}. Повторный Refresh того же feed создаст 0 дублей.</div>`;
@@ -14344,6 +14394,10 @@ const EXT_CLAIM_CLASSES = Object.freeze([
   'symbolic_interpretation', 'working_hypothesis', 'assistant_interpretation',
   'assistant_summary', 'external_source_claim', 'verification_result',
 ]);
+// Классы, семантически утверждающие ФАКТ (внешний или о действии
+// пользователя). Текст с origin «assistant_interpretation» не может нести ни
+// один из них — ни как primary claimClass, ни как слой claimClasses[].
+const EXT_FACTUAL_CLAIMS = Object.freeze(['user_fact', 'external_event', 'practice_action']);
 // Происхождение ТЕКСТА (чьи это слова), отдельно от класса утверждения.
 const EXT_TEXT_ORIGINS = Object.freeze([
   'user_words', 'structured_summary', 'user_interpretation',
@@ -14488,10 +14542,16 @@ function extValidatePackage(raw) {
     if (e.claimClass != null && !EXT_CLAIM_CLASSES.includes(e.claimClass)) errors.push(`entities[${i}]: неизвестный claimClass "${extStr(e.claimClass, 60)}"`);
     if (e.textOrigin != null && !EXT_TEXT_ORIGINS.includes(e.textOrigin)) errors.push(`entities[${i}]: неизвестный textOrigin "${extStr(e.textOrigin, 60)}"`);
     // Final A (claim safety, A7): слова ассистента не могут быть объявлены
-    // фактом пользователя. Несочетаемая пара отклоняется fail-closed — пакет
-    // не может «повысить» интерпретацию до факта декларацией.
-    if (e.claimClass === 'user_fact' && e.textOrigin === 'assistant_interpretation') {
-      errors.push(`entities[${i}]: claimClass "user_fact" несовместим с textOrigin "assistant_interpretation" — интерпретация ассистента не является фактом пользователя`);
+    // фактом. Проверяется ВЕСЬ набор слоёв (primary claimClass + все
+    // claimClasses[]), не только primary — иначе фактический слой можно
+    // протащить вторым элементом массива. Несочетаемая пара отклоняется
+    // fail-closed: пакет не может «повысить» интерпретацию до факта декларацией.
+    if (e.textOrigin === 'assistant_interpretation') {
+      const claimLayers = [e.claimClass, ...(Array.isArray(e.claimClasses) ? e.claimClasses : [])].filter(Boolean);
+      const promoted = claimLayers.find(c => EXT_FACTUAL_CLAIMS.includes(c));
+      if (promoted) {
+        errors.push(`entities[${i}]: слой claim "${extStr(promoted, 60)}" несовместим с textOrigin "assistant_interpretation" — интерпретация ассистента не является фактом пользователя (ни в primary, ни в claimClasses)`);
+      }
     }
     if (e.sourceDate != null && !extIsIsoDay(e.sourceDate)) errors.push(`entities[${i}]: sourceDate должна быть YYYY-MM-DD`);
     if (e.data != null && (typeof e.data !== 'object' || Array.isArray(e.data))) errors.push(`entities[${i}]: data должна быть объектом`);

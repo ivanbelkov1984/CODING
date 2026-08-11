@@ -17,20 +17,52 @@ const src = await readFile(DIST, 'utf8');
 
 const MUTANTS = [
   {
-    // FINAL contract: cursor-after-commit ordering.
-    id: 'cursor-before-commit',
-    what: 'чекпойнт двигается ДО commit пакета',
-    find: '    const res = extCommitPlan(b.plan, null);\n    if (!res.ok) {',
-    replace: "    extConnUpdate(connId, c => { c.checkpoint.committedPackageHashes = [...(c.checkpoint.committedPackageHashes || []), b.hash].slice(-EXT_CONN_MAX_HASHES); });\n    const res = extCommitPlan(b.plan, null);\n    if (!res.ok) {",
-    expectFail: 'чекпойнт не двигался',
+    // BLOCKER 2: атомарность previewed feed — откат снят.
+    id: 'feed-rollback-removed',
+    what: 'при ошибке пакета уже применённые пакеты feed НЕ откатываются (partial import)',
+    find: '      results.forEach(r => { if (r.status === \'committed\') r.status = \'rolled_back\'; });\n      extBridgeRestoreFeedSnapshot(feedSnap);',
+    replace: '      results.forEach(r => { if (r.status === \'committed\') r.status = \'rolled_back\'; });',
+    expectFail: 'byte-identical после сбоя',
   },
   {
-    // FINAL contract: claim promotion guard.
+    // BLOCKER 2: ошибка commit пакета игнорируется — feed «проходит».
+    id: 'commit-failure-ignored',
+    what: 'сбой commit пакета замалчивается, feed отчитывается успехом',
+    find: '    const res = extCommitPlan(b.plan, null);\n    if (!res.ok) {',
+    replace: '    const res = extCommitPlan(b.plan, null);\n    if (false) {',
+    expectFail: 'apply останавливается на конфликтном пакете',
+  },
+  {
+    // FINAL contract: cursor-after-commit ordering.
+    id: 'cursor-advanced-on-failed-feed',
+    what: 'чекпойнт продвигается за ошибочный пакет (cursor до успешного commit)',
+    find: '      extConnUpdate(connId, c => { c.status = \'error_requires_user\'; c.checkpoint.lastError = `пакет ${b.pkgIndex + 1}: ${res.error} — feed откатен целиком, canonical не изменён`; });',
+    replace: '      extConnUpdate(connId, c => { c.status = \'error_requires_user\'; c.checkpoint.lastError = `пакет ${b.pkgIndex + 1}: ${res.error} — feed откатен целиком, canonical не изменён`; c.checkpoint.committedPackageHashes = [...(c.checkpoint.committedPackageHashes || []), b.hash].slice(-EXT_CONN_MAX_HASHES); });',
+    expectFail: 'чекпойнт НЕ продвинут за ошибочный пакет',
+  },
+  {
+    // BLOCKER 4: результат сохранения чекпойнта игнорируется.
+    id: 'checkpoint-persist-ignored',
+    what: 'сбой сохранения чекпойнта замалчивается как full success',
+    find: '  if (!ck.ok) {',
+    replace: '  if (false && !ck.ok) {',
+    expectFail: 'canonical применён, checkpoint не сохранён (degraded)',
+  },
+  {
+    // BLOCKER 3 + FINAL contract: claim promotion guard (полное снятие).
     id: 'claim-promotion-allowed',
-    what: 'слова ассистента можно объявить фактом пользователя',
-    find: "    if (e.claimClass === 'user_fact' && e.textOrigin === 'assistant_interpretation') {",
+    what: 'слова ассистента можно объявить фактом (guard снят целиком)',
+    find: "    if (e.textOrigin === 'assistant_interpretation') {",
     replace: '    if (false) {',
     expectFail: 'отклонён fail-closed (новое правило A7)',
+  },
+  {
+    // BLOCKER 3: guard откатывается к проверке только primary claimClass.
+    id: 'claim-promotion-primary-only',
+    what: 'guard проверяет только primary — фактический слой проходит в claimClasses[]',
+    find: '      const claimLayers = [e.claimClass, ...(Array.isArray(e.claimClasses) ? e.claimClasses : [])].filter(Boolean);',
+    replace: '      const claimLayers = [e.claimClass].filter(Boolean);',
+    expectFail: 'full-set guard, не только primary',
   },
   {
     id: 'noop-swallows-conflicts',
@@ -46,6 +78,14 @@ const MUTANTS = [
     find: '    const skipped = committed.has(plan.packageHash) || plan.alreadyImported;',
     replace: '    const skipped = committed.has(plan.packageHash);',
     expectFail: 'stale/потерянный cursor безопасен',
+  },
+  {
+    // BLOCKER 4: checkpoint recovery — догон по ledger снят.
+    id: 'checkpoint-catchup-removed',
+    what: 'apply не догоняет потерянный чекпойнт по ledger',
+    find: '      if (!b.inCheckpoint) doneHashes.push(b.hash);',
+    replace: '      ;',
+    expectFail: 'checkpoint recovery',
   },
   {
     id: 'error-hidden-as-connected',

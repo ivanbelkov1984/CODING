@@ -1,122 +1,209 @@
 # FINAL A — Continuous GPT / Google Drive Bridge: implementation contract
 
 Реализация `FINAL_BRIDGE_CONTRACT.md` (Phase A мастер-программы завершения).
-Base: MAIN `76d0b90`. Ветка: `claude/phase-a-continuous-bridge`. Один Draft PR,
-merge только по независимой приёмке владельца.
+Base: MAIN `76d0b90`. Ветка: `claude/phase-a-continuous-bridge`, Draft PR #169,
+tracking issue #168. Merge только по независимой приёмке владельца.
+
+> **СТАТУС: Phase A НЕ объявлена завершённой.** Реализовано ядро моста
+> (инкрементальный канал с чекпойнтом, атомарным apply и claim-safety), но
+> требование контракта «authenticated Drive/GPT source discovery/read» имеет
+> **архитектурный блокер, требующий решения владельца** — см. раздел
+> «BLOCKER: authenticated intake» ниже. Ручной файл/вставка НЕ выдаётся за
+> живое авторизованное подключение (статус в UI: «канал активен (приём
+> вручную)»).
 
 ---
 
-## 1. Архитектурное решение (минимально жизнеспособное, п.2 контракта)
+## BLOCKER: authenticated intake требует owner-provisioned контракта
 
-**Ingestion остаётся owner-controlled.** OAuth/Drive API/фоновая сеть НЕ
-добавлены: контракт Волны 6 («без сети, без AI, без Google OAuth») сохранён,
-privacy boundary браузера не ослаблена. «Continuous» реализован как:
+Повторный аудит текущей архитектуры (backend/server.js, backend/astro_batch.js,
+frontend AI-маршрутизация, GitHub Pages static build) дал следующие факты:
 
-1. **Именованные подключения** — новая коллекция `externalConnections`
+**Что есть сейчас.** Backend — тонкий E2EE sync-store: Express + PostgreSQL,
+4 endpoint'а `/api/space/*` (CRUD зашифрованных пространств по секретному
+UUID-ключу), Web Push, feedback-лог и OpenAI Batch для астро-текстов (ключ
+только в env). **Никакой** OAuth-инфраструктуры, хранения пользовательских
+токенов, per-user auth или Google API-проксирования нет. Frontend — статический
+GitHub Pages PWA без сервера.
+
+**Google Drive.** Реальное авторизованное чтение Drive требует:
+
+1. **OAuth 2.0 Client ID** — создаётся ТОЛЬКО владельцем в Google Cloud
+   Console (проект, consent screen, scope `drive.readonly` или
+   `drive.file`). Это owner-provisioned credential, который Claude не может
+   и не должен создавать сам.
+2. **Решение о хранении токенов.** Два безопасных варианта, оба — новый
+   контракт:
+   - **(а) Browser-only PKCE:** access token живёт только в памяти вкладки
+     (НЕ в localStorage — это запрещено и владельцем, и threat-моделью
+     приложения: localStorage открыт любому XSS). Без refresh token —
+     Google не выдаёт его публичным SPA-клиентам надёжно; повторный вход
+     при каждой сессии. «Continuous» получается только на время вкладки.
+   - **(б) Backend token broker:** confidential client (client_secret в
+     env backend'а), таблица refresh-токенов с шифрованием at rest, новые
+     endpoint'ы (auth-редирект, token exchange, revoke), продуманный
+     доступ по существующему space-ключу. Это расширение backend'а с новой
+     ответственностью (хранение доступа к личному Drive владельца) —
+     существующий контракт backend'а («хранит только шифроблобы, не имеет
+     доступа к содержимому») этим НАРУШАЕТСЯ и требует явного решения.
+3. В обоих вариантах связь «authorization подключения» отделена от
+   «canonical import» (норма уже заложена в модель: authorization меняет
+   только статус `externalConnections`, импорт всегда идёт через
+   FETCH → PREVIEW → COMMIT).
+
+**GPT/ChatGPT.** У OpenAI **нет API для чтения истории чатов пользователя**
+— ни авторизованного, ни какого-либо ещё. Единственный канал — ручной
+экспорт (Settings → Data controls → Export). Для `gpt_export` файл/вставка —
+объективный максимум, не временный компромисс.
+
+**Вывод.** Безопасный authenticated intake из Google Drive объективно
+невозможен в текущей архитектуре без owner-provisioned credential (вариант а)
+или нового backend-контракта (вариант б). По указанию владельца: Phase A
+не объявляется complete; требуется owner architecture decision —
+**вариант (а), вариант (б) или осознанное принятие owner-mediated канала**.
+До решения ingestion остаётся owner-controlled (файл/вставка), и UI честно
+называет его ручным.
+
+---
+
+## 1. Реализованная архитектура (ядро моста)
+
+Поверх **нетронутой** машинерии импорта Волн 6–7 (`extParsePackage` /
+`extBuildPlan` / `extCommitPlan`; форматы v1 — 9 типов, v2 — 14 типов не
+изменены):
+
+1. **Именованные подключения** — коллекция `externalConnections`
    (SCHEMA_VERSION 8 → 9, аддитивно): `{ id, label, kind
    (google_drive|gpt_export|other), status, checkpoint, stats,
    sourceStatusNote, privacyClass:'sensitive', sv, _u }`.
-2. **Явная модель состояний** — `connected | syncing | error_requires_user |
-   permission_revoked | disconnected`. Ошибка разбора/чтения НИКОГДА не
-   маскируется под «новых данных нет»: статус переходит в
-   `error_requires_user` с текстом ошибки в `checkpoint.lastError`.
+2. **Модель состояний** — машинные значения `connected | syncing |
+   error_requires_user | permission_revoked | disconnected` (по контракту).
+   Пока authenticated intake не реализован, `connected` отображается как
+   «канал активен (приём вручную)» — интерфейс не притворяется живым
+   коннектором. Ошибка разбора/чтения НИКОГДА не маскируется под «новых
+   данных нет»: статус `error_requires_user` + причина в
+   `checkpoint.lastError`.
 3. **Инкрементальный детерминированный курсор** —
-   `checkpoint.committedPackageHashes` (bounded, последние 200). Курсор
-   двигается ТОЛЬКО после успешного transactional commit пакета (или
-   честного noop — см. §3). Крэш между commit и продвижением курсора
-   безопасен: повторный проход ловится ledger'ом contentHash → 0 дублей.
-   Устаревший/потерянный курсор безопасен по той же причине.
+   `checkpoint.committedPackageHashes` (bounded, последние 200).
 4. **Feed-обёртка** `architect-external-work-feed-v1` (≤50 пакетов) поверх
-   НЕИЗМЕНЁННЫХ форматов `architect-external-work-v1` (9 типов) и `…-v2`
-   (14 типов). Одиночный пакет тоже принимается (оборачивается в feed из
-   одного элемента). **v2 не бампался**: существующего контракта достаточно
-   (identity/provenance/claims уже выражают всё нужное), новый write-протокол
-   не вводился — feed только группирует пакеты для инкрементального прохода.
+   неизменённых v1/v2; одиночный пакет принимается как feed из одного.
+   v2 не бампался: существующего контракта достаточно, новый
+   write-протокол не вводился.
 
-## 2. Строгое разделение FETCH / PREVIEW / COMMIT
+## 2. FETCH / PREVIEW / COMMIT + атомарность feed
 
-- **FETCH** — `extBridgeRefresh(connId, text)`: разбор feed, per-package
-  `extBuildPlan` на чистом клоне БД, ноль канонических мутаций. Итоги:
-  `{packages, skippedByCheckpoint, new, existing, conflicts, rejected,
-  unresolved, alreadyImported}`.
-- **PREVIEW** — существующий Wave 6/7 предпросмотр плана: новые записи,
-  exact-dedup, alias/sourceRef merges, конфликты, отклонённые, claim classes.
-- **COMMIT** — «Применить»: `extBridgeApply(connId)` по пакетам через
-  `extCommitPlan` (transactional, zero-mutation-on-error). Ошибка commit →
-  feed останавливается, статус `error_requires_user`, курсор НЕ двигается.
-  «Отмена» — `extBridgeCancel()`: pending сбрасывается, ноль мутаций.
+- **FETCH/PREVIEW** — `extBridgeRefresh`: разбор + per-package `extBuildPlan`
+  на чистом клоне БД, ноль канонических мутаций.
+- **COMMIT** — `extBridgeApply`: пользователь видит ОДИН preview и жмёт ОДНУ
+  кнопку, поэтому **весь previewed feed — одна транзакция**. Перед
+  применением снимается полный снимок canonical состояния
+  (`extBridgeRestoreFeedSnapshot`); ошибка ЛЮБОГО пакета (конфликт, сбой
+  persist) откатывает ВСЁ — записи, ledger `externalWorkSessions`,
+  sourceRefs-merges, чекпойнт — byte-identical к состоянию до Apply, и в
+  памяти, и в localStorage. Никаких partial import. Пользователь исправляет
+  feed и повторяет его целиком.
+- **Чекпойнт двигается ОДИН раз** — после успешного commit всего feed.
+  Порядок cursor-after-commit закреплён мутациями
+  (`cursor-advanced-on-failed-feed`, `feed-rollback-removed`,
+  `commit-failure-ignored`).
 
-## 3. Noop-пакеты
+## 3. Checkpoint persistence: честное degraded-состояние
+
+Если canonical пакеты применены и сохранены, а сохранение чекпойнта
+отказало, apply НЕ отчитывается успехом: возвращает
+`{ ok:false, degraded:true }` с явным сообщением («записи применены, но
+контрольная точка не сохранена — повтори обновление: дубли исключены
+журналом импорта»), подключение помечается `error_requires_user`.
+Replay безопасен: ledger даёт 0 дублей, а apply **догоняет чекпойнт** по
+ledger (пакеты, известные ledger'у, но не чекпойнту, добавляются в чекпойнт
+без повторного commit). Закреплено мутациями `checkpoint-persist-ignored`
+и `checkpoint-catchup-removed`. Крэш между commit и чекпойнтом безопасен
+той же парой механизмов; устаревший/потерянный курсор — тоже.
+
+## 4. Noop-пакеты
 
 Пакет, где всё уже импортировано (нет новых записей/связей/addRefs-merge) И
 нет проблем (conflict/invalid/unsupported/unresolvedRefs) — честный noop:
-курсор двигается без commit. Пакет с конфликтом обязан пройти через commit и
-честно упасть (закреплено мутацией `noop-swallows-conflicts`).
+хэш попадает в чекпойнт вместе со всем feed, commit не вызывается. Пакет с
+конфликтом обязан пройти через commit и честно упасть
+(мутация `noop-swallows-conflicts`).
 
-## 4. Идентичность и дедупликация (без изменений, подтверждено тестами)
+## 5. Идентичность и дедупликация (без изменений, подтверждено тестами)
 
 - Семантический `sourceId` = идентичность; module/chat/session/batch =
   provenance. Тот же sourceId другим маршрутом → ОДНА запись, merged
   sourceRefs/aliases.
 - Одинаковый текст + разные sourceId → ДВЕ записи. **Text-dedup запрещён**
-  и закреплён мутацией `text-dedup-introduced`.
+  (мутация `text-dedup-introduced`).
 
-## 5. Claim safety — новое правило A7
+## 6. Claim safety — правило A7 (full-set)
 
-В `extParsePackage` добавлен fail-closed отказ:
-`claimClass:'user_fact'` + `textOrigin:'assistant_interpretation'` →
-пакет отклоняется («интерпретация ассистента не является фактом
-пользователя»). Сны/символические интерпретации с честными claim classes
-(`user_experience`, `symbolic_interpretation`) проходят с сохранением всех
-слоёв. Закреплено мутацией `claim-promotion-allowed`.
+В `extParsePackage`: текст с `textOrigin:'assistant_interpretation'` не может
+нести фактический класс (`EXT_FACTUAL_CLAIMS = user_fact, external_event,
+practice_action`) **ни в primary `claimClass`, ни в любом слое
+`claimClasses[]`** — отклоняется fail-closed. Честная многослойность без
+фактических классов (например symbolic_interpretation + working_hypothesis)
+проходит со всеми слоями. Закреплено мутациями `claim-promotion-allowed`
+(полное снятие) и `claim-promotion-primary-only` (откат к primary-only).
 
-## 6. Исчезновение источника ≠ удаление
+## 7. Исчезновение источника ≠ удаление
 
 `extConnMarkRevoked` / `extConnDisconnect` / `extConnForget` не трогают
 канонические записи. Forget = tombstone подключения + удаление только самой
-записи подключения; импортированные данные остаются с ext-provenance.
-`sourceStatusNote` — provenance-статус, не удаление. Закреплено мутациями
-`revoke-deletes-canonical`, `forget-deletes-canonical`.
+записи подключения. Мутации `revoke-deletes-canonical`,
+`forget-deletes-canonical`.
 
-## 7. Управление пользователем (UI, ov-ext-import)
+## 8. Управление пользователем (UI, ov-ext-import)
 
-Подключить (label+kind) → Обновить (файл/вставка feed) → Предпросмотр →
-Применить / Отмена → Отключить / Переподключить / Забыть. Все операции
-transactional со snapshot+rollback; write-lock восстановления уважается;
-labels экранируются (XSS-тест).
+Подключить (label+kind) → Обновить (файл/вставка) → Предпросмотр →
+Применить / Отмена → Отключить / Переподключить / Забыть. Ошибка отката и
+degraded-состояние показываются отдельными честными сообщениями. Все
+операции transactional; write-lock восстановления уважается; labels
+экранируются (XSS-тест). Никаких скрытых AI/network вызовов (0 запросов в
+тестах).
 
-## 8. Тесты
+## 9. Тесты
 
-- `tests/finalA-bridge.spec.mjs` — 54 проверки: схема v9, lifecycle
-  подключений, malformed feed fail-closed, первый импорт,
-  checkpoint-after-commit, инкремент/replay/stale-cursor → 0 дублей,
-  same-text-different-sourceId → 2 записи, interrupted transaction,
-  claim safety (adversarial fixtures), disappearance≠delete, изоляция
-  профилей + recovery lock, XSS, privacy canary, network=0, JS errors=0.
-- `tests/finalA-mutation.mjs` — 10 мутаций, каждая обязана уронить свой
-  сценарий: cursor-before-commit, claim-promotion-allowed,
-  noop-swallows-conflicts, ledger-skip-removed, error-hidden-as-connected,
-  revoke-deletes-canonical, forget-deletes-canonical, text-dedup-introduced,
-  provenance-dropped, profile-isolation-broken.
+- `tests/finalA-bridge.spec.mjs` — 70 проверок: схема v9, lifecycle,
+  malformed feed fail-closed, первый импорт, checkpoint-after-commit,
+  инкремент/replay/stale-cursor/checkpoint-recovery, same-text ≠ дубль,
+  interrupted transaction, **atomic feed (good A + merge M + failing B +
+  good C → полный byte-identical откат в памяти и storage + повтор
+  исправленного feed целиком)**, **commit-успех + checkpoint-сбой →
+  degraded + replay 0 дублей + recovery**, claim safety (primary,
+  multi-claim adversarial, external_event/practice_action, честная
+  многослойность), disappearance≠delete, изоляция профилей + recovery
+  lock, XSS, privacy canary, network=0, JS errors=0.
+- `tests/finalA-mutation.mjs` — 15 мутаций (каждая роняет ровно свой
+  сценарий): feed-rollback-removed, commit-failure-ignored,
+  cursor-advanced-on-failed-feed, checkpoint-persist-ignored,
+  claim-promotion-allowed, claim-promotion-primary-only,
+  noop-swallows-conflicts, ledger-skip-removed, checkpoint-catchup-removed,
+  error-hidden-as-connected, revoke-deletes-canonical,
+  forget-deletes-canonical, text-dedup-introduced, provenance-dropped,
+  profile-isolation-broken.
 - `tests/finalA-backup-roundtrip.test.mjs` — 10 проверок: подключения +
   checkpoint через encrypted backup/restore byte-identical; в envelope нет
   labels/hashes/sourceId открытым текстом; wrong password/corrupt → ноль
   мутаций.
-- Все сюиты включены в `npm test` / `npm run test:backup`.
+- Все сюиты включены в `npm test` / `npm run test:backup`. Wave 6/7/8/9
+  сюиты не ослаблялись.
 
-## 9. Известные ограничения
+## 10. Известные ограничения
 
-- Автоматического сетевого опроса Drive/GPT нет (осознанно): владелец
-  приносит feed-файл/вставку; состояния подключения отражают
-  owner-mediated pipeline, а не фоновый коннектор.
-- Feed ≤50 пакетов за один проход; больший объём — несколькими проходами
-  (курсор делает это безопасным).
+- Authenticated Drive intake — заблокирован до owner architecture decision
+  (см. BLOCKER выше). ChatGPT-история читается только экспортом — ограничение
+  платформы OpenAI, не этой реализации.
+- Feed ≤50 пакетов за проход; большие объёмы — несколькими проходами.
 - `committedPackageHashes` bounded (200): выпавшие из окна пакеты ловятся
-  ledger'ом contentHash (проверено тестом stale cursor).
+  ledger'ом (тест stale cursor).
+- При отказе хранилища в degraded-пути статус меняется best-effort в памяти
+  (persist только что отказал); истинное состояние всегда восстановимо
+  через ledger.
 
-## 10. Rollback
+## 11. Rollback
 
 Один revert-commit PR возвращает MAIN к `76d0b90`. Схема аддитивна
 (v8 → v9: пустой `externalConnections` + правило A7 в parse); данные
-пользователей v8 читаются без миграционных потерь; откат не разрушает
-существующие записи (новая коллекция просто игнорируется старым кодом).
+пользователей v8 читаются без потерь; откат не разрушает существующие
+записи (новая коллекция игнорируется старым кодом).
