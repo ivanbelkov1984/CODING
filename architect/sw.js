@@ -16,7 +16,14 @@ const LKG = 'arch-lkg';
 // Служебные ключи внутри LKG (не URL приложения — их не отдаём как ассеты).
 const LKG_VERSION_KEY = '__arch_lkg_version__';
 const RECOVERY_FLAG_KEY = '__arch_recovery_mode__';
-const SHELL = ['./', './index.html', './lucide.js', './astronomy.min.js', './astro_rules.js', './inter-latin.woff2', './inter-cyrillic.woff2', './manifest.json', './icon-192.png', './icon-512.png',
+const SHELL = ['./', './index.html', './lucide.js', './astronomy.min.js', './astro_rules.js', './inter-latin.woff2', './inter-cyrillic.woff2', './manifest.json',
+  // Brand v3: ассеты, нужные офлайн (иконки приложения, favicon, знак в
+  // шапке, знак «О приложении» и фирменный блок первого запуска).
+  './brand/03-app-icon-192.png', './brand/02-app-icon-512.png',
+  './brand/11-app-icon-maskable-192.png', './brand/10-app-icon-maskable-512.png',
+  './brand/04-apple-touch-icon-180.png', './brand/06-favicon-32.png', './brand/05-favicon-64.png',
+  './brand/08-header-brand-icon-64.png', './brand/07-header-brand-icon-96.png',
+  './brand/09-about-brand-icon-256.png', './brand/26-brand-lockup-icon-title-subtitle-safe.png',
   // ESM-модули зашифрованного backup — в app shell, чтобы UI работал офлайн
   // (dynamic import из index.html резолвится из кэша). Пути относительны scope
   // (/CODING/architect/). Сами backup-ФАЙЛЫ пользователя (blob-скачивание) не
@@ -234,7 +241,7 @@ self.addEventListener('push', e => {
   let d = { title: 'Архитектор', body: 'Хороший момент отметить день?' };
   try { if (e.data) d = Object.assign(d, e.data.json()); } catch (_) {}
   e.waitUntil(self.registration.showNotification(d.title, {
-    body: d.body, icon: './icon-192.png', badge: './icon-192.png',
+    body: d.body, icon: './brand/03-app-icon-192.png', badge: './brand/03-app-icon-192.png',
     tag: d.tag || 'arch-reminder', data: { url: d.url || './' }, renotify: true,
   }));
 });

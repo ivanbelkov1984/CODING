@@ -1,0 +1,42 @@
+{
+  "canonical_master": "01-app-icon-master-1024.png",
+  "pwa": {
+    "any": [
+      "03-app-icon-192.png",
+      "02-app-icon-512.png"
+    ],
+    "maskable": [
+      "11-app-icon-maskable-192.png",
+      "10-app-icon-maskable-512.png"
+    ]
+  },
+  "ios": "04-apple-touch-icon-180.png",
+  "favicon": [
+    "06-favicon-32.png",
+    "05-favicon-64.png"
+  ],
+  "header": {
+    "mobile": "08-header-brand-icon-64.png",
+    "retina_or_large": "07-header-brand-icon-96.png",
+    "rule": "use icon only when live HTML title is present"
+  },
+  "identity_lockups": {
+    "full_reference": "20-brand-lockup-full-safe.png",
+    "wordmark_title": "21-wordmark-title-safe.png",
+    "wordmark_subtitle": "22-wordmark-subtitle-safe.png",
+    "wordmark_title_subtitle": "23-wordmark-title-subtitle-safe.png",
+    "icon_title": "24-brand-lockup-icon-title-safe.png",
+    "compact": "25-brand-lockup-compact-safe.png",
+    "icon_title_subtitle": "26-brand-lockup-icon-title-subtitle-safe.png"
+  },
+  "settings_about": "09-about-brand-icon-256.png",
+  "splash": "12-splash-brand-1024.png",
+  "runtime_rules": [
+    "Never use 00-source-mockup-reference.png in runtime.",
+    "Never replace section/domain icons with the app brand icon.",
+    "Use live HTML text for titles where the current UI already renders a title; raster wordmarks are identity assets, not mandatory UI text.",
+    "Do not crop assets with CSS object-fit: cover; use contain.",
+    "Preserve aspect ratio.",
+    "No external CDN."
+  ]
+}

@@ -10,7 +10,7 @@
 //    node build.mjs v202607061500 → dist/, версия задана явно
 //    node build.mjs --combined out.html → только инлайн-HTML (для тестов)
 // ═══════════════════════════════════════════════════════════════
-import { readFile, writeFile, mkdir, copyFile } from 'fs/promises';
+import { readFile, writeFile, mkdir, copyFile, rm } from 'fs/promises';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
@@ -18,11 +18,25 @@ import { createHash } from 'crypto';
 const DIR = dirname(fileURLToPath(import.meta.url));
 // lucide.js — самохостинг иконок (без внешнего CDN); копируется рядом с HTML.
 // astronomy.min.js — vendored MIT-движок астрорасчётов (lazy-load, только при opt-in).
-const STATIC = ['lucide.js', 'astronomy.min.js', 'astro_rules.js', 'astro_texts_extra.js', 'astro_texts_natal.js', 'astro_texts_transit.js', 'astro_texts_synastry.js', 'astro_texts_jyotish.js', 'inter-latin.woff2', 'inter-cyrillic.woff2', 'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon-180.png'];
+const STATIC = ['lucide.js', 'astronomy.min.js', 'astro_rules.js', 'astro_texts_extra.js', 'astro_texts_natal.js', 'astro_texts_transit.js', 'astro_texts_synastry.js', 'astro_texts_jyotish.js', 'inter-latin.woff2', 'inter-cyrillic.woff2', 'manifest.json'];
 // ESM-модули зашифрованного backup — копируются рядом с HTML в dist/backup/,
 // грузятся приложением по HTTP (без CDN, без Node-рантайма). index.html делает
 // import('./backup/backup-boot.mjs'); sw.js кэширует их в app shell.
 const BACKUP_MODULES = ['backup-core.mjs', 'backup-adapter.mjs', 'backup-restore.mjs', 'backup-ui.mjs', 'backup-boot.mjs'];
+// Brand v3 (owner-approved kit): в сборку попадают ТОЛЬКО реально используемые
+// в рантайме ассеты. Мастер 1024, исходный mockup и неиспользуемые lockup'ы
+// остаются в репозитории как источник, но не раздуваются в dist.
+const BRAND_RUNTIME = [
+  '02-app-icon-512.png', '03-app-icon-192.png', '04-apple-touch-icon-180.png',
+  '05-favicon-64.png', '06-favicon-32.png', '07-header-brand-icon-96.png',
+  '08-header-brand-icon-64.png', '09-about-brand-icon-256.png',
+  '10-app-icon-maskable-512.png', '11-app-icon-maskable-192.png',
+  '26-brand-lockup-icon-title-subtitle-safe.png',
+];
+async function copyBrand(outDir) {
+  await mkdir(join(outDir, 'brand'), { recursive: true });
+  for (const f of BRAND_RUNTIME) await copyFile(join(DIR, 'brand', f), join(outDir, 'brand', f));
+}
 async function copyBackup(outDir) {
   await mkdir(join(outDir, 'backup'), { recursive: true });
   for (const f of BACKUP_MODULES) await copyFile(join(DIR, 'backup', f), join(outDir, 'backup', f));
@@ -36,6 +50,9 @@ async function contentVersion() {
   for (const f of ['index.html', 'styles.css', 'app.js', 'context-action-dock.css', 'context-action-dock.js', 'sw.js', 'lucide.js', 'astronomy.min.js', 'astro_rules.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) h.update(await readFile(join(DIR, f)));
   // Изменение любого backup-модуля тоже должно давать новую версию кэша.
   for (const f of BACKUP_MODULES) h.update(await readFile(join(DIR, 'backup', f)));
+  // …как и замена фирменных ассетов: иначе SW отдал бы старые иконки.
+  for (const f of BRAND_RUNTIME) h.update(await readFile(join(DIR, 'brand', f)));
+  h.update(await readFile(join(DIR, 'manifest.json')));
   return 'v' + h.digest('hex').slice(0, 10);
 }
 
@@ -94,11 +111,15 @@ async function main() {
     // чтобы combined-артефакт реально грузил backup по HTTP (не только собирался).
     for (const f of ['lucide.js', 'astronomy.min.js', 'astro_rules.js', 'astro_texts_extra.js', 'astro_texts_natal.js', 'astro_texts_transit.js', 'astro_texts_synastry.js', 'astro_texts_jyotish.js', 'inter-latin.woff2', 'inter-cyrillic.woff2']) await copyFile(join(DIR, f), join(dirname(out), f));
     await copyBackup(dirname(out));
+    await copyBrand(dirname(out));
     console.log('combined →', out);
     return;
   }
   const build = args[0] || await contentVersion();
   const dist = join(DIR, 'dist');
+  // Полная сборка начинается с чистого dist: иначе файлы прошлых версий
+  // (например заменённые иконки) остались бы в артефакте и уехали в деплой.
+  await rm(dist, { recursive: true, force: true });
   await mkdir(dist, { recursive: true });
   await writeFile(join(dist, 'index.html'), await buildCombined(build));
   const sw = await readFile(join(DIR, 'sw.js'), 'utf8');
@@ -106,7 +127,8 @@ async function main() {
   await writeFile(join(dist, 'sw.js'), sw.replaceAll('__BUILD__', build));
   for (const f of STATIC) await copyFile(join(DIR, f), join(dist, f));
   await copyBackup(dist);
-  console.log(`✓ dist/ собран · версия arch-${build} · файлов: ${STATIC.length + 2 + BACKUP_MODULES.length}`);
+  await copyBrand(dist);
+  console.log(`✓ dist/ собран · версия arch-${build} · файлов: ${STATIC.length + 2 + BACKUP_MODULES.length + BRAND_RUNTIME.length}`);
 }
 
 main().catch(e => { console.error('BUILD FAILED:', e.message); process.exit(1); });

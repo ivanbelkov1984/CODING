@@ -107,6 +107,27 @@ ok(Object.keys(sums).length === CRITICAL.length, `SHA: посчитаны сум
 console.log('\n  Контрольные суммы публикуемых ассетов (sha256, первые 16):');
 for (const [f, h] of Object.entries(sums)) console.log(`    ${h}  ${f}`);
 
+// ── 6b. Brand v3: фирменные ассеты и манифест в полном артефакте ────
+// Эта сюита запускается ПОСЛЕ `node build.mjs`, поэтому здесь проверяется
+// именно то, что уезжает в деплой: манифест, его иконки и precache SW.
+{
+  const man = JSON.parse(await readFile(join(DIST, 'manifest.json'), 'utf8'));
+  const missIcons = [];
+  for (const i of man.icons || []) if (!(await exists(join(DIST, i.src)))) missIcons.push(i.src);
+  ok(missIcons.length === 0, `артефакт: все иконки манифеста на месте (отсутствует: ${missIcons.length})`, missIcons.join(', '));
+  ok(man.name === 'Архитектор жизни', `артефакт: имя приложения в манифесте (${man.name})`);
+  const swSrc = await readFile(join(DIST, 'sw.js'), 'utf8');
+  const brandShell = [...swSrc.matchAll(/'\.\/(brand\/[^']+)'/g)].map(m => m[1]);
+  const missShell = [];
+  for (const f of new Set(brandShell)) if (!(await exists(join(DIST, f)))) missShell.push(f);
+  ok(brandShell.length > 0 && missShell.length === 0,
+    `артефакт: брендовый precache SW полностью присутствует (${new Set(brandShell).size} файлов)`, missShell.join(', '));
+  ok(!(await exists(join(DIST, 'icon-192.png'))) && !(await exists(join(DIST, 'icon-512.png'))) &&
+     !(await exists(join(DIST, 'brand', '00-source-mockup-reference.png'))) &&
+     !(await exists(join(DIST, 'brand', '01-app-icon-master-1024.png'))),
+    'артефакт: старых иконок и reference/мастера в деплое нет');
+}
+
 // ── 7. Backup-модули действительно скопированы ──────────────────────
 const BACKUP = ['backup-core.mjs', 'backup-adapter.mjs', 'backup-restore.mjs', 'backup-ui.mjs', 'backup-boot.mjs'];
 const missBackup = [];

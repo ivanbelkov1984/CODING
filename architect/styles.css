@@ -1272,8 +1272,11 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
   -webkit-background-clip:text;background-clip:text;color:transparent;
   -webkit-text-fill-color:transparent;}
 
-/* ── Логотип-звезда: градиентная плитка с мягким свечением ── */
-.top-dot,.sp-icon{background:linear-gradient(135deg,var(--accent),var(--purple))!important;
+/* ── Логотип-звезда: градиентная плитка с мягким свечением ──
+   Brand v3: плитка остаётся только там, где знак рисуется вектором. Под
+   фирменным растровым знаком подложка выключена — у него собственное
+   свечение и скруглённый квадрат, накладка их бы забивала. */
+.top-dot:not(.brand-mark),.sp-icon:not(:has(.brand-mark)){background:linear-gradient(135deg,var(--accent),var(--purple))!important;
   box-shadow:0 0 20px color-mix(in srgb,var(--accent) 40%,transparent);}
 .top-dot svg,.sp-icon svg{color:#fff!important}
 
@@ -1395,6 +1398,10 @@ body.navshell #sys-back{display:flex;align-items:center;gap:.3rem;min-height:44p
   body.navshell .scrim{display:none;opacity:0;pointer-events:none}
   body.navshell .burger{display:none}
   body.navshell .nsh-tabbar{display:none}
+  /* Brand v3: при постоянном сайдбаре идентичность несёт он — знак в шапке
+     скрывается, чтобы логотип не дублировался в одном экране (то же правило
+     уже действует на десктопе с 901px). */
+  body.navshell .topbar .top-brand .top-dot{display:none}
 }
 /* «Ещё»-хаб и группы лаунчера «Записать» */
 .more-list{display:flex;flex-direction:column;gap:2px;padding:0 var(--s3) var(--s2)}
@@ -1465,3 +1472,19 @@ body.navshell .nsh-tab:focus-visible,body.navshell .nsh-fab:focus-visible,
 .psy-ctxdep{display:inline-block;margin-left:.35rem;padding:.1rem .4rem;border-radius:6px;background:var(--orange-l,rgba(217,119,6,.12));color:var(--orange,#D97706);font-size:var(--tx1,.7rem)}
 .psy-exp-viz{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:.35rem}
 .psy-del{margin-top:.35rem}
+
+/* ── Brand v3 (owner-approved kit) ───────────────────────────────────
+   Фирменные изображения НИКОГДА не обрезаются: только contain, пропорции
+   сохраняются, контейнер не режет свечение и последние буквы названия. */
+.brand-mark{object-fit:contain;width:100%;height:100%;display:block}
+.top-dot.brand-mark{width:36px;height:36px;background:none;border:0;border-radius:10px;box-shadow:none}
+@media(min-width:901px){.side-brand .top-dot.brand-mark{width:40px;height:40px}}
+.sp-icon .brand-mark{width:100%;height:100%;border-radius:14px}
+.sp-icon:has(.brand-mark){background:none;border:0;box-shadow:none}
+.brand-lockup{display:block;object-fit:contain;width:auto;height:auto;max-width:100%;margin-inline:auto}
+.onboard-lockup{max-width:min(320px,86%);margin-bottom:var(--s5)}
+.about-card .about-id{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s4) 0}
+.about-mark{width:44px;height:44px;border-radius:12px;flex-shrink:0}
+.about-col{min-width:0}
+.about-name{font-weight:600;color:var(--t1)}
+.about-sub{font-size:var(--tx2);color:var(--t3)}
