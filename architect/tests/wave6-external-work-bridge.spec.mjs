@@ -1073,6 +1073,7 @@ console.log('\n── Wave 6: External Work Bridge ──');
     return {
       status: p.items[0].status, n: DB.insights.length,
       refs: (DB.insights[0].ext.sourceRefs || []).map(r => r.sourceId).sort(),
+      body: DB.insights[0].body,
       ok: res.ok,
     };
   }, JSON.stringify({
@@ -1090,8 +1091,14 @@ console.log('\n── Wave 6: External Work Bridge ──');
     }],
     links: [],
   }));
-  ok(dup.status === 'existing-by-provenance' && dup.n === 1,
-    `legacy-запись без sourceRefs найдена дедупом — дубля нет (${dup.n})`);
+  // Variant B: тот же primary sourceId с ДРУГИМ содержимым у legacy-записи
+  // (без снимка импорта) — не «existing», а конфликт fail-closed: владение
+  // изменившихся полей неатрибутируемо, локальное содержимое сохраняется,
+  // provenance-ссылки при этом дописываются.
+  ok(dup.status === 'changed-conflict' && dup.n === 1,
+    `legacy-запись без снимка + другой текст → конфликт, дубля нет (${dup.status}, ${dup.n})`);
+  ok(dup.body === 'Импортирована предыдущей версией importer.',
+    'локальное содержимое legacy-записи не затронуто (kept local)');
   ok(JSON.stringify(dup.refs) === JSON.stringify(['TEST-DREAM-400', 'TEST-LIFE-400']),
     'плоский legacy sourceId поднят в набор ссылок, новый псевдоним дописан');
 }

@@ -14233,28 +14233,50 @@ async function extBridgeRefresh(connId, text) {
   }
   const committed = new Set((conn.checkpoint.committedPackageHashes || []));
   const batches = [];
-  const totals = { packages: parsed.packages.length, skippedByCheckpoint: 0, new: 0, existing: 0, conflicts: 0, rejected: 0, unresolved: 0, alreadyImported: 0 };
+  // P1 (owner, пункт 10): пакеты и записи считаются РАЗДЕЛЬНО.
+  // skippedByCheckpoint — это ПАКЕТЫ (по журналу/чекпойнту), existing — ЗАПИСИ.
+  const totals = { packages: parsed.packages.length, skippedByCheckpoint: 0, new: 0, existing: 0, changed: 0, changedConflicts: 0, updateRejected: 0, conflicts: 0, rejected: 0, unresolved: 0, alreadyImported: 0 };
+  // Планы всех пакетов строятся ПОСЛЕДОВАТЕЛЬНО на ОДНОМ кандидате: пакет N
+  // видит записи и обновления пакетов 1…N-1. Иначе sourceId, впервые
+  // встречающийся в двух пакетах одного feed, оба раза выглядел бы «новым»
+  // и при применении создал бы дубль (устранённый дефект Variant B).
+  const sharedDb = JSON.parse(JSON.stringify(DB));
+  const sharedIdx = extIndexExistingProvenance(sharedDb);
   for (let i = 0; i < parsed.packages.length; i++) {
     const pkgText = JSON.stringify(parsed.packages[i]);
-    const plan = await extBuildPlan(pkgText);
+    // Пакет, известный чекпойнту или ledger'у, пропускается ДО построения
+    // плана: hash пакета покрывает всё содержимое, поэтому изменённая версия
+    // пакета никогда не совпадёт с checkpoint-hash и построит полный план.
+    const v = extValidatePackage(pkgText);
+    if (!v.ok) {
+      extConnUpdate(connId, c => { c.status = 'error_requires_user'; c.checkpoint.lastError = `пакет ${i + 1}: ${v.errors[0]}`; });
+      return { ok: false, errors: [`пакет ${i + 1}: ${v.errors.join('; ')}`] };
+    }
+    const hash = await extSha256(extCanonicalJson({
+      format: v.pkg.format, source: v.pkg.source, session: v.pkg.session,
+      entities: v.pkg.entities, links: v.pkg.links,
+    }));
+    const inCheckpoint = committed.has(hash);
+    const inLedger = (DB.externalWorkSessions || []).some(s => s && s.contentHash === hash);
+    if (inCheckpoint || inLedger) {
+      totals.skippedByCheckpoint++; totals.alreadyImported++;
+      batches.push({ pkgIndex: i, plan: null, hash, skipped: true, inCheckpoint });
+      continue;
+    }
+    const plan = await extBuildPlan(pkgText, { db: sharedDb, provIdx: sharedIdx });
     if (!plan.ok) {
       extConnUpdate(connId, c => { c.status = 'error_requires_user'; c.checkpoint.lastError = `пакет ${i + 1}: ${plan.errors[0]}`; });
       return { ok: false, errors: [`пакет ${i + 1}: ${plan.errors.join('; ')}`] };
     }
-    // Быстрый пропуск по чекпойнту — но ledger остаётся страховкой истины.
-    const skipped = committed.has(plan.packageHash) || plan.alreadyImported;
-    // Пакет известен ledger'у, но НЕ чекпойнту (потерянный/отставший cursor,
-    // сбой сохранения чекпойнта) — apply догонит чекпойнт без re-commit.
-    const inCheckpoint = committed.has(plan.packageHash);
-    if (skipped) { totals.skippedByCheckpoint++; totals.alreadyImported++; }
-    else {
-      totals.new += (plan.counts.new || 0);
-      totals.existing += (plan.counts['existing-by-provenance'] || 0);
-      totals.conflicts += (plan.counts.conflict || 0);
-      totals.rejected += (plan.counts.invalid || 0) + (plan.counts.unsupported || 0);
-      totals.unresolved += (plan.unresolvedRefs || []).length;
-    }
-    batches.push({ pkgIndex: i, plan, hash: plan.packageHash, skipped, inCheckpoint });
+    totals.new += (plan.counts.new || 0);
+    totals.existing += (plan.counts['existing-by-provenance'] || 0);
+    totals.changed += (plan.counts.changed || 0);
+    totals.changedConflicts += (plan.counts['changed-conflict'] || 0);
+    totals.updateRejected += (plan.counts['update-rejected'] || 0);
+    totals.conflicts += (plan.counts.conflict || 0);
+    totals.rejected += (plan.counts.invalid || 0) + (plan.counts.unsupported || 0);
+    totals.unresolved += (plan.unresolvedRefs || []).length;
+    batches.push({ pkgIndex: i, plan, hash: plan.packageHash, skipped: false, inCheckpoint: false });
   }
   extConnUpdate(connId, c => {
     c.status = 'preview_ready';
@@ -14270,28 +14292,25 @@ async function extBridgeRefresh(connId, text) {
 
 // ── Apply: ОДИН previewed feed = ОДНА транзакция ────────────────────
 // Пользователь видит один Preview и жмёт одну кнопку «Применить», поэтому
-// весь bounded feed атомарен: перед применением снимается полный снимок
-// canonical состояния; ошибка ЛЮБОГО пакета откатывает ВСЁ (записи, ledger
-// externalWorkSessions, sourceRefs-merges, чекпойнт) byte-identical к
-// состоянию до Apply. Никаких partial import. Пользователь исправляет feed
-// и повторяет его целиком. Чекпойнт двигается ОДИН раз — после успешного
-// commit всего feed; если canonical применён, а чекпойнт не сохранился —
-// это ЧЕСТНОЕ degraded-состояние (не full success): повтор безопасен через
-// ledger, следующий apply догоняет чекпойнт.
-function extBridgeRestoreFeedSnapshot(feedSnap) {
-  const before = JSON.parse(feedSnap);
-  Object.keys(DB).forEach(k => { delete DB[k]; });
-  Object.assign(DB, before);
-  return persist();
-}
+// весь bounded feed атомарен. Variant B: все пакеты коммитятся в ОДНОГО
+// кандидата (клон DB), живая DB не мутируется вовсе до финального swap;
+// сбой ЛЮБОГО пакета просто отбрасывает кандидата (rollback = «кандидат не
+// принят», byte-identical живое состояние), успех — один swap + один
+// persist. Никаких partial import. Чекпойнт двигается ОДИН раз — после
+// успешного commit всего feed; если canonical применён, а чекпойнт не
+// сохранился — это ЧЕСТНОЕ degraded-состояние (не full success): повтор
+// безопасен через ledger, следующий apply догоняет чекпойнт.
 function extBridgeApply(connId) {
   if (!_bridgePending || _bridgePending.connId !== connId) return { ok: false, errors: ['нет готового предпросмотра — сначала загрузи данные источника'] };
   const pending = _bridgePending;
   _bridgePending = null;   // preview одноразовый: и успех, и откат требуют нового Refresh
-  const feedSnap = JSON.stringify(DB);
+  const candidate = JSON.parse(JSON.stringify(DB));
+  // Единый provenance-индекс кандидата: commit-время ре-проверяет «new»
+  // записи против ЖИВОГО состояния (устаревший предпросмотр не создаст дубль).
+  const commitIdx = extIndexExistingProvenance(candidate);
   const results = [];
   const doneHashes = [];   // хэши для ЕДИНСТВЕННОГО продвижения чекпойнта после успеха всего feed
-  let committedPkgs = 0, createdRecs = 0;
+  let committedPkgs = 0, createdRecs = 0, updatedRecs = 0, keptLocalTotal = 0;
   for (const b of pending.batches) {
     if (b.skipped) {
       // Известен ledger'у, но не чекпойнту (stale cursor / прошлый сбой
@@ -14300,40 +14319,70 @@ function extBridgeApply(connId) {
       results.push({ pkgIndex: b.pkgIndex, status: 'skipped' });
       continue;
     }
-    // Пакет без нового содержимого (всё уже существует, псевдонимов и связей
-    // нет) — честный no-op: коммитить нечего, чекпойнт продвинется вместе со
-    // всем feed, чтобы следующий refresh не разбирал его заново.
-    const hasNew = (b.plan.counts.new || 0) > 0 ||
+    const counts = b.plan.counts || {};
+    // Пакет без применимой работы — честный no-op: коммитить нечего, чекпойнт
+    // продвинется вместе со всем feed, чтобы следующий refresh не разбирал
+    // его заново. Безопасные обновления (changed) — применимая работа.
+    const hasWork = (counts.new || 0) > 0 || (counts.changed || 0) > 0 ||
       (b.plan.links || []).some(l => l.status === 'new') ||
-      (b.plan.items || []).some(x => x.status === 'existing-by-provenance' && x.merge && x.merge.addRefs.length);
+      (b.plan.items || []).some(x => x.merge && x.merge.addRefs.length &&
+        ['existing-by-provenance', 'changed', 'changed-conflict'].includes(x.status));
     // Конфликт/ошибка — НЕ no-op: такой пакет обязан пройти через commit и
     // честно упасть (fail-closed), а чекпойнт остаться на месте.
-    const hasProblems = (b.plan.counts.conflict || 0) > 0 || (b.plan.counts.invalid || 0) > 0 ||
-      (b.plan.counts.unsupported || 0) > 0 || (b.plan.unresolvedRefs || []).length > 0;
-    if (!hasNew && !hasProblems) {
-      doneHashes.push(b.hash);
-      results.push({ pkgIndex: b.pkgIndex, status: 'noop' });
+    const hasProblems = (counts.conflict || 0) > 0 || (counts.invalid || 0) > 0 ||
+      (counts.unsupported || 0) > 0 || (b.plan.unresolvedRefs || []).length > 0;
+    const needsDecision = (counts['changed-conflict'] || 0) > 0;
+    if (!hasWork && !hasProblems) {
+      // Остались только непринятые решения (локальные правки против новой
+      // версии источника): ничего не применяется, ledger не пишется и
+      // чекпойнт НЕ двигается — пакет честно всплывёт при следующем чтении.
+      if (needsDecision) { keptLocalTotal += counts['changed-conflict'] || 0; }
+      else doneHashes.push(b.hash);
+      results.push({ pkgIndex: b.pkgIndex, status: needsDecision ? 'needs-decision' : 'noop' });
       continue;
     }
-    const res = extCommitPlan(b.plan, null);
+    const res = extCommitPlan(b.plan, null, { db: candidate, deferPersist: true, provIdx: commitIdx });
     if (!res.ok) {
       results.push({ pkgIndex: b.pkgIndex, status: 'failed', error: res.error });
-      // Атомарность feed: откатываем ВСЕ уже применённые пакеты этого feed.
+      // Атомарность feed: кандидат отброшен ЦЕЛИКОМ, живая DB не менялась.
       results.forEach(r => { if (r.status === 'committed') r.status = 'rolled_back'; });
-      extBridgeRestoreFeedSnapshot(feedSnap);
       extConnUpdate(connId, c => { c.status = 'error_requires_user'; c.checkpoint.lastError = `пакет ${b.pkgIndex + 1}: ${res.error} — feed откатен целиком, canonical не изменён`; });
       return { ok: false, rolledBack: true, errors: [`пакет ${b.pkgIndex + 1}: ${res.error} — feed откатен целиком, canonical не изменён`], results };
     }
     doneHashes.push(b.hash);
     committedPkgs++;
     createdRecs += Array.isArray(res.created) ? res.created.length : 0;
-    results.push({ pkgIndex: b.pkgIndex, status: 'committed', created: Array.isArray(res.created) ? res.created.length : 0 });
+    updatedRecs += Array.isArray(res.updatedRefs) ? res.updatedRefs.length : 0;
+    keptLocalTotal += res.keptLocal || 0;
+    results.push({
+      pkgIndex: b.pkgIndex, status: 'committed',
+      created: Array.isArray(res.created) ? res.created.length : 0,
+      updated: Array.isArray(res.updatedRefs) ? res.updatedRefs.length : 0,
+      keptLocal: res.keptLocal || 0,
+    });
+  }
+  // Один атомарный переход canonical: swap кандидата + ОДИН persist.
+  if (committedPkgs > 0) {
+    const prevDb = DB;
+    DB = candidate;
+    if (!persist()) {
+      DB = prevDb;   // кандидат отброшен целиком — canonical не изменён
+      const failMsg = 'не удалось сохранить импорт — feed не применён, canonical не изменён';
+      extConnUpdate(connId, c => { c.status = 'error_requires_user'; c.checkpoint.lastError = failMsg; });
+      return {
+        ok: false, rolledBack: true, errors: [failMsg],
+        results: results.map(r => r.status === 'committed' ? { ...r, status: 'rolled_back' } : r),
+      };
+    }
   }
   // Чекпойнт двигается ТОЛЬКО здесь — после успешного commit ВСЕГО feed.
   const ck = extConnUpdate(connId, c => {
-    c.checkpoint.committedPackageHashes = [...(c.checkpoint.committedPackageHashes || []), ...doneHashes].slice(-EXT_CONN_MAX_HASHES);
+    // Set-дедуп: идентичный пакет, встретившийся в feed дважды, не тратит
+    // два слота bounded-чекпойнта.
+    c.checkpoint.committedPackageHashes = [...new Set([...(c.checkpoint.committedPackageHashes || []), ...doneHashes])].slice(-EXT_CONN_MAX_HASHES);
     c.stats.packagesCommitted = (c.stats.packagesCommitted || 0) + committedPkgs;
     c.stats.recordsCreated = (c.stats.recordsCreated || 0) + createdRecs;
+    c.stats.recordsUpdated = (c.stats.recordsUpdated || 0) + updatedRecs;
     c.status = 'ready';   // предпросмотр применён — источник снова в обычном состоянии
   });
   if (!ck.ok) {
@@ -14345,9 +14394,9 @@ function extBridgeApply(connId) {
     const degradedMsg = 'записи применены, но контрольная точка (checkpoint) не сохранена — повтори обновление источника: дубли исключены журналом импорта, чекпойнт догонит';
     const live = extConnFind(connId);
     if (live) { live.status = 'error_requires_user'; live.checkpoint.lastError = degradedMsg; }
-    return { ok: false, degraded: true, errors: [degradedMsg], results };
+    return { ok: false, degraded: true, errors: [degradedMsg], results, keptLocal: keptLocalTotal };
   }
-  return { ok: true, errors: [], results };
+  return { ok: true, errors: [], results, keptLocal: keptLocalTotal, created: createdRecs, updated: updatedRecs };
 }
 function extBridgeCancel() {
   const pending = _bridgePending;
@@ -14394,13 +14443,18 @@ async function extConnUiRefresh() {
     return;
   }
   const t = r.totals;
-  const merges = (r.batches || []).reduce((n, b) => n + (b.skipped ? 0 :
-    (b.plan.items || []).filter(x => x.status === 'existing-by-provenance' && x.merge && x.merge.addRefs.length).length), 0);
+  const merges = (r.batches || []).reduce((n, b) => n + (b.skipped || !b.plan ? 0 :
+    (b.plan.items || []).filter(x => ['existing-by-provenance', 'changed', 'changed-conflict'].includes(x.status) && x.merge && x.merge.addRefs.length).length), 0);
+  // P1 (owner, пункт 10): пакеты и записи НЕ смешиваются в одном числе.
   if (out) out.innerHTML = `<div class="card mx" style="padding:.8rem">
-    <b>Что будет добавлено</b>
+    <b>Что изменится</b>
     <div class="si-text">Новых записей: <b>${t.new}</b></div>
-    <div class="si-text">Уже существуют: ${t.existing + t.skippedByCheckpoint}</div>
+    <div class="si-text">Будут обновлены: <b>${t.changed}</b>${t.changed ? ' (новая версия того же источника; локальные правки не затираются)' : ''}</div>
+    <div class="si-text">Записей уже существует: ${t.existing}</div>
+    <div class="si-text">Пакетов уже импортировано (по журналу): ${t.skippedByCheckpoint}</div>
     <div class="si-text">Будут объединены источники: ${merges}</div>
+    ${t.changedConflicts ? `<div class="si-text" style="color:var(--orange)">Требуют решения: ${t.changedConflicts} — источник изменился, но записи правились локально. Твои изменения будут сохранены; заменить их версией источника можно через ручной импорт пакета.</div>` : ''}
+    ${t.updateRejected ? `<div class="si-text" style="color:var(--red,#DC2626)">Обновлений отклонено (защита утверждений): ${t.updateRejected}</div>` : ''}
     <div class="si-text">Конфликты: ${t.conflicts}</div>
     <div class="si-text">Отклонено: ${t.rejected}${t.unresolved ? ' · нераспознанных ссылок: ' + t.unresolved : ''}</div>
     ${t.conflicts || t.unresolved ? '<div class="psy-adv">Есть конфликты — импорт не будет применён частично: либо всё целиком, либо ничего.</div>' : ''}
@@ -14410,19 +14464,23 @@ async function extConnUiRefresh() {
     </div>
     <div class="si-text" style="font-size:.72rem;color:var(--t4)">Пока ты не подтвердил импорт, в приложении ничего не меняется.</div>
     <details style="margin-top:.5rem"><summary class="si-text" style="font-size:.72rem;color:var(--t4)">Подробности для продвинутых</summary>
-      <div class="si-text" style="font-size:.72rem;color:var(--t4)">Формат: architect-external-work v1/v2 (feed ${esc(EXT_FEED_FORMAT)}). Пакетов в подаче: ${t.packages} · пропущено по журналу импорта: ${t.skippedByCheckpoint}. Идентичность записи — семантический sourceId; канал и контейнер (файл/архив) хранятся только как происхождение. Подтверждённая подача применяется одной транзакцией; чекпойнт двигается только после успешного импорта.</div>
+      <div class="si-text" style="font-size:.72rem;color:var(--t4)">Формат: architect-external-work v1/v2 (feed ${esc(EXT_FEED_FORMAT)}). Пакетов в подаче: ${t.packages} · пропущено по журналу импорта: ${t.skippedByCheckpoint}. Идентичность записи — семантический sourceId; канал и контейнер (файл/архив) хранятся только как происхождение. Изменённая версия того же sourceId обновляет ту же запись (changed), а не создаёт новую; похожесть текста никогда не участвует в идентичности. Подтверждённая подача применяется одной транзакцией; чекпойнт двигается только после успешного импорта.</div>
     </details>
   </div>`;
 }
-// Обязательное подтверждение перед любой мутацией canonical.
+// Обязательное подтверждение перед любой мутацией canonical. Обновления
+// существующих записей (changed) называются явно — CHANGED не применяется
+// без осознанного подтверждения.
 function extConnUiConfirm() {
   const out = $('ext-conn-out'); if (!out) return;
+  const changed = (_bridgePending && _bridgePending.batches || []).reduce((n, b) =>
+    n + ((b.plan && b.plan.counts && b.plan.counts.changed) || 0), 0);
   const box = document.createElement('div');
   box.className = 'psy-adv';
   box.setAttribute('role', 'alert');
-  box.innerHTML = `Импортировать эти записи в приложение? Действие применит подачу целиком.
+  box.innerHTML = `Импортировать эти записи в приложение?${changed ? ` Будут обновлены существующие записи: ${changed} (новая версия того же источника).` : ''} Действие применит подачу целиком.
     <div class="psy-actions">
-      <button type="button" class="btn btn-p btn-sm" onclick="extConnUiApply()">Да, импортировать</button>
+      <button type="button" class="btn btn-p btn-sm" onclick="extConnUiApply()">${changed ? 'Да, импортировать и обновить' : 'Да, импортировать'}</button>
       <button type="button" class="btn btn-s btn-sm" onclick="extBridgeCancel();$('ext-conn-out').innerHTML='';extRenderConnections()">Отмена</button>
     </div>`;
   out.appendChild(box);
@@ -14442,9 +14500,14 @@ function extConnUiApply() {
   }
   const committed = r.results.filter(x => x.status === 'committed').length;
   const skipped = r.results.filter(x => x.status === 'skipped').length;
+  const needDecision = r.results.filter(x => x.status === 'needs-decision').length;
   extRenderConnections();
   const out3 = $('ext-conn-out');
-  if (out3) out3.innerHTML = `<div class="si-text">Готово: импортировано ${committed}, пропущено (уже были в приложении) ${skipped}. Повторная загрузка тех же данных не создаст дублей.</div>`;
+  // P1 (owner, пункт 10): числа называют свои единицы — пакеты отдельно,
+  // записи отдельно.
+  if (out3) out3.innerHTML = `<div class="si-text">Готово. Новых записей: ${r.created || 0} · обновлено записей: ${r.updated || 0} · пакетов пропущено (уже импортированы): ${skipped} · пакетов применено: ${committed}.
+    ${r.keptLocal ? `<br>Записей с сохранёнными локальными правками: ${r.keptLocal}${needDecision ? ` (пакетов, ожидающих решения: ${needDecision} — они появятся при следующем чтении источника)` : ''}.` : ''}
+    <br>Повторная загрузка тех же данных не создаст дублей.</div>`;
   toast('Данные импортированы', 'ok');
   try { rPsyWorkspace(); } catch (_) {}
 }
@@ -14959,6 +15022,14 @@ const EXT_STATUS_RU = {
   // Owner review 5230472460: конфликт идентичности виден отдельным статусом —
   // он не «дубль» и не «новая», и молчаливого выбора одной проекции здесь нет.
   'conflict': 'конфликт идентичности источника',
+  // Variant B: явная update-семантика. changed — безопасное обновление той же
+  // записи (тот же sourceId, новая версия, локальных правок нет);
+  // changed-conflict — источник изменился, но запись правилась локально
+  // (по умолчанию сохраняются локальные правки); update-rejected — обновление
+  // отклонено claim-safety (эскалация до факта запрещена).
+  'changed': 'обновление записи',
+  'changed-conflict': 'конфликт: запись правилась локально',
+  'update-rejected': 'обновление отклонено (защита утверждений)',
 };
 async function extPreview() {
   const out = $('ext-out'), act = $('ext-actions');
@@ -14978,10 +15049,14 @@ async function extPreview() {
     return;
   }
   const rows = plan.items.map((i, n) => {
-    const dis = i.status !== 'new';
+    // Variant B: new и changed — включены по умолчанию; changed-conflict —
+    // выключен по умолчанию (замена локальных правок только явным выбором);
+    // остальные статусы решению не подлежат.
+    const selectable = ['new', 'changed', 'changed-conflict'].includes(i.status);
+    const checked = i.status === 'new' || i.status === 'changed';
     return `<div class="si-row"><div class="si-body">
       <label style="display:flex;gap:.5rem;align-items:flex-start">
-        <input type="checkbox" ${dis ? 'disabled' : 'checked'} onchange="extToggleItem(${n},this.checked)" aria-label="Импортировать запись ${n + 1}">
+        <input type="checkbox" ${selectable ? (checked ? 'checked' : '') : 'disabled'} onchange="extToggleItem(${n},this.checked)" aria-label="${i.status === 'new' ? 'Импортировать' : 'Обновить'} запись ${n + 1}">
         <span><b>${esc(i.type)}</b> → ${esc(i.coll)}<br><span class="si-text">${esc(i.title.slice(0, 90))}</span>
         <br><span style="color:var(--t4);font-size:.72rem">${esc(i.sourceId || '—')} · ${esc(i.date || 'без даты')} · ${esc(i.claimClass)} / ${esc(i.textOrigin)}</span>
         <br><span style="color:var(--t4);font-size:.72rem">статус: ${esc(EXT_STATUS_RU[i.status] || i.status)}${i.reason ? ' — ' + esc(i.reason) : ''}</span></span>
@@ -14997,8 +15072,14 @@ async function extPreview() {
       </label></div></div>`;
   }).join('');
   const targets = Object.entries(plan.byTarget).map(([c, n]) => `${esc(c)}: ${n}`).join(', ') || 'нечего создавать';
+  const nChanged = (plan.counts && plan.counts.changed) || 0;
+  const nChangedConflict = (plan.counts && plan.counts['changed-conflict']) || 0;
+  const nUpdRej = (plan.counts && plan.counts['update-rejected']) || 0;
   out.innerHTML = `<div class="si-text" style="line-height:1.7">
       <div><b>Будет создано:</b> ${targets}</div>
+      ${nChanged ? `<div><b>Будет обновлено:</b> ${nChanged} (новая версия того же источника; локальных правок нет)</div>` : ''}
+      ${nChangedConflict ? `<div style="color:var(--orange)"><b>Конфликты с локальными правками:</b> ${nChangedConflict} — по умолчанию сохраняются твои изменения; отметь запись, чтобы заменить её версией источника.</div>` : ''}
+      ${nUpdRej ? `<div style="color:var(--red,#DC2626)"><b>Обновлений отклонено (защита утверждений):</b> ${nUpdRej}</div>` : ''}
       <div><b>Связей:</b> ${plan.links.filter(l => l.status === 'new').length}</div>
       <div style="color:var(--t4)">До подтверждения ничего не сохраняется.</div>
       ${plan.alreadyImported ? '<div style="color:var(--orange)"><b>Этот пакет уже импортирован</b> — повторный импорт не создаст дублей.</div>' : ''}
@@ -15012,7 +15093,8 @@ async function extPreview() {
     // ВЕСЬ пакет: кнопки подтверждения нет, частичный импорт не предлагается.
     const conflicted = plan.items.filter(i => i.status === 'conflict');
     const unres = (plan.unresolvedRefs || []).length;
-    const can = !plan.alreadyImported && !conflicted.length && !unres && plan.items.some(i => i.status === 'new');
+    const can = !plan.alreadyImported && !conflicted.length && !unres &&
+      plan.items.some(i => ['new', 'changed', 'changed-conflict'].includes(i.status) || (i.merge && i.merge.addRefs.length));
     act.innerHTML = unres
       ? `<div class="ai-sp-empty">Импорт заблокирован: ${unres} внутрипакетн(ая/ых) ссылк(а/и) не разрешена. Проверь clientRef в ссылках пакета и загрузи заново.</div>`
       : conflicted.length
@@ -15029,9 +15111,11 @@ function extConfirm() {
   const r = extCommitPlan(_extPlan, _extSel);
   const out = $('ext-out');
   if (!r.ok) { toast('Импорт не выполнен: ' + r.error, 'err'); return; }
-  toast(`Импортировано записей: ${r.created.length}, связей: ${r.linkRefs.length}`, 'ok');
+  const upd = Array.isArray(r.updatedRefs) ? r.updatedRefs.length : 0;
+  toast(`Импортировано: новых ${r.created.length}, обновлено ${upd}, связей ${r.linkRefs.length}`, 'ok');
   if (out) out.innerHTML = `<div class="si-text" style="line-height:1.7"><b>Импортировано.</b>
-    <div>Записей: ${r.created.length} · связей: ${r.linkRefs.length}</div>
+    <div>Новых записей: ${r.created.length} · обновлено: ${upd} · связей: ${r.linkRefs.length}</div>
+    ${r.keptLocal ? `<div style="color:var(--t4)">Записей с сохранёнными локальными правками: ${r.keptLocal}.</div>` : ''}
     <div style="color:var(--t4)">Записи доступны в Дневнике и Психике как обычные.</div></div>`;
   const act = $('ext-actions');
   if (act) act.innerHTML = `<button type="button" class="btn btn-s" onclick="closeOv('ov-ext-import');goTo('map')">Открыть Дневник</button>`;
@@ -15149,6 +15233,129 @@ function extProvenance(pkg, e, packageHash) {
     importedAt: nowISO(),
   };
 }
+// ── Явная update-семантика (owner decision: Variant B) ──────────────
+// Идентичность записи — ТОЛЬКО sourceId. Изменение payload у того же
+// sourceId — это НОВАЯ ВЕРСИЯ ТОЙ ЖЕ записи (changed), а не новая запись:
+// правка текста в источнике не создаёт «#rev2». Похожесть текста и
+// content-hash НИКОГДА не участвуют в identity.
+//
+// Владение полями (field ownership):
+//   import-owned — поля, записанные адаптером из payload источника (списки
+//     ниже); ТОЛЬКО они могут быть обновлены повторным импортом;
+//   user/local-owned — всё остальное (links, media, cnt, лайфцикл-status
+//     relationshipContext, ручные правки любых полей) — импорт их НИКОГДА
+//     не перезаписывает молча;
+//   derived — пересчитываются движками на чтении и файла не имеют.
+// Если владение изменившегося значения надёжно определить нельзя (локальная
+// правка import-owned поля; legacy-запись без снимка импорта) — не угадываем:
+// changed-conflict, по умолчанию сохраняются локальные значения, замена
+// возможна только явным выбором пользователя.
+// Поля с ctx-значениями (id, createdAt, day, sv, _u, отображаемые date/dt/src
+// у insight/dream/spiritual/evolution) import-owned НЕ являются: они
+// инициализируются при создании и не принадлежат payload.
+const EXT_IMPORT_OWNED = Object.freeze({
+  insight: Object.freeze(['tag', 'title', 'body']),
+  why: WHY_FIELDS,
+  pattern: Object.freeze(['type', 'text']),
+  dream: Object.freeze(['title', 'body', 'tone', 'arch']),
+  spiritual: Object.freeze(['type', 'text']),
+  evolution: Object.freeze(['lv', 'text']),
+  relationshipContext: Object.freeze(['label', 'roleOrRelation', 'note']),
+  moment: Object.freeze(['valence', 'activation', 'emo', 'note']),
+  sphereLog: Object.freeze(['sphereId', 'date', 'value', 'note']),
+  psyFormulation: Object.freeze(['supersedesId', 'status', 'focus', 'formulation', 'hypotheses', 'protectiveFactors', 'maintainingFactors', 'sourceRefs']),
+  psyGoal: Object.freeze(['label', 'targetMechanism', 'status', 'startedAt', 'reviewAt', 'proximalOutcome', 'distalOutcome', 'measureRefs', 'sourceRefs']),
+  psyInterventionEpisode: Object.freeze(['dateTime', 'targetProblem', 'targetMechanism', 'methodId', 'methodFamily', 'interventionSummary', 'rationale', 'intendedProximalOutcome', 'preObservationRefs', 'postObservationRefs', 'followUpRefs', 'adherence', 'fidelityNote', 'acceptability', 'adverseEffects', 'confounders', 'outcomeClass', 'sourceRefs']),
+  psyObservation: Object.freeze(['timestamp', 'metricId', 'valueNumber', 'valueText', 'episode', 'unit', 'contextTag', 'triggerRef', 'entryMode', 'source', 'naturalistic', 'sourceRefs']),
+  psyReview: Object.freeze(['periodStart', 'periodEnd', 'goalRefs', 'formulationRef', 'interventionEpisodeRefs', 'observationRefs', 'methodsAppliedSummary', 'adherenceSummary', 'outcomeSummary', 'acceptabilitySummary', 'adverseEffectsSummary', 'confoundersSummary', 'hypothesesStrengthened', 'hypothesesWeakened', 'decision', 'limitations', 'sourceRefs']),
+});
+// Поля с fallback «на текущий момент» при отсутствии в payload: если новый
+// payload их НЕ задаёт, обновление сохраняет прежнее значение записи —
+// иначе повторный импорт молча сдвигал бы дату/время на день импорта.
+const EXT_VOLATILE_WHEN_ABSENT = Object.freeze({
+  sphereLog: Object.freeze({ date: d => extIsIsoDay(d.date) }),
+  psyGoal: Object.freeze({ startedAt: d => psyIsIso(d.startedAt) }),
+  psyInterventionEpisode: Object.freeze({ dateTime: d => psyIsIso(d.dateTime) }),
+  psyObservation: Object.freeze({ timestamp: d => psyIsIso(d.timestamp) }),
+});
+// Revision provenance ограничен: полный приватный текст старых версий НЕ
+// хранится (только какие поля, какой пакет, какие хеши, когда).
+const EXT_REVISIONS_MAX = 10;
+
+function extPickFields(rec, fields) {
+  const out = {};
+  (fields || []).forEach(f => { if (rec && rec[f] !== undefined) out[f] = rec[f]; });
+  return out;
+}
+// Хеш значений import-owned полей записи. Снимок этого хеша на момент
+// импорта (ext.importHash) — детектор локальных правок: совпадение текущих
+// значений со снимком доказывает, что пользователь import-owned поля не
+// трогал, и обновление безопасно.
+function extFieldsHash(rec, fields) { return extSha256(extCanonicalJson(extPickFields(rec, fields))); }
+// Хеш ВЕРСИИ исходного объекта: содержимое + claim-слои + textOrigin + даты
+// + excerpt. Provenance-метаданные контейнера/канала (label, module,
+// clientRef, sourceRefs) в хеш НЕ входят: их изменение — не новая версия
+// содержимого (псевдонимы дописываются отдельным merge-механизмом).
+function extEntityVersionHash(e) {
+  const claims = extClaimClasses(e);
+  return extSha256(extCanonicalJson({
+    type: e.type,
+    data: extPickData(e),
+    claimClass: claims.primary,
+    claimClasses: claims.all,
+    textOrigin: EXT_TEXT_ORIGINS.includes(e.textOrigin) ? e.textOrigin : 'structured_summary',
+    sourceDate: extIsIsoDay(e.sourceDate) ? e.sourceDate : null,
+    sourceDateRange: extStr(e.sourceDateRange, 80) || null,
+    sourceExcerpt: extStr(e.sourceExcerpt, 1000) || null,
+  }));
+}
+// Claim safety на update: добавление ФАКТИЧЕСКОГО класса, которого не было
+// у записи, запрещено — интерпретация/гипотеза/символика не «дорастают» до
+// факта повторным импортом (assistant_interpretation → user_fact,
+// symbolic → fact, hypothesis → факт-диагноз). Снятие класса разрешено.
+function extUpdateClaimEscalation(oldExt, newProv) {
+  const oldSet = Array.isArray(oldExt && oldExt.claimClasses) && oldExt.claimClasses.length
+    ? oldExt.claimClasses : (oldExt && oldExt.claimClass ? [oldExt.claimClass] : []);
+  return (newProv.claimClasses || []).filter(c => EXT_FACTUAL_CLAIMS.includes(c) && !oldSet.includes(c));
+}
+function extPinVolatileFields(type, newRec, curRec, data) {
+  const vol = EXT_VOLATILE_WHEN_ABSENT[type];
+  if (!vol || !curRec) return;
+  Object.entries(vol).forEach(([f, providedFn]) => {
+    if (!providedFn(data || {}) && curRec[f] !== undefined) newRec[f] = JSON.parse(JSON.stringify(curRec[f]));
+  });
+}
+// ЕДИНСТВЕННЫЙ писатель обновления записи — используется И на плановом
+// кандидате (preview), И на commit-кандидате: preview и commit физически
+// не могут разойтись в том, что именно будет записано.
+function extApplyUpdateToRecord(rec, u) {
+  (u.updatedFields || []).forEach(f => {
+    if (u.newValues[f] === undefined) { delete rec[f]; return; }
+    rec[f] = JSON.parse(JSON.stringify(u.newValues[f]));
+  });
+  const ext = rec.ext || (rec.ext = {});
+  // Revision provenance (без полного текста старых версий): какой пакет
+  // обновил, какие поля, prev/new хеши версии, когда.
+  const rev = {
+    at: nowISO(), packageHash: u.packageHash, sessionRef: u.sessionRef || null,
+    prevEntityHash: u.prevEntityHash || null, entityHash: u.newEntityHash,
+    updatedFields: (u.updatedFields || []).slice(),
+    mode: u.mode || 'update',
+  };
+  ext.revisions = [...(Array.isArray(ext.revisions) ? ext.revisions : []), rev].slice(-EXT_REVISIONS_MAX);
+  ext.claimClass = u.newProvMeta.claimClass;
+  ext.claimClasses = u.newProvMeta.claimClasses.slice();
+  ext.textOrigin = u.newProvMeta.textOrigin;
+  ext.sourceExcerpt = u.newProvMeta.sourceExcerpt;
+  ext.sourceDate = u.newProvMeta.sourceDate;
+  ext.sourceDateRange = u.newProvMeta.sourceDateRange;
+  ext.entityHash = u.newEntityHash;
+  ext.importHash = u.newImportHash;
+  ext.importedFields = u.newImportedFields.slice();
+  ext.importUpdatedAt = nowISO();
+  rec._u = Date.now();   // обновление обязано пережить merge/sync
+}
+
 // Ключ provenance-дедупликации: один и тот же исходный объект (LIFE/DREAM/PARA)
 // не должен импортироваться дважды в ту же canonical-коллекцию — даже из
 // другого модуля/пакета.
@@ -15194,11 +15401,112 @@ function extIndexExistingProvenance(db) {
   return idx;
 }
 
+// ── Классификация найденной по provenance записи (Variant B) ────────
+// same sourceId + неизменённая версия → existing-by-provenance (ноль
+// мутаций); изменённая версия + нетронутые пользователем import-owned
+// поля → changed (безопасное обновление); изменённая версия + локальные
+// правки ИЛИ legacy-запись без снимка импорта → changed-conflict (не
+// угадываем); эскалация claim-слоя до факта → update-rejected.
+async function extClassifyExisting(a) {
+  const { base, e, coll, prov, existingRec, mergeInfo, ctx, packageHash } = a;
+  const existingReason = mergeInfo.addRefs.length
+    ? `этот источник уже импортирован; добавляются ссылки: ${mergeInfo.addRefs.map(r => r.sourceId).join(', ')}`
+    : 'этот источник уже импортирован ранее';
+  if (!existingRec) return { ...base, status: 'existing-by-provenance', reason: existingReason, merge: mergeInfo };
+  const oldExt = existingRec.ext || null;
+  const newEntityHash = await extEntityVersionHash(e);
+  // Та же версия содержимого → existing. Повтор того же feed детерминированно
+  // даёт new 0 / changed 0.
+  if (oldExt && oldExt.entityHash && oldExt.entityHash === newEntityHash) {
+    return { ...base, status: 'existing-by-provenance', reason: existingReason, merge: mergeInfo };
+  }
+  // Версия источника изменилась (или запись без снимка версии) — новая
+  // версия собирается ТЕМ ЖЕ адаптером/билдером, что и создание: второй
+  // схемы записи не существует, невалидное обновление отклоняет билдер.
+  const builtU = EXT_ADAPTERS[e.type](e, extPickData(e), ctx);
+  if (builtU.reject) {
+    return { ...base, status: 'invalid', reason: 'обновлённая версия отклонена: ' + builtU.reject, merge: mergeInfo };
+  }
+  const newRec = builtU.rec;
+  extPinVolatileFields(e.type, newRec, existingRec, extPickData(e));
+  const ownedFields = EXT_IMPORT_OWNED[e.type] || [];
+  const canon = x => extCanonicalJson(x === undefined ? null : x);
+  const changedFields = ownedFields.filter(f => canon(newRec[f]) !== canon(existingRec[f]));
+  // Claim/provenance-слой (ext) принадлежит импорту целиком — пользователь
+  // его не редактирует; его изменение — тоже обновление.
+  const metaChanged = ['claimClass', 'textOrigin', 'sourceExcerpt', 'sourceDate', 'sourceDateRange']
+    .some(k => canon((oldExt && oldExt[k]) || null) !== canon(prov[k] || null))
+    || canon((oldExt && oldExt.claimClasses) || []) !== canon(prov.claimClasses || []);
+  if (!changedFields.length && !metaChanged) {
+    // Материально ничего не меняется (включая legacy-записи без снимка) —
+    // existing, ноль мутаций.
+    return { ...base, status: 'existing-by-provenance', reason: existingReason, merge: mergeInfo };
+  }
+  const escalated = extUpdateClaimEscalation(oldExt, prov);
+  if (escalated.length) {
+    const oldClaims = (oldExt && (Array.isArray(oldExt.claimClasses) && oldExt.claimClasses.length
+      ? oldExt.claimClasses : [oldExt.claimClass].filter(Boolean))) || [];
+    return {
+      ...base, status: 'update-rejected', merge: mergeInfo,
+      reason: `обновление отклонено: класс утверждения «${escalated.join('», «')}» повышал бы запись до факта (было: ${oldClaims.join(', ') || '—'}). Семантика утверждения не меняется обновлением.`,
+    };
+  }
+  // Детектор локальных правок: текущие значения import-owned полей против
+  // снимка импорта. Legacy-запись без снимка: расхождение только в
+  // ext-слое безопасно (ext правит только импорт), расхождение полей
+  // записи неатрибутируемо — конфликт.
+  let userUntouched;
+  if (oldExt && oldExt.importHash && Array.isArray(oldExt.importedFields)) {
+    const curHash = await extFieldsHash(existingRec, oldExt.importedFields);
+    userUntouched = curHash === oldExt.importHash;
+  } else {
+    userUntouched = !changedFields.length;
+  }
+  const newImportedFields = ownedFields.slice();
+  const newImportHash = await extFieldsHash(newRec, newImportedFields);
+  const expectedFields = [...new Set([
+    ...(oldExt && Array.isArray(oldExt.importedFields) ? oldExt.importedFields : []),
+    ...newImportedFields,
+  ])];
+  const update = {
+    coll, id: existingRec.id,
+    updatedFields: changedFields,
+    metaChanged,
+    newValues: JSON.parse(JSON.stringify(extPickFields(newRec, changedFields))),
+    newProvMeta: {
+      claimClass: prov.claimClass, claimClasses: prov.claimClasses.slice(),
+      textOrigin: prov.textOrigin, sourceExcerpt: prov.sourceExcerpt,
+      sourceDate: prov.sourceDate, sourceDateRange: prov.sourceDateRange,
+    },
+    prevEntityHash: (oldExt && oldExt.entityHash) || null,
+    newEntityHash, newImportHash, newImportedFields,
+    packageHash,
+    sessionRef: prov.sessionRef || null,
+    // Optimistic concurrency (stale preview): снимок ожидаемых значений на
+    // момент предпросмотра; commit сверяет их с живым состоянием.
+    expectedFields,
+    expectedValues: JSON.parse(JSON.stringify(extPickFields(existingRec, expectedFields))),
+    mode: userUntouched ? 'update' : 'override',
+  };
+  if (userUntouched) {
+    return {
+      ...base, status: 'changed', update, merge: mergeInfo,
+      reason: `новая версия источника: обновятся ${changedFields.length ? 'поля ' + changedFields.join(', ') : 'только provenance/claim-слой'}`,
+    };
+  }
+  return {
+    ...base, status: 'changed-conflict', update, merge: mergeInfo,
+    reason: `источник изменился, но запись правилась локально${changedFields.length ? ' (' + changedFields.join(', ') + ')' : ''} — по умолчанию сохраняются твои изменения; замена только по явному выбору`,
+  };
+}
+
 // ── Построение плана импорта (preview) ──────────────────────────────
-// ДО подтверждения — ноль мутаций. План строится на КЛОНЕ DB: адаптеры,
-// валидация ссылок и дедуп работают ровно на тех данных, которые получатся
-// после коммита, а живой DB не трогается вовсе.
-async function extBuildPlan(rawText) {
+// ДО подтверждения — ноль мутаций живого состояния. План строится на КЛОНЕ
+// DB: адаптеры, валидация ссылок и дедуп работают ровно на тех данных,
+// которые получатся после коммита, а живой DB не трогается вовсе.
+// `shared` ({db, provIdx}) — необязательный сквозной кандидат моста:
+// пакеты одного feed строятся последовательно на одном состоянии.
+async function extBuildPlan(rawText, shared) {
   const v = extValidatePackage(rawText);
   if (!v.ok) return { ok: false, errors: v.errors };
   const pkg = v.pkg;
@@ -15209,9 +15517,9 @@ async function extBuildPlan(rawText) {
     entities: pkg.entities, links: pkg.links,
   }));
 
-  const db = JSON.parse(JSON.stringify(DB));
+  const db = shared && shared.db ? shared.db : JSON.parse(JSON.stringify(DB));
   const already = (db.externalWorkSessions || []).find(s => s && s.contentHash === packageHash);
-  const provIdx = extIndexExistingProvenance(db);
+  const provIdx = shared && shared.provIdx ? shared.provIdx : extIndexExistingProvenance(db);
 
   let idSeq = Date.now();
 
@@ -15334,31 +15642,62 @@ async function extBuildPlan(rawText) {
       const existingRec = (db[coll] || []).find(r => r && r.id === existingId);
       const known = existingRec ? extRecordSourceIds(existingRec) : [];
       const addRefs = prov.sourceRefs.filter(r => !known.includes(r.sourceId));
-      items[eIdx] = {
-        ...base, status: 'existing-by-provenance',
-        reason: addRefs.length
-          ? `этот источник уже импортирован (${hit.ref.role === 'primary' ? 'основная ссылка' : 'псевдоним'}); добавляются ссылки: ${addRefs.map(r => r.sourceId).join(', ')}`
-          : 'этот источник уже импортирован ранее',
-        merge: { coll, id: existingId, addRefs, packageHash },
-      };
       // Индекс дополняется сразу, чтобы новые псевдонимы участвовали в
-      // дедупликации уже внутри ЭТОГО пакета.
+      // дедупликации уже внутри ЭТОГО пакета/feed.
       addRefs.forEach(r => {
         const k = extProvenanceKey(coll, r.sourceId);
         if (k && !provIdx.has(k)) provIdx.set(k, { coll, id: existingId });
       });
+      // Обновлять СОДЕРЖИМОЕ записи может только её первичный источник:
+      // primary sourceId входящей сущности должен совпадать с primary
+      // sourceId записи. Совпадение через псевдоним (кросс-модульная ссылка
+      // LIFE↔DREAM↔PARA) — это дописывание provenance, а НЕ новая версия:
+      // иначе более бедная проекция другого модуля затирала бы содержимое
+      // и claim-слои первичного источника.
+      const primaryMatches = !!(prov.sourceId && existingRec && existingRec.ext &&
+        existingRec.ext.sourceId && prov.sourceId === existingRec.ext.sourceId);
+      if (!primaryMatches) {
+        items[eIdx] = {
+          ...base, status: 'existing-by-provenance',
+          reason: addRefs.length
+            ? `этот источник уже импортирован (${hit.ref.role === 'primary' ? 'основная ссылка' : 'псевдоним'}); добавляются ссылки: ${addRefs.map(r => r.sourceId).join(', ')}`
+            : 'этот источник уже импортирован ранее',
+          merge: { coll, id: existingId, addRefs, packageHash },
+        };
+        continue;
+      }
+      items[eIdx] = await extClassifyExisting({
+        base, e, coll, prov, existingRec,
+        mergeInfo: { coll, id: existingId, addRefs, packageHash },
+        ctx, packageHash,
+      });
+      // Безопасное обновление отражается в плановом кандидате СРАЗУ: поздние
+      // сущности этого пакета и следующие пакеты feed видят обновлённое
+      // состояние — commit применит ровно то же самое тем же писателем.
+      if (items[eIdx].status === 'changed' && existingRec) {
+        extApplyUpdateToRecord(existingRec, items[eIdx].update);
+      }
       continue;
     }
     const built = EXT_ADAPTERS[e.type](e, extPickData(e), ctx);
     if (built.reject) { items[eIdx] = { ...base, status: 'invalid', reason: built.reject }; continue; }
     built.rec.ext = prov;
+    // Variant B: снимок версии и import-owned полей на КАЖДОЙ новой записи —
+    // фундамент детектора changed / локальных правок при будущих импортах.
+    prov.entityHash = await extEntityVersionHash(e);
+    prov.importedFields = (EXT_IMPORT_OWNED[e.type] || []).slice();
+    prov.importHash = await extFieldsHash(built.rec, prov.importedFields);
     // ПРОХОД 2: собранная запись немедленно попадает в кандидата. Именно
     // поэтому следующая сущность пакета (например review) видит её как
     // РЕАЛЬНО существующую, а проверка «висячих» ссылок остаётся строгой —
     // ничего не ослаблено, просто кандидат собран полностью.
     if (!Array.isArray(db[coll])) db[coll] = [];
     db[coll].push(built.rec);
-    items[eIdx] = { ...base, status: 'new', rec: built.rec };
+    // План хранит СНИМОК записи, а не ссылку на объект в кандидате: поздний
+    // пакет этого же feed может обновить запись в кандидате (changed), но
+    // commit обязан воспроизвести ту же последовательность «создание →
+    // обновление», иначе optimistic-concurrency сверка не сойдётся.
+    items[eIdx] = { ...base, status: 'new', rec: JSON.parse(JSON.stringify(built.rec)) };
     refToRec.set(prov.clientRef, { coll, id: built.rec.id });
     // Все ссылки новой записи сразу попадают в индекс: вторая запись ТОГО ЖЕ
     // пакета, ссылающаяся на тот же эпизод, не создаст дубль.
@@ -15415,7 +15754,10 @@ async function extBuildPlan(rawText) {
 // Кандидат собирается на КЛОНЕ, валидируется целиком, и только потом один
 // безопасный persist. Любая ошибка — zero mutation всего batch. Wave-5
 // recovery write lock не обходится: под блокировкой импорт запрещён.
-function extCommitPlan(plan, selection) {
+// `opts` (Variant B, только для моста): { db, deferPersist, provIdx } —
+// коммит пишет в переданного сквозного кандидата feed и НЕ делает
+// swap/persist (мост делает один атомарный swap на весь feed).
+function extCommitPlan(plan, selection, opts) {
   if (!plan || !plan.ok) return { ok: false, error: 'план невалиден' };
   if (isWriteLocked()) return { ok: false, error: 'профиль в режиме восстановления — импорт заблокирован' };
   if (plan.alreadyImported) return { ok: false, error: 'этот пакет уже импортирован' };
@@ -15450,24 +15792,71 @@ function extCommitPlan(plan, selection) {
   // Импортируются только записи со статусом `new` И не снятые пользователем.
   const pickedItems = plan.items.filter((i, n) => i.status === 'new' && (!sel.items || sel.items[n] !== false));
   const pickedLinks = plan.links.filter((l, n) => l.status === 'new' && (!sel.links || sel.links[n] !== false));
+  // Безопасные обновления (changed) применяются по умолчанию, но остаются
+  // снимаемыми. Перезапись локальных правок (changed-conflict) — ТОЛЬКО по
+  // явному выбору пользователя (sel.items[n] === true); по умолчанию
+  // локальные значения сохраняются. update-rejected не применяется никогда.
+  const pickedUpdates = plan.items.filter((i, n) => i.status === 'changed' && i.update && (!sel.items || sel.items[n] !== false));
+  const pickedOverrides = plan.items.filter((i, n) => i.status === 'changed-conflict' && i.update && sel.items && sel.items[n] === true);
+  const keptLocal = plan.items.filter((i, n) => i.status === 'changed-conflict' && i.update && !(sel.items && sel.items[n] === true));
   // Дописывание ссылок к УЖЕ существующим записям — тоже полезная работа:
   // кросс-модульный псевдоним (LIFE→DREAM) не создаёт записи, но обязан
   // сохранить provenance. Снятый пользователем элемент не дописывается.
+  // Псевдонимы дописываются и при kept-local: это аудит источника, не
+  // редактирование содержимого записи.
   const pickedMerges = plan.items.filter((i, n) =>
-    i.status === 'existing-by-provenance' && i.merge && i.merge.addRefs.length &&
+    ['existing-by-provenance', 'changed', 'changed-conflict'].includes(i.status) &&
+    i.merge && i.merge.addRefs.length &&
     (!sel.items || sel.items[n] !== false));
-  if (!pickedItems.length && !pickedLinks.length && !pickedMerges.length) {
+  if (!pickedItems.length && !pickedLinks.length && !pickedMerges.length && !pickedUpdates.length && !pickedOverrides.length) {
     return { ok: false, error: 'ничего не выбрано для импорта' };
   }
 
-  const candidate = JSON.parse(JSON.stringify(DB));
+  const candidate = opts && opts.db ? opts.db : JSON.parse(JSON.stringify(DB));
+  // Stale-preview защита на уровне пакета: если этот пакет уже попал в
+  // журнал импорта другим путём между предпросмотром и подтверждением —
+  // честный отказ вместо дублирующей сессии.
+  if ((candidate.externalWorkSessions || []).some(s => s && s.contentHash === plan.packageHash)) {
+    return { ok: false, error: 'этот пакет уже импортирован (журнал импорта) — предпросмотр устарел' };
+  }
+  const commitIdx = opts && opts.provIdx ? opts.provIdx : extIndexExistingProvenance(candidate);
   const created = [];
   const mergedRefs = [];
+  const updatedRefs = [];
   try {
     for (const it of pickedItems) {
+      // Stale-preview защита идентичности: «new» на предпросмотре, но
+      // sourceId уже существует в живом состоянии → дубль не создаётся,
+      // пакет отклоняется целиком (обнови предпросмотр).
+      const ids = (it.rec.ext && Array.isArray(it.rec.ext.sourceRefs))
+        ? it.rec.ext.sourceRefs.map(r => r && r.sourceId).filter(Boolean) : [];
+      const dupe = ids.find(sid => { const k = extProvenanceKey(it.coll, sid); return k && commitIdx.has(k); });
+      if (dupe) throw new Error(`источник «${dupe}» уже импортирован — предпросмотр устарел, обнови его`);
       if (!Array.isArray(candidate[it.coll])) candidate[it.coll] = [];
       candidate[it.coll].push(JSON.parse(JSON.stringify(it.rec)));
       created.push({ clientRef: it.clientRef, coll: it.coll, id: it.rec.id });
+      ids.forEach(sid => {
+        const k = extProvenanceKey(it.coll, sid);
+        if (k && !commitIdx.has(k)) commitIdx.set(k, { coll: it.coll, id: it.rec.id });
+      });
+    }
+    // Variant B: подтверждённые обновления. Пишутся ТОЛЬКО import-owned поля
+    // + ext-слой; локальные/пользовательские поля не затрагиваются. Пишет
+    // ТОТ ЖЕ extApplyUpdateToRecord, что и предпросмотр.
+    for (const it of [...pickedUpdates, ...pickedOverrides]) {
+      const u = it.update;
+      const rec = (candidate[u.coll] || []).find(r => r && r.id === u.id);
+      if (!rec) throw new Error('запись для обновления не найдена: ' + u.coll + '#' + u.id);
+      // Optimistic concurrency: запись менялась после предпросмотра (локально
+      // или другой сессией) → молча затирать нельзя, пакет отклоняется.
+      if (extCanonicalJson(extPickFields(rec, u.expectedFields)) !== extCanonicalJson(u.expectedValues)) {
+        throw new Error(`запись ${u.coll}#${u.id} изменилась после предпросмотра — обнови предпросмотр и подтверди заново`);
+      }
+      extApplyUpdateToRecord(rec, u);
+      updatedRefs.push({
+        coll: u.coll, id: u.id, updatedFields: u.updatedFields.slice(), mode: u.mode,
+        prevEntityHash: u.prevEntityHash, entityHash: u.newEntityHash,
+      });
     }
     // Слияние provenance: ТОЛЬКО дописывание ссылок в `ext.sourceRefs`.
     // Ни одно содержательное поле записи не трогается — это аудит источника,
@@ -15503,6 +15892,10 @@ function extCommitPlan(plan, selection) {
       if (added.length) {
         rec._u = Date.now();   // изменение обязано пережить merge/sync
         mergedRefs.push({ coll, id, addedSourceIds: added });
+        added.forEach(sid => {
+          const k = extProvenanceKey(coll, sid);
+          if (k && !commitIdx.has(k)) commitIdx.set(k, { coll, id });
+        });
       }
     }
     // Повторная полная валидация связей уже на финальном кандидате.
@@ -15538,20 +15931,31 @@ function extCommitPlan(plan, selection) {
       // Кросс-модульные псевдонимы, дописанные к уже существующим записям.
       // Записей они не создают, но обязаны быть видны в аудите.
       mergedRefs,
+      // Variant B: аудит обновлений — какие записи/поля обновлены (updatedRefs)
+      // и где пользовательские правки сохранены вопреки изменению источника
+      // (keptLocalRefs). Никаких старых текстов — только ссылки и имена полей.
+      updatedCount: updatedRefs.length,
+      updatedRefs,
+      keptLocalRefs: keptLocal.map(i => ({ coll: i.update.coll, id: i.update.id })),
       status: 'imported', privacyClass: 'sensitive',
       createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
     };
     if (!Array.isArray(candidate.externalWorkSessions)) candidate.externalWorkSessions = [];
     candidate.externalWorkSessions.push(session);
 
+    // Deferred-режим моста: кандидат общий на весь feed, swap/persist делает
+    // мост ОДИН раз после успешного commit всех пакетов.
+    if (opts && opts.deferPersist) {
+      return { ok: true, created, linkRefs, mergedRefs, updatedRefs, keptLocal: keptLocal.length, sessionId: session.id, deferred: true };
+    }
     // Один безопасный переход: подменяем DB целиком и пишем через
     // production-persist (транзакция Wave 5 + откат при сбое).
     const prevDb = DB;
     DB = candidate;
     if (!persist()) { DB = prevDb; return { ok: false, error: 'не удалось сохранить — данные не изменены' }; }
-    return { ok: true, created, linkRefs, mergedRefs, sessionId: session.id };
+    return { ok: true, created, linkRefs, mergedRefs, updatedRefs, keptLocal: keptLocal.length, sessionId: session.id };
   } catch (e) {
-    return { ok: false, error: (e && e.message) || 'ошибка импорта' };   // DB не трогался
+    return { ok: false, error: (e && e.message) || 'ошибка импорта' };   // живое состояние не менялось
   }
 }
 
