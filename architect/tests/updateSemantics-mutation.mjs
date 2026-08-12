@@ -64,7 +64,7 @@ const MUTANTS = [
     // conflict-only пакет проходит как noop и чекпойнтится.
     id: 'bridge-terminality-gate-removed',
     what: 'мост применяет подачу с нерешёнными конфликтами/отклонёнными обновлениями',
-    find: '  if (blockedRejected || blockedConflicts) {',
+    find: '  if (blockedRejected || blockedConflicts || blockedStale || blockedOrder || blockedVersion) {',
     replace: '  if (false) {',
     expectFail: 'мост с неразрешённым конфликтом останавливает подачу',
   },
@@ -89,7 +89,7 @@ const MUTANTS = [
     // Устранённый дефект: планы feed на независимых клонах.
     id: 'shared-feed-candidate-removed',
     what: 'пакеты feed планируются на независимых клонах — один sourceId в двух пакетах дублируется',
-    find: '    const plan = await extBuildPlan(pkgText, { db: sharedDb, provIdx: sharedIdx });',
+    find: '    const plan = await extBuildPlan(pkgText, { db: sharedDb, provIdx: sharedIdx, feedTouched: sharedTouched });',
     replace: '    const plan = await extBuildPlan(pkgText);',
     expectFail: 'sourceId в двух пакетах одного feed',
   },
