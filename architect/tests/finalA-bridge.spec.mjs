@@ -223,12 +223,20 @@ console.log('\n── FINAL A: Universal External Sources Bridge ──');
   changed.entities[0].sourceId = 'TEST-FA-SRC-7';   // тот же семантический объект
   changed.entities[0].data.body = 'обновлённый синтетический текст';
   const prev = await refresh(c.id, changed);
-  ok(prev.ok && prev.totals.existing === 1 && prev.totals.new === 0,
-    'same sourceId из другой сессии → existing-by-provenance, НЕ новая запись (identity = sourceId)');
+  // Variant B: изменённый payload того же sourceId — это новая ВЕРСИЯ той же
+  // записи (changed), не новая запись и не молчаливый existing.
+  ok(prev.ok && prev.totals.changed === 1 && prev.totals.new === 0 && prev.totals.existing === 0,
+    `same sourceId из другой сессии + изменённый текст → changed, НЕ новая запись (changed=${prev.totals.changed})`);
   const ap = await apply(c.id);
-  const cnt = await page.evaluate(() => DB.insights.length);
-  ok(ap.ok && ap.results.some(r => r.status === 'noop') && cnt === 1,
-    'controlled поведение: пакет без нового содержимого — no-op, дубль не создан, чекпойнт продвинут');
+  const st6 = await page.evaluate(() => ({
+    n: DB.insights.length,
+    body: DB.insights[0].body,
+    revs: (DB.insights[0].ext.revisions || []).length,
+  }));
+  ok(ap.ok && ap.results.some(r => r.status === 'committed' && r.updated === 1) && st6.n === 1,
+    'подтверждённое обновление применено к ТОЙ ЖЕ записи — дубль не создан, чекпойнт продвинут');
+  ok(st6.body === 'обновлённый синтетический текст' && st6.revs === 1,
+    'содержимое обновлено, revision provenance записан');
 
   // Одинаковый текст + разные sourceId → ДВЕ записи (запрет text-dedup).
   // Импорт ПОСЛЕДОВАТЕЛЬНЫЙ: второй пакет планируется, когда первый текст
@@ -532,8 +540,10 @@ console.log('\n── FINAL A: Universal External Sources Bridge ──');
   await refresh(cDrive.id, same(100, 'TEST-FA-UNIVERSAL-1', 'google_drive'));
   await apply(cDrive.id);
   const prevChat = await refresh(cChat.id, same(101, 'TEST-FA-UNIVERSAL-1', 'chatgpt'));
-  ok(prevChat.ok && prevChat.totals.new === 0 && prevChat.totals.existing === 1,
-    'тот же sourceId другим каналом (ChatGPT) → существующая запись, НЕ новая');
+  // Variant B: канал не влияет на identity; текст пакета 101 отличается от
+  // 100 → это ВЕРСИЯ той же записи (changed), но НЕ новая запись.
+  ok(prevChat.ok && prevChat.totals.new === 0 && (prevChat.totals.existing + prevChat.totals.changed) === 1,
+    'тот же sourceId другим каналом (ChatGPT) → та же запись (existing/changed), НЕ новая');
   await apply(cChat.id);
   const prevFile = await refresh(cFile.id, same(102, 'TEST-FA-UNIVERSAL-1', 'other'));
   await apply(cFile.id);
@@ -615,9 +625,12 @@ console.log('\n── FINAL A: Universal External Sources Bridge ──');
     await extConnUiRefresh();
     return document.getElementById('ext-conn-out').textContent;
   }, JSON.stringify(feed([pkg(120)])));
-  ok(/Новых записей/.test(prev) && /Уже существуют/.test(prev) &&
+  // P1 (owner, пункт 10): пакеты и записи считаются раздельно и называют
+  // свои единицы; появилась строка «Будут обновлены».
+  ok(/Новых записей/.test(prev) && /Записей уже существует/.test(prev) &&
+     /Пакетов уже импортировано/.test(prev) && /Будут обновлены/.test(prev) &&
      /Будут объединены источники/.test(prev) && /Конфликты/.test(prev) && /Отклонено/.test(prev),
-    'предпросмотр показан человеческим языком (новые/существуют/объединения/конфликты/отклонено)');
+    'предпросмотр показан человеческим языком (новые/обновляемые/существуют-записи/пакеты-по-журналу/объединения/конфликты/отклонено)');
   ok(/Подробности для продвинутых/.test(prev), 'технические детали спрятаны в раскрывающийся блок');
   const confirmStep = await page.evaluate(() => {
     extConnUiConfirm();

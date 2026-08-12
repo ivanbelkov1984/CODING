@@ -25,6 +25,7 @@ function makeMedia() {
   return { get: async id => m.get(id), put: async (id, v) => { m.set(id, v); }, del: async id => { m.delete(id); }, keys: async () => [...m.keys()] };
 }
 const NOW = '2026-08-11T09:00:00.000Z';
+const EXT_UPD = { sourceId: 'test-fa-src-1', origin: 'external_import', entityHash: 'aa'.repeat(32), importHash: 'bb'.repeat(32), importedFields: ['tag', 'title', 'body'], importUpdatedAt: '2026-08-05T10:00:00.000Z', revisions: [{ at: '2026-08-05T10:00:00.000Z', packageHash: 'cc'.repeat(32), sessionRef: 'TEST-FA-REV-S1', prevEntityHash: 'dd'.repeat(32), entityHash: 'aa'.repeat(32), updatedFields: ['body'], mode: 'update' }], localResolutions: [{ entityHash: 'ee'.repeat(32), packageHash: 'ff'.repeat(32), resolvedAt: '2026-08-06T10:00:00.000Z' }] };
 const CONNS = [
   {
     id: 'extConn:test-fa-backup-1', label: 'TEST-FA-источник-A', kind: 'chatgpt_export',
@@ -52,7 +53,10 @@ async function main() {
     [KEYS.AKEY]: 'pA',
     [KEYS.db('pA')]: JSON.stringify({
       externalConnections: CONNS,
-      insights: [{ id: 7101, body: 'TEST-FA-импортированная-запись', day: '2026-08-01', ext: { sourceId: 'test-fa-src-1', origin: 'external_import' } }],
+      // Variant B: снимки версии/импорта и revision provenance обязаны пережить
+      // зашифрованный роундтрип byte-identical — иначе replay после restore
+      // не даст NEW 0 / CHANGED 0.
+      insights: [{ id: 7101, body: 'TEST-FA-импортированная-запись', day: '2026-08-01', ext: EXT_UPD }],
       __ts: 42,
     }),
     [KEYS.cfg('pA')]: JSON.stringify({ userName: 'Alice' }),
@@ -63,8 +67,8 @@ async function main() {
   const { payload } = await adapter.buildBundle({ id: 'pA', mode: 'data-only' });
   ok(JSON.stringify(payload.db.externalConnections) === JSON.stringify(CONNS),
     'data-only bundle: externalConnections (checkpoint, статусы, hashes) byte-identical');
-  ok(JSON.stringify(payload.db.insights[0].ext) === JSON.stringify({ sourceId: 'test-fa-src-1', origin: 'external_import' }),
-    'data-only bundle: ext-provenance импортированной записи сохранён');
+  ok(JSON.stringify(payload.db.insights[0].ext) === JSON.stringify(EXT_UPD),
+    'data-only bundle: ext-provenance + снимки версии/импорта + revisions сохранены');
 
   // 2. Encrypted roundtrip.
   const password = 'test-passphrase-finalA';
@@ -88,8 +92,8 @@ async function main() {
   const db = JSON.parse(dest.storage.getItem(KEYS.db('pNew1')));
   ok(result.ok && JSON.stringify(db.externalConnections) === JSON.stringify(CONNS),
     'production restore: источники, checkpoint, контейнеры и статус error_requires_user восстановлены точно');
-  ok(JSON.stringify(db.insights[0].ext) === JSON.stringify({ sourceId: 'test-fa-src-1', origin: 'external_import' }),
-    'production restore: ext-provenance записи пережил роундтрип (dedup по sourceId продолжит работать)');
+  ok(JSON.stringify(db.insights[0].ext) === JSON.stringify(EXT_UPD),
+    'production restore: ext-provenance, entityHash/importHash/importedFields и revisions пережили роундтрип byte-identical');
 
   // 5. Неверный пароль — DECRYPT_FAILED, ноль мутаций.
   const dest2 = { storage: makeStorage({ [KEYS.PKEY]: '[]', [KEYS.AKEY]: '' }), media: makeMedia() };

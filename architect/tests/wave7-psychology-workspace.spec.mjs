@@ -397,8 +397,11 @@ const V2_BASE = {
     { clientRef: 'e1', type: 'psyInterventionEpisode', sourceId: 'TEST-INT-001',
       data: { methodId: 'behavioral_activation', interventionSummary: 'синтетическое применение', adherence: 'done' } }] });
   const after = await page.evaluate((c) => c.map(x => DB[x].length), PSY_COLLS);
-  ok(again.items[0].status === 'existing-by-provenance',
-    `повторный эпизод по стабильному source ID опознан как уже импортированный (${again.items[0].status})`);
+  // Variant B: payload повторного пакета ОТЛИЧАЕТСЯ (урезан) → это не дубль
+  // и не «existing», а новая версия ТОЙ ЖЕ записи (changed). Второй записи
+  // не возникает; live-DB preview не мутирует.
+  ok(again.items[0].status === 'changed',
+    `повторный эпизод по стабильному source ID опознан как ТА ЖЕ запись — новая версия, не дубль (${again.items[0].status})`);
   ok(JSON.stringify(before) === JSON.stringify(after), 'preview повторного пакета не создал записей');
 }
 

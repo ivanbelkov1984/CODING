@@ -17,19 +17,20 @@ const src = await readFile(DIST, 'utf8');
 
 const MUTANTS = [
   {
-    // BLOCKER 2: атомарность previewed feed — откат снят.
+    // BLOCKER 2: атомарность previewed feed — сбой пакета перестаёт прерывать
+    // feed, применяется «всё остальное» + swap кандидата (partial import).
     id: 'feed-rollback-removed',
-    what: 'при ошибке пакета уже применённые пакеты feed НЕ откатываются (partial import)',
-    find: '      results.forEach(r => { if (r.status === \'committed\') r.status = \'rolled_back\'; });\n      extBridgeRestoreFeedSnapshot(feedSnap);',
-    replace: '      results.forEach(r => { if (r.status === \'committed\') r.status = \'rolled_back\'; });',
+    what: 'при ошибке пакета feed не прерывается — кандидат применяется частично (partial import)',
+    find: '      return { ok: false, rolledBack: true, errors: [`пакет ${b.pkgIndex + 1}: ${res.error} — feed откатен целиком, canonical не изменён`], results };',
+    replace: '      continue;',
     expectFail: 'byte-identical после сбоя',
   },
   {
     // BLOCKER 2: ошибка commit пакета игнорируется — feed «проходит».
     id: 'commit-failure-ignored',
     what: 'сбой commit пакета замалчивается, feed отчитывается успехом',
-    find: '    const res = extCommitPlan(b.plan, null);\n    if (!res.ok) {',
-    replace: '    const res = extCommitPlan(b.plan, null);\n    if (false) {',
+    find: '    const res = extCommitPlan(b.plan, null, { db: candidate, deferPersist: true, provIdx: commitIdx });\n    if (!res.ok) {',
+    replace: '    const res = extCommitPlan(b.plan, null, { db: candidate, deferPersist: true, provIdx: commitIdx });\n    if (false) {',
     expectFail: 'apply останавливается на конфликтном пакете',
   },
   {
@@ -67,7 +68,7 @@ const MUTANTS = [
   {
     id: 'noop-swallows-conflicts',
     what: 'конфликтный пакет проглатывается как no-op с продвижением чекпойнта',
-    find: "    const hasProblems = (b.plan.counts.conflict || 0) > 0 || (b.plan.counts.invalid || 0) > 0 ||\n      (b.plan.counts.unsupported || 0) > 0 || (b.plan.unresolvedRefs || []).length > 0;",
+    find: "    const hasProblems = (counts.conflict || 0) > 0 || (counts.invalid || 0) > 0 ||\n      (counts.unsupported || 0) > 0 || (counts['update-rejected'] || 0) > 0 ||\n      (b.plan.unresolvedRefs || []).length > 0;",
     replace: '    const hasProblems = false;',
     expectFail: 'apply останавливается на конфликтном пакете',
   },
@@ -75,8 +76,8 @@ const MUTANTS = [
     // FINAL contract: sourceId dedup (stale cursor опирается на ledger).
     id: 'ledger-skip-removed',
     what: 'пропуск известных пакетов держится только на чекпойнте (ledger игнорируется)',
-    find: '    const skipped = committed.has(plan.packageHash) || plan.alreadyImported;',
-    replace: '    const skipped = committed.has(plan.packageHash);',
+    find: '    const inLedger = (DB.externalWorkSessions || []).some(s => s && s.contentHash === hash);',
+    replace: '    const inLedger = false;',
     expectFail: 'stale/потерянный cursor безопасен',
   },
   {
@@ -123,7 +124,7 @@ const MUTANTS = [
     what: 'импортированная запись теряет ext-provenance',
     find: '    built.rec.ext = prov;',
     replace: '',
-    expectFail: 'existing-by-provenance, НЕ новая запись',
+    expectFail: 'same sourceId из другой сессии',
   },
   {
     // Universal bridge: канал/контейнер НЕ могут подменить семантическую
@@ -132,7 +133,10 @@ const MUTANTS = [
     what: 'канал/модуль источника подмешивается в identity (та же запись из другого канала становится новой)',
     find: '      .map(r => ({ ref: r, key: extProvenanceKey(coll, r.sourceId) }))',
     replace: "      .map(r => ({ ref: r, key: extProvenanceKey(coll, r.sourceId + '|' + ((pkg.source || {}).module || '')) }))",
-    expectFail: 'ОДНА canonical запись',
+    // Красный сценарий — уже на preview: «тот же sourceId другим каналом»
+    // становится «новой записью». Commit-время дополнительно ловит дубль
+    // fail-closed (re-check против живого provenance-индекса).
+    expectFail: 'тот же sourceId другим каналом',
   },
   {
     // Universal bridge: контейнер источника (файл Drive/архив) — provenance.

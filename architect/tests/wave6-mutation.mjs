@@ -25,16 +25,20 @@ const src = await readFile(DIST, 'utf8');
 const MUTANTS = [
   {
     id: 'provenance-dedup',
-    what: 'снят provenance-дедуп: повторный импорт того же sourceId создаёт дубль',
+    what: 'снят provenance-дедуп предпросмотра: повторный sourceId выглядит «новым»',
     find: '      .filter(x => x.key && provIdx.has(x.key))',
     replace: '      .filter(() => false)',
-    expectFail: 'один факт остался одним canonical-фактом',
+    // Variant B добавил второй слой защиты: commit-время ре-проверяет «new»
+    // против живого provenance-индекса и отклоняет дубль fail-closed, поэтому
+    // канонический дубль при этой мутации больше не возникает — краснеет
+    // preview-контракт статуса.
+    expectFail: 'помечен как уже импортированный',
   },
   {
     id: 'transaction-staging',
     what: 'коммит пишет прямо в живой DB вместо клона-кандидата',
-    find: '  const candidate = JSON.parse(JSON.stringify(DB));\n  const created = [];',
-    replace: '  const candidate = DB;\n  const created = [];',
+    find: '  const candidate = opts && opts.db ? opts.db : JSON.parse(JSON.stringify(DB));',
+    replace: '  const candidate = DB;',
     expectFail: 'zero mutation',
   },
   {
