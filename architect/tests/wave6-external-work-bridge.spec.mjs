@@ -1069,11 +1069,18 @@ console.log('\n── Wave 6: External Work Bridge ──');
       ext: { format: 'architect-external-work-v1', sourceId: 'TEST-LIFE-400', sourceModule: 'OLD', claimClass: 'user_fact' },
     });
     const p = await extBuildPlan(t);
-    const res = extCommitPlan(p);
+    // Без явного решения конфликт блокирует пакет целиком (fail-closed).
+    const unresolved = extCommitPlan(p);
+    const refsBefore = (DB.insights[0].ext.sourceRefs || []).map(r => r.sourceId).sort();
+    // Явное «оставить мою версию» разрешает конфликт: локальное содержимое
+    // сохранено, provenance-ссылки дописаны, решение записано.
+    const res = extCommitPlan(p, { conflicts: { 0: 'keep' } });
     return {
       status: p.items[0].status, n: DB.insights.length,
+      unresolvedOk: unresolved.ok, refsBefore,
       refs: (DB.insights[0].ext.sourceRefs || []).map(r => r.sourceId).sort(),
       body: DB.insights[0].body,
+      resolutions: (DB.insights[0].ext.localResolutions || []).length,
       ok: res.ok,
     };
   }, JSON.stringify({
@@ -1093,14 +1100,17 @@ console.log('\n── Wave 6: External Work Bridge ──');
   }));
   // Variant B: тот же primary sourceId с ДРУГИМ содержимым у legacy-записи
   // (без снимка импорта) — не «existing», а конфликт fail-closed: владение
-  // изменившихся полей неатрибутируемо, локальное содержимое сохраняется,
-  // provenance-ссылки при этом дописываются.
+  // изменившихся полей неатрибутируемо. Без явного решения пакет отклоняется
+  // целиком; после явного «оставить мою версию» локальное содержимое
+  // сохраняется, provenance-ссылки дописываются, решение фиксируется.
   ok(dup.status === 'changed-conflict' && dup.n === 1,
     `legacy-запись без снимка + другой текст → конфликт, дубля нет (${dup.status}, ${dup.n})`);
-  ok(dup.body === 'Импортирована предыдущей версией importer.',
-    'локальное содержимое legacy-записи не затронуто (kept local)');
+  ok(dup.unresolvedOk === false && dup.refsBefore.length === 0,
+    'без явного решения пакет отклонён целиком — даже ссылки не дописаны (legacy ext без sourceRefs)');
+  ok(dup.ok === true && dup.body === 'Импортирована предыдущей версией importer.' && dup.resolutions === 1,
+    'после явного keep-local: локальное содержимое сохранено, решение записано');
   ok(JSON.stringify(dup.refs) === JSON.stringify(['TEST-DREAM-400', 'TEST-LIFE-400']),
-    'плоский legacy sourceId поднят в набор ссылок, новый псевдоним дописан');
+    'плоский legacy sourceId поднят в набор ссылок, новый псевдоним дописан при разрешении');
 }
 
 // ═══════════════════════════════════════════════════════════════════

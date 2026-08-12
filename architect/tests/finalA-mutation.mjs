@@ -68,7 +68,7 @@ const MUTANTS = [
   {
     id: 'noop-swallows-conflicts',
     what: 'конфликтный пакет проглатывается как no-op с продвижением чекпойнта',
-    find: "    const hasProblems = (counts.conflict || 0) > 0 || (counts.invalid || 0) > 0 ||\n      (counts.unsupported || 0) > 0 || (b.plan.unresolvedRefs || []).length > 0;",
+    find: "    const hasProblems = (counts.conflict || 0) > 0 || (counts.invalid || 0) > 0 ||\n      (counts.unsupported || 0) > 0 || (counts['update-rejected'] || 0) > 0 ||\n      (b.plan.unresolvedRefs || []).length > 0;",
     replace: '    const hasProblems = false;',
     expectFail: 'apply останавливается на конфликтном пакете',
   },

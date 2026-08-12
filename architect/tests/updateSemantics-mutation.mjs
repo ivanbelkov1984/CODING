@@ -41,15 +41,41 @@ const MUTANTS = [
     expectFail: 'apply устаревшего предпросмотра НЕ затирает молча',
   },
   {
-    // Раздел 3: замена локальных правок только по ЯВНОМУ выбору.
-    id: 'override-by-default',
-    what: 'changed-conflict применяется по умолчанию (локальные правки затираются без явного выбора)',
-    find: "  const pickedOverrides = plan.items.filter((i, n) => i.status === 'changed-conflict' && i.update && sel.items && sel.items[n] === true);",
-    replace: "  const pickedOverrides = plan.items.filter((i, n) => i.status === 'changed-conflict' && i.update && (!sel.items || sel.items[n] !== false));",
-    // В мосту conflict-only пакет защищён отдельным гейтом needs-decision
-    // (commit не вызывается), поэтому красный сценарий — смешанный пакет,
-    // где commit реально работает с selection=null.
-    expectFail: 'смешанный пакет: новое применено, локальная правка сохранена',
+    // Owner blocker 2: отсутствие выбора НЕ является решением. Мутант
+    // объявляет все конфликты «решёнными» — commit перестаёт отклонять
+    // пакеты с нерешёнными конфликтами, и NEW протаскивает пакет в журнал.
+    id: 'unresolved-treated-as-decided',
+    what: 'нерешённый конфликт считается решённым — пакет проходит в журнал без явного выбора',
+    find: "  const unresolvedConflicts = conflictItems.filter(x => selConflicts[x.n] !== 'keep' && selConflicts[x.n] !== 'override');",
+    replace: '  const unresolvedConflicts = [];',
+    expectFail: 'ручной импорт смешанного пакета без решения отклонён',
+  },
+  {
+    // Owner blocker 1: commit-guard update-rejected. Даже при снятом
+    // feed-гейте ручной пакет с эскалацией не может попасть в журнал.
+    id: 'update-rejected-commit-guard-removed',
+    what: 'commit пропускает пакет с update-rejected — отклонённое обновление проглатывается журналом',
+    find: "  const rejectedUpdates = plan.items.filter(i => i.status === 'update-rejected');\n  if (rejectedUpdates.length) {",
+    replace: "  const rejectedUpdates = plan.items.filter(i => i.status === 'update-rejected');\n  if (false) {",
+    expectFail: 'ручной импорт пакета с update-rejected отклонён целиком',
+  },
+  {
+    // Owner blocker 1+2: feed-гейт терминальности моста. Без него
+    // conflict-only пакет проходит как noop и чекпойнтится.
+    id: 'bridge-terminality-gate-removed',
+    what: 'мост применяет подачу с нерешёнными конфликтами/отклонёнными обновлениями',
+    find: '  if (blockedRejected || blockedConflicts) {',
+    replace: '  if (false) {',
+    expectFail: 'мост с неразрешённым конфликтом останавливает подачу',
+  },
+  {
+    // Owner blocker 2: terminal resolution provenance. Без записи решения
+    // keep-local не терминален и конфликт возвращается вечно.
+    id: 'resolution-provenance-dropped',
+    what: 'явное keep-local не записывает решение — та же версия источника конфликтует вечно',
+    find: '  ext.localResolutions = [...(Array.isArray(ext.localResolutions) ? ext.localResolutions : []), {\n    entityHash: u.newEntityHash, packageHash: u.packageHash, resolvedAt: nowISO(),\n  }].slice(-EXT_REVISIONS_MAX);',
+    replace: '  ;',
+    expectFail: 'replay после keep-local → existing',
   },
   {
     // Volatile-поля: повторный импорт не сдвигает даты на день импорта.
@@ -90,14 +116,6 @@ const MUTANTS = [
     find: "  insight: Object.freeze(['tag', 'title', 'body']),",
     replace: "  insight: Object.freeze(['tag', 'title', 'body', 'links', 'media']),",
     expectFail: 'правка user-owned полей НЕ мешает безопасному update',
-  },
-  {
-    // Kept-local: пакет с неразрешённым конфликтом не считается обработанным.
-    id: 'checkpoint-advanced-despite-needs-decision',
-    what: 'чекпойнт продвигается за пакет с неразрешённым конфликтом — он никогда не всплывёт снова',
-    find: "      if (needsDecision) { keptLocalTotal += counts['changed-conflict'] || 0; }\n      else doneHashes.push(b.hash);",
-    replace: '      doneHashes.push(b.hash);',
-    expectFail: 'чекпойнт НЕ продвинут за пакет с неразрешённым конфликтом',
   },
 ];
 

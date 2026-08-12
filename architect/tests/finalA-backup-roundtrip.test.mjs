@@ -25,7 +25,7 @@ function makeMedia() {
   return { get: async id => m.get(id), put: async (id, v) => { m.set(id, v); }, del: async id => { m.delete(id); }, keys: async () => [...m.keys()] };
 }
 const NOW = '2026-08-11T09:00:00.000Z';
-const EXT_UPD = { sourceId: 'test-fa-src-1', origin: 'external_import', entityHash: 'aa'.repeat(32), importHash: 'bb'.repeat(32), importedFields: ['tag', 'title', 'body'], importUpdatedAt: '2026-08-05T10:00:00.000Z', revisions: [{ at: '2026-08-05T10:00:00.000Z', packageHash: 'cc'.repeat(32), sessionRef: 'TEST-FA-REV-S1', prevEntityHash: 'dd'.repeat(32), entityHash: 'aa'.repeat(32), updatedFields: ['body'], mode: 'update' }] };
+const EXT_UPD = { sourceId: 'test-fa-src-1', origin: 'external_import', entityHash: 'aa'.repeat(32), importHash: 'bb'.repeat(32), importedFields: ['tag', 'title', 'body'], importUpdatedAt: '2026-08-05T10:00:00.000Z', revisions: [{ at: '2026-08-05T10:00:00.000Z', packageHash: 'cc'.repeat(32), sessionRef: 'TEST-FA-REV-S1', prevEntityHash: 'dd'.repeat(32), entityHash: 'aa'.repeat(32), updatedFields: ['body'], mode: 'update' }], localResolutions: [{ entityHash: 'ee'.repeat(32), packageHash: 'ff'.repeat(32), resolvedAt: '2026-08-06T10:00:00.000Z' }] };
 const CONNS = [
   {
     id: 'extConn:test-fa-backup-1', label: 'TEST-FA-источник-A', kind: 'chatgpt_export',

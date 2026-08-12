@@ -189,68 +189,152 @@ console.log('\n── VARIANT B: явная update-семантика внешн
     'local-only поля (links/media) пережили обновление нетронутыми');
 }
 
-// ═══ 5. Локальная правка import-owned поля → changed-conflict ════════
+// ═══ 5. Локальная правка → changed-conflict: НЕтерминален без решения ═
+// Owner review (blocker 2): default ≠ решение. Мост с неразрешённым
+// конфликтом останавливает ВСЮ подачу fail-closed; конфликт всплывает при
+// каждом чтении, пока пользователь явно не решит keep/override.
 {
   await reset();
   const c = await connCreate();
   await refresh(c.id, insightPkg(1, 'исходный текст'));
   await apply(c.id);
   await page.evaluate(() => { DB.insights[0].body = 'локально отредактированный текст'; DB.insights[0]._u = Date.now(); persist(); });
+  const before = await page.evaluate(() => JSON.stringify({
+    ins: DB.insights, ews: DB.externalWorkSessions,
+    ck: DB.externalConnections[0].checkpoint.committedPackageHashes,
+  }));
   const pr = await refresh(c.id, insightPkg(2, 'новая версия источника'));
   ok(pr.ok && pr.totals.changedConflicts === 1 && pr.totals.changed === 0 && pr.totals.new === 0,
     'локальная правка import-owned поля + изменение источника → конфликт, НЕ молчаливый update');
   const ap = await apply(c.id);
-  const st = await page.evaluate(() => ({
-    body: DB.insights[0].body, n: DB.insights.length,
-    results: null,
+  const after = await page.evaluate(() => JSON.stringify({
+    ins: DB.insights, ews: DB.externalWorkSessions,
+    ck: DB.externalConnections[0].checkpoint.committedPackageHashes,
   }));
-  ok(ap.ok && st.body === 'локально отредактированный текст' && st.n === 1,
-    'мост по умолчанию СОХРАНЯЕТ локальные правки (kept local), дубль не создан');
-  ok(ap.keptLocal === 1 && ap.results.some(r => r.status === 'needs-decision'),
-    'kept-local виден в результате; пакет остаётся «требует решения»');
-  const ck = await page.evaluate((i) => extConnFind(i).checkpoint.committedPackageHashes.length, c.id);
-  ok(ck === 1, 'чекпойнт НЕ продвинут за пакет с неразрешённым конфликтом — он всплывёт при следующем чтении');
+  ok(!ap.ok && ap.blocked === true && before === after,
+    'мост с неразрешённым конфликтом останавливает подачу: canonical/журнал/чекпойнт byte-identical');
+  // Конфликт всплывает при следующем чтении — он не «проглочен».
+  const pr2 = await refresh(c.id, insightPkg(2, 'новая версия источника'));
+  ok(pr2.ok && pr2.totals.changedConflicts === 1,
+    'неразрешённый конфликт всплывает при каждом чтении источника');
+  await page.evaluate(() => extBridgeCancel());
 
-  // Явный override через ручной импорт: пользователь сознательно берёт версию источника.
-  const over = await commit(insightPkg(3, 'новая версия источника'), { items: { 0: true }, links: {} });
-  const st2 = await page.evaluate(() => ({ body: DB.insights[0].body, revs: DB.insights[0].ext.revisions.length, mode: DB.insights[0].ext.revisions.at(-1).mode }));
-  ok(over.res.ok && st2.body === 'новая версия источника' && st2.mode === 'override',
-    'явный выбор пользователя применяет версию источника (mode=override, в revision provenance)');
+  // Ручной импорт БЕЗ решения → отклонён целиком (unchecked ≠ keep-local).
+  const unres = await commit(insightPkg(3, 'новая версия источника'), null);
+  const stU = await page.evaluate(() => ({ body: DB.insights[0].body, ews: DB.externalWorkSessions.length }));
+  ok(!unres.res.ok && /не разрешён/.test(unres.res.error) && stU.body === 'локально отредактированный текст' && stU.ews === 1,
+    'ручной импорт без решения конфликта отклонён целиком — журнал не пишется, конфликт не проглочен');
 
-  // Без явного выбора override не происходит (default-безопасность).
-  await page.evaluate(() => { DB.insights[0].body = 'снова локальная правка'; persist(); });
-  const keep = await commit(insightPkg(4, 'ещё одна версия источника'), null);
-  const st3 = await page.evaluate(() => DB.insights[0].body);
-  ok(!keep.res.ok || st3 === 'снова локальная правка',
-    'без явного выбора локальная правка не затирается никогда');
+  // Явное «оставить мою версию» — терминальное решение с provenance.
+  const keep = await commit(insightPkg(3, 'новая версия источника'), { conflicts: { 0: 'keep' } });
+  const stK = await page.evaluate(() => ({
+    body: DB.insights[0].body,
+    res: DB.insights[0].ext.localResolutions,
+    ledger: DB.externalWorkSessions.at(-1).keptLocalRefs,
+  }));
+  ok(keep.res.ok && stK.body === 'локально отредактированный текст' &&
+    Array.isArray(stK.res) && stK.res.length === 1 && /^[0-9a-f]{64}$/.test(stK.res[0].entityHash) && !!stK.res[0].resolvedAt,
+    'explicit keep-local: локальные поля сохранены, terminal resolution provenance записан (hash версии, без старого текста)');
+  ok(Array.isArray(stK.ledger) && stK.ledger.length === 1 && stK.ledger[0].resolution === 'keep_local',
+    'журнал импорта фиксирует явное решение keep_local');
+  // Replay ТОЙ ЖЕ версии источника после решения — resolved/existing, конфликта нет.
+  const replay = await refresh(c.id, insightPkg(4, 'новая версия источника'));
+  ok(replay.ok && replay.totals.changedConflicts === 0 && replay.totals.existing === 1 && replay.totals.new === 0,
+    'replay после keep-local → existing (решение терминально и детерминировано)');
+  const apR = await apply(c.id);
+  ok(apR.ok && apR.results.some(r => r.status === 'noop'),
+    'подача с решённой версией проходит как noop — чекпойнт может честно двигаться');
+
+  // НОВАЯ версия источника после решения снова требует решения.
+  const prNew = await refresh(c.id, insightPkg(5, 'совсем новая версия источника'));
+  ok(prNew.ok && prNew.totals.changedConflicts === 1,
+    'новая версия источника (другой hash) после keep-local снова требует решения');
+  await page.evaluate(() => extBridgeCancel());
+
+  // Явное «заменить версией источника» (override).
+  const over = await commit(insightPkg(5, 'совсем новая версия источника'), { conflicts: { 0: 'override' } });
+  const stO = await page.evaluate(() => ({ body: DB.insights[0].body, mode: DB.insights[0].ext.revisions.at(-1).mode }));
+  ok(over.res.ok && stO.body === 'совсем новая версия источника' && stO.mode === 'override',
+    'explicit override применяет версию источника (mode=override в revision provenance)');
+  // Replay после override — existing (терминально).
+  const replayO = await refresh(c.id, insightPkg(6, 'совсем новая версия источника'));
+  ok(replayO.ok && replayO.totals.existing === 1 && replayO.totals.changedConflicts === 0,
+    'replay после override → existing (детерминировано)');
+  await page.evaluate(() => extBridgeCancel());
 }
 
-// ═══ 5b. Смешанный пакет в мосту: NEW применяется, локальная правка живёт ═
+// ═══ 5b. Смешанный пакет: конфликт блокирует и NEW из той же подачи ═
+// Owner atomicity decision: один item не может «оплатить» проглатывание
+// другого — подача подтверждается одной кнопкой и применяется целиком
+// только когда всё терминально.
 {
   await reset();
   const c = await connCreate();
   await refresh(c.id, insightPkg(1, 'исходный текст'));
   await apply(c.id);
   await page.evaluate(() => { DB.insights[0].body = 'локально правленный текст'; persist(); });
-  const mixed = insightPkg(2, 'версия источника после правки');
-  mixed.entities.push({
-    clientRef: 'iNEW5b', type: 'insight', sourceId: 'TEST-UPD-SRC-5B',
-    claimClass: 'user_experience', textOrigin: 'user_words',
-    data: { title: 'TEST-UPD новый объект', body: 'новый объект в том же пакете', tag: 'personal' },
-  });
-  const pr = await refresh(c.id, mixed);
+  const mkMixed = (n) => {
+    const m = insightPkg(n, 'версия источника после правки');
+    m.entities.push({
+      clientRef: 'iNEW5b', type: 'insight', sourceId: 'TEST-UPD-SRC-5B',
+      claimClass: 'user_experience', textOrigin: 'user_words',
+      data: { title: 'TEST-UPD новый объект', body: 'новый объект в том же пакете', tag: 'personal' },
+    });
+    return m;
+  };
+  const before = await page.evaluate(() => JSON.stringify({ ins: DB.insights, ews: DB.externalWorkSessions, ck: DB.externalConnections[0].checkpoint.committedPackageHashes }));
+  const pr = await refresh(c.id, mkMixed(2));
   ok(pr.ok && pr.totals.new === 1 && pr.totals.changedConflicts === 1,
     'смешанный пакет виден в предпросмотре: NEW + конфликт локальной правки');
   const ap = await apply(c.id);
+  const after = await page.evaluate(() => JSON.stringify({ ins: DB.insights, ews: DB.externalWorkSessions, ck: DB.externalConnections[0].checkpoint.committedPackageHashes }));
+  ok(!ap.ok && ap.blocked === true && before === after,
+    'смешанный пакет: НИЧЕГО не применено до явного решения (canonical/журнал/чекпойнт byte-identical)');
+  // Ручной импорт смешанного пакета БЕЗ решения тоже отклонён целиком:
+  // «новая» запись не может протащить пакет в журнал мимо конфликта.
+  const unresMixed = await commit(mkMixed(2), null);
+  const stUM = await page.evaluate(() => ({ n: DB.insights.length, ews: DB.externalWorkSessions.length }));
+  ok(!unresMixed.res.ok && /не разрешён/.test(unresMixed.res.error) && stUM.n === 1 && stUM.ews === 1,
+    'ручной импорт смешанного пакета без решения отклонён — NEW не применён, журнал не написан');
+  // Ручной импорт с явным решением применяет пакет атомарно.
+  const res = await commit(mkMixed(2), { conflicts: { 0: 'keep' } });
   const st = await page.evaluate(() => ({
     n: DB.insights.length,
     edited: DB.insights.find(r => r.ext && r.ext.sourceId === 'TEST-UPD-SRC-1').body,
     kept: DB.externalWorkSessions.at(-1).keptLocalRefs,
   }));
-  ok(ap.ok && st.n === 2 && st.edited === 'локально правленный текст',
-    'смешанный пакет: новое применено, локальная правка сохранена (kept local)');
-  ok(Array.isArray(st.kept) && st.kept.length === 1,
-    'журнал импорта фиксирует keptLocalRefs — решение «сохранить локальное» аудируемо');
+  ok(res.res.ok && st.n === 2 && st.edited === 'локально правленный текст',
+    'после явного решения пакет применён атомарно: новое создано, локальная версия сохранена');
+  ok(Array.isArray(st.kept) && st.kept.length === 1 && st.kept[0].resolution === 'keep_local',
+    'журнал фиксирует explicit keep-local в смешанном пакете');
+  // Bridge-подача того же пакета теперь терминальна: ledger skip + checkpoint catch-up.
+  const replay = await refresh(c.id, mkMixed(2));
+  ok(replay.ok && replay.totals.skippedByCheckpoint === 1,
+    'после разрешения пакет known ledger\'у — подача пропускает его честно');
+  const apR = await apply(c.id);
+  const ckLen = await page.evaluate((i) => extConnFind(i).checkpoint.committedPackageHashes.length, c.id);
+  ok(apR.ok && ckLen === 2, 'чекпойнт догнан ТОЛЬКО после полного разрешения пакета');
+}
+
+// ═══ 5c. Stale preview между решением и Apply ═══════════════════════
+// Owner test 7: правка записи после построения плана делает явное решение
+// устаревшим — commit отклоняет пакет, требуется новый предпросмотр.
+{
+  await reset();
+  const c = await connCreate();
+  await refresh(c.id, insightPkg(1, 'исходный текст'));
+  await apply(c.id);
+  await page.evaluate(() => { DB.insights[0].body = 'локальная правка №1'; persist(); });
+  const stale = await page.evaluate(async (t) => {
+    const p = await extBuildPlan(t);
+    // Пользователь меняет запись ПОСЛЕ предпросмотра, но ДО подтверждения.
+    DB.insights[0].body = 'локальная правка №2'; persist();
+    const res = extCommitPlan(p, { conflicts: { 0: 'override' } });
+    return JSON.parse(JSON.stringify({ res, body: DB.insights[0].body, ews: DB.externalWorkSessions.length }));
+  }, JSON.stringify(insightPkg(2, 'версия источника')));
+  ok(!stale.res.ok && /изменилась после предпросмотра/.test(stale.res.error) &&
+    stale.body === 'локальная правка №2' && stale.ews === 1,
+    'явное решение по устаревшему предпросмотру отклонено — запись и журнал не тронуты, нужен re-preview');
 }
 
 // ═══ 6. Matrix: эскалация claim-семантики при update → STOP ═════════
@@ -263,18 +347,75 @@ console.log('\n── VARIANT B: явная update-семантика внешн
   await refresh(c.id, base);
   await apply(c.id);
   // Гипотеза «дорастает» до факта повторным импортом — запрещено.
+  // Owner review (blocker 1): update-rejected — НЕтерминальный safety
+  // blocker: подача останавливается, ничего не чекпойнтится/не журналится,
+  // событие всплывает при каждом чтении, пока источник не исправлен.
   const esc = insightPkg(2, 'текст наблюдения', null, {
     claimClass: 'user_fact', claimClasses: ['user_fact'], textOrigin: 'user_words',
   });
+  const before6 = await page.evaluate(() => JSON.stringify({
+    ins: DB.insights, ews: DB.externalWorkSessions,
+    ck: DB.externalConnections[0].checkpoint.committedPackageHashes,
+  }));
   const pr = await refresh(c.id, esc);
   ok(pr.ok && pr.totals.updateRejected === 1 && pr.totals.changed === 0,
     'working_hypothesis → user_fact обновлением ЗАПРЕЩЕНО (update-rejected)');
-  await apply(c.id);
+  const apEsc = await apply(c.id);
+  const after6 = await page.evaluate(() => JSON.stringify({
+    ins: DB.insights, ews: DB.externalWorkSessions,
+    ck: DB.externalConnections[0].checkpoint.committedPackageHashes,
+  }));
+  ok(!apEsc.ok && apEsc.blocked === true && before6 === after6,
+    'update-rejected останавливает подачу: canonical/журнал/чекпойнт byte-identical');
   const st = await page.evaluate(() => ({
     claims: DB.insights[0].ext.claimClasses, body: DB.insights[0].body, revs: (DB.insights[0].ext.revisions || []).length,
   }));
   ok(JSON.stringify(st.claims) === JSON.stringify(['working_hypothesis']) && st.revs === 0,
     'запись не изменена: claim-слой и содержимое остались прежними');
+  // Второй refresh — отклонённое обновление снова видно, оно не «проглочено».
+  const prAgain = await refresh(c.id, esc);
+  ok(prAgain.ok && prAgain.totals.updateRejected === 1,
+    'повторное чтение снова показывает update-rejected (не consumed чекпойнтом/журналом)');
+  await page.evaluate(() => extBridgeCancel());
+
+  // Owner test 9: НИКАКОЙ selection не может применить отклонённое обновление.
+  const forced = await commit(esc, { items: { 0: true }, conflicts: { 0: 'override' } });
+  const stF = await page.evaluate(() => ({
+    claims: DB.insights[0].ext.claimClasses, ews: DB.externalWorkSessions.length,
+  }));
+  ok(!forced.res.ok && /защитой утверждений/.test(forced.res.error) &&
+    JSON.stringify(stF.claims) === JSON.stringify(['working_hypothesis']) && stF.ews === 1,
+    'update-rejected нельзя применить никаким выбором UI/API — commit отклоняет пакет целиком');
+
+  // Ручной импорт пакета, где эскалация соседствует с новой записью: NEW не
+  // может протащить пакет в журнал мимо отклонённого обновления.
+  const escMixed = insightPkg(7, 'текст наблюдения', null, {
+    claimClass: 'user_fact', claimClasses: ['user_fact'], textOrigin: 'user_words',
+  });
+  escMixed.entities.push({
+    clientRef: 'safe6b', type: 'insight', sourceId: 'TEST-UPD-SRC-SAFE6B',
+    claimClass: 'user_experience', textOrigin: 'user_words',
+    data: { title: 'TEST-UPD сосед', body: 'новый объект рядом с эскалацией', tag: 'personal' },
+  });
+  const mixedManual = await commit(escMixed, null);
+  const stMM = await page.evaluate(() => ({ n: DB.insights.length, ews: DB.externalWorkSessions.length }));
+  ok(!mixedManual.res.ok && /защитой утверждений/.test(mixedManual.res.error) && stMM.n === 1 && stMM.ews === 1,
+    'ручной импорт пакета с update-rejected отклонён целиком — NEW не применён, журнал не написан');
+
+  // Owner test 2: смешанная подача safe-changed + update-rejected → ноль мутаций.
+  const safe2 = insightPkg(3, 'текст наблюдения дополненный', null, {
+    claimClass: 'working_hypothesis', claimClasses: ['working_hypothesis'], textOrigin: 'structured_summary',
+  });
+  safe2.entities[0].sourceId = 'TEST-UPD-SRC-SAFE6';
+  safe2.entities[0].clientRef = 'safe6';
+  // safe2 — НОВАЯ запись + пакет esc с эскалацией: блокируется вся подача.
+  const beforeMix = await page.evaluate(() => JSON.stringify({ ins: DB.insights, ews: DB.externalWorkSessions, ck: DB.externalConnections[0].checkpoint.committedPackageHashes }));
+  const prMix = await refresh(c.id, feed([safe2, esc]));
+  const apMix = await apply(c.id);
+  const afterMix = await page.evaluate(() => JSON.stringify({ ins: DB.insights, ews: DB.externalWorkSessions, ck: DB.externalConnections[0].checkpoint.committedPackageHashes }));
+  ok(prMix.ok && !apMix.ok && apMix.blocked === true && beforeMix === afterMix,
+    'смешанная подача (валидная работа + update-rejected) → ВСЯ подача остановлена, ноль мутаций');
+  await page.evaluate(() => extBridgeCancel());
 
   // Де-эскалация (снятие фактического слоя) разрешена.
   const deesc = insightPkg(3, 'текст наблюдения', null, {
@@ -372,6 +513,30 @@ console.log('\n── VARIANT B: явная update-семантика внешн
     'restore сохранил снимки версии, importedFields, revisions и sourceRefs');
   ok(res.totals.new === 0 && res.totals.changed === 0 && res.totals.skippedByCheckpoint === 1,
     'replay после restore: NEW 0, CHANGED 0');
+
+  // Owner test 8: terminal keep-local resolution переживает restore, и
+  // replay после restore НЕ меняет решение (без старых приватных текстов).
+  await page.evaluate(() => { extBridgeCancel(); DB.insights[0].body = 'локальная правка перед решением'; persist(); });
+  const keep9 = await commit(insightPkg(3, 'версия три'), { conflicts: { 0: 'keep' } });
+  const res2 = await page.evaluate(async (t) => {
+    const snap = JSON.stringify(DB);
+    Object.keys(DB).forEach(k => { delete DB[k]; });
+    Object.assign(DB, JSON.parse(snap));
+    persist();
+    const p = await extBuildPlan(t);
+    const lr = DB.insights[0].ext.localResolutions;
+    return JSON.parse(JSON.stringify({
+      status: p.items[0].status,
+      lrLen: Array.isArray(lr) ? lr.length : 0,
+      lrHash: lr && lr[0] && /^[0-9a-f]{64}$/.test(lr[0].entityHash),
+      noOldText: !JSON.stringify(lr || []).includes('версия три'),
+      body: DB.insights[0].body,
+    }));
+  }, JSON.stringify(insightPkg(4, 'версия три')));
+  ok(keep9.res.ok && res2.lrLen === 1 && res2.lrHash && res2.noOldText,
+    'localResolutions пережил restore: hash версии без старого приватного текста');
+  ok(res2.status === 'existing-by-provenance' && res2.body === 'локальная правка перед решением',
+    'replay после restore не меняет решение: та же версия — resolved/existing, локальный текст сохранён');
 }
 
 // ═══ 10. Matrix: исчезновение источника ≠ delete ════════════════════
@@ -614,15 +779,22 @@ console.log('\n── VARIANT B: явная update-семантика внешн
     document.getElementById('ext-text').value = t;
     await extPreview();
     const out = document.getElementById('ext-out');
-    const boxes = [...out.querySelectorAll('input[type=checkbox]')].map(b => ({ checked: b.checked, disabled: b.disabled }));
+    const radios = [...out.querySelectorAll('input[type=radio]')].map(b => ({ checked: b.checked, name: b.name }));
+    const group = out.querySelector('[role=radiogroup]');
     const text = out.textContent;
+    const actText = (document.getElementById('ext-actions') || {}).textContent || '';
     closeOv('ov-ext-import');
-    return { boxes, text };
+    return { radios, hasGroup: !!group, text, actText };
   }, JSON.stringify(insightPkg(2, 'версия источника')));
-  ok(ui.boxes.length === 1 && ui.boxes[0].disabled === false && ui.boxes[0].checked === false,
-    'changed-conflict в ручном предпросмотре: чекбокс доступен, но ПО УМОЛЧАНИЮ снят');
-  ok(/сохраняются твои изменения/.test(ui.text) && /запись правилась локально/.test(ui.text),
-    'конфликт объяснён человеческим языком с безопасным дефолтом');
+  // Owner review (blocker 2): решение — явный per-record выбор из двух
+  // вариантов, НИ ОДИН не выбран по умолчанию.
+  ok(ui.hasGroup && ui.radios.length === 2 && ui.radios.every(r => !r.checked),
+    'changed-conflict в ручном предпросмотре: два явных варианта, ни один не выбран по умолчанию');
+  ok(/Оставить мою версию/.test(ui.text) && /Заменить версией источника/.test(ui.text) &&
+    /запись правилась локально/.test(ui.text),
+    'варианты решения названы человеческим языком');
+  ok(/Без решения импорт не применится/.test(ui.text),
+    'пользователю объяснено, что без решения импорт не применится');
 }
 
 // ═══ 19. Санити после update: JS-ошибки/сеть ════════════════════════
