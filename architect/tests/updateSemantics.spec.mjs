@@ -54,6 +54,8 @@ const insightPkg = (n, body, over, entityOver) => ({
   entities: [
     { clientRef: 'i' + n, type: 'insight', sourceId: 'TEST-UPD-SRC-1',
       claimClass: 'user_experience', textOrigin: 'user_words',
+      // §19: монотонная ревизия источника — ordering evidence для update-путей.
+      sourceVersion: { sequence: n },
       data: { title: 'TEST-UPD инсайт', body, tag: 'personal' },
       ...(entityOver || {}) },
   ],
@@ -597,7 +599,7 @@ console.log('\n── VARIANT B: явная update-семантика внешн
     source: { kind: 'google_drive', label: 'TEST-UPD источник', module: 'TEST-UPD-MODULE' },
     session: { clientRef: 'TEST-UPD-SL-' + n, summary: 'сессия ' + n, date: '2026-05-02' },
     entities: [{ clientRef: 's' + n, type: 'sphereLog', sourceId: 'TEST-UPD-SL-1',
-      claimClass: 'user_fact', textOrigin: 'user_words',
+      claimClass: 'user_fact', textOrigin: 'user_words', sourceVersion: { sequence: n },
       data: { sphereId: 501, value: val, note: 'TEST-UPD заметка', ...(date ? { date } : {}) } }],
     links: [],
   });
@@ -627,10 +629,10 @@ console.log('\n── VARIANT B: явная update-семантика внешн
     session: { clientRef: 'TEST-UPD-PSY-S' + n, summary: 'сессия ' + n, date: '2026-05-04' },
     entities: [
       { clientRef: 'g1', type: 'psyGoal', sourceId: 'TEST-UPD-GOAL-1',
-        claimClass: 'assistant_summary', textOrigin: 'structured_summary',
+        claimClass: 'assistant_summary', textOrigin: 'structured_summary', sourceVersion: { sequence: n },
         data: { label: 'TEST-UPD цель', proximalOutcome: outcome, startedAt: '2026-05-01T10:00:00.000Z' } },
       { clientRef: 'e1', type: 'psyInterventionEpisode', sourceId: 'TEST-UPD-INT-1',
-        claimClass: 'practice_action', textOrigin: 'user_words',
+        claimClass: 'practice_action', textOrigin: 'user_words', sourceVersion: { sequence: n },
         data: { methodId: 'behavioral_activation', interventionSummary: 'TEST-UPD применение',
           dateTime: '2026-05-01T11:00:00.000Z', adherence: 'done' } },
     ],
@@ -719,8 +721,11 @@ console.log('\n── VARIANT B: явная update-семантика внешн
   const prCh = await refresh(c.id, chPkg);
   await apply(c.id);
   const st = await page.evaluate(() => DB.insights[0].body);
-  ok(prCh.ok && prCh.totals.changedConflicts === 1 && st === 'legacy содержимое',
-    'legacy + изменённые поля → changed-conflict, содержимое не тронуто (не угадываем владение)');
+  // §19: у legacy-записи нет ни снимков версии, ни sourceVersion — порядок
+  // недоказуем; расхождение полей теперь честно ORDER_UNKNOWN (fail-closed),
+  // а не «конфликт правок». Содержимое не тронуто, решение только явное.
+  ok(prCh.ok && prCh.totals.orderUnknown === 1 && prCh.totals.changedConflicts === 0 && st === 'legacy содержимое',
+    'legacy + изменённые поля → order-unknown, содержимое не тронуто (порядок не угадываем)');
 }
 
 // ═══ 16. Кросс-модульная целостность: update не оставляет вторую сущность ═

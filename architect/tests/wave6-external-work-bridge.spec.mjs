@@ -830,7 +830,9 @@ console.log('\n── Wave 6: External Work Bridge ──');
     source: { kind: 'chatgpt', label: 'Психология', module: 'PSY-MODULE', chatId: 'chat-psy' },
     session: { clientRef: 's-psy', summary: 'Очередь психологии', date: '2026-03-05' },
     entities: [{
-      clientRef: 'p1', type: 'dream', sourceId: 'TEST-DREAM-340',
+      // §19: та же ВЕРСИЯ эпизода (тот же sourceDate/содержимое) + новый
+      // псевдоним — это merge provenance, а не новая версия.
+      clientRef: 'p1', type: 'dream', sourceId: 'TEST-DREAM-340', sourceDate: '2026-03-03',
       sourceRefs: [{ sourceId: 'TEST-PSY-340', role: 'alias' }],
       claimClass: 'user_experience', textOrigin: 'user_words',
       data: { title: 'Сон об экзамене', body: 'Синтетический рассказ сна об экзамене.', tone: 'тревожный' },
@@ -1098,13 +1100,14 @@ console.log('\n── Wave 6: External Work Bridge ──');
     }],
     links: [],
   }));
-  // Variant B: тот же primary sourceId с ДРУГИМ содержимым у legacy-записи
-  // (без снимка импорта) — не «existing», а конфликт fail-closed: владение
-  // изменившихся полей неатрибутируемо. Без явного решения пакет отклоняется
-  // целиком; после явного «оставить мою версию» локальное содержимое
-  // сохраняется, provenance-ссылки дописываются, решение фиксируется.
-  ok(dup.status === 'changed-conflict' && dup.n === 1,
-    `legacy-запись без снимка + другой текст → конфликт, дубля нет (${dup.status}, ${dup.n})`);
+  // §19: у legacy-записи нет ни снимков версии, ни sourceVersion — порядок
+  // версий недоказуем, поэтому расхождение содержимого теперь честно
+  // ORDER_UNKNOWN (fail-closed), не «конфликт правок». Без явного решения
+  // пакет отклоняется целиком; после явного «оставить мою версию» локальное
+  // содержимое сохраняется, provenance-ссылки дописываются, решение
+  // фиксируется.
+  ok(dup.status === 'order-unknown' && dup.n === 1,
+    `legacy-запись без снимка + другой текст → order-unknown, дубля нет (${dup.status}, ${dup.n})`);
   ok(dup.unresolvedOk === false && dup.refsBefore.length === 0,
     'без явного решения пакет отклонён целиком — даже ссылки не дописаны (legacy ext без sourceRefs)');
   ok(dup.ok === true && dup.body === 'Импортирована предыдущей версией importer.' && dup.resolutions === 1,

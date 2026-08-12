@@ -397,11 +397,12 @@ const V2_BASE = {
     { clientRef: 'e1', type: 'psyInterventionEpisode', sourceId: 'TEST-INT-001',
       data: { methodId: 'behavioral_activation', interventionSummary: 'синтетическое применение', adherence: 'done' } }] });
   const after = await page.evaluate((c) => c.map(x => DB[x].length), PSY_COLLS);
-  // Variant B: payload повторного пакета ОТЛИЧАЕТСЯ (урезан) → это не дубль
-  // и не «existing», а новая версия ТОЙ ЖЕ записи (changed). Второй записи
-  // не возникает; live-DB preview не мутирует.
-  ok(again.items[0].status === 'changed',
-    `повторный эпизод по стабильному source ID опознан как ТА ЖЕ запись — новая версия, не дубль (${again.items[0].status})`);
+  // §19: payload повторного пакета ОТЛИЧАЕТСЯ, но ordering evidence
+  // (sourceVersion) нет ни у записи, ни у пакета → порядок версий недоказуем,
+  // автоматическое обновление запрещено (order-unknown). Второй записи не
+  // возникает; live-DB preview не мутирует.
+  ok(again.items[0].status === 'order-unknown',
+    `повторный эпизод по стабильному source ID опознан как ТА ЖЕ запись — порядок версий неизвестен, не дубль (${again.items[0].status})`);
   ok(JSON.stringify(before) === JSON.stringify(after), 'preview повторного пакета не создал записей');
 }
 

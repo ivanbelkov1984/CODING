@@ -14235,13 +14235,14 @@ async function extBridgeRefresh(connId, text) {
   const batches = [];
   // P1 (owner, пункт 10): пакеты и записи считаются РАЗДЕЛЬНО.
   // skippedByCheckpoint — это ПАКЕТЫ (по журналу/чекпойнту), existing — ЗАПИСИ.
-  const totals = { packages: parsed.packages.length, skippedByCheckpoint: 0, new: 0, existing: 0, changed: 0, changedConflicts: 0, updateRejected: 0, conflicts: 0, rejected: 0, unresolved: 0, alreadyImported: 0 };
+  const totals = { packages: parsed.packages.length, skippedByCheckpoint: 0, new: 0, existing: 0, changed: 0, changedConflicts: 0, updateRejected: 0, stale: 0, orderUnknown: 0, versionConflicts: 0, normalizationChanges: 0, supersededInFeed: 0, conflicts: 0, rejected: 0, unresolved: 0, alreadyImported: 0 };
   // Планы всех пакетов строятся ПОСЛЕДОВАТЕЛЬНО на ОДНОМ кандидате: пакет N
   // видит записи и обновления пакетов 1…N-1. Иначе sourceId, впервые
   // встречающийся в двух пакетах одного feed, оба раза выглядел бы «новым»
   // и при применении создал бы дубль (устранённый дефект Variant B).
   const sharedDb = JSON.parse(JSON.stringify(DB));
   const sharedIdx = extIndexExistingProvenance(sharedDb);
+  const sharedTouched = new Set();
   for (let i = 0; i < parsed.packages.length; i++) {
     const pkgText = JSON.stringify(parsed.packages[i]);
     // Пакет, известный чекпойнту или ledger'у, пропускается ДО построения
@@ -14263,7 +14264,7 @@ async function extBridgeRefresh(connId, text) {
       batches.push({ pkgIndex: i, plan: null, hash, skipped: true, inCheckpoint });
       continue;
     }
-    const plan = await extBuildPlan(pkgText, { db: sharedDb, provIdx: sharedIdx });
+    const plan = await extBuildPlan(pkgText, { db: sharedDb, provIdx: sharedIdx, feedTouched: sharedTouched });
     if (!plan.ok) {
       extConnUpdate(connId, c => { c.status = 'error_requires_user'; c.checkpoint.lastError = `пакет ${i + 1}: ${plan.errors[0]}`; });
       return { ok: false, errors: [`пакет ${i + 1}: ${plan.errors.join('; ')}`] };
@@ -14273,6 +14274,11 @@ async function extBridgeRefresh(connId, text) {
     totals.changed += (plan.counts.changed || 0);
     totals.changedConflicts += (plan.counts['changed-conflict'] || 0);
     totals.updateRejected += (plan.counts['update-rejected'] || 0);
+    totals.stale += (plan.counts['stale-source-version'] || 0);
+    totals.orderUnknown += (plan.counts['order-unknown'] || 0);
+    totals.versionConflicts += (plan.counts['source-version-conflict'] || 0);
+    totals.normalizationChanges += (plan.counts['normalization-change'] || 0);
+    totals.supersededInFeed += (plan.counts['superseded-in-feed'] || 0);
     totals.conflicts += (plan.counts.conflict || 0);
     totals.rejected += (plan.counts.invalid || 0) + (plan.counts.unsupported || 0);
     totals.unresolved += (plan.unresolvedRefs || []).length;
@@ -14313,14 +14319,20 @@ function extBridgeApply(connId) {
   // проглатывание другого: safe-changed и new из этого же feed тоже не
   // применяются — владелец подтверждает подачу одной кнопкой целиком.
   // Разрешение конфликтов — ручной импорт пакета с явным выбором по записи.
-  const blockedRejected = pending.batches.reduce((n, b) =>
-    n + (!b.skipped && b.plan ? (b.plan.counts['update-rejected'] || 0) : 0), 0);
-  const blockedConflicts = pending.batches.reduce((n, b) =>
-    n + (!b.skipped && b.plan ? (b.plan.counts['changed-conflict'] || 0) : 0), 0);
-  if (blockedRejected || blockedConflicts) {
+  const cntOf = (st) => pending.batches.reduce((n, b) =>
+    n + (!b.skipped && b.plan ? (b.plan.counts[st] || 0) : 0), 0);
+  const blockedRejected = cntOf('update-rejected');
+  const blockedConflicts = cntOf('changed-conflict');
+  const blockedStale = cntOf('stale-source-version');
+  const blockedOrder = cntOf('order-unknown');
+  const blockedVersion = cntOf('source-version-conflict') + cntOf('normalization-change');
+  if (blockedRejected || blockedConflicts || blockedStale || blockedOrder || blockedVersion) {
     const parts = [];
     if (blockedRejected) parts.push(`обновлений отклонено защитой утверждений: ${blockedRejected} — источник пытается изменить смысл записи, исправь источник`);
     if (blockedConflicts) parts.push(`записей с неразрешённым конфликтом локальных правок: ${blockedConflicts} — реши каждую через ручной импорт пакета («оставить мою версию» / «заменить версией источника»)`);
+    if (blockedStale) parts.push(`источник содержит более старые уже известные версии записей: ${blockedStale} — текущее состояние новее, подача не применяется`);
+    if (blockedOrder) parts.push(`записей с неопределимым порядком версий: ${blockedOrder} — реши каждую через ручной импорт пакета`);
+    if (blockedVersion) parts.push(`конфликтов версии источника/нормализации: ${blockedVersion} — проверь коннектор и подачу`);
     const blockMsg = 'подача не применена: ' + parts.join('; ') + '. Ничего не изменено — состояние всплывёт при следующем чтении источника.';
     extConnUpdate(connId, c => { c.status = 'error_requires_user'; c.checkpoint.lastError = blockMsg; });
     return { ok: false, blocked: true, errors: [blockMsg], results: [] };
@@ -14355,6 +14367,8 @@ function extBridgeApply(connId) {
     // даже без него commit отклонит пакет и остановит весь feed.
     const hasProblems = (counts.conflict || 0) > 0 || (counts.invalid || 0) > 0 ||
       (counts.unsupported || 0) > 0 || (counts['update-rejected'] || 0) > 0 ||
+      (counts['stale-source-version'] || 0) > 0 || (counts['order-unknown'] || 0) > 0 ||
+      (counts['source-version-conflict'] || 0) > 0 || (counts['normalization-change'] || 0) > 0 ||
       (b.plan.unresolvedRefs || []).length > 0;
     if (!hasWork && !hasProblems) {
       doneHashes.push(b.hash);
@@ -14473,6 +14487,10 @@ async function extConnUiRefresh() {
     <div class="si-text">Будут объединены источники: ${merges}</div>
     ${t.changedConflicts ? `<div class="si-text" style="color:var(--orange)">Требуют решения: ${t.changedConflicts} — источник изменился, но записи правились локально. Подача НЕ будет применена, пока не решишь каждую через ручной импорт пакета: «Оставить мою версию» или «Заменить версией источника».</div>` : ''}
     ${t.updateRejected ? `<div class="si-text" style="color:var(--red,#DC2626)">Обновлений отклонено защитой утверждений: ${t.updateRejected} — подача не будет применена; исправь источник. Это состояние будет показываться, пока источник не исправлен.</div>` : ''}
+    ${t.stale ? `<div class="si-text" style="color:var(--red,#DC2626)">Источник содержит более старые уже известные версии: ${t.stale} — текущее состояние новее; подача не будет применена.</div>` : ''}
+    ${t.orderUnknown ? `<div class="si-text" style="color:var(--orange)">Порядок версий неизвестен: ${t.orderUnknown} — подача не будет применена; реши каждую запись через ручной импорт пакета.</div>` : ''}
+    ${t.versionConflicts || t.normalizationChanges ? `<div class="si-text" style="color:var(--red,#DC2626)">Конфликты версии источника/нормализации: ${(t.versionConflicts || 0) + (t.normalizationChanges || 0)} — проверь коннектор; подача не будет применена.</div>` : ''}
+    ${t.supersededInFeed ? `<div class="si-text">Заменены более новыми версиями в этой подаче: ${t.supersededInFeed}</div>` : ''}
     <div class="si-text">Конфликты: ${t.conflicts}</div>
     <div class="si-text">Отклонено: ${t.rejected}${t.unresolved ? ' · нераспознанных ссылок: ' + t.unresolved : ''}</div>
     ${t.conflicts || t.unresolved ? '<div class="psy-adv">Есть конфликты — импорт не будет применён частично: либо всё целиком, либо ничего.</div>' : ''}
@@ -14642,6 +14660,62 @@ const EXT_RESERVED_FIELDS = Object.freeze([
 ]);
 const EXT_POLLUTION_KEYS = Object.freeze(['__proto__', 'constructor', 'prototype']);
 
+// ── Source revision contract (owner decision §19) ───────────────────
+// sourceVersion — provider-neutral НЕОБЯЗАТЕЛЬНАЯ метаданная упорядочения
+// версий исходного объекта. Это provenance/ordering evidence, НЕ identity
+// (identity — только sourceId) и НЕ содержимое (в hash версии не входит).
+//   sequence   — монотонный номер ревизии; его наличие — заявление коннектора
+//                о гарантии монотонности;
+//   modifiedAt — source-side время ИЗМЕНЕНИЯ источника (не дата события, не
+//                время экспорта, не часы устройства);
+//   revisionId — opaque идентификатор ревизии провайдера; сравнивается
+//                ТОЛЬКО на равенство, порядок из него не выводится.
+// Версия нормализатора: если один и тот же source revision нормализован
+// другой версией парсера и дал другой hash — это НЕ изменение источника.
+const EXT_NORMALIZER_VERSION = 1;
+function extNormalizeSourceVersion(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const out = {};
+  if (typeof v.sequence === 'number' && isFinite(v.sequence)) out.sequence = v.sequence;
+  const mAt = extStr(v.modifiedAt, 40);
+  if (mAt && !Number.isNaN(Date.parse(mAt))) out.modifiedAt = mAt;
+  const rid = extStr(v.revisionId, 200);
+  if (rid) out.revisionId = rid;
+  return Object.keys(out).length ? out : null;
+}
+// Детерминированное сравнение версий (приоритет владельца §5):
+// 1) monotonic sequence; 2) source-side modifiedAt; 3) равенство revisionId
+// (только идентичность, не порядок); иначе — 'unknown'. Равные modifiedAt у
+// разных ревизий порядок НЕ доказывают ('unknown', не 'same').
+function extCompareSourceVersions(cur, inc) {
+  const c = extNormalizeSourceVersion(cur), n = extNormalizeSourceVersion(inc);
+  if (!c || !n) return 'unknown';
+  if (typeof c.sequence === 'number' && typeof n.sequence === 'number') {
+    if (n.sequence > c.sequence) return 'newer';
+    if (n.sequence < c.sequence) return 'older';
+    return 'same';
+  }
+  if (c.revisionId && n.revisionId && c.revisionId === n.revisionId) return 'same';
+  if (c.modifiedAt && n.modifiedAt) {
+    const tc = Date.parse(c.modifiedAt), tn = Date.parse(n.modifiedAt);
+    if (tn > tc) return 'newer';
+    if (tn < tc) return 'older';
+    return 'unknown';   // одинаковое время двух ревизий — порядок недоказуем
+  }
+  return 'unknown';
+}
+// Все исторические хеши версий записи (bounded цепочка revisions).
+// Текущий hash сюда не входит — равенство текущему решается раньше.
+function extKnownHistoricalHashes(ext) {
+  const cur = ext && ext.entityHash;
+  const out = new Set();
+  (ext && Array.isArray(ext.revisions) ? ext.revisions : []).forEach(r => {
+    if (r && r.prevEntityHash && r.prevEntityHash !== cur) out.add(r.prevEntityHash);
+    if (r && r.entityHash && r.entityHash !== cur) out.add(r.entityHash);
+  });
+  return out;
+}
+
 // ── Детерминированная канонизация для хеша ──────────────────────────
 // Ключи сортируются, undefined отбрасывается. Один и тот же пакет с иным
 // порядком ключей обязан дать ОДИН И ТОТ ЖЕ hash — это контракт дедупликации.
@@ -14758,6 +14832,26 @@ function extValidatePackage(raw) {
       }
     }
     if (e.sourceDate != null && !extIsIsoDay(e.sourceDate)) errors.push(`entities[${i}]: sourceDate должна быть YYYY-MM-DD`);
+    // Source revision contract (§19): необязательная метаданная упорядочения.
+    if (e.sourceVersion != null) {
+      if (typeof e.sourceVersion !== 'object' || Array.isArray(e.sourceVersion)) {
+        errors.push(`entities[${i}]: sourceVersion должен быть объектом`);
+      } else {
+        const sv = e.sourceVersion;
+        if (sv.sequence != null && !(typeof sv.sequence === 'number' && isFinite(sv.sequence))) {
+          errors.push(`entities[${i}]: sourceVersion.sequence должен быть конечным числом`);
+        }
+        if (sv.modifiedAt != null && (typeof sv.modifiedAt !== 'string' || Number.isNaN(Date.parse(sv.modifiedAt)))) {
+          errors.push(`entities[${i}]: sourceVersion.modifiedAt должен быть корректной датой-временем ISO`);
+        }
+        if (sv.revisionId != null && !extStr(sv.revisionId, 200)) {
+          errors.push(`entities[${i}]: sourceVersion.revisionId должен быть непустой строкой`);
+        }
+        if (sv.sequence == null && sv.modifiedAt == null && sv.revisionId == null) {
+          errors.push(`entities[${i}]: sourceVersion пуст — укажи sequence, modifiedAt или revisionId`);
+        }
+      }
+    }
     if (e.data != null && (typeof e.data !== 'object' || Array.isArray(e.data))) errors.push(`entities[${i}]: data должна быть объектом`);
 
     // Wave 6 / owner review 5228662919 (1): source на уровне ЗАПИСИ.
@@ -15046,6 +15140,12 @@ const EXT_STATUS_RU = {
   'changed': 'обновление записи',
   'changed-conflict': 'конфликт: запись правилась локально',
   'update-rejected': 'обновление отклонено (защита утверждений)',
+  // §19: упорядочение версий источника.
+  'stale-source-version': 'устаревшая версия источника (текущее состояние новее)',
+  'order-unknown': 'порядок версий неизвестен — нужно явное решение',
+  'source-version-conflict': 'конфликт версии источника (одна ревизия — разное содержимое)',
+  'normalization-change': 'изменилась нормализация (это не изменение источника)',
+  'superseded-in-feed': 'заменена более новой версией в этой подаче',
 };
 async function extPreview() {
   const out = $('ext-out'), act = $('ext-actions');
@@ -15071,12 +15171,12 @@ async function extPreview() {
     // выбором per-record — «оставить мою версию» или «заменить версией
     // источника». НИ ОДИН вариант не выбран по умолчанию; без выбора импорт
     // пакета отклоняется целиком.
-    if (i.status === 'changed-conflict') {
+    if (i.status === 'changed-conflict' || i.status === 'order-unknown') {
       return `<div class="si-row"><div class="si-body">
         <span><b>${esc(i.type)}</b> → ${esc(i.coll)}<br><span class="si-text">${esc(i.title.slice(0, 90))}</span>${meta}</span>
-        <div role="radiogroup" aria-label="Решение по конфликту записи ${n + 1}" style="display:flex;gap:1rem;margin-top:.35rem">
+        <div role="radiogroup" aria-label="Решение по записи ${n + 1}" style="display:flex;gap:1rem;margin-top:.35rem;flex-wrap:wrap">
           <label style="display:flex;gap:.35rem;align-items:center"><input type="radio" name="ext-conf-${n}" onchange="extResolveConflict(${n},'keep')">Оставить мою версию</label>
-          <label style="display:flex;gap:.35rem;align-items:center"><input type="radio" name="ext-conf-${n}" onchange="extResolveConflict(${n},'override')">Заменить версией источника</label>
+          <label style="display:flex;gap:.35rem;align-items:center"><input type="radio" name="ext-conf-${n}" onchange="extResolveConflict(${n},'override')">${i.status === 'order-unknown' ? 'Заменить версией источника (порядок версий неизвестен)' : 'Заменить версией источника'}</label>
         </div>
       </div></div>`;
     }
@@ -15101,11 +15201,17 @@ async function extPreview() {
   const nChanged = (plan.counts && plan.counts.changed) || 0;
   const nChangedConflict = (plan.counts && plan.counts['changed-conflict']) || 0;
   const nUpdRej = (plan.counts && plan.counts['update-rejected']) || 0;
+  const nOrderUnknown = (plan.counts && plan.counts['order-unknown']) || 0;
+  const nStale = (plan.counts && plan.counts['stale-source-version']) || 0;
+  const nVerConf = ((plan.counts && plan.counts['source-version-conflict']) || 0) + ((plan.counts && plan.counts['normalization-change']) || 0);
   out.innerHTML = `<div class="si-text" style="line-height:1.7">
       <div><b>Будет создано:</b> ${targets}</div>
       ${nChanged ? `<div><b>Будет обновлено:</b> ${nChanged} (новая версия того же источника; локальных правок нет)</div>` : ''}
       ${nChangedConflict ? `<div style="color:var(--orange)"><b>Конфликты с локальными правками:</b> ${nChangedConflict} — источник изменился, но запись правилась локально. Для каждой такой записи выбери ниже: «Оставить мою версию» или «Заменить версией источника». Без решения импорт не применится.</div>` : ''}
       ${nUpdRej ? `<div style="color:var(--red,#DC2626)"><b>Импорт заблокирован — обновлений отклонено защитой утверждений:</b> ${nUpdRej}. Источник пытается изменить смысл записи (повышение до факта); исправь источник и загрузи заново.</div>` : ''}
+      ${nOrderUnknown ? `<div style="color:var(--orange)"><b>Порядок версий неизвестен:</b> ${nOrderUnknown} — источник отличается, но невозможно определить, какая версия новее. Для каждой записи выбери ниже явное решение.</div>` : ''}
+      ${nStale ? `<div style="color:var(--red,#DC2626)"><b>Импорт заблокирован — устаревшие версии источника:</b> ${nStale}. Текущее состояние приложения новее; подготовь подачу с актуальной версией.</div>` : ''}
+      ${nVerConf ? `<div style="color:var(--red,#DC2626)"><b>Импорт заблокирован — конфликт версии источника/нормализации:</b> ${nVerConf}. Проверь коннектор и подачу.</div>` : ''}
       <div><b>Связей:</b> ${plan.links.filter(l => l.status === 'new').length}</div>
       <div style="color:var(--t4)">До подтверждения ничего не сохраняется.</div>
       ${plan.alreadyImported ? '<div style="color:var(--orange)"><b>Этот пакет уже импортирован</b> — повторный импорт не создаст дублей.</div>' : ''}
@@ -15119,15 +15225,18 @@ async function extPreview() {
     // ВЕСЬ пакет: кнопки подтверждения нет, частичный импорт не предлагается.
     const conflicted = plan.items.filter(i => i.status === 'conflict');
     const updRej = plan.items.filter(i => i.status === 'update-rejected');
+    const staleOrVer = plan.items.filter(i => ['stale-source-version', 'source-version-conflict', 'normalization-change'].includes(i.status));
     const unres = (plan.unresolvedRefs || []).length;
-    const can = !plan.alreadyImported && !conflicted.length && !updRej.length && !unres &&
-      plan.items.some(i => ['new', 'changed', 'changed-conflict'].includes(i.status) || (i.merge && i.merge.addRefs.length));
+    const can = !plan.alreadyImported && !conflicted.length && !updRej.length && !staleOrVer.length && !unres &&
+      plan.items.some(i => ['new', 'changed', 'changed-conflict', 'order-unknown'].includes(i.status) || (i.merge && i.merge.addRefs.length));
     act.innerHTML = unres
       ? `<div class="ai-sp-empty">Импорт заблокирован: ${unres} внутрипакетн(ая/ых) ссылк(а/и) не разрешена. Проверь clientRef в ссылках пакета и загрузи заново.</div>`
       : conflicted.length
       ? `<div class="ai-sp-empty">Импорт заблокирован: ${conflicted.length} конфликт(ов) идентичности источника. Один исходный объект не может быть двумя разными типами записи — исправь пакет и загрузи заново.</div>`
       : updRej.length
       ? `<div class="ai-sp-empty">Импорт заблокирован: ${updRej.length} обновлен(ие/ия) отклонено защитой утверждений — никакой выбор не может применить повышение до факта. Исправь источник и загрузи заново.</div>`
+      : staleOrVer.length
+      ? `<div class="ai-sp-empty">Импорт заблокирован: ${staleOrVer.length} запис(ь/и) с устаревшей версией источника или конфликтом ревизии/нормализации. Текущее состояние приложения не изменяется — подготовь подачу с актуальными версиями.</div>`
       : can
         ? `<button type="button" class="btn btn-p" onclick="extConfirm()">Импортировать выбранное</button>`
         : `<div class="ai-sp-empty">Нет новых записей для импорта.</div>`;
@@ -15256,6 +15365,9 @@ function extProvenance(pkg, e, packageHash) {
     sourceId: primaryRef ? primaryRef.sourceId : (extStr(e.sourceId, 200) || null),
     sourceDate: extIsIsoDay(e.sourceDate) ? e.sourceDate : null,
     sourceDateRange: extStr(e.sourceDateRange, 80) || null,
+    // Source revision contract (§19): ordering evidence + версия нормализатора.
+    sourceVersion: extNormalizeSourceVersion(e.sourceVersion),
+    normalizerVersion: EXT_NORMALIZER_VERSION,
     claimClass: claims.primary,
     claimClasses: claims.all,
     textOrigin: EXT_TEXT_ORIGINS.includes(e.textOrigin) ? e.textOrigin : 'structured_summary',
@@ -15374,6 +15486,7 @@ function extApplyUpdateToRecord(rec, u) {
     at: nowISO(), packageHash: u.packageHash, sessionRef: u.sessionRef || null,
     prevEntityHash: u.prevEntityHash || null, entityHash: u.newEntityHash,
     updatedFields: (u.updatedFields || []).slice(),
+    sourceVersion: u.newSourceVersion || null,
     mode: u.mode || 'update',
   };
   ext.revisions = [...(Array.isArray(ext.revisions) ? ext.revisions : []), rev].slice(-EXT_REVISIONS_MAX);
@@ -15386,6 +15499,10 @@ function extApplyUpdateToRecord(rec, u) {
   ext.entityHash = u.newEntityHash;
   ext.importHash = u.newImportHash;
   ext.importedFields = u.newImportedFields.slice();
+  // §19: текущая версия источника (ordering evidence) и версия нормализатора,
+  // которой посчитан entityHash.
+  ext.sourceVersion = u.newSourceVersion || null;
+  ext.normalizerVersion = EXT_NORMALIZER_VERSION;
   ext.importUpdatedAt = nowISO();
   rec._u = Date.now();   // обновление обязано пережить merge/sync
 }
@@ -15477,6 +15594,49 @@ async function extClassifyExisting(a) {
       reason: 'эта версия источника ранее осознанно отклонена — сохранены локальные данные', merge: mergeInfo,
     };
   }
+  // ── Source revision ordering (owner decision §19) ─────────────────
+  // Содержимое отличается от текущего. ПРЕЖДЕ чем считать это обновлением,
+  // устанавливается временной порядок версий. Приоритет доказательств (§5):
+  // metadata (sequence → modifiedAt → revisionId-равенство) выше исторических
+  // хешей: доказанно более новая ревизия со старым содержимым — это
+  // сознательный revert источника (CHANGED), а не stale.
+  const cmp = extCompareSourceVersions(oldExt && oldExt.sourceVersion, prov.sourceVersion);
+  // Терминальный skip внутри одной подачи: более новая версия этого же
+  // sourceId уже установлена ЭТОЙ подачей — старая в том же feed просто
+  // заменена (newest wins детерминированно при любом порядке пакетов).
+  const supersededHere = ctx.feedTouched && ctx.feedTouched.has(String(prov.sourceId));
+  if (cmp === 'older') {
+    if (supersededHere) {
+      return { ...base, status: 'superseded-in-feed', merge: mergeInfo,
+        reason: 'заменена более новой версией того же источника в этой же подаче' };
+    }
+    return { ...base, status: 'stale-source-version', merge: mergeInfo,
+      reason: 'источник содержит более старую версию записи (по метаданным ревизии) — текущее состояние новее, обновление не применяется' };
+  }
+  if (cmp === 'same') {
+    // Та же ревизия источника, но другой hash содержимого: либо изменился
+    // нормализатор/парсер (не изменение источника!), либо невозможное
+    // состояние источника / повреждённая подача. Fail-closed.
+    const oldNorm = oldExt && oldExt.normalizerVersion;
+    if (oldNorm != null && oldNorm !== EXT_NORMALIZER_VERSION) {
+      return { ...base, status: 'normalization-change', merge: mergeInfo,
+        reason: `та же ревизия источника нормализована другой версией парсера (${oldNorm} → ${EXT_NORMALIZER_VERSION}) — это не изменение источника; требуется решение` };
+    }
+    return { ...base, status: 'source-version-conflict', merge: mergeInfo,
+      reason: 'одна и та же ревизия источника дала разное содержимое — ошибка коннектора, повреждённая подача или невозможное состояние источника' };
+  }
+  if (cmp !== 'newer') {
+    // Метаданных нет/недостаточно — исторические хеши как запасное
+    // доказательство: известная ПРОШЛАЯ версия записи = stale.
+    if (extKnownHistoricalHashes(oldExt).has(newEntityHash)) {
+      if (supersededHere) {
+        return { ...base, status: 'superseded-in-feed', merge: mergeInfo,
+          reason: 'заменена более новой версией того же источника в этой же подаче' };
+      }
+      return { ...base, status: 'stale-source-version', merge: mergeInfo,
+        reason: 'источник содержит уже известную более старую версию записи — текущее состояние новее, обновление не применяется' };
+    }
+  }
   // Версия источника изменилась (или запись без снимка версии) — новая
   // версия собирается ТЕМ ЖЕ адаптером/билдером, что и создание: второй
   // схемы записи не существует, невалидное обновление отклоняет билдер.
@@ -15537,6 +15697,7 @@ async function extClassifyExisting(a) {
     },
     prevEntityHash: (oldExt && oldExt.entityHash) || null,
     newEntityHash, newImportHash, newImportedFields,
+    newSourceVersion: prov.sourceVersion,
     packageHash,
     sessionRef: prov.sessionRef || null,
     // Optimistic concurrency (stale preview): снимок ожидаемых значений на
@@ -15545,6 +15706,17 @@ async function extClassifyExisting(a) {
     expectedValues: JSON.parse(JSON.stringify(extPickFields(existingRec, expectedFields))),
     mode: userUntouched ? 'update' : 'override',
   };
+  // §19 fail-closed unknown order: содержимое отличается, но временной
+  // порядок версий недоказуем (нет метаданных с одной из сторон, либо
+  // одинаковый modifiedAt) — это НЕ безопасный CHANGED. Автоматическое
+  // применение запрещено; разрешение — только явный per-record выбор
+  // («оставить мою версию» / «заменить версией источника»), как у конфликта.
+  if (cmp !== 'newer') {
+    return {
+      ...base, status: 'order-unknown', update, merge: mergeInfo,
+      reason: `версия источника отличается, но невозможно определить, какая версия новее${(oldExt && oldExt.sourceVersion) ? '' : ' (запись импортирована без метаданных ревизии)'} — автоматическое обновление запрещено; реши явно: «оставить мою версию» или «заменить версией источника»`,
+    };
+  }
   if (userUntouched) {
     return {
       ...base, status: 'changed', update, merge: mergeInfo,
@@ -15577,6 +15749,10 @@ async function extBuildPlan(rawText, shared) {
   const db = shared && shared.db ? shared.db : JSON.parse(JSON.stringify(DB));
   const already = (db.externalWorkSessions || []).find(s => s && s.contentHash === packageHash);
   const provIdx = shared && shared.provIdx ? shared.provIdx : extIndexExistingProvenance(db);
+  // §19: sourceId, чья версия установлена ЭТОЙ подачей (создана/обновлена) —
+  // более старая версия того же sourceId дальше в подаче терминально
+  // «заменена» (newest wins), а не stale-блокер.
+  const feedTouched = shared && shared.feedTouched ? shared.feedTouched : new Set();
 
   let idSeq = Date.now();
 
@@ -15634,7 +15810,7 @@ async function extBuildPlan(rawText, shared) {
     nextId: () => ++idSeq,
     createdAt: nowISO(), day: todayKey(), dateRU: dateRU(), dateFull: dateFullRU(),
     srcLabel: extStr((pkg.source || {}).label, 80) || 'Внешняя работа',
-    psyIds, unresolvedRefs, refToRec,
+    psyIds, unresolvedRefs, refToRec, feedTouched,
   };
 
   cyclicIdx.forEach(i => {
@@ -15733,6 +15909,7 @@ async function extBuildPlan(rawText, shared) {
       // состояние — commit применит ровно то же самое тем же писателем.
       if (items[eIdx].status === 'changed' && existingRec) {
         extApplyUpdateToRecord(existingRec, items[eIdx].update);
+        feedTouched.add(String(prov.sourceId));
       }
       continue;
     }
@@ -15755,6 +15932,7 @@ async function extBuildPlan(rawText, shared) {
     // commit обязан воспроизвести ту же последовательность «создание →
     // обновление», иначе optimistic-concurrency сверка не сойдётся.
     items[eIdx] = { ...base, status: 'new', rec: JSON.parse(JSON.stringify(built.rec)) };
+    if (prov.sourceId) feedTouched.add(String(prov.sourceId));
     refToRec.set(prov.clientRef, { coll, id: built.rec.id });
     // Все ссылки новой записи сразу попадают в индекс: вторая запись ТОГО ЖЕ
     // пакета, ссылающаяся на тот же эпизод, не создаст дубль.
@@ -15858,6 +16036,26 @@ function extCommitPlan(plan, selection, opts) {
         '. Импорт отклонён целиком — исправь источник и повтори; данные не изменены.',
     };
   }
+  // §19: устаревшая версия источника и конфликты ревизии/нормализации —
+  // блокирующие НЕтерминальные состояния. Никакой selection их не применяет
+  // (сознательное восстановление старой версии — отдельный будущий UX,
+  // сейчас STALE полностью non-applicable по решению владельца).
+  const staleItems = plan.items.filter(i => i.status === 'stale-source-version');
+  if (staleItems.length) {
+    return {
+      ok: false, stale: staleItems.length,
+      error: `источник содержит более старую уже известную версию записи (${staleItems.length}) — текущее состояние новее; импорт отклонён целиком, данные не изменены.`,
+    };
+  }
+  const versionConflictItems = plan.items.filter(i => i.status === 'source-version-conflict' || i.status === 'normalization-change');
+  if (versionConflictItems.length) {
+    return {
+      ok: false, versionConflicts: versionConflictItems.length,
+      error: `конфликт версии источника/нормализации (${versionConflictItems.length}): ` +
+        versionConflictItems.slice(0, 2).map(i => i.reason).join('; ') +
+        '. Импорт отклонён целиком — данные не изменены.',
+    };
+  }
 
   const sel = selection || {};
   const selConflicts = sel.conflicts || {};
@@ -15867,12 +16065,12 @@ function extCommitPlan(plan, selection, opts) {
   // числе дефолт моста (selection = null) и неотмеченный чекбокс — решением
   // НЕ является: пакет отклоняется целиком, ничего не применяется и не
   // попадает в журнал/чекпойнт, конфликт всплывёт при следующем чтении.
-  const conflictItems = plan.items.map((i, n) => ({ i, n })).filter(x => x.i.status === 'changed-conflict' && x.i.update);
+  const conflictItems = plan.items.map((i, n) => ({ i, n })).filter(x => ['changed-conflict', 'order-unknown'].includes(x.i.status) && x.i.update);
   const unresolvedConflicts = conflictItems.filter(x => selConflicts[x.n] !== 'keep' && selConflicts[x.n] !== 'override');
   if (unresolvedConflicts.length) {
     return {
       ok: false, unresolvedConflicts: unresolvedConflicts.length,
-      error: `конфликт локальных правок не разрешён (${unresolvedConflicts.length}): для каждой записи выбери «оставить мою версию» или «заменить версией источника». Импорт отклонён целиком — данные не изменены.`,
+      error: `конфликт/неопределённый порядок версий не разрешён (${unresolvedConflicts.length}): для каждой записи выбери «оставить мою версию» или «заменить версией источника». Импорт отклонён целиком — данные не изменены.`,
     };
   }
   const pickedOverrides = conflictItems.filter(x => selConflicts[x.n] === 'override').map(x => x.i);
@@ -15888,7 +16086,7 @@ function extCommitPlan(plan, selection, opts) {
   // сохранить provenance. Снятый пользователем элемент не дописывается.
   // На этом этапе все конфликты уже имеют явное решение.
   const pickedMerges = plan.items.filter((i, n) =>
-    ['existing-by-provenance', 'changed', 'changed-conflict'].includes(i.status) &&
+    ['existing-by-provenance', 'changed', 'changed-conflict', 'order-unknown', 'superseded-in-feed'].includes(i.status) &&
     i.merge && i.merge.addRefs.length &&
     (!sel.items || sel.items[n] !== false));
   if (!pickedItems.length && !pickedLinks.length && !pickedMerges.length && !pickedUpdates.length && !pickedOverrides.length && !pickedKeeps.length) {
@@ -15926,7 +16124,14 @@ function extCommitPlan(plan, selection, opts) {
     // Variant B: подтверждённые обновления. Пишутся ТОЛЬКО import-owned поля
     // + ext-слой; локальные/пользовательские поля не затрагиваются. Пишет
     // ТОТ ЖЕ extApplyUpdateToRecord, что и предпросмотр.
-    for (const it of [...pickedUpdates, ...pickedOverrides]) {
+    // Режим в provenance отражает РЕШЕНИЕ, а не классификацию: явный выбор
+    // «заменить версией источника» — всегда override, даже если локальных
+    // правок не было (order-unknown без правок).
+    const updateJobs = [
+      ...pickedUpdates.map(it => ({ it, mode: it.update.mode })),
+      ...pickedOverrides.map(it => ({ it, mode: 'override' })),
+    ];
+    for (const { it, mode } of updateJobs) {
       const u = it.update;
       const rec = (candidate[u.coll] || []).find(r => r && r.id === u.id);
       if (!rec) throw new Error('запись для обновления не найдена: ' + u.coll + '#' + u.id);
@@ -15935,9 +16140,9 @@ function extCommitPlan(plan, selection, opts) {
       if (extCanonicalJson(extPickFields(rec, u.expectedFields)) !== extCanonicalJson(u.expectedValues)) {
         throw new Error(`запись ${u.coll}#${u.id} изменилась после предпросмотра — обнови предпросмотр и подтверди заново`);
       }
-      extApplyUpdateToRecord(rec, u);
+      extApplyUpdateToRecord(rec, { ...u, mode });
       updatedRefs.push({
-        coll: u.coll, id: u.id, updatedFields: u.updatedFields.slice(), mode: u.mode,
+        coll: u.coll, id: u.id, updatedFields: u.updatedFields.slice(), mode,
         prevEntityHash: u.prevEntityHash, entityHash: u.newEntityHash,
       });
     }

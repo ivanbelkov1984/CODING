@@ -58,6 +58,7 @@ const pkg = (n, over) => ({
   entities: [
     { clientRef: 'i' + n, type: 'insight', sourceId: 'TEST-FA-SRC-' + n,
       claimClass: 'user_experience', textOrigin: 'user_words',
+      sourceVersion: { sequence: n },   // §19: ordering evidence для update-путей
       data: { title: 'TEST-FA инсайт ' + n, body: 'синтетический текст инсайта номер ' + n, tag: 'personal' } },
   ],
   links: [],
