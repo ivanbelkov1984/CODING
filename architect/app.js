@@ -8359,21 +8359,29 @@ function rSpi() {
   ).join('');
 }
 const EVO_LV = [{c:'el0',d:'ed0',lb:'Наблюдение'},{c:'el1',d:'ed1',lb:'Понято'},{c:'el2',d:'ed2',lb:'Прочувствовано'},{c:'el3',d:'ed3',lb:'Трансформировало'}];
-// Уровень вехи 0..3 — шкала приложения. Значение вне шкалы (пусто, строка-
-// формулировка из внешнего источника, легаси) НЕ додумывается до «Наблюдения»:
-// запись показывается нейтральным стилем со СВОЕЙ формулировкой. Прямой
-// EVO_LV[Math.min(lv,3)] небезопасен: Math.min('этап',3) → NaN → undefined.
+// Шкала приложения — РОВНО четыре уровня: целые 0, 1, 2, 3. Всё остальное
+// вне шкалы и НЕ подтягивается в неё: 4 и 100 — не «Трансформировало»,
+// −1 — не «Наблюдение», 2.5 — не уровень. Прежний Math.min(n, 3) молча
+// объявлял любое большое число высшей ступенью развития, то есть выдумывал
+// смысл приложения за источник. Значение вне шкалы показывается нейтральным
+// стилем и СВОИМ содержанием; «Наблюдение» не додумывается.
+// Прямой EVO_LV[Math.min(lv,3)] небезопасен и по другой причине:
+// Math.min('этап',3) → NaN → EVO_LV[NaN] → undefined.
 const EVO_LV_OFFSCALE = { c: 'elx', d: 'edx', lb: 'Этап' };
 function evoLevelIndex(v) {
   const n = typeof v === 'number' ? v
     : (typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
-  return Number.isInteger(n) && n >= 0 ? Math.min(n, EVO_LV.length - 1) : null;
+  return Number.isInteger(n) && n >= 0 && n < EVO_LV.length ? n : null;
 }
-// Единая точка представления вехи для ВСЕХ рендереров.
+// Единая точка представления вехи для ВСЕХ рендереров. Вне шкалы человеку
+// показывается то, что реально пришло: строка — как есть, число — с явной
+// пометкой «вне шкалы», чтобы источник был виден и не выдавался за ступень.
 function evoView(rec) {
-  const i = evoLevelIndex(rec && rec.lv);
+  const raw = rec ? rec.lv : undefined;
+  const i = evoLevelIndex(raw);
   if (i != null) return EVO_LV[i];
-  const own = typeof (rec && rec.lv) === 'string' ? rec.lv.trim() : '';
+  const own = typeof raw === 'string' ? raw.trim()
+    : (typeof raw === 'number' && Number.isFinite(raw) ? `вне шкалы: ${raw}` : '');
   return own ? { ...EVO_LV_OFFSCALE, lb: own } : EVO_LV_OFFSCALE;
 }
 function rEvoList(el) {
@@ -15461,11 +15469,15 @@ const EXT_ADAPTERS = {
     if (!text) return { reject: 'нет текста вехи' };
     // `d.lv || d.level` терял валидный 0 (falsy), а extStr отбрасывал ЛЮБОЕ
     // число — числовой уровень источника молча превращался в строку «этап».
-    // Теперь: число 0..3 сохраняется числом, строка — собственной
-    // формулировкой источника; renderer-невалидных значений не создаётся.
+    // Теперь: целое 0..3 сохраняется числом как уровень шкалы; число ВНЕ
+    // шкалы (4, 100, 2.5, −1) тоже сохраняется числом — как есть, без
+    // подтягивания в шкалу: приложение покажет его нейтрально и с пометкой
+    // «вне шкалы», а не объявит высшей ступенью развития. Строка остаётся
+    // собственной формулировкой источника.
     const rawLv = (d.lv !== undefined && d.lv !== null) ? d.lv : d.level;
     const lvNum = evoLevelIndex(typeof rawLv === 'number' ? rawLv : (typeof rawLv === 'string' ? rawLv : null));
-    const lv = lvNum != null ? lvNum : (extStr(rawLv, 40) || 'этап');
+    const lv = lvNum != null ? lvNum
+      : (typeof rawLv === 'number' && Number.isFinite(rawLv) ? rawLv : (extStr(rawLv, 40) || 'этап'));
     return { rec: { id: ctx.nextId(), lv, text, dt: ctx.dateFull,
       createdAt: ctx.createdAt, day: ctx.day, sv: SCHEMA_VERSION } };
   },
