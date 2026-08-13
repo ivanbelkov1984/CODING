@@ -2301,6 +2301,221 @@ const REC_COLLS = {
   labObservations: { ru: 'Лабораторные результаты', sum: r => `${(r.collectedAt || '').slice(0, 10)} · ${r.testName || ''}: ${r.valueText || ''}${r.unit ? ' ' + r.unit : ''}` },
   healthDocuments: { ru: 'Документы здоровья', sum: r => `${(r.documentDate || '').slice(0, 10)} · ${r.title || 'документ'}` },
 };
+// ═══════════════════════════════════════════════════════════════════
+//  ИНСПЕКТОР ЗАПИСИ («Мои записи» → тап по строке).
+//
+//  Каждая каноническая запись открывается и читается целиком. Правка
+//  разрешена ТОЛЬКО там, где она не переписывает историю доказательств —
+//  матрица REC_EDIT (решения владельца):
+//    A — правка на месте (уточнение собственной формулировки);
+//    B — правка только по доменным правилам (версия/коррекция), в этом
+//        релизе показывается read-only с честной причиной и путём;
+//    C — системная/производная запись, правка недоступна.
+//
+//  ИНВАРИАНТ ИМПОРТА: пользовательская правка НИКОГДА не трогает
+//  sourceId / sourceRefs / sourceVersion / claimClasses / textOrigin /
+//  ext.entityHash / ext.importHash / ext.importedFields / revisions /
+//  localResolutions. Меняется только значение поля и `_u` для синка.
+//  Благодаря этому детектор локальных правок (сверяет ТЕКУЩИЕ значения
+//  import-owned полей с ext.importHash) видит расхождение, и более новая
+//  ревизия источника даёт changed-conflict с явным выбором, а не тихую
+//  перезапись работы владельца.
+// ═══════════════════════════════════════════════════════════════════
+const REC_FIELD = (k, l, o) => ({ k, l, ...(o || {}) });
+// Человекочитаемые поля для инспектора. Порядок = порядок показа.
+const REC_VIEW = {
+  insights: [REC_FIELD('title', 'Заголовок'), REC_FIELD('body', 'Текст', { long: true }), REC_FIELD('tag', 'Метка'), REC_FIELD('date', 'Дата'), REC_FIELD('src', 'Источник')],
+  dreams: [REC_FIELD('title', 'Заголовок'), REC_FIELD('body', 'Сон (слова сновидца)', { long: true }), REC_FIELD('arch', 'Трактовка', { long: true }), REC_FIELD('tone', 'Тон'), REC_FIELD('date', 'Дата')],
+  spiritual: [REC_FIELD('type', 'Тип'), REC_FIELD('text', 'Текст', { long: true }), REC_FIELD('date', 'Дата')],
+  evolution: [REC_FIELD('lv', 'Уровень', { fmt: (v, r) => evoView(r).lb }), REC_FIELD('text', 'Текст', { long: true }), REC_FIELD('dt', 'Дата')],
+  patterns: [REC_FIELD('type', 'Тип'), REC_FIELD('text', 'Текст', { long: true }), REC_FIELD('cnt', 'Встречался раз')],
+  bots: [REC_FIELD('title', 'Задача'), REC_FIELD('prio', 'Приоритет', { fmt: v => (v === 'high' ? 'высокий' : 'средний') }), REC_FIELD('done', 'Выполнена', { fmt: v => (v ? 'да' : 'нет') })],
+  relationshipContexts: [REC_FIELD('label', 'Обозначение'), REC_FIELD('roleOrRelation', 'Роль / отношение'), REC_FIELD('note', 'Заметка', { long: true }), REC_FIELD('status', 'Статус')],
+  spheres: [REC_FIELD('name', 'Название'), REC_FIELD('type', 'Вид'), REC_FIELD('unit', 'Единица'), REC_FIELD('target', 'Цель')],
+  astroPartners: [REC_FIELD('label', 'Обозначение'), REC_FIELD('birth', 'Данные рождения', { fmt: v => (v && v.date) ? `${v.date}${v.place ? ', ' + v.place : ''}` : '' })],
+  healthDocuments: [REC_FIELD('title', 'Заголовок'), REC_FIELD('documentDate', 'Дата документа'), REC_FIELD('kind', 'Вид'), REC_FIELD('provider', 'Кем выдан'), REC_FIELD('note', 'Заметка', { long: true })],
+  checkins: [REC_FIELD('date', 'Дата'), REC_FIELD('sl', 'Сон, часов'), REC_FIELD('sq', 'Качество сна'), REC_FIELD('cl', 'Ясность'), REC_FIELD('st', 'Стресс'), REC_FIELD('mv', 'Движение'), REC_FIELD('emo', 'Эмоция'), REC_FIELD('note', 'Заметка', { long: true })],
+  moments: [REC_FIELD('day', 'День'), REC_FIELD('valence', 'Приятность'), REC_FIELD('activation', 'Энергия'), REC_FIELD('emo', 'Эмоция'), REC_FIELD('note', 'Заметка', { long: true })],
+  whys: [REC_FIELD('day', 'День'), REC_FIELD('symptom', 'Симптом — что происходит', { long: true }), REC_FIELD('function', 'Функция — зачем это тебе', { long: true }), REC_FIELD('gain', 'Вторичная выгода', { long: true }), REC_FIELD('need', 'Потребность', { long: true }), REC_FIELD('cost', 'Цена', { long: true }), REC_FIELD('alternative', 'Альтернатива', { long: true }), REC_FIELD('action', 'Действие', { long: true })],
+  cravings: [REC_FIELD('day', 'День'), REC_FIELD('kind', 'Что тянуло'), REC_FIELD('intensity', 'Сила'), REC_FIELD('outcome', 'Исход', { fmt: v => (v === 'held' ? 'пережил' : v === 'gave_in' ? 'уступил' : v) }), REC_FIELD('trigger', 'Триггер', { long: true })],
+  symptoms: [REC_FIELD('day', 'День'), REC_FIELD('name', 'Симптом'), REC_FIELD('severity', 'Выраженность'), REC_FIELD('note', 'Заметка', { long: true })],
+  measures: [REC_FIELD('day', 'День'), REC_FIELD('name', 'Показатель'), REC_FIELD('value', 'Значение'), REC_FIELD('unit', 'Единица')],
+  labObservations: [REC_FIELD('collectedAt', 'Дата забора'), REC_FIELD('testName', 'Анализ'), REC_FIELD('valueText', 'Результат'), REC_FIELD('unit', 'Единица'), REC_FIELD('referenceText', 'Референс'), REC_FIELD('laboratory', 'Лаборатория'), REC_FIELD('note', 'Заметка', { long: true })],
+  meds: [REC_FIELD('name', 'Название'), REC_FIELD('dose', 'Доза'), REC_FIELD('scheduleMode', 'Режим'), REC_FIELD('dailyTarget', 'Приёмов в день'), REC_FIELD('active', 'Активен', { fmt: v => (v ? 'да' : 'нет') })],
+  medIntakes: [REC_FIELD('at', 'Время приёма'), REC_FIELD('medId', 'Препарат', { fmt: v => { const m = (DB.meds || []).find(x => x && x.id === v); return m ? m.name : String(v ?? '—'); } }), REC_FIELD('status', 'Статус')],
+  sphereLogs: [REC_FIELD('date', 'Дата'), REC_FIELD('sphereId', 'Сфера', { fmt: v => { const sp = (DB.spheres || []).find(x => x && x.id === v); return sp ? sp.name : String(v ?? '—'); } }), REC_FIELD('value', 'Значение'), REC_FIELD('note', 'Заметка', { long: true })],
+  psyFormulations: [REC_FIELD('focus', 'Фокус'), REC_FIELD('status', 'Статус', { fmt: v => PSY_STATUS_RU[v] || v }), REC_FIELD('formulation', 'Формулировка', { long: true }), REC_FIELD('hypotheses', 'Гипотезы', { fmt: v => (Array.isArray(v) ? v : []).map(h => `— ${h && h.text ? h.text : ''}${h && h.confidenceLabel ? ' (уверенность: ' + h.confidenceLabel + ')' : ''}`).filter(s => s !== '— ').join('\n') }), REC_FIELD('maintainingFactors', 'Что поддерживает'), REC_FIELD('protectiveFactors', 'Что защищает'), REC_FIELD('supersedesId', 'Заменяет версию')],
+  psyGoals: [REC_FIELD('label', 'Цель'), REC_FIELD('status', 'Статус', { fmt: v => PSY_GOAL_STATUS_RU[v] || v }), REC_FIELD('targetMechanism', 'Механизм-мишень'), REC_FIELD('proximalOutcome', 'Ближний результат'), REC_FIELD('distalOutcome', 'Дальний результат'), REC_FIELD('startedAt', 'Начата'), REC_FIELD('reviewAt', 'Пересмотр')],
+  psyInterventionEpisodes: [REC_FIELD('dateTime', 'Когда'), REC_FIELD('targetProblem', 'Проблема-мишень'), REC_FIELD('targetMechanism', 'Механизм-мишень'), REC_FIELD('methodFamily', 'Семейство метода'), REC_FIELD('methodId', 'Метод'), REC_FIELD('interventionSummary', 'Что делали', { long: true }), REC_FIELD('rationale', 'Обоснование', { long: true }), REC_FIELD('adherence', 'Выполнение', { fmt: v => PSY_ADHERENCE_RU[v] || v }), REC_FIELD('outcomeClass', 'Исход', { fmt: v => PSY_OUTCOME_RU[v] || v }), REC_FIELD('acceptability', 'Переносимость', { fmt: v => PSY_ACCEPT_RU[v] || v }), REC_FIELD('fidelityNote', 'Как именно применяли', { long: true }), REC_FIELD('adverseEffects', 'Нежелательные эффекты', { long: true }), REC_FIELD('confounders', 'Что могло повлиять', { long: true })],
+  psyObservations: [REC_FIELD('timestamp', 'Когда'), REC_FIELD('metricId', 'Метрика'), REC_FIELD('valueNumber', 'Значение'), REC_FIELD('unit', 'Единица'), REC_FIELD('valueText', 'Значение (текст)', { long: true }), REC_FIELD('episode', 'Эпизод', { fmt: v => (v && typeof v === 'object' ? [['event', 'Событие'], ['firstThought', 'Первая мысль'], ['body', 'Тело'], ['emotion', 'Эмоция'], ['impulse', 'Импульс'], ['action', 'Действие'], ['result', 'Результат']].filter(([k]) => v[k]).map(([k, l]) => `${l}: ${v[k]}`).join('\n') : '') }), REC_FIELD('contextTag', 'Контекст'), REC_FIELD('entryMode', 'Способ записи'), REC_FIELD('source', 'Кто записал'), REC_FIELD('naturalistic', 'В естественных условиях', { fmt: v => (v ? 'да' : 'нет') })],
+  psyReviews: [REC_FIELD('periodStart', 'Период с'), REC_FIELD('periodEnd', 'Период по'), REC_FIELD('decision', 'Решение', { fmt: v => PSY_DECISION_RU[v] || v }), REC_FIELD('methodsAppliedSummary', 'Какие методы применялись', { long: true }), REC_FIELD('adherenceSummary', 'Как выполнялось', { long: true }), REC_FIELD('outcomeSummary', 'Что получилось', { long: true }), REC_FIELD('acceptabilitySummary', 'Как переносилось', { long: true }), REC_FIELD('adverseEffectsSummary', 'Нежелательные эффекты', { long: true }), REC_FIELD('confoundersSummary', 'Что могло повлиять', { long: true }), REC_FIELD('hypothesesStrengthened', 'Гипотезы подтвердились'), REC_FIELD('hypothesesWeakened', 'Гипотезы ослабли'), REC_FIELD('limitations', 'Ограничения', { long: true })],
+  psyAdaptivePlans: [REC_FIELD('proximalOutcome', 'Ближний результат'), REC_FIELD('distalOutcome', 'Дальний результат'), REC_FIELD('decisionPoints', 'Точки принятия решения'), REC_FIELD('interventionOptions', 'Возможные приёмы'), REC_FIELD('enabled', 'Включён', { fmt: v => (v ? 'да' : 'нет') })],
+  psyExperiments: [REC_FIELD('question', 'Вопрос'), REC_FIELD('status', 'Статус', { fmt: v => PSY_EXP_STATUS_RU[v] || v }), REC_FIELD('designType', 'Дизайн'), REC_FIELD('methodId', 'Метод'), REC_FIELD('conditions', 'Условия'), REC_FIELD('resultSummary', 'Итог', { long: true }), REC_FIELD('limitations', 'Ограничения')],
+  psyLinks: [REC_FIELD('relation', 'Связь', { fmt: v => PSY_LINK_RELATION_LABELS[v] || v }), REC_FIELD('fromColl', 'Откуда'), REC_FIELD('toColl', 'Куда')],
+  chats: [REC_FIELD('title', 'Тема'), REC_FIELD('mode', 'Режим')],
+  astroCharts: [REC_FIELD('createdAt', 'Рассчитана')],
+  externalWorkSessions: [REC_FIELD('importedAt', 'Импортировано'), REC_FIELD('sourceLabel', 'Источник'), REC_FIELD('summary', 'Сводка', { long: true })],
+  externalConnections: [REC_FIELD('label', 'Название'), REC_FIELD('kind', 'Канал', { fmt: v => EXT_CHANNEL_RU[v] || v }), REC_FIELD('status', 'Состояние', { fmt: v => EXT_SOURCE_STATUS_RU[v] || v })],
+};
+// Матрица редактируемости (решения владельца).
+const REC_EDIT = {
+  // A — правка на месте.
+  insights: { cls: 'A', fields: ['title', 'body', 'tag'] },
+  dreams: { cls: 'A', fields: ['title', 'body', 'arch', 'tone'] },
+  spiritual: { cls: 'A', fields: ['type', 'text'] },
+  evolution: { cls: 'A', fields: ['text'] },
+  patterns: { cls: 'A', fields: ['type', 'text'] },
+  bots: { cls: 'A', fields: ['title'] },
+  // «Зачем?» — собственная трактовка эпизода. Формулировки правятся, день эпизода — нет.
+  whys: { cls: 'A', fields: ['symptom', 'function', 'gain', 'need', 'cost', 'alternative', 'action'] },
+  relationshipContexts: { cls: 'A', fields: ['label', 'roleOrRelation', 'note'] },
+  spheres: { cls: 'A', fields: ['name'] },
+  astroPartners: { cls: 'A', fields: ['label'] },
+  healthDocuments: { cls: 'A', fields: ['title', 'note'] },
+  // B — только по доменным правилам; в этом релизе правка на месте закрыта.
+  psyReviews: { cls: 'B', why: 'Review — зафиксированное суждение за период. Тексты-сводки станут редактируемыми отдельно; период, решение и ссылки на доказательства не переписываются задним числом — для исправления создаётся новый review, заменяющий прежний.' },
+  psyFormulations: { cls: 'B', why: 'Формулировка версионная. Черновик будет правиться на месте, принятая — только новой версией со ссылкой на прежнюю: принятая история не переписывается.' },
+  psyObservations: { cls: 'B', why: 'Это измерение. Значение и время не переписываются задним числом — исправление оформляется отдельной коррекцией, чтобы выводы пересчитались, а исходное наблюдение осталось видимым.' },
+  moments: { cls: 'B', why: 'Это самоотчёт о состоянии. Числа и время не переписываются задним числом — исправление оформляется коррекцией.' },
+  checkins: { cls: 'B', why: 'Это ежедневное измерение. Значения и дата не переписываются задним числом — исправление оформляется коррекцией.' },
+  symptoms: { cls: 'B', why: 'Это медицинское наблюдение. Выраженность и дата не переписываются задним числом — исправление оформляется коррекцией.' },
+  measures: { cls: 'B', why: 'Это измерение. Значение и дата не переписываются задним числом — исправление оформляется коррекцией.' },
+  labObservations: { cls: 'B', why: 'Это результат анализа. Значение и дата забора не переписываются задним числом — исправление оформляется коррекцией.' },
+  medIntakes: { cls: 'B', why: 'Это факт приёма. Время и препарат не переписываются задним числом — исправление оформляется коррекцией.' },
+  cravings: { cls: 'B', why: 'Это зафиксированный эпизод. Сила и исход не переписываются задним числом — исправление оформляется коррекцией.' },
+  sphereLogs: { cls: 'B', why: 'Это оценка по сфере за дату. Значение и дата не переписываются задним числом — исправление оформляется коррекцией.' },
+  meds: { cls: 'B', why: 'План приёма правится в разделе «Здоровье», где проверяется расписание целиком.' },
+  psyInterventionEpisodes: { cls: 'B', why: 'Применение метода несёт доказательные поля (выполнение, исход, переносимость). Любая правка обязана пройти ту же проверку безопасности утверждений, что и импорт: невыполненная техника не может быть объявлена бесполезной. Правится отдельным путём с сохранением истории исправлений.' },
+  psyGoals: { cls: 'B', why: 'У цели есть жизненный цикл статусов. Статус меняется допустимыми переходами в разделе «Психология», а не произвольной правкой.' },
+  psyAdaptivePlans: { cls: 'B', why: 'У плана есть жизненный цикл. Статус меняется допустимыми переходами в разделе «Психология».' },
+  psyExperiments: { cls: 'B', why: 'У эксперимента есть жизненный цикл. Завершённый эксперимент не возвращается в активные произвольной правкой.' },
+  // C — системные и производные.
+  externalWorkSessions: { cls: 'C', why: 'Системная запись — журнал импорта. Это история того, что уже принято, а не данные жизни: правка сломала бы защиту от повторного импорта.' },
+  externalConnections: { cls: 'C', why: 'Системная запись — состояние источника: контрольная точка и статистика импорта. Правка вручную сломала бы защиту от дублей.' },
+  psyLinks: { cls: 'C', why: 'Системная запись — доказательная связь. Она строится из самих записей, а не пишется руками.' },
+  astroCharts: { cls: 'C', why: 'Производная запись — результат расчёта. Он пересчитывается из данных рождения, а не редактируется.' },
+  chats: { cls: 'C', why: 'История диалога с ИИ. Прошедший разговор не переписывается.' },
+};
+const recEditCls = coll => (REC_EDIT[coll] || { cls: 'C', why: 'Для этого типа записи правка недоступна.' });
+// Идентификатор записи как аргумент inline-обработчика. JSON.stringify
+// сохраняет разницу «число vs строка» (id сравниваются через ===), а
+// экранирование кавычек обязательно: строковый id (psyUid: «psyReview-…»)
+// иначе обрывает HTML-атрибут — обработчик ломается, а хвост id парсится
+// как чужой атрибут. `esc` здесь не годится: она не трогает кавычки.
+const recArg = v => JSON.stringify(v)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+// Значение поля человеку. Массивы — списком, пусто — «не заполнено».
+function recFieldText(rec, f) {
+  const raw = rec[f.k];
+  if (f.fmt) { const t = f.fmt(raw, rec); return (t === undefined || t === null || t === '') ? '' : String(t); }
+  if (Array.isArray(raw)) return raw.filter(x => x != null && x !== '').map(x => String(x)).join('\n');
+  if (raw === undefined || raw === null || raw === '') return '';
+  return String(raw);
+}
+let _recDet = null;   // { coll, id, editing }
+function recOpen(coll, id) {
+  _recDet = { coll, id, editing: false };
+  recRenderDetail();
+  openOv('ov-rec-det');
+}
+function recDetRecord() {
+  if (!_recDet) return null;
+  return (DB[_recDet.coll] || []).find(r => r && String(r.id) === String(_recDet.id)) || null;
+}
+function recRenderDetail() {
+  const box = $('rec-det-body'); const act = $('rec-det-actions');
+  const ttl = $('rec-det-title');
+  if (!box || !_recDet) return;
+  const { coll } = _recDet;
+  const rec = recDetRecord();
+  const cfg = REC_COLLS[coll] || { ru: coll };
+  if (ttl) ttl.textContent = cfg.ru;
+  if (!rec) { box.innerHTML = '<div class="bk-empty">Запись не найдена — возможно, она удалена.</div>'; if (act) act.innerHTML = `<button type="button" class="btn btn-s btn-full" onclick="closeOv('ov-rec-det');rRecords()">Закрыть</button>`; return; }
+  const view = REC_VIEW[coll] || Object.keys(rec).filter(k => !['id', 'ext', 'sv', '_u'].includes(k)).map(k => REC_FIELD(k, k));
+  const em = recEditCls(coll);
+  const ext = rec.ext || null;
+  if (_recDet.editing) {
+    const fields = (em.fields || []).filter(k => view.some(v => v.k === k) || true);
+    box.innerHTML = fields.map(k => {
+      const f = view.find(v => v.k === k) || REC_FIELD(k, k);
+      const val = rec[k] == null ? '' : String(rec[k]);
+      return `<div class="psy-fld"><label class="f-lbl" for="rec-f-${esc(k)}">${esc(f.l)}</label>${
+        f.long ? `<textarea id="rec-f-${esc(k)}" rows="5" class="field">${esc(val)}</textarea>`
+               : `<input type="text" id="rec-f-${esc(k)}" class="field" value="${esc(val)}">`}</div>`;
+    }).join('') + (ext ? `<div class="ext-safe">Происхождение записи сохраняется без изменений: источник, версия источника и классы утверждений правка не затрагивает.</div>` : '');
+    if (act) act.innerHTML = `<button type="button" class="btn btn-p btn-full" onclick="recSaveEdit()">Сохранить</button>
+      <button type="button" class="btn btn-s btn-full" onclick="_recDet.editing=false;recRenderDetail()">Отмена</button>`;
+    return;
+  }
+  const rows = view.map(f => {
+    const t = recFieldText(rec, f);
+    if (!t) return '';
+    return `<div class="psy-fld"><div class="f-lbl">${esc(f.l)}</div><div class="si-text" style="white-space:pre-wrap;line-height:1.55">${esc(t)}</div></div>`;
+  }).filter(Boolean).join('') || '<div class="bk-empty">У записи нет заполненных полей.</div>';
+  const prov = ext ? `<div class="psy-fld"><div class="f-lbl">Происхождение</div><div class="si-text" style="line-height:1.55">Импортировано из внешнего источника${ext.sourceLabel ? ' · ' + esc(ext.sourceLabel) : ''}.${
+      (ext.claimClasses || []).length ? '<br>Класс утверждения: ' + esc((ext.claimClasses || []).join(', ')) : ''}${
+      ext.textOrigin ? '<br>Происхождение текста: ' + esc(ext.textOrigin) : ''}${
+      (ext.sourceRefs || []).length > 1 ? '<br>Ссылок на исходные объекты: ' + (ext.sourceRefs || []).length : ''}${
+      (ext.revisions || []).length ? '<br>Версий из источника: ' + (ext.revisions || []).length : ''}${
+      (ext.localResolutions || []).length ? '<br>Есть решение «оставить мою версию»' : ''}</div></div>`
+    : '';
+  const noteC = em.cls === 'C' ? `<div class="ext-need">Системная запись — редактирование недоступно.<br>${esc(em.why)}</div>` : '';
+  const noteB = em.cls === 'B' ? `<div class="ext-need">Правка на месте недоступна.<br>${esc(em.why)}</div>` : '';
+  box.innerHTML = rows + prov + noteC + noteB + `
+    <details class="psy-det"><summary class="si-text" style="color:var(--t3)">Технические данные</summary>
+      <div class="si-text" style="font-size:.72rem;color:var(--t4);white-space:pre-wrap;word-break:break-word">${esc(JSON.stringify(rec, null, 1).slice(0, 4000))}</div>
+    </details>`;
+  if (act) {
+    const canEdit = em.cls === 'A' && (em.fields || []).length;
+    act.innerHTML = `${canEdit ? `<button type="button" class="btn btn-p btn-full" onclick="_recDet.editing=true;recRenderDetail()">Редактировать</button>` : ''}
+      <button type="button" class="btn btn-s btn-full" onclick="closeOv('ov-rec-det')">Закрыть</button>
+      ${em.cls === 'C' ? '' : `<button type="button" class="btn btn-s btn-full" style="color:var(--red,#DC2626)" onclick="recDelFromDetail()">Удалить запись</button>`}`;
+  }
+}
+// ЕДИНСТВЕННЫЙ писатель пользовательской правки. Трогает только значения
+// разрешённых полей и `_u` (метка изменения для синка). Провенанс импорта
+// не переписывается — именно поэтому более новая ревизия источника позже
+// станет changed-conflict, а не тихой перезаписью.
+function recApplyLocalEdit(rec, coll, patch) {
+  const em = recEditCls(coll);
+  if (em.cls !== 'A') return { ok: false, error: 'правка этого типа записи недоступна' };
+  const allowed = em.fields || [];
+  Object.keys(patch).forEach(k => {
+    if (!allowed.includes(k)) return;
+    const prev = rec[k];
+    const next = patch[k];
+    rec[k] = (typeof prev === 'number' && next !== '' && !Number.isNaN(Number(next))) ? Number(next) : next;
+  });
+  touch(rec);
+  return { ok: true };
+}
+function recSaveEdit() {
+  const rec = recDetRecord(); if (!rec || !_recDet) return;
+  const em = recEditCls(_recDet.coll);
+  const patch = {};
+  (em.fields || []).forEach(k => { const el = $('rec-f-' + k); if (el) patch[k] = el.value; });
+  const snap = JSON.parse(JSON.stringify(rec));
+  const r = recApplyLocalEdit(rec, _recDet.coll, patch);
+  if (!r.ok) { toast(r.error, 'warn'); return; }
+  if (!persist()) {
+    Object.keys(rec).forEach(k => { delete rec[k]; });
+    Object.assign(rec, snap);
+    toast('Не удалось сохранить — запись не изменена', 'err');
+    return;
+  }
+  _recDet.editing = false;
+  recRenderDetail();
+  rRecords();
+  try { rIns(); rDrms(); rSpi(); rPats(); rEvoList($('evo-sh')); } catch (e) { }
+  toast('Запись сохранена', 'ok');
+}
+function recDelFromDetail() {
+  if (!_recDet) return;
+  const { coll, id } = _recDet;
+  closeOv('ov-rec-det');
+  recDel(coll, id);
+}
 function openRecords() {
   const sel = $('rec-coll');
   if (sel && !sel.options.length) rRecordsFillSelect();
@@ -2334,8 +2549,10 @@ function rRecords() {
   }
   const cfg = REC_COLLS[coll]; if (!cfg) { out.innerHTML = ''; return; }
   const list = [...(DB[coll] || [])].sort((a, b) => _ru(b) - _ru(a));
+  // Строка — настоящая кнопка открытия записи. Удаление остаётся рядом, но
+  // перестаёт быть единственным и главным действием.
   out.innerHTML = list.length ? list.slice(0, 300).map(r =>
-    `<div class="si-row"><div class="si-body"><div class="si-text">${esc(cfg.sum(r) || 'запись')}</div></div>${delBtn(`recDel('${coll}',${JSON.stringify(r.id)})`)}</div>`).join('')
+    `<div class="si-row"><button type="button" class="si-body" style="text-align:left;background:none;border:0;padding:.55rem 0;min-height:44px;width:100%;color:inherit;font:inherit;cursor:pointer" onclick="recOpen('${coll}',${recArg(r.id)})"><div class="si-text">${esc(cfg.sum(r) || 'запись')}</div><div class="si-text" style="font-size:.7rem;color:var(--t4)">Открыть запись</div></button>${delBtn(`recDel('${coll}',${recArg(r.id)})`)}</div>`).join('')
     + (list.length > 300 ? `<div class="si-text" style="color:var(--t3);padding:.4rem 0">Показаны последние 300 из ${list.length}.</div>` : '')
     : '<div class="bk-empty" style="padding:.6rem 0">Записей этого типа нет.</div>';
 }
@@ -4692,7 +4909,7 @@ function rHealthTimeline() {
   html += `<div style="padding:.5rem 1rem 0;display:flex;gap:.4rem;flex-wrap:wrap">` + HEALTH_TL_PERIODS.map(p => `<button type="button" class="btn btn-s btn-xs${_tlDays === p.v ? ' on' : ''}" aria-pressed="${_tlDays === p.v}" onclick="healthTimelineWindow(${p.v === null ? 'null' : p.v})">${esc(p.l)}</button>`).join('') + `</div>`;
   html += `<div style="padding:.5rem 1rem;display:flex;gap:.4rem;flex-wrap:wrap">` + kinds.map(k => `<button type="button" class="btn btn-s btn-xs${_tlFilter === k ? ' on' : ''}" aria-pressed="${_tlFilter === k}" onclick="healthTimelineFilter('${k}')">${k === 'all' ? 'Всё' : esc(HEALTH_TL_LABELS[k])}</button>`).join('') + `</div>`;
   html += list.length
-    ? list.slice(0, 200).map(it => `<button type="button" class="si-row tap" style="width:100%;background:none;border:0;padding:var(--s3) 0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:44px" onclick="healthTimelineOpen('${it.coll}',${JSON.stringify(it.id)})">
+    ? list.slice(0, 200).map(it => `<button type="button" class="si-row tap" style="width:100%;background:none;border:0;padding:var(--s3) 0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:44px" onclick="healthTimelineOpen('${it.coll}',${recArg(it.id)})">
         <div class="si-body"><div class="si-text">${esc(it.text)}</div>
         <div class="si-text" style="color:var(--t3);font-size:.72rem">${it.at ? esc(new Date(it.at).toLocaleDateString('ru', { day: 'numeric', month: 'short' })) : ''} · ${esc(HEALTH_TL_LABELS[it.kind] || it.kind)}</div></div>
       </button>`).join('')
