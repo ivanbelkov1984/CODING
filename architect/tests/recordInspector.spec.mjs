@@ -279,7 +279,7 @@ console.log('\nИНСПЕКТОР ЗАПИСИ · ЧТЕНИЕ И БЕЗОПАС
     JSON.stringify(narrow));
 }
 
-// ── 4. Класс B: правки на месте нет, назван честный путь ─────────────
+// ── 4. Класс B: каждый тип объясняет своё состояние честно ───────────
 {
   const bColls = await page.evaluate((cs) => cs.filter(c => REC_EDIT[c] && REC_EDIT[c].cls === 'B'), COLLS);
   ok(bColls.length >= 15, `коллекций класса B объявлено ${bColls.length}`);
@@ -291,23 +291,202 @@ console.log('\nИНСПЕКТОР ЗАПИСИ · ЧТЕНИЕ И БЕЗОПАС
     }, coll);
     const v = await openRec(coll, id);
     await closeRec();
-    if (v.actions.some(a => /Редактировать/.test(a))) bad.push(`${coll}: есть кнопка правки`);
-    if (!/Правка на месте недоступна/.test(v.text)) bad.push(`${coll}: причина не показана`);
+    // Каждая B-запись обязана сказать ОДНО из двух: правки нет вовсе, либо
+    // правится не всё. Молчаливого «серого» состояния быть не должно.
+    if (!/Правка на месте недоступна|Правится не всё/.test(v.text)) bad.push(`${coll}: состояние правки не объяснено`);
   }
   ok(bad.length === 0, 'класс B: правка на месте закрыта и объяснена на каждом типе', bad.join('\n'));
 
   // Ключевые доменные решения владельца названы своими словами.
   const rev = await openRec('psyReviews', await page.evaluate(() => DB.psyReviews[0].id));
   await closeRec();
-  ok(/новый review/.test(rev.text) && /не переписыва/.test(rev.text),
+  ok(/нов(ый|ая) review/i.test(rev.text) && /не переписыва/.test(rev.text),
     'psyReview: сказано, что исправление — это новый review, а не переписывание истории', rev.text.slice(0, 300));
   const int = await openRec('psyInterventionEpisodes', await page.evaluate(() => DB.psyInterventionEpisodes[0].id));
   await closeRec();
-  ok(/невыполненная техника не может быть объявлена бесполезной/.test(int.text),
-    'psyInterventionEpisode: сохранена семантика not_done ≠ not_helpful', int.text.slice(0, 300));
+  ok(/невыполненная техника не может быть объявлена бесполезной/.test(int.text) &&
+     !int.actions.some(a => /Редактировать/.test(a)),
+    'psyInterventionEpisode: сырой правки доказательных полей нет, not_done ≠ not_helpful названо', int.text.slice(0, 300));
   const obs = await openRec('psyObservations', await page.evaluate(() => DB.psyObservations[0].id));
   await closeRec();
-  ok(/коррекц/.test(obs.text), 'измерение: назван путь коррекции, а не переписывание значения', obs.text.slice(0, 300));
+  ok(/коррекц/.test(obs.text) && !obs.actions.some(a => /Редактировать/.test(a)),
+    'измерение: назван путь коррекции, а не переписывание значения', obs.text.slice(0, 300));
+  // contextTag наблюдения — метка условия эксперимента (по ней N-of-1 сравнивает
+  // фазы), поэтому «контекст» здесь НЕ простое поле-заметка.
+  ok(/метка условия эксперимента/.test(obs.text),
+    'psyObservation: сказано, почему «контекст» — доказательное поле, а не заметка', obs.text.slice(0, 400));
+  const cf = await page.evaluate(() => (REC_EDIT.psyObservations.fields || []).length);
+  ok(cf === 0, 'psyObservation: contextTag НЕ в списке правки на месте');
+
+  // Статусные типы: произвольной правки статуса не существует.
+  const lifecycle = await page.evaluate(() => ['psyGoals', 'psyAdaptivePlans', 'psyExperiments']
+    .map(c => ({ c, fields: (REC_EDIT[c].fields || []).length })));
+  ok(lifecycle.every(x => x.fields === 0),
+    'psyGoals/psyAdaptivePlans/psyExperiments: сырой правки статуса нет', JSON.stringify(lifecycle));
+}
+
+// ── 4b. B2 (psyReviews): правятся только тексты-сводки ───────────────
+{
+  await reset();
+  const built = await page.evaluate(() => {
+    const g = psySaveRecord('psyGoal', { label: 'TEST-RI цель', proximalOutcome: 'наблюдаемый результат' });
+    const r = psySaveRecord('psyReview', {
+      periodStart: '2026-04-01T00:00:00.000Z', periodEnd: '2026-04-07T00:00:00.000Z',
+      goalRefs: [g.rec.id], decision: 'continue',
+      outcomeSummary: 'исходная сводка итога', methodsAppliedSummary: 'исходные методы',
+      limitations: ['исходное ограничение'], hypothesesStrengthened: ['гипотеза A'],
+    });
+    return { ok: r.ok, id: r.rec && r.rec.id, errors: r.errors };
+  });
+  ok(built.ok, 'синтетический review создан через production write contract', (built.errors || []).join('; '));
+
+  const v = await openRec('psyReviews', built.id);
+  ok(v.actions.some(a => /Редактировать/.test(a)), 'B2: у review есть кнопка правки текстов-сводок');
+  ok(/Правится не всё/.test(v.text), 'B2: сказано, что правится не всё');
+
+  const res = await page.evaluate((id) => {
+    recOpen('psyReviews', id);
+    _recDet.editing = true; recRenderDetail();
+    const shown = [...document.querySelectorAll('#rec-det-body input, #rec-det-body textarea')].map(e => e.id.replace('rec-f-', ''));
+    const note = ($('rec-det-body').textContent || '');
+    $('rec-f-outcomeSummary').value = 'исправленная сводка итога TEST-RI';
+    recSaveEdit();
+    const r = DB.psyReviews.find(x => x.id === id);
+    closeOv('ov-rec-det');
+    return { shown, note, outcome: r.outcomeSummary, start: r.periodStart, end: r.periodEnd,
+      decision: r.decision, goalRefs: r.goalRefs, hyp: r.hypothesesStrengthened, lim: r.limitations };
+  }, built.id);
+  ok(res.shown.every(k => /Summary$/.test(k)) && res.shown.includes('outcomeSummary'),
+    `B2: в форме только тексты-сводки (${res.shown.join(', ')})`);
+  ok(/Период, решение, ссылки на доказательства/.test(res.note),
+    'B2: человеку сказано, что именно останется неизменным', res.note.slice(0, 160));
+  ok(res.outcome === 'исправленная сводка итога TEST-RI', 'B2: сводка исправлена');
+  ok(res.start === '2026-04-01T00:00:00.000Z' && res.end === '2026-04-07T00:00:00.000Z' &&
+    res.decision === 'continue' && res.goalRefs.length === 1 &&
+    JSON.stringify(res.hyp) === JSON.stringify(['гипотеза A']),
+    'B2: период, решение, ссылки на доказательства и выводы по гипотезам не тронуты', JSON.stringify(res));
+
+  // Прямой вызов писателя с запрещёнными полями — тоже отклоняется по полям.
+  const forced = await page.evaluate((id) => {
+    const r = DB.psyReviews.find(x => x.id === id);
+    recApplyLocalEdit(r, 'psyReviews', {
+      periodEnd: '2027-01-01T00:00:00.000Z', decision: 'stop',
+      goalRefs: [], hypothesesStrengthened: ['подменённая гипотеза'],
+      outcomeSummary: 'ещё одна правка сводки',
+    });
+    return { end: r.periodEnd, decision: r.decision, goals: r.goalRefs.length, hyp: r.hypothesesStrengthened, out: r.outcomeSummary };
+  }, built.id);
+  ok(forced.end === '2026-04-07T00:00:00.000Z' && forced.decision === 'continue' &&
+    forced.goals === 1 && JSON.stringify(forced.hyp) === JSON.stringify(['гипотеза A']) &&
+    forced.out === 'ещё одна правка сводки',
+    'B2: прямой вызов не переписал период, решение, доказательства и гипотезы', JSON.stringify(forced));
+}
+
+// ── 4c. B1 (psyFormulations): черновик правится, принятая — нет ──────
+{
+  const ids = await page.evaluate(() => {
+    const d = psySaveRecord('psyFormulation', { focus: 'TEST-RI черновик', formulation: 'исходный текст черновика', status: 'draft' });
+    const a = psySaveRecord('psyFormulation', { focus: 'TEST-RI принятая', formulation: 'исходный текст принятой', status: 'active' });
+    return { draft: d.rec && d.rec.id, active: a.rec && a.rec.id, ok: d.ok && a.ok };
+  });
+  ok(ids.ok, 'созданы черновик и принятая формулировка через production write contract');
+
+  const vd = await openRec('psyFormulations', ids.draft);
+  ok(vd.actions.some(a => /Редактировать/.test(a)), 'B1: черновик правится на месте');
+  const edited = await page.evaluate((id) => {
+    recOpen('psyFormulations', id);
+    _recDet.editing = true; recRenderDetail();
+    const note = ($('rec-det-body').textContent || '');
+    $('rec-f-formulation').value = 'исправленный текст черновика TEST-RI';
+    recSaveEdit();
+    const r = DB.psyFormulations.find(x => x.id === id);
+    closeOv('ov-rec-det');
+    return { note, text: r.formulation, status: r.status };
+  }, ids.draft);
+  ok(edited.text === 'исправленный текст черновика TEST-RI' && edited.status === 'draft',
+    'B1: черновик исправлен на месте, статус не изменился');
+  ok(/После принятия правка закроется/.test(edited.note),
+    'B1: человеку заранее сказано, что после принятия правка закроется', edited.note.slice(0, 160));
+
+  const va = await openRec('psyFormulations', ids.active);
+  await closeRec();
+  ok(!va.actions.some(a => /Редактировать/.test(a)), 'B1: принятая формулировка на месте НЕ правится');
+  ok(/уже принята/.test(va.text) && /НОВОЙ версией/.test(va.text),
+    'B1: назван путь — новая версия со ссылкой на прежнюю', va.text.slice(0, 300));
+
+  const forced = await page.evaluate((id) => {
+    const r = DB.psyFormulations.find(x => x.id === id);
+    const before = r.formulation;
+    const res = recApplyLocalEdit(r, 'psyFormulations', { formulation: 'подмена принятой версии' });
+    return { ok: res.ok, error: res.error, unchanged: r.formulation === before };
+  }, ids.active);
+  ok(!forced.ok && forced.unchanged,
+    'B1: прямой вызов на принятой версии отклонён, текст не изменён', forced.error);
+
+  // Правка обязана пройти ту же доменную проверку, что создание и импорт.
+  const invalid = await page.evaluate((id) => {
+    const r = DB.psyFormulations.find(x => x.id === id);
+    const before = r.formulation;
+    const res = recApplyLocalEdit(r, 'psyFormulations', { formulation: '   ' });
+    return { ok: res.ok, error: res.error, unchanged: r.formulation === before };
+  }, ids.draft);
+  ok(!invalid.ok && invalid.unchanged && /формулировк/i.test(invalid.error || ''),
+    'B1: пустая формулировка отклонена доменной проверкой — запись не изменена', invalid.error);
+}
+
+// ── 4d. B3 (измерения): правится только заметка ──────────────────────
+{
+  const cases = [
+    ['moments', { id: 'TEST-RI-B3-MO', valence: 40, activation: 60, emo: 'тревога', note: 'исходная заметка', day: '2026-04-01', createdAt: '2026-04-01T10:00:00.000Z' }, ['valence', 'activation', 'emo', 'day']],
+    ['checkins', { id: 'TEST-RI-B3-CI', sl: 7, sq: 6, cl: 5, st: 4, mv: 3, note: 'исходная заметка', date: '2026-04-01' }, ['sl', 'sq', 'cl', 'st', 'mv', 'date']],
+    ['symptoms', { id: 'TEST-RI-B3-SY', name: 'симптом', severity: 6, note: 'исходная заметка', day: '2026-04-01' }, ['name', 'severity', 'day']],
+    ['labObservations', { id: 'TEST-RI-B3-LB', testName: 'анализ', valueText: '5.4', unit: 'ммоль/л', collectedAt: '2026-04-01T08:00:00.000Z', note: 'исходная заметка' }, ['testName', 'valueText', 'unit', 'collectedAt']],
+    ['sphereLogs', { id: 'TEST-RI-B3-SL', sphereId: 1, date: '2026-04-01', value: 7, note: 'исходная заметка' }, ['sphereId', 'date', 'value']],
+  ];
+  const bad = [];
+  for (const [coll, rec, frozen] of cases) {
+    const r = await page.evaluate(({ c, base, fr }) => {
+      DB[c] = [{ ...base, sv: SCHEMA_VERSION, _u: 1 }];
+      persist();
+      recOpen(c, base.id);
+      const hasBtn = [...$('rec-det-actions').querySelectorAll('button')].some(b => /Редактировать/.test(b.textContent));
+      _recDet.editing = true; recRenderDetail();
+      const shown = [...document.querySelectorAll('#rec-det-body input, #rec-det-body textarea')].map(e => e.id.replace('rec-f-', ''));
+      $('rec-f-note').value = 'исправленная заметка TEST-RI';
+      recSaveEdit();
+      // И прямой вызов с доказательными полями — тоже мимо.
+      const rr = DB[c][0];
+      recApplyLocalEdit(rr, c, fr.reduce((a, k) => (a[k] = 'ПОДМЕНА', a), { note: 'вторая заметка' }));
+      closeOv('ov-rec-det');
+      return { hasBtn, shown, note: rr.note, frozen: fr.map(k => [k, rr[k]]) };
+    }, { c: coll, base: rec, fr: frozen });
+    if (!r.hasBtn) bad.push(`${coll}: нет кнопки правки заметки`);
+    if (r.shown.join(',') !== 'note') bad.push(`${coll}: в форме не только заметка (${r.shown.join(',')})`);
+    if (r.note !== 'вторая заметка') bad.push(`${coll}: заметка не исправлена (${r.note})`);
+    const drifted = r.frozen.filter(([, v]) => v === 'ПОДМЕНА');
+    if (drifted.length) bad.push(`${coll}: доказательные поля переписаны: ${drifted.map(([k]) => k).join(',')}`);
+  }
+  ok(bad.length === 0,
+    'B3: у измерений правится только заметка; значения, даты и статусы не переписываются даже прямым вызовом',
+    bad.join('\n'));
+
+  // Там, где отделимой заметки нет, правки на месте нет вовсе — и это сказано.
+  const noNote = ['measures', 'medIntakes', 'cravings'];
+  const nn = [];
+  for (const coll of noNote) {
+    const v = await page.evaluate((c) => {
+      DB[c] = [{ id: 'TEST-RI-B3-NN-' + c, sv: SCHEMA_VERSION, _u: 1 }];
+      recOpen(c, 'TEST-RI-B3-NN-' + c);
+      const acts = [...$('rec-det-actions').querySelectorAll('button')].map(b => b.textContent.trim());
+      const text = ($('rec-det-body').textContent || '');
+      closeOv('ov-rec-det');
+      return { acts, text };
+    }, coll);
+    if (v.acts.some(a => /Редактировать/.test(a))) nn.push(`${coll}: появилась кнопка правки`);
+    if (!/Правка на месте недоступна/.test(v.text)) nn.push(`${coll}: причина не показана`);
+  }
+  ok(nn.length === 0,
+    'B3 без отделимой заметки (measures/medIntakes/cravings): правки на месте нет, причина названа', nn.join('\n'));
 }
 
 // ── 5. Класс A: локальная запись правится и переживает перезагрузку ──

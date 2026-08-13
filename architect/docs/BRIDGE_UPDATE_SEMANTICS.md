@@ -423,31 +423,114 @@ B-01) работают как раньше; replay той же версии → 
 ### 17.2 Матрица редактируемости (`REC_EDIT`)
 
 Матрица объявлена явно для каждой коллекции из `REC_COLLS` — молчаливого
-фолбэка нет (проверяется тестом).
+фолбэка нет (проверяется тестом). `fields` — не подсказка для формы, а
+**граница**: писатель игнорирует всё, чего в списке нет, даже при прямом
+вызове. `guard` решает, открыта ли правка ПРЯМО СЕЙЧАС (состояние записи).
+`build` прогоняет результат через тот же доменный строитель, что
+create/import.
 
-- **A — правка на месте.** Собственная формулировка владельца, изменение
-  которой не переписывает факт и не меняет доказательство:
-  `insights`, `dreams`, `spiritual`, `evolution`, `patterns`, `bots`,
-  `whys`, `relationshipContexts`, `spheres`, `astroPartners`,
-  `healthDocuments`. Правятся ТОЛЬКО поля из `fields` — день, время
-  создания, источник, вес, версия схемы и любое необъявленное поле
-  игнорируются писателем, а не только формой.
-- **B — только доменным путём.** Доказательные и версионные записи:
-  `psyReviews`, `psyFormulations`, `psyObservations`, `moments`,
-  `checkins`, `symptoms`, `measures`, `labObservations`, `medIntakes`,
-  `cravings`, `sphereLogs`, `meds`, `psyInterventionEpisodes`,
-  `psyGoals`, `psyAdaptivePlans`, `psyExperiments`. В этом релизе правка
-  на месте закрыта, и человеку показана честная причина и путь
-  исправления (новый review / новая версия / коррекция / допустимый
-  переход статуса). Семантика `not_done ≠ not_helpful` названа своими
-  словами на экране эпизода вмешательства.
-- **C — системные и производные.** `externalWorkSessions`,
-  `externalConnections`, `psyLinks`, `astroCharts`, `chats`: ни правки,
-  ни удаления, причина показана.
+**A — правка на месте.** Собственная формулировка владельца, изменение
+которой не переписывает факт и не меняет доказательство:
 
-Класс проверяется в `recApplyLocalEdit` — единственном писателе
-пользовательской правки. Прямой вызов для B/C отклоняется, запись не
-меняется.
+| Коллекция | Поля |
+|---|---|
+| `insights` | title, body, tag |
+| `dreams` | title, body, arch, tone |
+| `spiritual` | type, text |
+| `evolution` | text |
+| `patterns` | type, text |
+| `bots` | title |
+| `whys` | symptom, function, gain, need, cost, alternative, action |
+| `relationshipContexts` | label, roleOrRelation, note |
+| `spheres` | name |
+| `astroPartners` | label |
+| `healthDocuments` | title, note |
+
+**B1 — версионная запись.** `psyFormulations`: пока `status === 'draft'`,
+правятся `focus` и `formulation` на месте. После принятия (`active` /
+`superseded` / `archived`) правка на месте закрывается: исправление — это
+НОВАЯ версия со ссылкой `supersedesId` на прежнюю, принятая история не
+переписывается. Гипотезы и факторы правятся формой в разделе
+«Психология», где действует проверка классов утверждений. Правка
+прогоняется через `PSY_BUILDERS.psyFormulation` — пустая формулировка
+отклоняется так же, как при создании.
+
+**B2 — зафиксированное суждение за период.** `psyReviews`: правятся
+только тексты-сводки — `methodsAppliedSummary`, `adherenceSummary`,
+`outcomeSummary`, `acceptabilitySummary`, `adverseEffectsSummary`,
+`confoundersSummary`. Неизменны на месте: `periodStart`, `periodEnd`,
+`decision`, `goalRefs` / `formulationRef` / `interventionEpisodeRefs` /
+`observationRefs` / `sourceRefs`, `hypothesesStrengthened` /
+`hypothesesWeakened`, `limitations` и провенанс. Исправление смысла
+решения или доказательств — НОВЫЙ review, заменяющий прежний. Правка
+прогоняется через `PSY_BUILDERS.psyReview`.
+
+**B3 — измерение/событие.** Правится только поле-заметка, изменение
+которого не меняет измеренный факт:
+
+| Коллекция | Правится | Неизменно на месте |
+|---|---|---|
+| `moments` | note | valence, activation, emo, время |
+| `checkins` | note | sl, sq, cl, st, mv, date |
+| `symptoms` | note | name, severity, day |
+| `labObservations` | note | testName, valueText, unit, referenceText, laboratory, collectedAt |
+| `sphereLogs` | note | sphereId, value, date |
+| `measures` | — | name, value, unit — отделимой заметки нет |
+| `medIntakes` | — | medId, at, status — отделимой заметки нет |
+| `cravings` | — | kind, intensity, trigger, outcome — часть самого события |
+| `psyObservations` | — | см. ниже |
+
+**`psyObservations.contextTag` — доказательное поле, а не заметка.**
+По нему N-of-1 группирует замеры по условиям эксперимента и сравнивает
+фазы. Правка «контекста» молча переназначила бы замер в другое условие,
+то есть изменила бы доказательство. Поэтому у наблюдения нет полей,
+правимых на месте, и в интерфейсе названа именно эта причина.
+
+**Доменные правила без сырой правки.** `psyInterventionEpisodes` —
+доказательные поля (`adherence`, `outcomeClass`, `acceptability`) не
+правятся сырым вводом: любое изменение обязано пройти ту же проверку
+утверждений, что создание и импорт, и `not_done ≠ not_helpful`
+сохраняется. `psyGoals`, `psyAdaptivePlans`, `psyExperiments` — статус
+меняется только допустимыми переходами жизненного цикла, произвольной
+правки статуса нет. `meds` — план приёма правится в «Здоровье», где
+проверяется расписание целиком.
+
+**C — системные и производные.** `externalWorkSessions`,
+`externalConnections`, `psyLinks`, `astroCharts`, `chats`: ни правки, ни
+удаления, причина показана.
+
+В интерфейсе класс B честно различает два разных состояния: «Правка на
+месте недоступна» (с причиной и путём) и «Правится не всё» (с
+перечислением того, что останется неизменным).
+
+### 17.2.1 Чего пока НЕТ — и почему
+
+Решения владельца по B описывают путь исправления через **коррекцию /
+новую версию**. Сами эти потоки в этом релизе **не реализованы**: доступна
+только та правка на месте, которую решения прямо разрешают. Причина
+названа честно, а не обойдена.
+
+Для измерений в коде уже есть append-only ядро коррекций —
+`addCorrection(coll, targetId, patch, reason)` + проекция
+`proj` / `projAll` (оригинал неизменен, «текущее принятое» значение
+считается при чтении). Но требование владельца «effective views/derived
+engines must use the corrected effective value» выполняется не везде:
+
+| Коллекция | Чтение через `projAll` |
+|---|---|
+| `moments`, `whys` | да |
+| `symptoms`, `measures`, `labObservations` | да |
+| `medIntakes`, `cravings` | частично (часть чтений сырые) |
+| `checkins`, `sphereLogs`, `psyObservations` | **нет** — все чтения сырые |
+
+Пока `checkins`, `sphereLogs` и `psyObservations` читаются мимо проекции,
+включение коррекций для них дало бы расхождение: аудит показывал бы
+исправление, а аналитика считала бы по старому значению. Это отдельная
+сквозная работа (перевод всех чтений и производных движков на проекцию),
+и делать её молча внутри задачи про инспектор — значит поменять поведение
+аналитики без отдельного решения владельца. Поэтому:
+создание коррекций и новых версий из инспектора — **следующая задача**,
+а не тихо пропущенная часть этой.
 
 ### 17.3 Инвариант импорта
 

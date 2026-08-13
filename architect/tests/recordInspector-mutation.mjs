@@ -47,24 +47,63 @@ function recSaveEdit() {`,
   {
     // Матрица снимается: любая коллекция становится редактируемой на месте.
     id: 'class-b-becomes-editable',
-    what: 'класс B (доказательные записи) снова правится на месте',
-    find: "  if (em.cls !== 'A') return { ok: false, error: 'правка этого типа записи недоступна' };",
-    replace: "  if (em.cls === 'X') return { ok: false, error: 'правка этого типа записи недоступна' };",
+    what: 'граница класса снимается — править можно что угодно',
+    find: "  if (em.cls === 'C') return { ok: false, why: em.why, em };",
+    replace: "  if (em.cls === 'X') return { ok: false, why: em.why, em };",
+    extra: {
+      find: '  if (!(em.fields || []).length) return { ok: false, why: em.why, em };',
+      replace: '  if (false) return { ok: false, why: em.why, em };',
+    },
     expectFail: 'прямой вызов правки для класса C отклонён, запись не изменена',
+  },
+  {
+    // B1: принятая формулировка снова правится на месте — принятая история
+    // переписывается вместо создания новой версии.
+    id: 'accepted-formulation-editable',
+    what: 'принятая формулировка снова правится на месте (вместо новой версии)',
+    find: '  const g = em.guard ? em.guard(rec) : { ok: true };',
+    replace: '  const g = { ok: true };',
+    expectFail: 'B1: принятая формулировка на месте НЕ правится',
+  },
+  {
+    // Правка перестаёт проходить ту же доменную проверку, что импорт.
+    id: 'domain-validation-skipped',
+    what: 'правка перестаёт проходить доменную проверку create/import',
+    find: '    if (!built.ok) return { ok: false, error: (built.errors || [])[0] || \'правка не прошла доменную проверку\' };',
+    replace: '    if (false) return { ok: false, error: (built.errors || [])[0] };',
+    expectFail: 'B1: пустая формулировка отклонена доменной проверкой',
+  },
+  {
+    // B2/B3: список полей перестаёт быть границей — доказательные поля
+    // review и измерений снова переписываются на месте.
+    id: 'evidence-fields-writable',
+    what: 'период/решение review и значения измерений снова переписываются',
+    find: '  const writes = Object.keys(patch).filter(k => allowed.includes(k));',
+    replace: '  const writes = Object.keys(patch);',
+    expectFail: 'B2: прямой вызов не переписал период, решение, доказательства и гипотезы',
+  },
+  {
+    // Наблюдение снова отдаёт contextTag в правку — метка условия
+    // эксперимента становится редактируемой, и замер молча меняет фазу.
+    id: 'observation-context-editable',
+    what: 'contextTag наблюдения снова считается простой заметкой',
+    find: "  psyObservations: {\n    cls: 'B', sub: 'B3',\n    why:",
+    replace: "  psyObservations: {\n    cls: 'B', sub: 'B3', fields: ['contextTag'],\n    why:",
+    expectFail: 'psyObservation: contextTag НЕ в списке правки на месте',
   },
   {
     // Причина запрета исчезает: человек видит «нельзя» без объяснения и пути.
     id: 'class-b-reason-hidden',
     what: 'причина запрета правки перестаёт показываться',
-    find: "  const noteB = em.cls === 'B' ? `<div class=\"ext-need\">Правка на месте недоступна.<br>${esc(em.why)}</div>` : '';",
-    replace: "  const noteB = '';",
+    find: "      : `<div class=\"ext-need\">Правка на месте недоступна.<br>${esc(gate.why || em.why)}</div>`;",
+    replace: "      : '';",
     expectFail: 'класс B: правка на месте закрыта и объяснена на каждом типе',
   },
   {
     // Кнопка правки возвращается на системные записи.
     id: 'class-c-gets-edit-button',
     what: 'системная запись снова получает кнопку правки и удаления',
-    find: "    const canEdit = em.cls === 'A' && (em.fields || []).length;",
+    find: '    const canEdit = gate.ok;',
     replace: '    const canEdit = true;',
     expectFail: 'класс C: нет ни правки, ни удаления, причина показана человеку',
   },
@@ -80,8 +119,8 @@ function recSaveEdit() {`,
     // Форма правки перестаёт ограничивать себя разрешёнными полями.
     id: 'edit-writes-any-field',
     what: 'правка снова пишет любое переданное поле, а не только разрешённые',
-    find: '    if (!allowed.includes(k)) return;',
-    replace: '    if (false) return;',
+    find: "  insights: { cls: 'A', fields: ['title', 'body', 'tag'] },",
+    replace: "  insights: { cls: 'A', fields: ['title', 'body', 'tag', 'day', 'createdAt', 'src', 'w', 'sv', 'newField'] },",
     expectFail: 'поля вне списка разрешённых НЕ записаны',
   },
   {
@@ -145,7 +184,18 @@ for (const m of MUTANTS) {
     continue;
   }
   const file = join(DIST_DIR, `_rec-mutant-${m.id}.html`);
-  await writeFile(file, src.replace(m.find, m.replace));
+  let mutated = src.replace(m.find, m.replace);
+  // Некоторым мутациям нужны две согласованные правки: снять один страж
+  // мало, если рядом стоит второй — иначе мутант нейтрализован и ничего
+  // не доказывает.
+  if (m.extra) {
+    if (!mutated.includes(m.extra.find)) {
+      ok(false, `[${m.id}] второй якорь мутации найден в бандле`, `не найдено:\n${m.extra.find}`);
+      continue;
+    }
+    mutated = mutated.replace(m.extra.find, m.extra.replace);
+  }
+  await writeFile(file, mutated);
   const { code, out } = await run(file);
   await rm(file, { force: true });
   const reds = out.split('\n').filter(l => l.trimStart().startsWith('✗')).map(l => l.trim());
