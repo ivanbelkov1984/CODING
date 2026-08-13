@@ -642,7 +642,7 @@
   </div>
   <div class="sec-lbl">Данные</div>
   <div class="card mx">
-    <div class="srow" onclick="openRecords()"><div class="sic" style="background:var(--orange-l,#FDEDD3)"><svg style="color:var(--orange,#D97706)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><polyline points="3 5.5 4 6.5 6 4.5"/><polyline points="3 11.5 4 12.5 6 10.5"/><line x1="3.5" y1="17" x2="5.5" y2="19"/><line x1="5.5" y1="17" x2="3.5" y2="19"/></svg></div><span class="sl2">Мои записи</span><span class="sv2">Просмотр и удаление</span></div>
+    <div class="srow" onclick="openRecords()"><div class="sic" style="background:var(--orange-l,#FDEDD3)"><svg style="color:var(--orange,#D97706)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><polyline points="3 5.5 4 6.5 6 4.5"/><polyline points="3 11.5 4 12.5 6 10.5"/><line x1="3.5" y1="17" x2="5.5" y2="19"/><line x1="5.5" y1="17" x2="3.5" y2="19"/></svg></div><span class="sl2">Мои записи</span><span class="sv2">Открыть и править</span></div>
     <!-- Wave 5 (issue #158): хранилище и диагностика. -->
     <button type="button" class="srow" onclick="openStorage()"><div class="sic" style="background:var(--blue-l)"><svg style="color:var(--blue-t)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg></div><span class="sl2">Хранилище и диагностика</span><span class="sv2">Место · целостность</span></button>
     <div class="srow" onclick="openBackups()"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.85.99 6.57 2.6"/><polyline points="21 3 21 9 15 9"/></svg></div><span class="sl2">Резервные копии</span><span class="sv2">Восстановить</span></div>
@@ -1204,11 +1204,20 @@
     <div class="sh-pull"></div>
     <div class="sh-title">Мои записи</div>
     <div class="mx" style="padding:0 1rem .5rem">
-      <div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.5rem">Здесь можно посмотреть и удалить любую свою запись по одной. Удаление действует на всех устройствах после синхронизации; несколько секунд его можно отменить.</div>
+      <div class="si-text" style="color:var(--t3);line-height:1.5;margin-bottom:.5rem">Нажми на строку, чтобы открыть запись целиком. Что можно править — правится в самой записи; системные записи открываются только для чтения. Удаление действует на всех устройствах после синхронизации; несколько секунд его можно отменить.</div>
       <select class="field" id="rec-coll" onchange="rRecords()"></select>
     </div>
     <div id="records-list" class="mx" style="padding:0 1rem 1rem;max-height:60vh;overflow-y:auto"></div>
     <div style="padding:0 1rem 1rem"><button class="btn btn-s btn-full" onclick="closeOv('ov-records')">Закрыть</button></div>
+  </div>
+</div>
+<!-- Инспектор записи: полное содержимое, правка по матрице, удаление отдельно -->
+<div class="ov" id="ov-rec-det" onclick="if(event.target===this)closeOv('ov-rec-det')">
+  <div class="sheet">
+    <div class="sh-pull"></div>
+    <div class="sh-title" id="rec-det-title">Запись</div>
+    <div id="rec-det-body" class="mx sh-form" style="padding:0 1rem 1rem;max-height:62vh;overflow-y:auto" aria-live="polite"></div>
+    <div id="rec-det-actions" class="sh-form" style="padding:0 1rem 1rem"></div>
   </div>
 </div>
 <div class="ov" id="ov-history" onclick="if(event.target===this)closeOv('ov-history')">
@@ -2148,7 +2157,7 @@
     <div class="sec-lbl" style="padding-left:var(--s4)">Инструменты</div>
     <div class="more-list">
       <div class="srow" onclick="openOv('ov-search')"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div><span class="sl2">Поиск по памяти</span><span class="sv2">Найти запись</span></div>
-      <div class="srow" onclick="closeOv('ov-more');openRecords()"><div class="sic" style="background:var(--orange-l,#FDEDD3)"><svg style="color:var(--orange,#D97706)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><polyline points="3 5.5 4 6.5 6 4.5"/><polyline points="3 11.5 4 12.5 6 10.5"/></svg></div><span class="sl2">Мои записи</span><span class="sv2">Просмотр и удаление (21 тип)</span></div>
+      <div class="srow" onclick="closeOv('ov-more');openRecords()"><div class="sic" style="background:var(--orange-l,#FDEDD3)"><svg style="color:var(--orange,#D97706)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><polyline points="3 5.5 4 6.5 6 4.5"/><polyline points="3 11.5 4 12.5 6 10.5"/></svg></div><span class="sl2">Мои записи</span><span class="sv2">Открыть и править</span></div>
     </div>
     <div class="sec-lbl" style="padding-left:var(--s4)">Данные</div>
     <div class="more-list">
