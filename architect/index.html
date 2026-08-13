@@ -1942,8 +1942,8 @@
       </div>
       <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5">Записи из внешней работы попадают в обычные разделы приложения с сохранением происхождения. Файл разбирается прямо на устройстве — без сети, без ИИ и без учётных записей Google или ChatGPT.</div>
       <div id="ext-target-note" class="si-text" style="font-size:.75rem;color:var(--t3)"></div>
-      <label class="f-lbl" for="ext-file">Шаг 1 · выбрать файл (.json)</label>
-      <input type="file" id="ext-file" accept="application/json,.json" onchange="extPickFile(event)">
+      <label class="f-lbl" for="ext-file">Шаг 1 · выбрать файл (.json или .zip)</label>
+      <input type="file" id="ext-file" accept="application/json,.json,application/zip,.zip" onchange="extPickFile(event)">
       <div id="ext-file-note" class="si-text" style="font-size:.75rem;color:var(--t3)"></div>
       <label class="f-lbl" for="ext-text">…или вставить данные</label>
       <textarea id="ext-text" rows="5" placeholder='Вставь сюда содержимое файла'></textarea>
@@ -1954,6 +1954,7 @@
           <p><b>Экспорт ChatGPT.</b> В ChatGPT: «Настройки» → «Управление данными» → «Экспортировать данные». Придёт письмо со ссылкой, в архиве нужен файл <code>conversations.json</code>.</p>
           <p><b>Подготовленные данные Google Drive.</b> Это файл <code>.json</code>, собранный по формату Архитектора из твоих документов. Приложение само в Drive не ходит — файл приносишь ты.</p>
           <p><b>Файл Архитектора.</b> Выгрузка из другого профиля или устройства — раздел «Экспорт».</p>
+          <p><b>Архив поставки (.zip).</b> Готовый архив с несколькими подачами (внутри — манифест и контрольные суммы). Весь архив проверяется и показывается одним предпросмотром; применяется одной кнопкой, целиком или никак.</p>
           <p>Подойдёт любой совместимый <code>.json</code>. Приложению не нужны учётные записи и пароли.</p>
         </div>
       </details>
