@@ -31,8 +31,8 @@ const MUTANTS = [
     // пока источник не создан и не выбран.
     id: 'primary-requires-source',
     what: 'главная кнопка снова требует предварительно выбранного источника',
-    find: '  if (_extConnActive && extConnFind(_extConnActive)) return extConnUiRefresh();\n  return extPreview();',
-    replace: "  if (_extConnActive && extConnFind(_extConnActive)) return extConnUiRefresh();\n  toast('Сначала выбери источник', 'warn');\n  return;",
+    find: '  if ((!typedRaw && _extBatchFeed) || (_extConnActive && extConnFind(_extConnActive))) return extConnUiRefresh();\n  return extPreview();',
+    replace: "  if ((!typedRaw && _extBatchFeed) || (_extConnActive && extConnFind(_extConnActive))) return extConnUiRefresh();\n  toast('Сначала выбери источник', 'warn');\n  return;",
     expectFail: 'вставка текста + главная кнопка дают предпросмотр без всякого источника',
   },
   {

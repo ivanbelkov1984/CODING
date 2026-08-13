@@ -14133,13 +14133,20 @@ function extNormalizeContainer(c) {
 }
 
 function extConnUid() { return 'extConn:' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
-function extConnFind(id, dbArg) { return ((dbArg || DB).externalConnections || []).find(c => c && c.id === id) || null; }
-function extConnCreate(label, kind) {
-  if (typeof isWriteLocked === 'function' && isWriteLocked()) return { ok: false, errors: ['профиль в режиме восстановления'] };
+// Pending-источник архивной поставки: живёт ТОЛЬКО в памяти (вне DB) до
+// подтверждения импорта, поэтому никакой persist() не может сохранить его
+// раньше времени. Материализуется в DB в момент apply одной транзакцией.
+let _extPendingConn = null;
+function extConnFind(id, dbArg) {
+  const hit = ((dbArg || DB).externalConnections || []).find(c => c && c.id === id) || null;
+  if (hit) return hit;
+  return (!dbArg && _extPendingConn && _extPendingConn.id === id) ? _extPendingConn : null;
+}
+function extConnNewRec(label, kind) {
   const lbl = String(label || '').trim().slice(0, 120);
-  if (!lbl) return { ok: false, errors: ['нужно название источника'] };
+  if (!lbl) return null;
   const k = EXT_CHANNEL_KINDS.includes(kind) ? kind : 'other';
-  const rec = {
+  return {
     id: extConnUid(), label: lbl, kind: k, status: 'ready',
     createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
     privacyClass: 'sensitive',
@@ -14148,6 +14155,11 @@ function extConnCreate(label, kind) {
     container: null,          // provenance-контейнер (файл/архив), НЕ идентичность записей
     sourceStatusNote: null,   // «источник недоступен» — provenance-статус, НЕ удаление данных
   };
+}
+function extConnCreate(label, kind) {
+  if (typeof isWriteLocked === 'function' && isWriteLocked()) return { ok: false, errors: ['профиль в режиме восстановления'] };
+  const rec = extConnNewRec(label, kind);
+  if (!rec) return { ok: false, errors: ['нужно название источника'] };
   const snap = JSON.parse(JSON.stringify(DB.externalConnections || []));
   if (!Array.isArray(DB.externalConnections)) DB.externalConnections = [];
   DB.externalConnections.push(rec);
@@ -14195,7 +14207,8 @@ function extConnForget(id) {
 // Принимает либо feed {format, packages:[…]}, либо одиночный пакет
 // (оборачивается в feed из одного). Malformed → fail closed, ноль мутаций.
 function extBridgeParseFeed(text) {
-  const raw = String(text || '');
+  // BOM — деталь транспорта (реальные экспортёры её добавляют), не содержимое.
+  const raw = String(text || '').replace(/^\uFEFF/, '');
   if (raw.length > EXT_LIMITS.maxBytes * 4) return { ok: false, errors: ['feed слишком большой'] };
   let obj;
   try { obj = JSON.parse(raw); } catch (e) { return { ok: false, errors: ['это не корректный JSON: ' + String(e.message).slice(0, 120)] }; }
@@ -14463,7 +14476,12 @@ function extConnUiAction(i, action) {
 }
 async function extConnUiRefresh() {
   if (!_extConnActive) { toast('Сначала выбери источник', 'warn'); return; }
-  const text = ($('ext-text') || {}).value || '';
+  // Непустое поле ввода всегда главнее сохранённой архивной поставки:
+  // человек, вставивший текст ПОСЛЕ выбора архива, ожидает импорт текста,
+  // а не молчаливый повтор старого архива. Архив живёт в памяти, пока поле
+  // пусто (его чистит сам выбор архива).
+  const typed = String((($('ext-text') || {}).value || '')).trim();
+  const text = typed || (_extBatchFeed && _extBatchFeed.text) || '';
   if (!String(text).trim()) { toast('Выбери файл или вставь данные', 'warn'); return; }
   extSetStep(2);
   const r = await extBridgeRefresh(_extConnActive, text);
@@ -14478,14 +14496,23 @@ async function extConnUiRefresh() {
   const t = r.totals;
   const merges = (r.batches || []).reduce((n, b) => n + (b.skipped || !b.plan ? 0 :
     (b.plan.items || []).filter(x => ['existing-by-provenance', 'changed', 'changed-conflict'].includes(x.status) && x.merge && x.merge.addRefs.length).length), 0);
+  // Разбивка «что будет добавлено» по разделам приложения — агрегат по ВСЕМ
+  // пакетам подачи (кумулятивный предпросмотр моста).
+  const byColl = {};
+  (r.batches || []).forEach(b => { if (!b.skipped && b.plan) Object.entries(b.plan.byTarget || {}).forEach(([c, n]) => { byColl[c] = (byColl[c] || 0) + n; }); });
+  const collRows = Object.entries(byColl).map(([c, n]) => `<div class="ext-sum"><span>${esc(extCollRu(c))}</span><b>${n}</b></div>`).join('');
+  const softNorm = (r.batches || []).reduce((n, b) => n + (!b.skipped && b.plan ? (b.plan.counts.softNormalized || 0) : 0), 0);
   // P1 (owner, пункт 10): пакеты и записи НЕ смешиваются в одном числе.
   if (out) out.innerHTML = `<div class="card mx" style="padding:.8rem">
     <b>Что изменится</b>
+    ${t.packages > 1 ? `<div class="si-text">Пакетов в поставке: <b>${t.packages}</b>${t.skippedByCheckpoint ? ` · уже импортировано: ${t.skippedByCheckpoint}` : ''}</div>` : ''}
     <div class="si-text">Новых записей: <b>${t.new}</b></div>
+    ${collRows}
     <div class="si-text">Будут обновлены: <b>${t.changed}</b>${t.changed ? ' (новая версия того же источника; локальные правки не затираются)' : ''}</div>
     <div class="si-text">Записей уже существует: ${t.existing}</div>
     <div class="si-text">Пакетов уже импортировано (по журналу): ${t.skippedByCheckpoint}</div>
     <div class="si-text">Будут объединены источники: ${merges}</div>
+    ${softNorm ? `<div class="si-text" style="color:var(--t3)">Полей будет приведено к безопасному значению «неизвестно»: ${softNorm} — значение вне словаря приложения; смысл записи не меняется.</div>` : ''}
     ${t.changedConflicts ? `<div class="si-text" style="color:var(--orange)">Требуют решения: ${t.changedConflicts} — источник изменился, но записи правились локально. Подача НЕ будет применена, пока не решишь каждую через ручной импорт пакета: «Оставить мою версию» или «Заменить версией источника».</div>` : ''}
     ${t.updateRejected ? `<div class="si-text" style="color:var(--red,#DC2626)">Обновлений отклонено защитой утверждений: ${t.updateRejected} — подача не будет применена; исправь источник. Это состояние будет показываться, пока источник не исправлен.</div>` : ''}
     ${t.stale ? `<div class="si-text" style="color:var(--red,#DC2626)">Источник содержит более старые уже известные версии: ${t.stale} — текущее состояние новее; подача не будет применена.</div>` : ''}
@@ -14524,7 +14551,32 @@ function extConnUiConfirm() {
   out.appendChild(box);
 }
 function extConnUiApply() {
+  // Разбивка по разделам снимается ДО apply: успешный apply потребляет
+  // preview (одноразовый), а результат обязан говорить на языке разделов.
+  const byColl = {};
+  ((_bridgePending && _bridgePending.batches) || []).forEach(b => {
+    if (!b.skipped && b.plan) Object.entries(b.plan.byTarget || {}).forEach(([c, n]) => { byColl[c] = (byColl[c] || 0) + n; });
+  });
+  // Pending-источник материализуется в DB ровно на время apply: успешный
+  // swap+persist сохраняет его атомарно вместе с записями; любой не-успех
+  // (blocked/rollback/persist-fail) вычищает его из DB и из хранилища —
+  // осиротевших автосозданных подключений не бывает.
+  const pending = (_extPendingConn && _extConnActive === _extPendingConn.id) ? _extPendingConn : null;
+  if (pending) {
+    if (!Array.isArray(DB.externalConnections)) DB.externalConnections = [];
+    DB.externalConnections.push(pending);
+    _extPendingConn = null;
+  }
   const r = extBridgeApply(_extConnActive);
+  if (pending && !r.ok && !r.degraded) {
+    // Поставка не применена: убрать сироту и из памяти, и из хранилища
+    // (сбойный путь apply мог успеть сохранить DB со статусом ошибки).
+    // Поиск ПО ID: сбойные ветки apply восстанавливают массив соединений
+    // из снимка-клона, и идентичность объекта теряется.
+    const i = (DB.externalConnections || []).findIndex(c => c && c.id === pending.id);
+    if (i >= 0) { DB.externalConnections.splice(i, 1); persist(); }
+    _extPendingConn = pending;   // предпросмотр можно честно повторить
+  }
   if (!r.ok) {
     // Два честных не-успеха: rolledBack — весь feed откатен (canonical не
     // изменён); degraded — записи применены, но чекпойнт не сохранён.
@@ -14542,12 +14594,15 @@ function extConnUiApply() {
   const out3 = $('ext-conn-out');
   // P1 (owner, пункт 10): числа называют свои единицы — пакеты отдельно,
   // записи отдельно.
+  const collRows3 = Object.entries(byColl).map(([c, n]) => `<div class="ext-sum"><span>${esc(extCollRu(c))}</span><b>${n}</b></div>`).join('');
   if (out3) out3.innerHTML = `<div class="si-text" style="line-height:1.7">
     <div style="font-weight:600;color:var(--t1);font-size:1rem">Готово · добавлено записей: ${r.created || 0}</div>
+    ${collRows3}
     <div>Обновлено записей: ${r.updated || 0} · пакетов применено: ${committed} · пакетов пропущено (уже импортированы): ${skipped}</div>
     <div class="ext-safe">Повторная загрузка тех же данных не создаст дублей. Хороший момент сделать резервную копию.</div></div>`;
   const act3 = $('ext-actions');
-  if (act3) act3.innerHTML = `<button type="button" class="btn btn-p btn-full" onclick="closeOv('ov-ext-import');goTo('map')">Открыть Дневник</button>
+  if (act3) act3.innerHTML = `<button type="button" class="btn btn-p btn-full" onclick="closeOv('ov-ext-import');openEncBackup()">Создать резервную копию</button>
+    <button type="button" class="btn btn-s btn-full" onclick="closeOv('ov-ext-import');goTo('map')">Открыть Дневник</button>
     <button type="button" class="btn btn-s btn-full" onclick="extResetToStep1()">Импортировать ещё файл</button>`;
   extSetStep(3);
   toast('Данные импортированы', 'ok');
@@ -15114,6 +15169,11 @@ const EXT_ADAPTERS = {
 let _extPlan = null, _extSel = { items: {}, links: {}, conflicts: {} };
 function openExtImport() {
   _extPlan = null; _extSel = { items: {}, links: {}, conflicts: {} };
+  _extBatchFeed = null;
+  if (_extPendingConn) {
+    if (_extConnActive === _extPendingConn.id) _extConnActive = null;
+    _extPendingConn = null;   // жил только в памяти — чистить в хранилище нечего
+  }
   const t = $('ext-text'); if (t) { t.value = ''; t.rows = 5; }
   const f = $('ext-file'); if (f) f.value = '';
   const fn = $('ext-file-note'); if (fn) fn.textContent = '';
@@ -15123,18 +15183,339 @@ function openExtImport() {
   extSetStep(1);
   openOv('ov-ext-import');
 }
+// ═══════════════════════════════════════════════════════════════════
+//  ZIP BATCH: одна авторитетная поставка = один архив = одна транзакция.
+//
+//  Архив — ТОЛЬКО транспорт: он распаковывается локально (без сети),
+//  проверяется fail-closed и превращается в ОДИН существующий feed
+//  (architect-external-work-feed-v1). Дальше работает НЕИЗМЕНЁННЫЙ
+//  production-мост: кумулятивный предпросмотр всех пакетов на одном
+//  кандидате, терминальная модель, один confirm, атомарный apply с
+//  полным откатом (canonical/журнал/чекпойнт/sourceRefs). Второго
+//  импортёра с собственной семантикой НЕ существует.
+//
+//  Ограничения (мобильные, документированы в BRIDGE_UPDATE_SEMANTICS §9.2):
+//  сам архив ≤ 16 МБ; файлов ≤ 64; один распакованный файл ≤ 8 МБ;
+//  сумма распакованного ≤ 32 МБ; итоговый feed — существующие лимиты
+//  моста (≤ 50 пакетов, текст ≤ 8 МБ). Zip64 и шифрованные записи не
+//  поддерживаются (fail-closed с внятной причиной).
+// ═══════════════════════════════════════════════════════════════════
+const EXT_ZIP_LIMITS = Object.freeze({
+  maxZipBytes: 16 * 1024 * 1024,
+  maxEntries: 64,
+  maxFileBytes: 8 * 1024 * 1024,
+  maxTotalBytes: 32 * 1024 * 1024,
+  maxNameLen: 200,
+});
+// CRC32 — проверка целостности каждой распакованной записи архива.
+const _extCrcTable = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function extCrc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = _extCrcTable[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+// Имя записи безопасно только если это относительный путь вниз без выхода
+// из архива. Всё остальное — fail closed (никаких «поправим сами»).
+function extZipSafeName(name) {
+  if (typeof name !== 'string' || !name || name.length > EXT_ZIP_LIMITS.maxNameLen) return false;
+  if (name.includes('\\') || name.startsWith('/') || /^[A-Za-z]:/.test(name)) return false;
+  if (name.split('/').some(seg => seg === '..' || seg === '')) return false;
+  return true;
+}
+// Разбор central directory (EOCD → записи). Только то, что нужно для
+// поставки: stored (0) и deflate (8), без zip64 и шифрования.
+function extZipEntries(buf) {
+  const u8 = new Uint8Array(buf);
+  const dv = new DataView(buf);
+  if (u8.length < 22) return { ok: false, errors: ['архив повреждён: слишком короткий'] };
+  // EOCD ищется с конца (комментарий архива ≤ 64К по формату).
+  let eocd = -1;
+  const min = Math.max(0, u8.length - 22 - 65535);
+  for (let i = u8.length - 22; i >= min; i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) return { ok: false, errors: ['архив повреждён: не найден конец central directory'] };
+  const count = dv.getUint16(eocd + 10, true);
+  const cdOfs = dv.getUint32(eocd + 16, true);
+  if (dv.getUint16(eocd + 4, true) !== 0 || dv.getUint16(eocd + 6, true) !== 0) {
+    return { ok: false, errors: ['многотомные архивы не поддерживаются'] };
+  }
+  if (count > EXT_ZIP_LIMITS.maxEntries) return { ok: false, errors: [`слишком много файлов в архиве: ${count} (максимум ${EXT_ZIP_LIMITS.maxEntries})`] };
+  const entries = [];
+  const seen = new Set();
+  let p = cdOfs, totalU = 0;
+  for (let n = 0; n < count; n++) {
+    if (p + 46 > u8.length || dv.getUint32(p, true) !== 0x02014b50) {
+      return { ok: false, errors: ['архив повреждён: central directory не читается'] };
+    }
+    const flags = dv.getUint16(p + 8, true);
+    const method = dv.getUint16(p + 10, true);
+    const crc = dv.getUint32(p + 16, true);
+    const csize = dv.getUint32(p + 20, true);
+    const usize = dv.getUint32(p + 24, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const cmtLen = dv.getUint16(p + 32, true);
+    const lho = dv.getUint32(p + 42, true);
+    const name = new TextDecoder('utf-8').decode(u8.subarray(p + 46, p + 46 + nameLen));
+    p += 46 + nameLen + extraLen + cmtLen;
+    if (name.endsWith('/')) continue;              // каталоги не несут данных
+    if (flags & 0x0001) return { ok: false, errors: [`«${name.slice(0, 60)}»: зашифрованные архивы не поддерживаются`] };
+    if (method !== 0 && method !== 8) return { ok: false, errors: [`«${name.slice(0, 60)}»: неподдерживаемый метод сжатия (${method})`] };
+    if (csize === 0xFFFFFFFF || usize === 0xFFFFFFFF || lho === 0xFFFFFFFF) {
+      return { ok: false, errors: ['zip64 не поддерживается — пересобери архив обычным ZIP'] };
+    }
+    if (!extZipSafeName(name)) return { ok: false, errors: [`небезопасное имя файла в архиве: «${String(name).slice(0, 60)}»`] };
+    if (seen.has(name)) return { ok: false, errors: [`файл «${name.slice(0, 60)}» встречается в архиве дважды`] };
+    seen.add(name);
+    if (usize > EXT_ZIP_LIMITS.maxFileBytes) return { ok: false, errors: [`«${name.slice(0, 60)}» слишком большой после распаковки`] };
+    totalU += usize;
+    if (totalU > EXT_ZIP_LIMITS.maxTotalBytes) return { ok: false, errors: ['суммарный размер распакованного архива превышает лимит'] };
+    entries.push({ name, method, crc, csize, usize, lho });
+  }
+  if (!entries.length) return { ok: false, errors: ['архив пуст'] };
+  return { ok: true, errors: [], entries, u8, dv };
+}
+async function extZipInflateRaw(bytes, maxOut) {
+  if (typeof DecompressionStream !== 'function') {
+    throw new Error('устройство не поддерживает распаковку deflate — обнови систему или пришли архив без сжатия');
+  }
+  // Заявленному в central directory размеру ВЕРИТЬ НЕЛЬЗЯ: злонамеренный
+  // deflate-поток может раздуться сколь угодно. Читаем поток кусками и
+  // считаем ФАКТИЧЕСКИЕ байты; первый байт сверх лимита — немедленный
+  // обрыв, без предварительной аллокации целого буфера.
+  const ds = new DecompressionStream('deflate-raw');
+  const reader = new Blob([bytes]).stream().pipeThrough(ds).getReader();
+  const cap = Math.min(Number(maxOut) || 0, EXT_ZIP_LIMITS.maxFileBytes);
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > cap) {
+      try { await reader.cancel(); } catch (_) { }
+      throw new Error('распакованные данные превышают заявленный размер — архив отклонён');
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.length; }
+  return out;
+}
+// Данные одной записи: local header → срез → распаковка → проверка CRC и
+// размера. Любое расхождение = повреждённый архив, fail closed.
+async function extZipEntryData(zip, e) {
+  if (e._data) return e._data;
+  const { u8, dv } = zip;
+  if (e.lho + 30 > u8.length || dv.getUint32(e.lho, true) !== 0x04034b50) {
+    throw new Error(`«${e.name.slice(0, 60)}»: local header не читается`);
+  }
+  const nameLen = dv.getUint16(e.lho + 26, true);
+  const extraLen = dv.getUint16(e.lho + 28, true);
+  const start = e.lho + 30 + nameLen + extraLen;
+  if (start + e.csize > u8.length) throw new Error(`«${e.name.slice(0, 60)}»: данные обрезаны`);
+  const packed = u8.subarray(start, start + e.csize);
+  const data = e.method === 0 ? packed.slice() : await extZipInflateRaw(packed, e.usize);
+  if (data.length !== e.usize) throw new Error(`«${e.name.slice(0, 60)}»: размер после распаковки не совпал`);
+  if (extCrc32(data) !== e.crc) throw new Error(`«${e.name.slice(0, 60)}»: контрольная сумма CRC не совпала`);
+  e._data = data;
+  return data;
+}
+// UTF-8 → текст. TextDecoder по умолчанию срезает BOM — реальный owner-корпус
+// содержит файлы с BOM, и это транспортная деталь, а не содержимое.
+const extZipText = bytes => new TextDecoder('utf-8').decode(bytes);
+const extZipBase = name => name.slice(name.lastIndexOf('/') + 1);
+const extHex = bytes => [...new Uint8Array(bytes)].map(b => b.toString(16).padStart(2, '0')).join('');
+async function extZipSha256Hex(bytes) { return extHex(await crypto.subtle.digest('SHA-256', bytes)); }
+
+// Сборка batch из архива. Fail-closed на каждом шаге:
+//  1) структура архива и лимиты;
+//  2) SHA256SUMS.txt (если есть): каждый указанный файл существует и совпадает,
+//     каждый .json архива покрыт суммой;
+//  3) манифест (если есть): порядок пакетов, полнота списка, sha256 файлов;
+//  4) каждый feed-файл разбирается существующим extBridgeParseFeed;
+//  5) дубликаты одинакового пакета в разных файлах запрещены;
+//  6) итог — ОДИН feed для существующего моста (≤ 50 пакетов).
+// Манифест и README — метаданные поставки, канонической информацией не являются.
+async function extZipBatchBuild(arrayBuffer, fileName) {
+  const zip = extZipEntries(arrayBuffer);
+  if (!zip.ok) return zip;
+  const byName = new Map(zip.entries.map(e => [e.name, e]));
+  const readText = async e => extZipText(await extZipEntryData(zip, e));
+  const jsonEntries = zip.entries.filter(e => /\.json$/i.test(e.name));
+  const sumsEntry = zip.entries.find(e => /(^|\/)SHA256SUMS\.txt$/i.test(e.name));
+  const manifestEntry = jsonEntries.find(e => /MANIFEST\.json$/i.test(extZipBase(e.name)));
+  // Feed-файлы: каталог FEEDS/ приоритетен; иначе все .json кроме манифеста.
+  let feedEntries = jsonEntries.filter(e => /(^|\/)FEEDS\/[^/]+\.json$/i.test(e.name));
+  if (!feedEntries.length) feedEntries = jsonEntries.filter(e => e !== manifestEntry);
+  if (!feedEntries.length) return { ok: false, errors: ['в архиве нет ни одного feed-файла (.json)'] };
+  try {
+    // ── SHA256SUMS: проверяется ДО какого-либо разбора содержимого ──
+    if (sumsEntry) {
+      const covered = new Set();
+      const lines = (await readText(sumsEntry)).split('\n').map(s => s.trim()).filter(Boolean);
+      for (const line of lines) {
+        const m = line.match(/^([0-9a-fA-F]{64})\s+\*?(.+)$/);
+        if (!m) return { ok: false, errors: [`SHA256SUMS.txt: нечитаемая строка «${line.slice(0, 60)}»`] };
+        const want = m[1].toLowerCase();
+        const path = m[2].trim();
+        // Только ТОЧНЫЙ путь записи: совпадение по basename позволило бы
+        // подсунуть одноимённый файл из другого каталога.
+        const entry = byName.get(path);
+        if (!entry) return { ok: false, errors: [`SHA256SUMS.txt: файл «${path.slice(0, 60)}» отсутствует в архиве`] };
+        const got = await extZipSha256Hex(await extZipEntryData(zip, entry));
+        if (got !== want) return { ok: false, errors: [`контрольная сумма не совпала: «${path.slice(0, 60)}» — архив повреждён или подменён`] };
+        covered.add(entry.name);
+      }
+      const uncovered = jsonEntries.filter(e => !covered.has(e.name));
+      if (uncovered.length) return { ok: false, errors: [`SHA256SUMS.txt не покрывает: «${extZipBase(uncovered[0].name).slice(0, 60)}»${uncovered.length > 1 ? ` и ещё ${uncovered.length - 1}` : ''}`] };
+    }
+    // ── Манифест: порядок и полнота ──
+    let ordered = null;
+    let manifestLabel = null;
+    if (manifestEntry) {
+      let man;
+      try { man = JSON.parse(await readText(manifestEntry)); }
+      catch (e) { return { ok: false, errors: ['манифест поставки не является корректным JSON'] }; }
+      manifestLabel = extStr(man && man.handoff, 120) || null;
+      const list = Array.isArray(man && man.packages) ? man.packages
+        : Array.isArray(man && man.files) ? man.files
+          : Array.isArray(man && man.feeds) ? man.feeds : null;
+      if (list && list.length) {
+        const rows = list.map(x => (x && typeof x === 'object') ? x : { file: x });
+        if (rows.some(r => !r.file || typeof r.file !== 'string')) {
+          return { ok: false, errors: ['манифест: у элемента списка пакетов нет имени файла'] };
+        }
+        // order: либо отсутствует у всех (порядок массива), либо задан у всех
+        // уникальными положительными целыми. Молчаливая «какая-то» сортировка
+        // при дублях/мусоре недопустима.
+        const withOrder = rows.filter(r => r.order !== undefined && r.order !== null);
+        if (withOrder.length) {
+          if (withOrder.length !== rows.length) return { ok: false, errors: ['манифест: order задан не у всех пакетов'] };
+          const nums = rows.map(r => Number(r.order));
+          if (nums.some(n => !Number.isInteger(n) || n <= 0)) return { ok: false, errors: ['манифест: order должен быть положительным целым'] };
+          if (new Set(nums).size !== nums.length) return { ok: false, errors: ['манифест: значения order повторяются — порядок неоднозначен'] };
+          rows.sort((a, b) => Number(a.order) - Number(b.order));
+        }
+        const used = new Set();
+        ordered = [];
+        for (const r of rows) {
+          const base = extZipBase(r.file);
+          // Точный путь приоритетен; basename допустим ТОЛЬКО когда он
+          // однозначен в архиве (двойники — fail closed).
+          const exact = feedEntries.find(x => x.name === r.file);
+          const byBase = exact ? [exact] : feedEntries.filter(x => extZipBase(x.name) === base);
+          if (byBase.length > 1) return { ok: false, errors: [`манифест: имя «${base.slice(0, 60)}» неоднозначно — в архиве несколько таких файлов`] };
+          const entry = byBase[0];
+          if (!entry) return { ok: false, errors: [`манифест указывает файл «${base.slice(0, 60)}», которого нет в архиве`] };
+          if (used.has(entry.name)) return { ok: false, errors: [`манифест указывает файл «${base.slice(0, 60)}» дважды`] };
+          used.add(entry.name);
+          if (r.sha256) {
+            const got = await extZipSha256Hex(await extZipEntryData(zip, entry));
+            if (got !== String(r.sha256).toLowerCase()) {
+              return { ok: false, errors: [`контрольная сумма из манифеста не совпала: «${base.slice(0, 60)}»`] };
+            }
+          }
+          ordered.push(entry);
+        }
+        const extra = feedEntries.filter(e => !used.has(e.name));
+        if (extra.length) return { ok: false, errors: [`в архиве есть feed-файлы вне манифеста: «${extZipBase(extra[0].name).slice(0, 60)}»${extra.length > 1 ? ` и ещё ${extra.length - 1}` : ''}`] };
+      }
+    }
+    // Без манифеста порядок задаёт числовая сортировка имён — ровно то, что
+    // видит человек в списке файлов.
+    if (!ordered) ordered = feedEntries.slice().sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
+    // ── Разбор каждого файла СУЩЕСТВУЮЩИМ парсером моста ──
+    const packages = [];
+    const seenPkg = new Set();
+    const files = [];
+    for (const e of ordered) {
+      const parsed = extBridgeParseFeed(await readText(e));
+      if (!parsed.ok) return { ok: false, errors: [`«${extZipBase(e.name).slice(0, 60)}»: ${parsed.errors[0]}`] };
+      for (const pkg of parsed.packages) {
+        const key = extCanonicalJson({ format: pkg.format, source: pkg.source, session: pkg.session, entities: pkg.entities, links: pkg.links });
+        if (seenPkg.has(key)) return { ok: false, errors: [`«${extZipBase(e.name).slice(0, 60)}»: этот пакет уже есть в архиве в другом файле — двойная поставка запрещена`] };
+        seenPkg.add(key);
+        packages.push(pkg);
+      }
+      files.push(extZipBase(e.name));
+    }
+    if (packages.length > 50) return { ok: false, errors: [`в архиве ${packages.length} пакетов — больше лимита feed (50). Раздели поставку`] };
+    const feedText = JSON.stringify({
+      format: EXT_FEED_FORMAT,
+      container: { kind: 'zip', id: null, label: String(fileName || 'архив').slice(0, 120) },
+      packages,
+    });
+    if (feedText.length > EXT_LIMITS.maxBytes * 4) return { ok: false, errors: ['суммарный размер поставки превышает лимит feed'] };
+    return { ok: true, errors: [], feedText, packages: packages.length, files, manifestLabel };
+  } catch (err) {
+    return { ok: false, errors: [String((err && err.message) || err).slice(0, 200)] };
+  }
+}
+
+// Выбранный batch живёт ТОЛЬКО в памяти до подтверждения; перезагрузка
+// страницы честно требует выбрать архив заново (никаких слепых commit).
+let _extBatchFeed = null;
+async function extZipSelect(file, arrayBuffer) {
+  const note = $('ext-file-note');
+  const out = $('ext-out'); const act = $('ext-actions');
+  if (act) act.innerHTML = '';
+  if (note) note.textContent = `Архив прочитан: ${file.name} · ${Math.max(1, Math.round(file.size / 1024))} КБ`;
+  if (out) out.innerHTML = '<div class="ai-sp-empty">Проверяю архив…</div>';
+  const built = await extZipBatchBuild(arrayBuffer, file.name);
+  if (!built.ok) {
+    _extBatchFeed = null;
+    if (out) out.innerHTML = `<div class="psy-adv" role="alert">Архив не принят — ничего не изменено.<br>${esc(built.errors[0] || 'неизвестная ошибка')}</div>`;
+    extSetStep(1);
+    return;
+  }
+  _extBatchFeed = { text: built.feedText, packages: built.packages, files: built.files, label: built.manifestLabel || file.name };
+  if (out) out.innerHTML = '';   // результат поставки живёт в предпросмотре моста
+  if (note) note.textContent += ` · пакетов: ${built.packages}`;
+  const t = $('ext-text'); if (t) { t.value = ''; t.rows = 2; }
+  // Архивная поставка всегда идёт через мост (журнал + чекпойнт + атомарный
+  // feed-apply). Если источник не выбран — он создаётся из имени поставки:
+  // владелец не обязан настраивать что-либо до первого импорта.
+  if (!(_extConnActive && extConnFind(_extConnActive))) {
+    // Источник поставки до подтверждения — ТОЛЬКО в памяти (вне DB):
+    // отмена, закрытие или перезагрузка не оставляют осиротевшего
+    // подключения в хранилище. Персистентным он становится в apply.
+    const rec = extConnNewRec(`Поставка: ${_extBatchFeed.label}`.slice(0, 120), 'external_connector');
+    if (!rec) {
+      if (out) out.innerHTML = `<div class="psy-adv" role="alert">не удалось подготовить источник поставки</div>`;
+      return;
+    }
+    _extPendingConn = rec;
+    _extConnActive = rec.id;
+    extRenderConnections();
+  }
+  extConnUiRefresh();
+}
 function extPickFile(ev) {
   const file = ev && ev.target && ev.target.files && ev.target.files[0];
   if (!file) return;
-  if (file.size > EXT_LIMITS.maxBytes) { toast('Файл слишком большой', 'warn'); return; }
-  const fr = new FileReader();
-  // Если выбран источник — файл идёт через универсальный мост (человеческий
-  // предпросмотр, чекпойнт, атомарный импорт). Без выбранного источника
-  // остаётся разовая техническая проверка пакета.
-  fr.onload = () => {
+  if (file.size > EXT_ZIP_LIMITS.maxZipBytes) { toast('Файл слишком большой', 'warn'); return; }
+  // Формат определяется по СОДЕРЖИМОМУ (сигнатура ZIP), не по имени файла.
+  file.arrayBuffer().then(buf => {
+    const u8 = new Uint8Array(buf);
+    const isZip = u8.length > 3 && u8[0] === 0x50 && u8[1] === 0x4B && (u8[2] === 0x03 || u8[2] === 0x05 || u8[2] === 0x07);
+    if (isZip) return extZipSelect(file, buf);
+    _extBatchFeed = null;
+    if (file.size > EXT_LIMITS.maxBytes) { toast('Файл слишком большой', 'warn'); return; }
     const t = $('ext-text');
     if (t) {
-      t.value = String(fr.result || '');
+      // TextDecoder срезает BOM: файл с BOM — валидный транспорт, не мусор.
+      t.value = extZipText(u8);
       // Содержимое файла нужно обоим путям, но показывать человеку стену JSON
       // незачем: на телефоне она уносит ответ далеко под сгиб. Поле сжимаем
       // и подписываем, что именно прочитано.
@@ -15144,9 +15525,7 @@ function extPickFile(ev) {
     }
     if (_extConnActive && extConnFind(_extConnActive)) extConnUiRefresh();
     else extPreview();
-  };
-  fr.onerror = () => toast('Не удалось прочитать файл', 'err');
-  fr.readAsText(file);
+  }).catch(() => toast('Не удалось прочитать файл', 'err'));
 }
 const EXT_STATUS_RU = {
   'new': 'новая', 'existing-by-provenance': 'уже импортировано',
@@ -15202,7 +15581,8 @@ function extRenderTargetNote() {
 // какой блок пользователь догадался раскрыть: выбран источник — идём через
 // мост (журнал/чекпойнт), не выбран — разовая подача.
 function extPreviewPrimary() {
-  const raw = ($('ext-text') || {}).value || '';
+  const typedRaw = String((($('ext-text') || {}).value || '')).trim();
+  const raw = typedRaw || (_extBatchFeed && _extBatchFeed.text) || '';
   if (!String(raw).trim()) {
     const out = $('ext-out');
     if (out) out.innerHTML = '<div class="ai-sp-empty">Сначала выбери файл или вставь данные в поле выше.</div>';
@@ -15210,13 +15590,18 @@ function extPreviewPrimary() {
     toast('Выбери файл или вставь данные', 'warn');
     return;
   }
-  if (_extConnActive && extConnFind(_extConnActive)) return extConnUiRefresh();
+  if ((!typedRaw && _extBatchFeed) || (_extConnActive && extConnFind(_extConnActive))) return extConnUiRefresh();
   return extPreview();
 }
 // Возврат к шагу 1 после успешного импорта: поля чистые, результат убран.
 // Уже импортированные записи это НЕ трогает.
 function extResetToStep1() {
   _extPlan = null; _extSel = { items: {}, links: {}, conflicts: {} };
+  _extBatchFeed = null;
+  if (_extPendingConn) {
+    if (_extConnActive === _extPendingConn.id) _extConnActive = null;
+    _extPendingConn = null;   // жил только в памяти — чистить в хранилище нечего
+  }
   const t = $('ext-text'); if (t) { t.value = ''; t.rows = 5; }
   const f = $('ext-file'); if (f) f.value = '';
   const fn = $('ext-file-note'); if (fn) fn.textContent = '';
@@ -16074,6 +16459,26 @@ async function extBuildPlan(rawText, shared) {
   orderedItems.forEach(i => { counts[i.status] = (counts[i.status] || 0) + 1; });
   const byTarget = {};
   orderedItems.filter(i => i.status === 'new').forEach(i => { byTarget[i.coll] = (byTarget[i.coll] || 0) + 1; });
+  // UX-прозрачность «тихой» нормализации (счёт только, семантика не меняется):
+  // строка вне закрытого словаря enum-поля безопасно приводится билдерами к
+  // fallback «unknown». Здесь она СЧИТАЕТСЯ, чтобы предпросмотр честно сказал
+  // об этом владельцу. Узкая документированная карта — только оси, где
+  // fallback наблюдался в реальных подачах; словари НЕ расширяются.
+  const softMap = {
+    psyInterventionEpisode: { adherence: PSY_ADHERENCE, outcomeClass: PSY_OUTCOME_CLASSES, acceptability: PSY_ACCEPTABILITY },
+    psyObservation: { entryMode: PSY_ENTRY_MODES },
+  };
+  let softNormalized = 0;
+  (pkg.entities || []).forEach(e => {
+    const fields = e && softMap[e.type];
+    if (!fields) return;
+    const data = extPickData(e) || {};
+    Object.entries(fields).forEach(([f, list]) => {
+      const v = data[f];
+      if (typeof v === 'string' && v && !list.includes(v)) softNormalized++;
+    });
+  });
+  counts.softNormalized = softNormalized;
 
   return {
     ok: true, errors: [], packageHash, pkg, items: orderedItems, links: linkItems, counts, byTarget,
