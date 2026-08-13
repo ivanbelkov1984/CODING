@@ -14465,9 +14465,10 @@ async function extConnUiRefresh() {
   if (!_extConnActive) { toast('Сначала выбери источник', 'warn'); return; }
   const text = ($('ext-text') || {}).value || '';
   if (!String(text).trim()) { toast('Выбери файл или вставь данные', 'warn'); return; }
+  extSetStep(2);
   const r = await extBridgeRefresh(_extConnActive, text);
-  // Список источников перерисовывается ПЕРВЫМ: он пересоздаёт контейнер
-  // вывода, поэтому предпросмотр всегда пишется после перерисовки.
+  // Список источников обновляет «последний импорт»; контейнер вывода живёт
+  // снаружи списка, поэтому перерисовка его больше не затирает.
   extRenderConnections();
   const out = $('ext-conn-out');
   if (!r.ok) {
@@ -14503,6 +14504,7 @@ async function extConnUiRefresh() {
       <div class="si-text" style="font-size:.72rem;color:var(--t4)">Формат: architect-external-work v1/v2 (feed ${esc(EXT_FEED_FORMAT)}). Пакетов в подаче: ${t.packages} · пропущено по журналу импорта: ${t.skippedByCheckpoint}. Идентичность записи — семантический sourceId; канал и контейнер (файл/архив) хранятся только как происхождение. Изменённая версия того же sourceId обновляет ту же запись (changed), а не создаёт новую; похожесть текста никогда не участвует в идентичности. Подтверждённая подача применяется одной транзакцией; чекпойнт двигается только после успешного импорта.</div>
     </details>
   </div>`;
+  extScrollToResult('ext-conn-out');
 }
 // Обязательное подтверждение перед любой мутацией canonical. Обновления
 // существующих записей (changed) называются явно — CHANGED не применяется
@@ -14540,8 +14542,14 @@ function extConnUiApply() {
   const out3 = $('ext-conn-out');
   // P1 (owner, пункт 10): числа называют свои единицы — пакеты отдельно,
   // записи отдельно.
-  if (out3) out3.innerHTML = `<div class="si-text">Готово. Новых записей: ${r.created || 0} · обновлено записей: ${r.updated || 0} · пакетов пропущено (уже импортированы): ${skipped} · пакетов применено: ${committed}.
-    <br>Повторная загрузка тех же данных не создаст дублей.</div>`;
+  if (out3) out3.innerHTML = `<div class="si-text" style="line-height:1.7">
+    <div style="font-weight:600;color:var(--t1);font-size:1rem">Готово · добавлено записей: ${r.created || 0}</div>
+    <div>Обновлено записей: ${r.updated || 0} · пакетов применено: ${committed} · пакетов пропущено (уже импортированы): ${skipped}</div>
+    <div class="ext-safe">Повторная загрузка тех же данных не создаст дублей. Хороший момент сделать резервную копию.</div></div>`;
+  const act3 = $('ext-actions');
+  if (act3) act3.innerHTML = `<button type="button" class="btn btn-p btn-full" onclick="closeOv('ov-ext-import');goTo('map')">Открыть Дневник</button>
+    <button type="button" class="btn btn-s btn-full" onclick="extResetToStep1()">Импортировать ещё файл</button>`;
+  extSetStep(3);
   toast('Данные импортированы', 'ok');
   try { rPsyWorkspace(); } catch (_) {}
 }
@@ -14565,17 +14573,20 @@ function extRenderConnections() {
       </div>
     </div>`;
   }).join('');
-  el.innerHTML = `<div class="sec-lbl" style="padding-left:0">Внешние источники</div>
-    <div class="be-note">Источник — это имя канала и отметка о том, что уже импортировано. Приложению не нужны учётные записи Google или ChatGPT: данные приходят файлом, вставкой или готовой подачей по твоему действию. «Отключить» и «забыть» никогда не удаляют импортированные записи.</div>
+  // Источник — необязательная память о том, что уже импортировано. Он больше
+  // не является предусловием первого импорта: без источника подача проходит
+  // разово, дедупликация по sourceId работает одинаково в обоих путях.
+  // Вывод предпросмотра живёт СНАРУЖИ (#ext-conn-out в разметке экрана),
+  // поэтому перерисовка списка его не затирает и не прячет.
+  el.innerHTML = `<div class="be-note">Источник запоминает, что уже импортировано, чтобы повторная загрузка тех же данных пропускалась. Он не обязателен: можно импортировать файл и без него. Приложению не нужны учётные записи Google или ChatGPT — данные приходят файлом или вставкой по твоему действию. «Отключить» и «забыть» никогда не удаляют импортированные записи.</div>
     <div class="si-text" style="font-size:.75rem;color:var(--t3)">Поддерживаются: экспорт ChatGPT · подготовленные данные Google Drive · JSON Архитектора · другие совместимые источники.</div>
     ${rows || '<div class="ai-sp-empty">Источников пока нет.</div>'}
     <div class="psy-fld" style="margin-top:.5rem"><label class="f-lbl" for="extc-label">Название источника</label>
       <input type="text" id="extc-label" class="field" placeholder="например: Экспорт ChatGPT — психология"></div>
     <div class="psy-fld"><label class="f-lbl" for="extc-kind">Откуда приходят данные</label>
       <select id="extc-kind" class="field">${EXT_CHANNEL_KINDS.map(k => `<option value="${k}">${esc(EXT_CHANNEL_RU[k])}</option>`).join('')}</select></div>
-    <button type="button" class="btn btn-s" onclick="extConnUiCreate()">Добавить источник</button>
-    ${_extConnActive ? `<div style="margin-top:.6rem"><button type="button" class="btn btn-p" onclick="extConnUiRefresh()">Импортировать данные выбранного источника (файл или поле ниже)</button></div>` : ''}
-    <div id="ext-conn-out" aria-live="polite"></div>`;
+    <button type="button" class="btn btn-s" onclick="extConnUiCreate()">Добавить источник</button>`;
+  extRenderTargetNote();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -15103,11 +15114,13 @@ const EXT_ADAPTERS = {
 let _extPlan = null, _extSel = { items: {}, links: {}, conflicts: {} };
 function openExtImport() {
   _extPlan = null; _extSel = { items: {}, links: {}, conflicts: {} };
-  const t = $('ext-text'); if (t) t.value = '';
+  const t = $('ext-text'); if (t) { t.value = ''; t.rows = 5; }
   const f = $('ext-file'); if (f) f.value = '';
-  const out = $('ext-out'); if (out) out.innerHTML = '';
-  const act = $('ext-actions'); if (act) act.innerHTML = '';
+  const fn = $('ext-file-note'); if (fn) fn.textContent = '';
+  ['ext-out', 'ext-actions', 'ext-conn-out'].forEach(id => { const el = $(id); if (el) el.innerHTML = ''; });
   extRenderConnections();   // Final A: постоянные источники
+  extRenderTargetNote();
+  extSetStep(1);
   openOv('ov-ext-import');
 }
 function extPickFile(ev) {
@@ -15119,7 +15132,16 @@ function extPickFile(ev) {
   // предпросмотр, чекпойнт, атомарный импорт). Без выбранного источника
   // остаётся разовая техническая проверка пакета.
   fr.onload = () => {
-    const t = $('ext-text'); if (t) t.value = String(fr.result || '');
+    const t = $('ext-text');
+    if (t) {
+      t.value = String(fr.result || '');
+      // Содержимое файла нужно обоим путям, но показывать человеку стену JSON
+      // незачем: на телефоне она уносит ответ далеко под сгиб. Поле сжимаем
+      // и подписываем, что именно прочитано.
+      t.rows = 2;
+      const note = $('ext-file-note');
+      if (note) note.textContent = `Файл прочитан: ${file.name} · ${Math.max(1, Math.round(file.size / 1024))} КБ`;
+    }
     if (_extConnActive && extConnFind(_extConnActive)) extConnUiRefresh();
     else extPreview();
   };
@@ -15147,12 +15169,68 @@ const EXT_STATUS_RU = {
   'normalization-change': 'изменилась нормализация (это не изменение источника)',
   'superseded-in-feed': 'заменена более новой версией в этой подаче',
 };
+// Названия разделов приложения для сводки «что будет добавлено». Человек
+// думает разделами («Сны», «Практики»), а не именами коллекций.
+const EXT_COLL_RU = {
+  insights: 'Инсайты', dreams: 'Сны', spiritual: 'Духовный опыт', whys: '«Зачем?»',
+  patterns: 'Закономерности', moments: 'Моменты состояния', evolution: 'Эволюция',
+  sphereLogs: 'Записи сфер', relationshipContexts: 'Контексты отношений',
+  psyFormulations: 'Формулировки', psyGoals: 'Цели работы',
+  psyInterventionEpisodes: 'Практики', psyObservations: 'Наблюдения', psyReviews: 'Обзоры',
+};
+const extCollRu = c => EXT_COLL_RU[c] || c;
+// Индикатор шага. Меняет только подсветку: сам импорт по-прежнему применяется
+// одной транзакцией и только по явному подтверждению.
+function extSetStep(n) {
+  const box = $('ext-steps'); if (!box) return;
+  box.querySelectorAll('.ext-step').forEach(el => {
+    const s = Number(el.getAttribute('data-step'));
+    el.classList.toggle('on', s === n);
+    el.classList.toggle('done', s < n);
+  });
+}
+// Куда попадёт этот импорт: в выбранный источник (с журналом и чекпойнтом)
+// или разово, без источника. Человек должен видеть это ДО нажатия.
+function extRenderTargetNote() {
+  const el = $('ext-target-note'); if (!el) return;
+  const conn = _extConnActive ? extConnFind(_extConnActive) : null;
+  el.innerHTML = conn
+    ? `Импорт будет записан в источник «${esc(conn.label)}» — повторная загрузка тех же данных будет пропущена по журналу.`
+    : 'Источник не выбран — разовый импорт. Дубли всё равно не появятся: записи опознаются по своему идентификатору.';
+}
+// Единая главная кнопка шага 1. Путь выбирается по состоянию, а не по тому,
+// какой блок пользователь догадался раскрыть: выбран источник — идём через
+// мост (журнал/чекпойнт), не выбран — разовая подача.
+function extPreviewPrimary() {
+  const raw = ($('ext-text') || {}).value || '';
+  if (!String(raw).trim()) {
+    const out = $('ext-out');
+    if (out) out.innerHTML = '<div class="ai-sp-empty">Сначала выбери файл или вставь данные в поле выше.</div>';
+    const act = $('ext-actions'); if (act) act.innerHTML = '';
+    toast('Выбери файл или вставь данные', 'warn');
+    return;
+  }
+  if (_extConnActive && extConnFind(_extConnActive)) return extConnUiRefresh();
+  return extPreview();
+}
+// Возврат к шагу 1 после успешного импорта: поля чистые, результат убран.
+// Уже импортированные записи это НЕ трогает.
+function extResetToStep1() {
+  _extPlan = null; _extSel = { items: {}, links: {}, conflicts: {} };
+  const t = $('ext-text'); if (t) { t.value = ''; t.rows = 5; }
+  const f = $('ext-file'); if (f) f.value = '';
+  const fn = $('ext-file-note'); if (fn) fn.textContent = '';
+  ['ext-out', 'ext-actions', 'ext-conn-out'].forEach(id => { const el = $(id); if (el) el.innerHTML = ''; });
+  extRenderTargetNote();
+  extSetStep(1);
+}
 async function extPreview() {
   const out = $('ext-out'), act = $('ext-actions');
   const raw = ($('ext-text') || {}).value || '';
   if (!out) return;
   if (!raw.trim()) { out.innerHTML = '<div class="ai-sp-empty">Вставь JSON или выбери файл.</div>'; if (act) act.innerHTML = ''; return; }
   out.innerHTML = '<div class="ai-sp-empty">Проверяю…</div>';
+  extSetStep(2);
   let plan;
   try { plan = await extBuildPlan(raw); }
   catch (e) { out.innerHTML = `<div class="ai-sp-empty">Ошибка разбора: ${esc((e && e.message) || '')}</div>`; return; }
@@ -15197,15 +15275,22 @@ async function extPreview() {
         <br><span style="color:var(--t4);font-size:.72rem">статус: ${esc(EXT_STATUS_RU[l.status] || l.status)}${l.reason ? ' — ' + esc(l.reason) : ''}</span></span>
       </label></div></div>`;
   }).join('');
-  const targets = Object.entries(plan.byTarget).map(([c, n]) => `${esc(c)}: ${n}`).join(', ') || 'нечего создавать';
+  const targetRows = Object.entries(plan.byTarget)
+    .map(([c, n]) => `<div class="ext-sum"><span>${esc(extCollRu(c))}</span><b>${n}</b></div>`).join('');
+  const nNew = Object.values(plan.byTarget).reduce((a, b) => a + b, 0);
   const nChanged = (plan.counts && plan.counts.changed) || 0;
   const nChangedConflict = (plan.counts && plan.counts['changed-conflict']) || 0;
   const nUpdRej = (plan.counts && plan.counts['update-rejected']) || 0;
   const nOrderUnknown = (plan.counts && plan.counts['order-unknown']) || 0;
   const nStale = (plan.counts && plan.counts['stale-source-version']) || 0;
   const nVerConf = ((plan.counts && plan.counts['source-version-conflict']) || 0) + ((plan.counts && plan.counts['normalization-change']) || 0);
+  const nExisting = (plan.counts && plan.counts['existing-by-provenance']) || 0;
+  // Решение нужно ЯВНО — блок с записями раскрывается сам, иначе выбор
+  // «оставить мою / заменить» оказался бы спрятан и импорт встал бы молча.
+  const needsDecision = nChangedConflict + nOrderUnknown > 0;
   out.innerHTML = `<div class="si-text" style="line-height:1.7">
-      <div><b>Будет создано:</b> ${targets}</div>
+      <div style="font-weight:600;color:var(--t1);font-size:1rem">${nNew ? `Будет добавлено записей: ${nNew}` : 'Новых записей нет'}</div>
+      ${targetRows}
       ${nChanged ? `<div><b>Будет обновлено:</b> ${nChanged} (новая версия того же источника; локальных правок нет)</div>` : ''}
       ${nChangedConflict ? `<div style="color:var(--orange)"><b>Конфликты с локальными правками:</b> ${nChangedConflict} — источник изменился, но запись правилась локально. Для каждой такой записи выбери ниже: «Оставить мою версию» или «Заменить версией источника». Без решения импорт не применится.</div>` : ''}
       ${nUpdRej ? `<div style="color:var(--red,#DC2626)"><b>Импорт заблокирован — обновлений отклонено защитой утверждений:</b> ${nUpdRej}. Источник пытается изменить смысл записи (повышение до факта); исправь источник и загрузи заново.</div>` : ''}
@@ -15213,13 +15298,18 @@ async function extPreview() {
       ${nStale ? `<div style="color:var(--red,#DC2626)"><b>Импорт заблокирован — устаревшие версии источника:</b> ${nStale}. Текущее состояние приложения новее; подготовь подачу с актуальной версией.</div>` : ''}
       ${nVerConf ? `<div style="color:var(--red,#DC2626)"><b>Импорт заблокирован — конфликт версии источника/нормализации:</b> ${nVerConf}. Проверь коннектор и подачу.</div>` : ''}
       <div><b>Связей:</b> ${plan.links.filter(l => l.status === 'new').length}</div>
-      <div style="color:var(--t4)">До подтверждения ничего не сохраняется.</div>
       ${plan.alreadyImported ? '<div style="color:var(--orange)"><b>Этот пакет уже импортирован</b> — повторный импорт не создаст дублей.</div>' : ''}
       ${(plan.intraPackageRefs || []).length ? `<div style="color:var(--t4);font-size:.72rem"><b>Ссылки внутри пакета:</b> ${plan.intraPackageRefs.map(r => `${esc(r.clientRef)} → ${esc(r.coll)}`).join(', ')}</div>` : ''}
       ${(plan.unresolvedRefs || []).length ? `<div style="color:var(--red,#DC2626)"><b>Не разрешены ссылки:</b> ${plan.unresolvedRefs.slice(0, 5).map(u => esc(u.clientRef + ' — ' + u.problem)).join('; ')}</div>` : ''}
     </div>
-    <div class="sec-lbl">Записи</div><div class="card mb">${rows}</div>
-    ${linkRows ? `<div class="sec-lbl">Связи</div><div class="card mb">${linkRows}</div>` : ''}`;
+    ${needsDecision
+      ? `<div class="ext-need">Нужно твоё решение по записям: ${nChangedConflict + nOrderUnknown}. Открой список ниже и выбери для каждой.</div>`
+      : `<div class="ext-safe">Ничего не удаляется и не перезаписывается.${nExisting ? ` ${nExisting} запис(ь/и) уже есть — повторно они не добавятся.` : ''} Пока не нажал «Добавить», в приложении ничего не изменилось.</div>`}
+    <details class="psy-det"${needsDecision ? ' open' : ''}>
+      <summary class="si-text" style="color:var(--t3)">Разобрать по записям${needsDecision ? ' — нужно решение' : ''}</summary>
+      <div class="sec-lbl" style="padding-left:0">Записи</div><div class="card mb">${rows}</div>
+      ${linkRows ? `<div class="sec-lbl" style="padding-left:0">Связи</div><div class="card mb">${linkRows}</div>` : ''}
+    </details>`;
   if (act) {
     // Конфликт идентичности и нерезолвящаяся внутрипакетная ссылка блокируют
     // ВЕСЬ пакет: кнопки подтверждения нет, частичный импорт не предлагается.
@@ -15238,9 +15328,16 @@ async function extPreview() {
       : staleOrVer.length
       ? `<div class="ai-sp-empty">Импорт заблокирован: ${staleOrVer.length} запис(ь/и) с устаревшей версией источника или конфликтом ревизии/нормализации. Текущее состояние приложения не изменяется — подготовь подачу с актуальными версиями.</div>`
       : can
-        ? `<button type="button" class="btn btn-p" onclick="extConfirm()">Импортировать выбранное</button>`
+        ? `<button type="button" class="btn btn-p btn-full" onclick="extConfirm()">${nNew ? `Добавить записей: ${nNew}` : 'Применить изменения'}</button>`
         : `<div class="ai-sp-empty">Нет новых записей для импорта.</div>`;
   }
+  extScrollToResult('ext-out');
+}
+// Ответ на действие человека должен оказаться перед глазами, а не «где-то
+// ниже по странице»: на телефоне длинное поле вставки уносит его под сгиб.
+function extScrollToResult(id) {
+  const el = $(id); if (!el || !el.scrollIntoView) return;
+  try { el.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (_) { }
 }
 function extToggleItem(n, on) { _extSel.items[n] = !!on; }
 function extToggleLink(n, on) { _extSel.links[n] = !!on; }
@@ -15256,12 +15353,21 @@ function extConfirm() {
   if (!r.ok) { toast('Импорт не выполнен: ' + r.error, 'err'); return; }
   const upd = Array.isArray(r.updatedRefs) ? r.updatedRefs.length : 0;
   toast(`Импортировано: новых ${r.created.length}, обновлено ${upd}, связей ${r.linkRefs.length}`, 'ok');
-  if (out) out.innerHTML = `<div class="si-text" style="line-height:1.7"><b>Импортировано.</b>
-    <div>Новых записей: ${r.created.length} · обновлено: ${upd} · связей: ${r.linkRefs.length}</div>
+  extSetStep(3);
+  const byColl = {};
+  (r.created || []).forEach(c => { const k = (c && c.coll) || (c && c.collection); if (k) byColl[k] = (byColl[k] || 0) + 1; });
+  const collRows = Object.entries(byColl)
+    .map(([c, n]) => `<div class="ext-sum"><span>${esc(extCollRu(c))}</span><b>${n}</b></div>`).join('');
+  if (out) out.innerHTML = `<div class="si-text" style="line-height:1.7">
+    <div style="font-weight:600;color:var(--t1);font-size:1rem">Готово · добавлено записей: ${r.created.length}</div>
+    ${collRows}
+    <div>Обновлено: ${upd} · связей: ${r.linkRefs.length}</div>
     ${r.keptLocal ? `<div style="color:var(--t4)">Решено «оставить мою версию»: ${r.keptLocal} — выбор запомнен, эта версия источника больше не будет предлагаться.</div>` : ''}
-    <div style="color:var(--t4)">Записи доступны в Дневнике и Психике как обычные.</div></div>`;
+    <div style="color:var(--t4)">Записи доступны в Дневнике и Психике как обычные.</div>
+    <div class="ext-safe">Если загрузишь этот же файл ещё раз, дублей не будет. Хороший момент сделать резервную копию.</div></div>`;
   const act = $('ext-actions');
-  if (act) act.innerHTML = `<button type="button" class="btn btn-s" onclick="closeOv('ov-ext-import');goTo('map')">Открыть Дневник</button>`;
+  if (act) act.innerHTML = `<button type="button" class="btn btn-p btn-full" onclick="closeOv('ov-ext-import');goTo('map')">Открыть Дневник</button>
+    <button type="button" class="btn btn-s btn-full" onclick="extResetToStep1()">Импортировать ещё файл</button>`;
   _extPlan = null;
   try { rIns(); rDrms(); rPats(); rSpi(); } catch (e) {}
 }

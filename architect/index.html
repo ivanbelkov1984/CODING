@@ -1930,22 +1930,45 @@
 <div class="ov" id="ov-ext-import" onclick="if(event.target===this)closeOv('ov-ext-import')">
   <div class="sheet">
     <div class="sh-pull"></div>
-    <div class="sh-title">Импорт данных из внешних источников</div>
+    <div class="sh-title">Импорт данных</div>
     <div class="sh-form">
-      <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5">Записи из внешней работы попадают в обычные разделы приложения с сохранением происхождения. Всё обрабатывается прямо на устройстве — без сети, без ИИ и без учётных записей Google или ChatGPT.</div>
-      <!-- Final A: универсальный мост внешних источников (provider-neutral). -->
-      <div id="ext-connections"></div>
-      <label class="f-lbl" for="ext-file">Выбрать файл (.json)</label>
+      <!-- Экран построен как три шага: выбрать файл → увидеть, что добавится →
+           добавить. Результат разбора НИКОГДА не прячется в свёрнутый блок:
+           иначе выбор файла на чистой установке не давал видимого ответа. -->
+      <div class="ext-steps" id="ext-steps" aria-hidden="true">
+        <span class="ext-step on" data-step="1">1 · Файл</span>
+        <span class="ext-step" data-step="2">2 · Проверка</span>
+        <span class="ext-step" data-step="3">3 · Готово</span>
+      </div>
+      <div style="font-size:var(--tx2);color:var(--t3);line-height:1.5">Записи из внешней работы попадают в обычные разделы приложения с сохранением происхождения. Файл разбирается прямо на устройстве — без сети, без ИИ и без учётных записей Google или ChatGPT.</div>
+      <div id="ext-target-note" class="si-text" style="font-size:.75rem;color:var(--t3)"></div>
+      <label class="f-lbl" for="ext-file">Шаг 1 · выбрать файл (.json)</label>
       <input type="file" id="ext-file" accept="application/json,.json" onchange="extPickFile(event)">
+      <div id="ext-file-note" class="si-text" style="font-size:.75rem;color:var(--t3)"></div>
       <label class="f-lbl" for="ext-text">…или вставить данные</label>
       <textarea id="ext-text" rows="5" placeholder='Вставь сюда содержимое файла'></textarea>
-      <!-- Разовая техническая проверка пакета (путь Волны 6) остаётся для
-           продвинутых: обычный путь — выбрать источник выше и импортировать. -->
-      <details>
-        <summary style="font-size:var(--tx2);color:var(--t3)">Разовая проверка пакета без источника (для продвинутых)</summary>
-        <button type="button" class="btn btn-p" onclick="extPreview()">Проверить данные</button>
-        <div id="ext-out" aria-live="polite"></div>
-        <div id="ext-actions"></div>
+      <button type="button" class="btn btn-p btn-full" onclick="extPreviewPrimary()">Посмотреть, что добавится</button>
+      <details class="psy-det">
+        <summary style="font-size:var(--tx2);color:var(--t3)">Откуда взять файл</summary>
+        <div class="si-text" style="font-size:.78rem;line-height:1.6;color:var(--t2)">
+          <p><b>Экспорт ChatGPT.</b> В ChatGPT: «Настройки» → «Управление данными» → «Экспортировать данные». Придёт письмо со ссылкой, в архиве нужен файл <code>conversations.json</code>.</p>
+          <p><b>Подготовленные данные Google Drive.</b> Это файл <code>.json</code>, собранный по формату Архитектора из твоих документов. Приложение само в Drive не ходит — файл приносишь ты.</p>
+          <p><b>Файл Архитектора.</b> Выгрузка из другого профиля или устройства — раздел «Экспорт».</p>
+          <p>Подойдёт любой совместимый <code>.json</code>. Приложению не нужны учётные записи и пароли.</p>
+        </div>
+      </details>
+      <!-- Шаг 2/3: единственная зона результата, всегда видимая.
+           ext-conn-out — предпросмотр моста (когда выбран источник),
+           ext-out — предпросмотр разовой подачи (когда источник не выбран). -->
+      <div id="ext-conn-out" aria-live="polite"></div>
+      <div id="ext-out" aria-live="polite"></div>
+      <div id="ext-actions"></div>
+      <!-- Final A: универсальный мост внешних источников (provider-neutral).
+           Источник — необязательная память о том, что уже импортировано;
+           он больше не загораживает первый импорт. -->
+      <details class="psy-det" id="ext-src-det">
+        <summary style="font-size:var(--tx2);color:var(--t3)">Источники и история импорта</summary>
+        <div id="ext-connections"></div>
       </details>
     </div>
   </div>
