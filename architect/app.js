@@ -1492,7 +1492,7 @@ $('search-in')?.addEventListener('keydown', e => { if (e.key==='Escape') closeOv
 
 // ─── СТРИК ──────────────────────────────────────────────────────
 function calcStreak() {
-  const keys = DB.checkins.map(c => c.date).sort().reverse();
+  const keys = projAll('checkins').map(c => c.date).sort().reverse();
   if (!keys.length) return 0;
   let streak = 0, cur = new Date();
   cur.setHours(0,0,0,0);
@@ -1506,7 +1506,7 @@ function calcStreak() {
 }
 // Лучший стрик — отдельно от текущего, чтобы пропуск не обнулял мотивацию.
 function calcBestStreak() {
-  const days = [...new Set(DB.checkins.map(c => c.date))].filter(Boolean).sort();
+  const days = [...new Set(projAll('checkins').map(c => c.date))].filter(Boolean).sort();
   if (!days.length) return 0;
   let best = 1, cur = 1;
   for (let i = 1; i < days.length; i++) {
@@ -1522,7 +1522,7 @@ function calcBestStreak() {
 // многих отметок почти не влияет, восстанавливается по мере отметок.
 function calcConsistency(window) {
   window = window || 21;
-  const logged = new Set(DB.checkins.map(c => c.date).filter(Boolean));
+  const logged = new Set(projAll('checkins').map(c => c.date).filter(Boolean));
   let num = 0, den = 0;
   for (let i = 0; i < window; i++) {
     const w = window - i;                 // свежие дни весомее
@@ -1534,7 +1534,7 @@ function calcConsistency(window) {
 function rStreak() {
   const el = $('h-streak-wrap');
   if (!el) return;
-  if (!DB.checkins.length) { el.innerHTML = ''; return; }
+  if (!DB.checkins.length) { el.innerHTML = ''; return; }   // raw intentionally: только наличие записей
   const s = calcStreak(), best = calcBestStreak(), cons = calcConsistency(21);
   // Лид — постоянство (не обнуляется); стрик вторичен, без вины за пропуск.
   const tone = cons >= 70 ? 'good' : cons >= 40 ? 'mid' : 'low';
@@ -1603,7 +1603,7 @@ function resurface() {
   const MIN_AGE = 30 * 864e5;                       // минимум месяц — это «прошлое»
   const v = DB.vit;
   const todayState = (v && v.ci) ? (v.cl + v.mv + (10 - v.st)) / 3 : null;
-  const stateOn = {}; DB.checkins.forEach(c => { if (c.date) stateOn[c.date] = dayComposite(c); });
+  const stateOn = {}; projAll('checkins').forEach(c => { if (c.date) stateOn[c.date] = dayComposite(c); });
   const cands = (DB.insights || []).filter(i => {
     const t = Date.parse(i.createdAt); return t && (now - t) >= MIN_AGE && (i.body || i.title);
   }).map(i => {
@@ -1807,7 +1807,7 @@ function openCrisisCard() {
 // данных хватает, иначе остаётся только сегодняшнее состояние.
 // atHour — необязательный час «как будто сейчас» (для тестов/прогноза).
 function cravingRisk(atHour) {
-  const v = DB.vit, crav = DB.cravings || [];
+  const v = DB.vit, crav = projAll('cravings');
   const hour = atHour == null ? new Date().getHours() : atHour;
   const hasCi = !!(v && v.ci && v.date === todayKey());
   const F = [];  // {w, why, tag}
@@ -1868,7 +1868,7 @@ function smartNudge() {
   // (см. cravingRisk / HEALTH_BRIEF.md). Не требует чек-ина: окно суток и
   // пост-срыв знаемы и без него — потому предупреждение реально опережает.
   {
-    const riskCtx = healthSpheres().length > 0 || (DB.cravings || []).length > 0;
+    const riskCtx = healthSpheres().length > 0 || (DB.cravings || []).length > 0;   // raw intentionally: только счётчик записей, коррекции их не добавляют
     const risk = cravingRisk();
     if (riskCtx && risk.score >= 0.3 && risk.top)
       return { icon: '⚠️', text: `Сейчас риск тяги выше обычного — ${risk.top.why}.`,
@@ -1877,7 +1877,7 @@ function smartNudge() {
   // 2. Привычка-сфера давно без отметки
   for (const s of (DB.spheres || [])) {
     if (s.type !== 'habit') continue;
-    const logs = DB.sphereLogs.filter(l => l.sphereId === s.id && l.value).map(l => l.date).filter(Boolean).sort();
+    const logs = projAll('sphereLogs').filter(l => l.sphereId === s.id && l.value).map(l => l.date).filter(Boolean).sort();
     if (logs.length < 3) continue;
     const last = logs[logs.length - 1];
     const gap = Math.round((Date.now() - Date.parse(last + 'T00:00:00')) / 864e5);
@@ -2479,9 +2479,96 @@ function recFieldText(rec, f) {
   if (raw === undefined || raw === null || raw === '') return '';
   return String(raw);
 }
+// §7: какие ДОКАЗАТЕЛЬНЫЕ поля можно исправить коррекцией и по каким
+// правилам. Валидация здесь — та же по смыслу, что при создании записи:
+// диапазоны, перечисления и обязательность. Исправление НИКОГДА не меняет
+// оригинал: пишется append-only событие, оригинал остаётся видимым.
+const RC = (k, l, o) => ({ k, l, ...(o || {}) });
+const REC_CORR = {
+  moments: [RC('valence', 'Приятность', { num: [0, 100] }), RC('activation', 'Энергия', { num: [0, 100] }),
+    RC('emo', 'Эмоция'), RC('day', 'День', { day: true })],
+  checkins: [RC('sl', 'Сон, часов', { num: [0, 24] }), RC('sq', 'Качество сна', { num: [0, 10] }),
+    RC('cl', 'Ясность', { num: [0, 10] }), RC('st', 'Стресс', { num: [0, 10] }),
+    RC('mv', 'Движение', { num: [0, 10] }), RC('date', 'Дата', { day: true })],
+  symptoms: [RC('name', 'Симптом', { req: true }), RC('severity', 'Выраженность', { num: [0, 10] }), RC('day', 'День', { day: true })],
+  measures: [RC('name', 'Показатель', { req: true }), RC('value', 'Значение', { num: [-1e9, 1e9] }),
+    RC('unit', 'Единица'), RC('day', 'День', { day: true })],
+  labObservations: [RC('testName', 'Анализ', { req: true }), RC('valueText', 'Результат'),
+    RC('unit', 'Единица'), RC('collectedAt', 'Дата забора', { iso: true })],
+  medIntakes: [RC('status', 'Статус', { enums: ['taken', 'skipped'] }), RC('at', 'Время приёма', { iso: true })],
+  cravings: [RC('kind', 'Что тянуло'), RC('intensity', 'Сила', { num: [0, 10] }),
+    RC('outcome', 'Исход', { enums: ['held', 'gave_in'] }), RC('trigger', 'Триггер')],
+  sphereLogs: [RC('value', 'Значение', { num: [-1e9, 1e9] }), RC('date', 'Дата', { day: true })],
+  psyObservations: [RC('metricId', 'Метрика', { req: true }), RC('valueNumber', 'Значение', { num: [-1e9, 1e9], nullable: true }),
+    RC('valueText', 'Значение (текст)'), RC('unit', 'Единица'),
+    RC('contextTag', 'Контекст (условие эксперимента)'), RC('timestamp', 'Когда', { iso: true })],
+};
+// Доменная проверка одного исправленного значения. Отклонение — это отказ,
+// а не «поправим как сможем»: доказательное поле не угадывается.
+function recCorrValidate(spec, raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (spec.num) {
+    if (s === '') {
+      if (spec.nullable) return { ok: true, value: null };
+      return { ok: false, error: `«${spec.l}»: нужно число` };
+    }
+    const n = Number(s.replace(',', '.'));
+    if (!Number.isFinite(n)) return { ok: false, error: `«${spec.l}»: нужно число` };
+    if (n < spec.num[0] || n > spec.num[1]) return { ok: false, error: `«${spec.l}»: допустимо от ${spec.num[0]} до ${spec.num[1]}` };
+    return { ok: true, value: n };
+  }
+  if (spec.enums) {
+    if (!spec.enums.includes(s)) return { ok: false, error: `«${spec.l}»: допустимо только ${spec.enums.join(' / ')}` };
+    return { ok: true, value: s };
+  }
+  if (spec.day) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(s + 'T00:00:00Z'))) {
+      return { ok: false, error: `«${spec.l}»: нужна дата в виде ГГГГ-ММ-ДД` };
+    }
+    return { ok: true, value: s };
+  }
+  if (spec.iso) {
+    if (!s || Number.isNaN(Date.parse(s))) return { ok: false, error: `«${spec.l}»: нужны корректные дата и время` };
+    return { ok: true, value: new Date(s).toISOString() };
+  }
+  if (spec.req && !s) return { ok: false, error: `«${spec.l}»: значение обязательно` };
+  return { ok: true, value: s };
+}
+// §3: ОДНА универсальная история исправлений для всех типов записей —
+// вместо прежнего частного случая «только моменты». Показывает оригинал,
+// цепочку по порядку замен, кто кого заменил, активное значение, время и
+// причину. Сырого JSON здесь нет — он живёт в техническом блоке.
+const CORR_ORIGIN_RU = { user: 'исправление владельца', import_override: 'заменено версией источника' };
+function recCorrHistoryHtml(coll, rec, hist) {
+  const list = hist || corrHistory(coll, rec);
+  if (!list.length) return '';
+  const view = REC_VIEW[coll] || [];
+  const label = k => { const f = view.find(v => v.k === k); return f ? f.l : k; };
+  const val = v => {
+    if (v === undefined || v === null || v === '') return '— пусто';
+    if (Array.isArray(v)) return v.map(x => String(x)).join(', ');
+    if (typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+  };
+  const blocks = list.map(h => {
+    const steps = h.chain.map((c, i) => `<div class="si-text" style="line-height:1.5">${i + 1}. ${esc(val(c.value))}${
+      c.reason ? ` — ${esc(c.reason)}` : ''}<br><span style="color:var(--t4);font-size:.72rem">${esc(String(c.at || '').slice(0, 16).replace('T', ' '))} UTC · ${esc(CORR_ORIGIN_RU[c.origin] || c.origin)}${
+      c.supersedes ? ' · заменяет предыдущее' : ''}</span></div>`).join('');
+    const head = h.conflict
+      ? `<div class="ext-need">Конфликт исправлений: ${h.heads.length} независимых версии этого поля. Пока конфликт не разрешён, используется ОРИГИНАЛ — приложение не выбирает «кто новее» само.</div>`
+      : `<div class="si-text" style="color:var(--t3);font-size:.75rem">Сейчас принято: ${esc(val(h.active ? h.active.patch[h.field] : h.original))}</div>`;
+    return `<div class="psy-fld"><div class="f-lbl">${esc(label(h.field))}</div>
+      <div class="si-text" style="color:var(--t3);font-size:.75rem">Оригинал: ${esc(val(h.original))}</div>
+      ${steps}${head}</div>`;
+  }).join('');
+  const inactive = list.some(h => h.inactive)
+    ? `<div class="ext-need">Запись удалена — исправления сохранены как история, но не применяются. Если отменить удаление, они снова вступят в силу.</div>`
+    : '';
+  return `<details class="psy-det" open><summary class="si-text" style="color:var(--t3)">История исправлений</summary>${inactive}${blocks}</details>`;
+}
 let _recDet = null;   // { coll, id, editing }
 function recOpen(coll, id) {
-  _recDet = { coll, id, editing: false };
+  _recDet = { coll, id, editing: false, correcting: false };
   recRenderDetail();
   openOv('ov-rec-det');
 }
@@ -2494,12 +2581,20 @@ function recDetRecord() {
   if (!_recDet) return null;
   return (DB[_recDet.coll] || []).find(r => r && r.id === _recDet.id) || null;
 }
+// Для ПОКАЗА инспектор берёт эффективное значение (оригинал ⊕ активные
+// коррекции). Для ПРАВКИ — сырую запись: правка меняет оригинал, коррекция
+// оформляется отдельным append-only путём.
+function recDetEffective() {
+  const raw = recDetRecord();
+  return raw ? proj(_recDet.coll, raw) : null;
+}
 function recRenderDetail() {
   const box = $('rec-det-body'); const act = $('rec-det-actions');
   const ttl = $('rec-det-title');
   if (!box || !_recDet) return;
   const { coll } = _recDet;
   const rec = recDetRecord();
+  const eff = rec ? proj(coll, rec) : null;    // что человек видит
   const cfg = REC_COLLS[coll] || { ru: coll };
   if (ttl) ttl.textContent = cfg.ru;
   if (!rec) { box.innerHTML = '<div class="bk-empty">Запись не найдена — возможно, она удалена.</div>'; if (act) act.innerHTML = `<button type="button" class="btn btn-s btn-full" onclick="closeOv('ov-rec-det');rRecords()">Закрыть</button>`; return; }
@@ -2507,6 +2602,7 @@ function recRenderDetail() {
   const em = recEditCls(coll);
   const gate = recEditGate(rec, coll);
   const ext = rec.ext || null;
+  if (_recDet.correcting && (REC_CORR[coll] || []).length) { recCorrRender(coll, rec, box, act); return; }
   if (_recDet.editing) {
     const fields = (em.fields || []).filter(k => view.some(v => v.k === k) || true);
     box.innerHTML = (em.editNote ? `<div class="ext-safe">${esc(em.editNote)}</div>` : '') + fields.map(k => {
@@ -2520,10 +2616,19 @@ function recRenderDetail() {
       <button type="button" class="btn btn-s btn-full" onclick="_recDet.editing=false;recRenderDetail()">Отмена</button>`;
     return;
   }
+  const corrFields = eff && Array.isArray(eff._corrFields) ? eff._corrFields : [];
+  const corrConf = eff && Array.isArray(eff._corrConflicts) ? eff._corrConflicts : [];
   const rows = view.map(f => {
-    const t = recFieldText(rec, f);
+    const t = recFieldText(eff, f);
     if (!t) return '';
-    return `<div class="psy-fld"><div class="f-lbl">${esc(f.l)}</div><div class="si-text" style="white-space:pre-wrap;line-height:1.55">${esc(t)}</div></div>`;
+    // §4: исправленное поле помечается нейтрально и заметно; поле с
+    // неразрешённым конфликтом показывает ОРИГИНАЛ и честно говорит почему.
+    const mark = corrConf.includes(f.k)
+      ? `<span class="ext-need" style="display:inline-block;padding:.05rem .35rem;margin-left:.35rem;font-size:.7rem">Конфликт исправлений — показан оригинал</span>`
+      : corrFields.includes(f.k)
+        ? `<span style="margin-left:.35rem;font-size:.7rem;color:var(--t3)">· Исправлено</span>`
+        : '';
+    return `<div class="psy-fld"><div class="f-lbl">${esc(f.l)}${mark}</div><div class="si-text" style="white-space:pre-wrap;line-height:1.55">${esc(t)}</div></div>`;
   }).filter(Boolean).join('') || '<div class="bk-empty">У записи нет заполненных полей.</div>';
   const prov = ext ? `<div class="psy-fld"><div class="f-lbl">Происхождение</div><div class="si-text" style="line-height:1.55">Импортировано из внешнего источника${ext.sourceLabel ? ' · ' + esc(ext.sourceLabel) : ''}.${
       (ext.claimClasses || []).length ? '<br>Класс утверждения: ' + esc((ext.claimClasses || []).join(', ')) : ''}${
@@ -2539,13 +2644,23 @@ function recRenderDetail() {
     : gate.ok
       ? `<div class="ext-need">Правится не всё.<br>${esc(em.why)}</div>`
       : `<div class="ext-need">Правка на месте недоступна.<br>${esc(gate.why || em.why)}</div>`;
-  box.innerHTML = rows + prov + noteC + noteB + `
+  const hist = corrHistory(coll, rec);
+  const histHtml = recCorrHistoryHtml(coll, rec, hist);
+  const tech = `
     <details class="psy-det"><summary class="si-text" style="color:var(--t3)">Технические данные</summary>
+      <div class="f-lbl" style="margin-top:.4rem">A · Оригинал записи (как записан)</div>
       <div class="si-text" style="font-size:.72rem;color:var(--t4);white-space:pre-wrap;word-break:break-word">${esc(JSON.stringify(rec, null, 1).slice(0, 4000))}</div>
+      <div class="f-lbl" style="margin-top:.6rem">B · Цепочка исправлений</div>
+      <div class="si-text" style="font-size:.72rem;color:var(--t4);white-space:pre-wrap;word-break:break-word">${esc(hist.length ? JSON.stringify(hist, null, 1).slice(0, 4000) : 'исправлений нет')}</div>
+      <div class="f-lbl" style="margin-top:.6rem">C · Эффективная запись (что видно выше)</div>
+      <div class="si-text" style="font-size:.72rem;color:var(--t4);white-space:pre-wrap;word-break:break-word">${esc(JSON.stringify(eff, null, 1).slice(0, 4000))}</div>
     </details>`;
+  box.innerHTML = rows + prov + histHtml + noteC + noteB + tech;
   if (act) {
     const canEdit = gate.ok;
+    const canCorrect = (REC_CORR[coll] || []).length > 0 && !corrParentTombstoned(rec, DB);
     act.innerHTML = `${canEdit ? `<button type="button" class="btn btn-p btn-full" onclick="_recDet.editing=true;recRenderDetail()">Редактировать</button>` : ''}
+      ${canCorrect ? `<button type="button" class="btn btn-s btn-full" onclick="recCorrOpen()">Исправить значение</button>` : ''}
       <button type="button" class="btn btn-s btn-full" onclick="closeOv('ov-rec-det')">Закрыть</button>
       ${em.cls === 'C' ? '' : `<button type="button" class="btn btn-s btn-full" style="color:var(--red,#DC2626)" onclick="recDelFromDetail()">Удалить запись</button>`}`;
   }
@@ -2620,6 +2735,64 @@ function recSaveEdit() {
   rRecords();
   try { rIns(); rDrms(); rSpi(); rPats(); rEvoList($('evo-sh')); } catch (e) { }
   toast('Запись сохранена', 'ok');
+}
+// ── Исправление доказательного значения (append-only коррекция) ──────
+// Оригинал НИКОГДА не мутируется: человек видит текущее значение, вводит
+// исправленное, при желании причину — и появляется новое событие в истории.
+function recCorrOpen() {
+  if (!_recDet) return;
+  _recDet.correcting = true;
+  recRenderDetail();
+}
+function recCorrRender(coll, rec, box, act) {
+  const specs = REC_CORR[coll] || [];
+  const eff = proj(coll, rec);
+  const conf = Array.isArray(eff._corrConflicts) ? eff._corrConflicts : [];
+  const val = v => (v === undefined || v === null ? '' : String(v));
+  box.innerHTML = `<div class="ext-safe">Оригинал остаётся в истории навсегда: исправление добавляется отдельным событием и не переписывает исходную запись. Пустое поле = оставить как есть.</div>` +
+    specs.map(sp => {
+      const locked = conf.includes(sp.k);
+      const hint = `сейчас: ${esc(val(eff[sp.k]) || '—')}${val(rec[sp.k]) !== val(eff[sp.k]) ? ` · оригинал: ${esc(val(rec[sp.k]) || '—')}` : ''}`;
+      return `<div class="psy-fld"><label class="f-lbl" for="rec-c-${esc(sp.k)}">${esc(sp.l)}</label>
+        <div class="si-text" style="color:var(--t3);font-size:.72rem;margin-bottom:.2rem">${hint}</div>
+        ${locked
+          ? `<div class="ext-need">По этому полю неразрешённый конфликт исправлений — исправлять его нельзя, пока конфликт не разрешён.</div>`
+          : `<input type="text" id="rec-c-${esc(sp.k)}" class="field" value="" placeholder="${esc(sp.enums ? sp.enums.join(' / ') : sp.day ? 'ГГГГ-ММ-ДД' : '')}">`}</div>`;
+    }).join('') +
+    `<div class="psy-fld"><label class="f-lbl" for="rec-c-reason">Причина исправления (необязательно)</label>
+      <input type="text" id="rec-c-reason" class="field" value=""></div>`;
+  if (act) act.innerHTML = `<button type="button" class="btn btn-p btn-full" onclick="recCorrSave()">Сохранить исправление</button>
+    <button type="button" class="btn btn-s btn-full" onclick="_recDet.correcting=false;recRenderDetail()">Отмена</button>`;
+}
+function recCorrSave() {
+  const rec = recDetRecord(); if (!rec || !_recDet) return;
+  const coll = _recDet.coll;
+  const specs = REC_CORR[coll] || [];
+  const patch = {};
+  for (const sp of specs) {
+    const el = $('rec-c-' + sp.k);
+    if (!el) continue;
+    const rawIn = el.value;
+    if (String(rawIn).trim() === '' && !(sp.nullable && sp.touched)) continue;   // пусто = не трогаем
+    const v = recCorrValidate(sp, rawIn);
+    if (!v.ok) { toast(v.error, 'warn'); return; }
+    const eff = proj(coll, rec);
+    if (Object.is(eff[sp.k], v.value)) continue;   // значение не изменилось
+    patch[sp.k] = v.value;
+  }
+  const fields = Object.keys(patch);
+  if (!fields.length) { toast('Изменений нет', 'ok'); _recDet.correcting = false; recRenderDetail(); return; }
+  const snap = corrHeadSnapshot(coll, rec.id, fields);
+  if (snap.conflict) { toast('По этой записи есть неразрешённый конфликт исправлений', 'warn'); return; }
+  if (snap.ambiguous) { toast('Эти поля исправлялись по отдельности — исправляй их по одному', 'warn'); return; }
+  const reasonEl = $('rec-c-reason');
+  const r = addCorrection(coll, rec.id, patch, reasonEl ? String(reasonEl.value).trim() : '', { supersedes: snap.supersedes });
+  if (!r.ok) { toast(r.error, 'warn'); return; }
+  _recDet.correcting = false;
+  recRenderDetail();
+  rRecords();
+  try { renderAfterSync(); } catch (e) { }
+  toast('Исправлено — оригинал сохранён в истории', 'ok');
 }
 function recDelFromDetail() {
   if (!_recDet) return;
@@ -2783,7 +2956,7 @@ function buildGraph() {
   });
   // сфера ↔ сфера: статистическая связь по дням
   const numSph = sph.filter(s => ['score','counter','goal'].includes(s.type));
-  const vbd = s => { const m = {}; DB.sphereLogs.filter(l => l.sphereId === s.id && l.date).forEach(l => { const v = +l.value; if (!Number.isNaN(v)) m[l.date] = v; }); return m; };
+  const vbd = s => { const m = {}; projAll('sphereLogs').filter(l => l.sphereId === s.id && l.date).forEach(l => { const v = +l.value; if (!Number.isNaN(v)) m[l.date] = v; }); return m; };
   for (let a = 0; a < numSph.length; a++) for (let b = a+1; b < numSph.length; b++) {
     const A = vbd(numSph[a]), B = vbd(numSph[b]); const days = Object.keys(A).filter(d => d in B);
     if (days.length < 5) continue;
@@ -3104,7 +3277,7 @@ function livingLinks() {
   const out = [];
   const forms = themeForms();
   const show = s => forms[s] || s;
-  const dayState = {}; (DB.checkins || []).forEach(c => { if (c.date) { const v = dayComposite(c); if (v != null) dayState[c.date] = v; } });
+  const dayState = {}; projAll('checkins').forEach(c => { if (c.date) { const v = dayComposite(c); if (v != null) dayState[c.date] = v; } });
   const stateDays = Object.keys(dayState);
   // A) Тема записей ↔ состояние в тот же день (кросс: смысл ↔ самочувствие)
   if (stateDays.length >= 6) {
@@ -3126,7 +3299,7 @@ function livingLinks() {
   }
   // B) Сфера ↔ сфера (кросс: одна область жизни тянет другую)
   const numSph = (DB.spheres || []).filter(s => ['score', 'counter', 'goal'].includes(s.type));
-  const valByDate = s => { const m = {}; DB.sphereLogs.filter(l => l.sphereId === s.id && l.date).forEach(l => { const v = +l.value; if (!Number.isNaN(v)) m[l.date] = v; }); return m; };
+  const valByDate = s => { const m = {}; projAll('sphereLogs').filter(l => l.sphereId === s.id && l.date).forEach(l => { const v = +l.value; if (!Number.isNaN(v)) m[l.date] = v; }); return m; };
   for (let i = 0; i < numSph.length; i++) for (let j = i + 1; j < numSph.length; j++) {
     const A = valByDate(numSph[i]), B = valByDate(numSph[j]);
     const days = Object.keys(A).filter(d => d in B);
@@ -3186,7 +3359,7 @@ function livingMapContext() {
     '\n\nЧто помогает:\n' + (helps.length ? helps.join('\n') : '— мало данных') +
     '\n\nСферы:\n' + (sph.length ? sph.join('\n') : '— нет');
 }
-function livingMapSig() { return (DB.insights||[]).length + '-' + (DB.checkins||[]).length + '-' + (DB.sphereLogs||[]).length; }
+function livingMapSig() { return (DB.corrections||[]).length + '-' + (DB.insights||[]).length + '-' + (DB.checkins||[]).length + '-' + (DB.sphereLogs||[]).length; }
 async function aiLivingMap(force) {
   if (!getAiKey()) { if (force) { toast('Добавь ключ Anthropic в Настройки', 'warn'); goTo('settings'); } return; }
   const el = $('livingmap-out'), btn = $('livingmap-btn');
@@ -3304,7 +3477,7 @@ function saveCI() {
     createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
   };
   DB.vit = v;
-  const existing = DB.checkins.findIndex(c=>c.date===v.date);
+  const existing = DB.checkins.findIndex(c=>c.date===v.date);   // raw intentionally: путь записи чек-ина
   const ci = {...v, id: existing>=0 ? DB.checkins[existing].id : Date.now()};
   if (existing>=0) DB.checkins[existing] = ci; else DB.checkins.push(ci);
   closeOv('ov-ci'); persist(); rVit(); rCompass(); rHState(); rStreak();
@@ -3320,30 +3493,201 @@ function saveCI() {
 // вычисляется проекцией при чтении (оригинал ⊕ коррекции по порядку времени).
 // Так исправления не теряют историю, синкаются как обычные записи и не могут
 // молча подменить факт.
-function addCorrection(coll, targetId, patch, reason) {
-  if (!coll || targetId == null || !patch || typeof patch !== 'object') return null;
+// Коллекции с поддержкой коррекций (решение владельца §6). Только они
+// проецируются; остальные читаются как есть.
+const CORRECTABLE_COLLS = Object.freeze(['moments', 'whys', 'checkins', 'sphereLogs',
+  'psyObservations', 'medIntakes', 'cravings', 'symptoms', 'measures', 'labObservations']);
+const CORRECTION_CONFLICT = 'CORRECTION_CONFLICT';
+
+// Цепочка коррекций по ОДНОМУ полю (решение владельца §1): на пару
+// «запись + поле» может быть только одна активная голова. Более новая
+// коррекция обязана явно нести supersedesCorrectionId предыдущей головы.
+// Молчаливый last-write-wins запрещён: две неподчинённые активные головы
+// одного поля дают CORRECTION_CONFLICT и fail-closed по этому полю —
+// выбирать «кто новее» по времени нельзя.
+//
+// Возвращает Map: поле → { heads: [коррекции], chain: [коррекции по порядку] }.
+// Индекс коррекций по записи. Без него projAll был бы O(записи × коррекции)
+// на каждый рендер; на устройстве владельца это заметно.
+function corrIndex(coll, db) {
+  const d = db || DB;
+  const idx = new Map();
+  (d.corrections || []).forEach(c => {
+    if (!c || c.coll !== coll) return;
+    const k = c.targetId;
+    if (!idx.has(k)) idx.set(k, []);
+    idx.get(k).push(c);
+  });
+  return idx;
+}
+function corrFieldChains(coll, targetId, db, index) {
+  const d = db || DB;
+  const all = index ? (index.get(targetId) || [])
+    : (d.corrections || []).filter(c => c && c.coll === coll && c.targetId === targetId);
+  const byField = new Map();
+  all.forEach(c => {
+    Object.keys(c.patch || {}).forEach(f => {
+      if (!byField.has(f)) byField.set(f, []);
+      byField.get(f).push(c);
+    });
+  });
+  const out = new Map();
+  byField.forEach((list, f) => {
+    // Внутри поля: голова — та, которую никто из этого же поля не заменил.
+    const supersededIds = new Set(list.map(c => c.supersedesCorrectionId).filter(x => x != null).map(String));
+    const heads = list.filter(c => !supersededIds.has(String(c.id)));
+    // Порядок цепочки — по ссылкам supersedes, а не по времени: время
+    // ненадёжно при слиянии с другого устройства.
+    const byId = new Map(list.map(c => [String(c.id), c]));
+    const chain = [];
+    if (heads.length === 1) {
+      let cur = heads[0], guard = 0;
+      while (cur && guard++ < 100) { chain.unshift(cur); cur = cur.supersedesCorrectionId != null ? byId.get(String(cur.supersedesCorrectionId)) : null; }
+    }
+    out.set(f, { heads, chain, all: list });
+  });
+  return out;
+}
+// Активная голова поля: одна — значение принимается; несколько — конфликт.
+function corrActiveHead(coll, targetId, field, db) {
+  const ch = corrFieldChains(coll, targetId, db).get(field);
+  if (!ch || !ch.heads.length) return { head: null, conflict: false };
+  if (ch.heads.length > 1) return { head: null, conflict: true, heads: ch.heads };
+  return { head: ch.heads[0], conflict: false };
+}
+// Родитель в tombstone (решение владельца §2): коррекции остаются в истории и
+// синкаются, но НЕ участвуют в эффективной проекции и не потребляются
+// движками. Отмена удаления возвращает цепочку в силу автоматически —
+// специального действия не требуется, потому что проверка идёт при чтении.
+const corrParentTombstoned = (rec, db) => !!((db || DB)._del || {})[rec && rec.id];
+
+// Запись коррекции. Требует явного supersedesCorrectionId, если у поля уже
+// есть активная голова: так ловится конкурентная/устаревшая запись, сделанная
+// без учёта чужой коррекции (решение владельца §1).
+function addCorrection(coll, targetId, patch, reason, opts) {
+  if (!coll || targetId == null || !patch || typeof patch !== 'object') {
+    return { ok: false, error: 'коррекция без цели или значения' };
+  }
+  if (!CORRECTABLE_COLLS.includes(coll)) {
+    return { ok: false, error: `коллекция «${coll}» не поддерживает коррекции` };
+  }
+  const fields = Object.keys(patch);
+  if (!fields.length) return { ok: false, error: 'коррекция без полей' };
+  const supersedes = (opts && opts.supersedes) != null ? (opts && opts.supersedes) : null;
+  // `supersedesCorrectionId` — ОДНА ссылка на одну заменяемую коррекцию
+  // (формулировка решения владельца). Чтобы она была однозначной, все поля
+  // одного исправления обязаны иметь ОДНУ И ТУ ЖЕ активную голову: иначе
+  // непонятно, что именно заменяется. Расхождение — не повод угадывать.
+  const headIds = new Set();
+  for (const f of fields) {
+    const { head, conflict } = corrActiveHead(coll, targetId, f);
+    if (conflict) return { ok: false, error: `по полю «${f}» уже есть неразрешённый конфликт исправлений — сначала разреши его`, conflict: CORRECTION_CONFLICT };
+    headIds.add(head ? String(head.id) : '');
+  }
+  if (headIds.size > 1) {
+    return { ok: false, error: 'поля этого исправления заменяют разные прежние исправления — оформи их отдельно', ambiguous: true };
+  }
+  const curHead = [...headIds][0] || '';
+  if (curHead && supersedes == null) {
+    return { ok: false, error: 'это значение уже исправлялось — новое исправление обязано явно заменять прежнее', stale: true, expected: curHead };
+  }
+  if (curHead && String(supersedes) !== curHead) {
+    return { ok: false, error: 'исправление опирается на устаревшую версию — обнови экран и повтори', stale: true, expected: curHead };
+  }
+  if (!curHead && supersedes != null) {
+    return { ok: false, error: 'исправление ссылается на несуществующую активную коррекцию', stale: true };
+  }
   const c = {
-    id: Date.now() + Math.floor(Math.random() * 1000),
+    id: psyUid('corr'),
     kType: 'correction', coll, targetId, patch: { ...patch }, reason: reason || '',
+    supersedesCorrectionId: supersedes,
+    origin: (opts && opts.origin) || 'user',
     createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
   };
   if (!Array.isArray(DB.corrections)) DB.corrections = [];
   DB.corrections.push(c);
-  persist();
-  return c;
+  if (!persist()) { DB.corrections.pop(); return { ok: false, error: 'не удалось сохранить — исправление не создано' }; }
+  return { ok: true, rec: c };
 }
-// Проекция записи: оригинал + все её коррекции (по времени). Оригинал не мутируется.
-function proj(coll, rec) {
+// Снимок активной головы для набора полей — берётся ТОГДА, когда человеку
+// показали текущее значение. С ним writer доказывает, что исправляет именно
+// то, что видел человек; если между показом и сохранением прилетела чужая
+// коррекция (синк с другого устройства), запись будет отклонена как stale.
+function corrHeadSnapshot(coll, targetId, fields, db) {
+  const ids = new Set();
+  let conflict = false;
+  (fields || []).forEach(f => {
+    const r = corrActiveHead(coll, targetId, f, db);
+    if (r.conflict) conflict = true;
+    ids.add(r.head ? String(r.head.id) : '');
+  });
+  if (conflict) return { conflict: true, supersedes: null };
+  if (ids.size > 1) return { ambiguous: true, supersedes: null };
+  const v = [...ids][0] || '';
+  return { supersedes: v || null };
+}
+// Проекция записи: оригинал ⊕ активные головы полей. Оригинал НЕ мутируется.
+// Поле с конфликтом остаётся ОРИГИНАЛЬНЫМ (fail closed) и перечисляется в
+// `_corrConflicts` — молчаливого выбора «кто новее» не существует.
+function proj(coll, rec, db, index) {
+  const d = db || DB;
   if (!rec || rec.id == null) return rec;
-  const cs = (DB.corrections || []).filter(c => c && c.coll === coll && c.targetId === rec.id);
-  if (!cs.length) return rec;
-  cs.sort((a, b) => (Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0));
+  if (!CORRECTABLE_COLLS.includes(coll)) return rec;
+  if (corrParentTombstoned(rec, d)) return rec;      // §2: удалённый родитель
+  if (index && !index.has(rec.id)) return rec;       // быстрый путь: коррекций нет
+  const chains = corrFieldChains(coll, rec.id, d, index);
+  if (!chains.size) return rec;
   const out = { ...rec };
-  cs.forEach(c => Object.assign(out, c.patch));
-  out._corrected = cs.length;
+  const applied = [];
+  const conflicts = [];
+  const headIds = new Set();
+  chains.forEach((ch, f) => {
+    if (ch.heads.length > 1) { conflicts.push(f); return; }
+    if (ch.heads.length === 1) { out[f] = ch.heads[0].patch[f]; applied.push(f); headIds.add(String(ch.heads[0].id)); }
+  });
+  if (!applied.length && !conflicts.length) return rec;
+  // `_corrected` — число ПРИМЕНЁННЫХ исправлений (записей), а не полей: одно
+  // исправление может менять несколько полей сразу.
+  out._corrected = headIds.size;
+  out._corrFields = applied;
+  if (conflicts.length) out._corrConflicts = conflicts;
   return out;
 }
-const projAll = (coll) => (DB[coll] || []).map(r => proj(coll, r));
+function projAll(coll, db) {
+  const d = db || DB;
+  const list = d[coll] || [];
+  if (!CORRECTABLE_COLLS.includes(coll) || !(d.corrections || []).length) return list;
+  const idx = corrIndex(coll, d);
+  if (!idx.size) return list;
+  return list.map(r => proj(coll, r, d, idx));
+}
+// Эффективная одиночная запись по id (строгая идентичность, как везде).
+function projOne(coll, id, db) {
+  const rec = ((db || DB)[coll] || []).find(r => r && r.id === id);
+  return rec ? proj(coll, rec, db) : null;
+}
+// Полная история исправлений записи для показа человеку (решение §3).
+function corrHistory(coll, rec, db) {
+  const d = db || DB;
+  if (!rec || rec.id == null || !CORRECTABLE_COLLS.includes(coll)) return [];
+  const chains = corrFieldChains(coll, rec.id, d);
+  const out = [];
+  chains.forEach((ch, f) => {
+    out.push({
+      field: f,
+      original: rec[f],
+      conflict: ch.heads.length > 1,
+      heads: ch.heads.map(c => c.id),
+      active: ch.heads.length === 1 ? ch.heads[0] : null,
+      chain: (ch.heads.length === 1 ? ch.chain : ch.all.slice()).map(c => ({
+        id: c.id, value: c.patch[f], reason: c.reason || '', at: c.createdAt,
+        origin: c.origin || 'user', supersedes: c.supersedesCorrectionId || null,
+      })),
+      inactive: corrParentTombstoned(rec, d),
+    });
+  });
+  return out.sort((a, b) => (a.field < b.field ? -1 : 1));
+}
 
 // ─── MOMENTARY STATE ─────────────────────────────────────────────
 // Быстрый двухосевой ввод состояния «здесь и сейчас»: приятность (valence)
@@ -3403,11 +3747,10 @@ function openMoment(id) {
   const body = $('mom-det-body');
   if (body) {
     let html = rows.map(([lbl, v]) => `<div style="margin-bottom:.6rem"><div class="f-lbl">${lbl}</div><div class="si-text">${esc(v)}</div></div>`).join('');
-    // Паспорт данных: показать, что запись исправлялась (оригинал сохранён).
-    if (m._corrected) {
-      const orig = (DB.moments || []).find(x => x && x.id === id) || {};
-      html += `<div class="si-text" style="color:var(--t3);font-size:.85em">исправлено (${m._corrected}) · оригинал: приятность ${Math.round(orig.valence || 0)}, энергия ${Math.round(orig.activation || 0)}</div>`;
-    }
+    // §3: одна общая история исправлений вместо прежнего частного случая
+    // «только моменты с жёстко зашитыми приятностью/энергией».
+    const rawMom = (DB.moments || []).find(x => x && x.id === id);   // raw intentionally: ОРИГИНАЛ для истории
+    if (rawMom) html += recCorrHistoryHtml('moments', rawMom);
     // Wave 1 (issue #148): разборы «Зачем?», уже возникшие из этого Момента.
     html += '<div class="side-div"></div>';
     const whys = psyLinksFrom('moments', id, 'moment_to_why');
@@ -3616,16 +3959,24 @@ function rHistory() {
 // Отметка выполнения выбранного действия из разбора «Зачем?» (проверка результата).
 function markWhyAction(done) {
   const id = STATE.whyDetId;
-  const w = (DB.whys || []).find(x => x && x.id === id); if (!w) return;
+  const w = (DB.whys || []).find(x => x && x.id === id); if (!w) return;   // raw intentionally: писатель коррекции
   // Через ядро: оригинал разбора неизменен, отметка — append-only коррекция.
-  addCorrection('whys', id, { actionDone: done, checkedAt: (done == null) ? '' : nowISO() }, 'проверка результата');
+  const F = ['actionDone', 'checkedAt'];
+  const snap = corrHeadSnapshot('whys', id, F);
+  const r = addCorrection('whys', id, { actionDone: done, checkedAt: (done == null) ? '' : nowISO() },
+    'проверка результата', { supersedes: snap.supersedes });
+  if (!r.ok) { toast(r.error, 'warn'); return; }
   openWhy(id); try { rWhys(); } catch (e) {}
   if (done != null) { hptMed(); toast(done ? 'Отмечено: сделано' : 'Отмечено', 'ok'); }
 }
 // Исправление момента через ядро: оригинал неизменен, правка — коррекция.
 function correctMoment() {
   const id = STATE.momDetId; if (id == null) return;
-  const cur = projAll('moments').find(x => x && x.id === id); if (!cur) return;
+  const cur = projOne('moments', id); if (!cur) return;
+  // Снимок головы берём ДО диалогов: пока человек вводит значения, могла
+  // прилететь чужая коррекция — тогда сохранение честно отклонится.
+  const snap = corrHeadSnapshot('moments', id, ['valence', 'activation']);
+  if (snap.conflict) { toast('По этому моменту есть неразрешённый конфликт исправлений', 'warn'); return; }
   const val = prompt('Приятность (0–100):', String(Math.round(cur.valence)));
   if (val == null) return;
   const act = prompt('Энергия (0–100):', String(Math.round(cur.activation)));
@@ -3633,7 +3984,8 @@ function correctMoment() {
   const v = Math.max(0, Math.min(100, parseInt(val, 10)));
   const a = Math.max(0, Math.min(100, parseInt(act, 10)));
   if (!isFinite(v) || !isFinite(a)) { toast('Нужны числа 0–100', 'warn'); return; }
-  addCorrection('moments', id, { valence: v, activation: a }, 'исправление пользователем');
+  const res = addCorrection('moments', id, { valence: v, activation: a }, 'исправление пользователем', { supersedes: snap.supersedes });
+  if (!res.ok) { toast(res.error, 'warn'); return; }
   openMoment(id);
   try { rHomeMoments(); rMomentTrend(); rWeekSummary(); } catch (e) {}
   toast('Исправлено (оригинал сохранён в истории)', 'ok');
@@ -3851,7 +4203,10 @@ function psyActionEvidenceChain(why) {
 // В отличие от markWhyAction, не открывает деталь разбора (список остаётся
 // на месте после клика).
 function togglePsyActionDone(id, done) {
-  addCorrection('whys', id, { actionDone: done, checkedAt: done ? nowISO() : '' }, 'проверка результата (список действий)');
+  const snap = corrHeadSnapshot('whys', id, ['actionDone', 'checkedAt']);
+  const r = addCorrection('whys', id, { actionDone: done, checkedAt: done ? nowISO() : '' },
+    'проверка результата (список действий)', { supersedes: snap.supersedes });
+  if (!r.ok) { toast(r.error, 'warn'); return; }
   try { rPsyActions(); } catch (e) {}
   try { rWhys(); } catch (e) {}
   hptMed(); toast(done ? 'Отмечено: сделано' : 'Отменено', 'ok');
@@ -4048,7 +4403,7 @@ function rDiaryState() {
   // без сортировки/мутации исходного массива и записей.
   const momentTs = m => Date.parse(m.createdAt) || Date.parse((m.day || '') + 'T00:00:00') || m.id || 0;
   const lastMom = moments.length ? moments.reduce((a, b) => momentTs(b) > momentTs(a) ? b : a) : null;
-  const cis = DB.checkins || [];
+  const cis = projAll('checkins');
   const lastCi = cis.length ? [...cis].sort((a, b) => (a.date || '') < (b.date || '') ? 1 : -1)[0] : null;
   const momTxt = lastMom
     ? `Момент · ${esc((lastMom.day || '').slice(5))} — приятность ${momentLabel(lastMom.valence)}, энергия ${momentLabel(lastMom.activation)}`
@@ -4175,11 +4530,11 @@ function rOverviewHealth() {
   const ts = r => Date.parse(r.createdAt) || r.id || 0;
   const lastSym = sym.length ? sym.reduce((a, b) => ts(b) > ts(a) ? b : a) : null;
   const lastMea = mea.length ? mea.reduce((a, b) => ts(b) > ts(a) ? b : a) : null;
-  const crav = DB.cravings || [];
+  const crav = projAll('cravings');
   const cravWeek = crav.filter(c => rcDay(c) > dayAgo(7));
   const meds = projAll('meds').filter(m => m && m.active !== false);
   const today = todayKey();
-  const takenToday = meds.filter(m => (DB.medIntakes || []).some(i => i && i.medId === m.id && i.day === today && i.status === 'taken')).length;
+  const takenToday = meds.filter(m => projAll('medIntakes').some(i => i && i.medId === m.id && i.day === today && i.status === 'taken')).length;
   const rows = [];
   rows.push(lastSym
     ? `Симптом · ${esc((lastSym.day || '').slice(5))} — ${esc(lastSym.name)} (${lastSym.severity}/10)`
@@ -4248,7 +4603,7 @@ const CRAVING_TIPS_TONIC = [
 ];
 // Сколько раз каждый приём помог именно тебе (из истории «Тяги»).
 function tipHelpCounts() {
-  const c = {}; (DB.cravings || []).forEach(r => { if (r.helped && r.helped !== 'wait') c[r.helped] = (c[r.helped] || 0) + 1; });
+  const c = {}; projAll('cravings').forEach(r => { if (r.helped && r.helped !== 'wait') c[r.helped] = (c[r.helped] || 0) + 1; });
   return c;
 }
 // Персонализация: приёмы, что работали у тебя, идут первыми.
@@ -4402,7 +4757,7 @@ function planForTriggerIdx(i) {
 // вовлечённость (см. разбор JITAI, п. «variable-ratio reinforcement»).
 function reactToCraving(rec) {
   const rows = [];
-  const list = DB.cravings || [];
+  const list = projAll('cravings');
   if (rec.outcome === 'held') {
     let streak = 0; for (const c of list) { if (c.outcome !== 'held') break; streak++; }
     rows.push({ html: `💪 Устоял(а)${streak > 1 ? ` — ${streak} раз подряд` : ''}` });
@@ -4436,7 +4791,7 @@ function reactToCraving(rec) {
 // раз поднимет его первым (см. orderedTips). Локально, приватно, на твоих
 // данных — это и есть персональная адаптивность вместо серверного ML.
 function markHelped(id, key) {
-  const rec = (DB.cravings || []).find(c => c.id === id); if (!rec) return;
+  const rec = (DB.cravings || []).find(c => c.id === id); if (!rec) return;   // raw intentionally: путь записи
   rec.helped = key; touch(rec); persist(); hpt();
   toast(key === 'wait' ? 'Записал — просто переждал' : 'Запомнил, что помогло тебе ✓', 'ok');
   rcClose();
@@ -4518,7 +4873,7 @@ function deleteMed(id) {
 function medsSectionHTML() {
   const meds = projAll('meds').filter(m => m && m.active !== false);
   const today = todayKey();
-  const takenToday = medId => (DB.medIntakes || []).filter(i => i && i.medId === medId && i.day === today && i.status === 'taken').length;
+  const takenToday = medId => projAll('medIntakes').filter(i => i && i.medId === medId && i.day === today && i.status === 'taken').length;
   let html = `<div class="sec-lbl">Лекарства и витамины</div><div class="card mx mb">`;
   if (!meds.length) {
     html += `<div style="padding:1rem" class="ai-sp-empty">Веди свой план приёма — лекарства, витамины, добавки. Отмечай факт приёма одним тапом.</div>`;
@@ -4645,7 +5000,7 @@ function medDueOnDay(med, day) {
   }
   return false;
 }
-function medIntakeCountOnDay(medId, day) { return (DB.medIntakes || []).filter(i => i && i.medId === medId && i.day === day && i.status === 'taken').length; }
+function medIntakeCountOnDay(medId, day) { return projAll('medIntakes').filter(i => i && i.medId === medId && i.day === day && i.status === 'taken').length; }
 function medTakenOnDay(medId, day) { return medIntakeCountOnDay(medId, day) > 0; }
 function pushMedIntakeRecord(medId, day) {
   const atISO = day === localDayKey() ? nowISO() : day + 'T12:00:00.000Z';
@@ -4686,7 +5041,7 @@ function rMedDetail() {
   const med = (DB.meds || []).find(m => m && m.id === STATE.medDetailId);
   if (!med) { el.innerHTML = ''; return; }
   const day = _healthDay;
-  const intakes = (DB.medIntakes || []).filter(i => i && i.medId === med.id && i.day === day)
+  const intakes = projAll('medIntakes').filter(i => i && i.medId === med.id && i.day === day)
     .sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
   let html = `<div class="si-text" style="font-weight:600">${esc(med.name)}</div>`;
   if (med.dose) html += `<div class="si-text" style="color:var(--t3)">${esc(med.dose)}</div>`;
@@ -4806,7 +5161,7 @@ async function rDocAddMedia() {
 // ── Лабораторные результаты ──
 function openLabAdd(editId) {
   STATE.labEditId = editId != null ? editId : null;
-  const rec = editId != null ? (DB.labObservations || []).find(r => r && r.id === editId) : null;
+  const rec = editId != null ? (DB.labObservations || []).find(r => r && r.id === editId) : null;   // raw intentionally: форма правки
   const fields = {
     'lab-testname': rec ? rec.testName : '', 'lab-value': rec ? rec.valueText : '',
     'lab-unit': rec ? rec.unit : '', 'lab-ref': rec ? rec.referenceText : '',
@@ -4834,7 +5189,7 @@ function saveLab() {
   const valueNumber = /^-?\d+(\.\d+)?$/.test(normalized) ? parseFloat(normalized) : null;
   const media = (STATE.labAddMedia || []).slice();
   if (STATE.labEditId != null) {
-    const rec = (DB.labObservations || []).find(r => r && r.id === STATE.labEditId);
+    const rec = (DB.labObservations || []).find(r => r && r.id === STATE.labEditId);   // raw intentionally: путь записи
     if (rec) { Object.assign(rec, { testName, valueText, valueNumber, unit, referenceText, laboratory, note, media, collectedAt }); touch(rec); }
   } else {
     DB.labObservations.push({
@@ -5005,7 +5360,7 @@ function healthTimelineItems() {
   return items.sort((a, b) => b.at - a.at);
 }
 function healthTimelineOpen(coll, id) {
-  if (coll === 'medIntakes') { const i = (DB.medIntakes || []).find(x => x && x.id === id); if (i) openMedDetail(i.medId); return; }
+  if (coll === 'medIntakes') { const i = projOne('medIntakes', id); if (i) openMedDetail(i.medId); return; }
   if (coll === 'labObservations') { openLabDet(id); return; }
   if (coll === 'healthDocuments') { openDocDet(id); return; }
   goTo('health');   // symptoms/measures/cravings: своих detail-экранов нет — открываем «Здоровье»
@@ -7278,18 +7633,18 @@ function buildAstroAiContext(consent, windowDays = 30) {
   if (c.health) {
     ctx.categories.push('health');
     const sym = {};
-    (DB.symptoms || []).filter(inWin).forEach(s => { if (s.name) sym[s.name] = (sym[s.name] || 0) + 1; });
-    const cis = (DB.checkins || []).filter(x => x && (x.date || '') >= new Date(from).toISOString().slice(0, 10));
+    projAll('symptoms').filter(inWin).forEach(s => { if (s.name) sym[s.name] = (sym[s.name] || 0) + 1; });
+    const cis = projAll('checkins').filter(x => x && (x.date || '') >= new Date(from).toISOString().slice(0, 10));
     const avg = k => cis.length ? +(cis.reduce((s, x) => s + (+x[k] || 0), 0) / cis.length).toFixed(1) : null;
     ctx.health = { symptom_freq: sym, checkin_avg: { сон: avg('sl'), ясность: avg('cl'), движение: avg('mv'), стресс: avg('st') }, checkin_count: cis.length };
   }
   if (c.habits) {
     ctx.categories.push('habits');
     ctx.habits = (DB.spheres || []).slice(0, 8).map(sp => {
-      const logs = (DB.sphereLogs || []).filter(l => l && l.sphereId === sp.id && (l.date || '') >= new Date(from).toISOString().slice(0, 10));
+      const logs = projAll('sphereLogs').filter(l => l && l.sphereId === sp.id && (l.date || '') >= new Date(from).toISOString().slice(0, 10));
       return { name: sp.name, type: sp.type, entries: logs.length };
     });
-    ctx.habits_cravings = (DB.cravings || []).filter(inWin).length;
+    ctx.habits_cravings = projAll('cravings').filter(inWin).length;
   }
   return ctx;
 }
@@ -7832,7 +8187,7 @@ function rMedReminder() {
   const el = $('h-med-reminder'); if (!el) return;
   const today = todayKey();
   const meds = projAll('meds').filter(m => m && m.active !== false);
-  const pending = meds.filter(m => !(DB.medIntakes || []).some(i => i && i.medId === m.id && i.day === today && i.status === 'taken'));
+  const pending = meds.filter(m => !projAll('medIntakes').some(i => i && i.medId === m.id && i.day === today && i.status === 'taken'));
   if (!pending.length) { el.innerHTML = ''; return; }
   const names = pending.slice(0, 3).map(m => esc(m.name)).join(', ') + (pending.length > 3 ? '…' : '');
   el.innerHTML = `<div class="card mx mb tap" style="padding:.7rem 1rem;cursor:pointer" onclick="goTo('health')" role="button">
@@ -7855,7 +8210,7 @@ function buildDoctorReport(days = 30) {
   if (meds.length) {
     L.push('ЛЕКАРСТВА / ВИТАМИНЫ (план, заданный пациентом, и фактический приём):');
     meds.forEach(m => {
-      const n = (DB.medIntakes || []).filter(i => i && i.medId === m.id && i.status === 'taken' && inWin(i)).length;
+      const n = projAll('medIntakes').filter(i => i && i.medId === m.id && i.status === 'taken' && inWin(i)).length;
       L.push(`• ${m.name}${m.dose ? ' — ' + m.dose : ''} · принято за период: ${n} раз`);
     });
     L.push('');
@@ -7932,7 +8287,7 @@ function shareDoctorReport() {
 
 function rHealth() {
   const el = $('health-out'); if (!el) return;
-  const hs = healthSpheres(), crav = DB.cravings || [];
+  const hs = healthSpheres(), crav = projAll('cravings');
   // «Риск»: прозрачный объясняющий слой — персональный движок cravingRisk
   // выдаёт уровень + конкретные причины (окно суток, пост-срыв, стресс…),
   // чтобы решение системы никогда не ощущалось произвольным.
@@ -8173,7 +8528,7 @@ function saveAxesAll() {
 // Производит значения осей «Здоровье»/«Психология» из чек-инов
 // (честно — только при ≥3 замерах за 2 недели). Не трогает остальные оси.
 function deriveAxes() {
-  const list = DB.checkins.filter(c => c.date > dayAgo(14));
+  const list = projAll('checkins').filter(c => c.date > dayAgo(14));
   if (list.length < 3) return null;
   const a = checkinAvg(list); if (!a) return null;
   const sleepScore = Math.max(0, Math.min(10, a.sl / 8 * 10)); // 8ч ≈ 10
@@ -8188,7 +8543,7 @@ function deriveAxes() {
 // (механика Oura: последние 3 дня против 14-дневной базы). Каждый contributor
 // прозрачен — видно под-балл и отклонение от базы. Честно при малом n.
 function stateScore() {
-  const win = DB.checkins.filter(c => c.date > dayAgo(14) && c.date);
+  const win = projAll('checkins').filter(c => c.date > dayAgo(14) && c.date);
   if (win.length < 3) return { ok:false, n:win.length };
   // под-баллы 0–100 из одного чек-ина
   const sub = c => ({
@@ -8410,7 +8765,7 @@ function checkinAvg(list) {
 function rTrends() {
   const el = $('vit-trends'); if (!el) return;
   const days = 30;
-  const map = {}; DB.checkins.forEach(c => { if (c.date) map[c.date] = c; });
+  const map = {}; projAll('checkins').forEach(c => { if (c.date) map[c.date] = c; });
   const arr = [];
   for (let i = days-1; i >= 0; i--) { const d = dayAgo(i); const c = map[d]; arr.push({ d, v: c ? (c.cl + c.mv + (10 - c.st))/3 : null }); }
   const logged = arr.filter(p => p.v != null);
@@ -8460,7 +8815,7 @@ function moodColor(v) {
 function rHeatmap(elId, days) {
   const el = $(elId); if (!el) return;
   days = days || 90;
-  const map = {}; DB.checkins.forEach(c => { if (c.date) map[c.date] = c; });
+  const map = {}; projAll('checkins').forEach(c => { if (c.date) map[c.date] = c; });
   const cells = [];
   for (let i = days-1; i >= 0; i--) { const d = dayAgo(i); cells.push({ d, v: dayComposite(map[d]) }); }
   const logged = cells.filter(c => c.v != null);
@@ -8476,7 +8831,7 @@ function rHeatmap(elId, days) {
     `<div class="hm" style="grid-template-columns:repeat(${cols},1fr)">${grid}</div>`;
 }
 function openDayCheckin(d) {
-  const c = DB.checkins.find(x => x.date === d);
+  const c = DB.checkins.find(x => x.date === d);   // raw intentionally: форма правки оригинала чек-ина
   if (!c) return;
   const comp = dayComposite(c);
   const emo = c.emo ? ' · ' + c.emo : '';
@@ -8500,7 +8855,7 @@ function confLabel(n) {
   return { t:'устойчивая связь', cls:'cf-hi' };
 }
 function correlations() {
-  const list = DB.checkins.filter(c => c.date && c.sl != null);
+  const list = projAll('checkins').filter(c => c.date && c.sl != null);
   const pairs = { sleep:[], calm:[], move:[], clarity:[] };
   const comp = [];
   list.forEach(c => {
@@ -8523,7 +8878,7 @@ function correlations() {
 // (сегодня + назавтра), с конкретным действием и честной меткой по n.
 // Метод: медианный сплит фактора → разница среднего состояния (в баллах).
 function smartInsights() {
-  const map = {}; DB.checkins.forEach(c => { if (c.date) map[c.date] = c; });
+  const map = {}; projAll('checkins').forEach(c => { if (c.date) map[c.date] = c; });
   const rows = Object.keys(map).sort().map(d => {
     const c = map[d], st = dayComposite(c);
     const nd = new Date(d + 'T00:00:00'); nd.setDate(nd.getDate() + 1);
@@ -8569,7 +8924,7 @@ function smartInsights() {
   // Сферы как факторы — единый смысл через все сферы (механика Exist).
   // Состояние берём из чек-инов; сопоставляем со значением сферы в тот же день.
   (DB.spheres || []).forEach(s => {
-    const byDate = {}; DB.sphereLogs.filter(l => l.sphereId === s.id && l.date).forEach(l => byDate[l.date] = l);
+    const byDate = {}; projAll('sphereLogs').filter(l => l.sphereId === s.id && l.date).forEach(l => byDate[l.date] = l);
     // lagged: сравниваем состояние СЛЕДУЮЩЕГО дня (механика Bearable)
     const lag = (a, b) => {
       const an = a.filter(r => r.next != null), bn = b.filter(r => r.next != null);
@@ -9306,7 +9661,7 @@ function synDismissAt(i) {
 function openSourceRecord(coll, id) {
   if (coll === 'labObservations') { openLabDet(id); return; }
   if (coll === 'healthDocuments') { openDocDet(id); return; }
-  if (coll === 'medIntakes') { const i = (DB.medIntakes || []).find(x => x && x.id === id); if (i) openMedDetail(i.medId); return; }
+  if (coll === 'medIntakes') { const i = projOne('medIntakes', id); if (i) openMedDetail(i.medId); return; }
   if (coll === 'insights') { showDet(id); return; }
   if (coll === 'whys') { openWhy(id); return; }
   if (coll === 'moments') { openMoment(id); return; }
@@ -9560,21 +9915,21 @@ function updateSphere(id, patch) {
 function deleteSphere(id) {
   tomb(id);
   DB.spheres = DB.spheres.filter(x => x.id !== id);
-  DB.sphereLogs.filter(l => l.sphereId === id).forEach(l => tomb(l.id));
+  DB.sphereLogs.filter(l => l.sphereId === id).forEach(l => tomb(l.id));   // raw intentionally: удаление по оригиналам
   DB.sphereLogs = DB.sphereLogs.filter(l => l.sphereId !== id);
   persist();
 }
 // Записать/обновить значение сферы за день (по умолчанию — сегодня).
 function logSphere(sphereId, value, note, date) {
   date = date || todayKey();
-  const ex = DB.sphereLogs.find(l => l.sphereId === sphereId && l.date === date);
+  const ex = DB.sphereLogs.find(l => l.sphereId === sphereId && l.date === date);   // raw intentionally: путь записи
   if (ex) { ex.value = value; if (note != null) ex.note = note; ex._u = Date.now(); }
   else DB.sphereLogs.push({ id: uid(), sphereId, date, value,
     note: note || '', createdAt: nowISO(), sv: SCHEMA_VERSION, _u: Date.now() });
   persist();
 }
 function sphereLogsOf(id) {
-  return DB.sphereLogs.filter(l => l.sphereId === id && l.date)
+  return projAll('sphereLogs').filter(l => l.sphereId === id && l.date)
     .sort((a, b) => a.date < b.date ? -1 : 1);
 }
 // Сводка по сфере под её тип — то, что рисуем и подаём в умный движок.
@@ -9771,7 +10126,7 @@ function crossLinks() {
   const sph = (DB.spheres || []).filter(s => s.type !== 'log');
   if (sph.length < 2) return [];
   const val = {}; sph.forEach(s => {
-    val[s.id] = {}; DB.sphereLogs.filter(l => l.sphereId === s.id && l.date)
+    val[s.id] = {}; projAll('sphereLogs').filter(l => l.sphereId === s.id && l.date)
       .forEach(l => { val[s.id][l.date] = s.type === 'habit' ? (l.value ? 1 : 0) : +l.value; });
   });
   const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
@@ -9803,12 +10158,12 @@ function crossLinks() {
 // ─── ОБЗОР ПЕРИОДА (месяц/год) — синтез из данных (волна 3) ───────
 function periodReview(days) {
   const since = dayAgo(days), comp = c => (c.cl + c.mv + (10 - c.st)) / 3;
-  const cks = DB.checkins.filter(c => c.date && c.date > since);
+  const cks = projAll('checkins').filter(c => c.date && c.date > since);
   const wc = cks.map(c => ({ d: c.date, v: comp(c) }));
   const n = wc.length;
   const avg = n ? wc.reduce((a, x) => a + x.v, 0) / n : null;
   const prevSince = dayAgo(days * 2);
-  const prev = DB.checkins.filter(c => c.date && c.date > prevSince && c.date <= since).map(comp);
+  const prev = projAll('checkins').filter(c => c.date && c.date > prevSince && c.date <= since).map(comp);
   const prevAvg = prev.length ? prev.reduce((a, b) => a + b, 0) / prev.length : null;
   const delta = (avg != null && prevAvg != null) ? avg - prevAvg : null;
   let best = null, worst = null;
@@ -9926,8 +10281,8 @@ async function mkDig() {
   const top = [...insW]
     .sort((a,b) => (b.w||1)-(a.w||1)).slice(0,3)
     .map(i => ({ title: i.title, tag: i.tag }));
-  const ciW = DB.checkins.filter(c => c.date >  dayAgo(7));
-  const ciP = DB.checkins.filter(c => c.date <= dayAgo(7) && c.date > dayAgo(14));
+  const ciW = projAll('checkins').filter(c => c.date >  dayAgo(7));
+  const ciP = projAll('checkins').filter(c => c.date <= dayAgo(7) && c.date > dayAgo(14));
   const aW = checkinAvg(ciW), aP = checkinAvg(ciP);
   const stateDelta = (aW && aP) ? +(aW.comp - aP.comp).toFixed(1) : null;
   const counts = {}; insW.forEach(i => counts[i.tag] = (counts[i.tag]||0)+1);
@@ -11146,8 +11501,8 @@ function weekContextForAI() {
   const wk = iso => iso && Date.parse(iso) >= now - 7*864e5;
   const ins = DB.insights.filter(i => wk(i.createdAt)).slice(0, 12)
     .map(i => `— [${TL[i.tag]||i.tag}] ${i.title}${i.body && i.body !== i.title ? ': ' + i.body.slice(0,160) : ''}`);
-  const ciW = DB.checkins.filter(c => c.date > dayAgo(7));
-  const ciP = DB.checkins.filter(c => c.date <= dayAgo(7) && c.date > dayAgo(14));
+  const ciW = projAll('checkins').filter(c => c.date > dayAgo(7));
+  const ciP = projAll('checkins').filter(c => c.date <= dayAgo(7) && c.date > dayAgo(14));
   const aW = checkinAvg(ciW), aP = checkinAvg(ciP);
   const delta = (aW && aP) ? +(aW.comp - aP.comp).toFixed(1) : null;
   const pats = DB.patterns.slice(0, 6).map(p => '— ' + p.text);
@@ -11819,7 +12174,7 @@ function reactToSphere(s) {
     if (cl) rows.push({ html: `🔗 ${esc(cl.text)}` });
   } catch (e) {}
   if (!rows.length) {
-    const n = (DB.sphereLogs || []).filter(l => l.sphereId === s.id).length;
+    const n = projAll('sphereLogs').filter(l => l.sphereId === s.id).length;
     rows.push({ html: `🌱 «${esc(s.name)}»: ${n} ${pl(n, 'отметка', 'отметки', 'отметок')} — данные копятся` });
   }
   reactCard(rows);
@@ -11837,8 +12192,8 @@ function reactToDream(d, insId) {
 function rVector() {
   const el = $('h-vector'); if (!el) return;
   const all = [...(DB.insights || []), ...(DB.dreams || []), ...(DB.spiritual || [])];
-  const wk = all.filter(i => rcDay(i) > dayAgo(7)).length + (DB.checkins || []).filter(c => c.date > dayAgo(7)).length;
-  const pw = all.filter(i => rcDay(i) > dayAgo(14) && rcDay(i) <= dayAgo(7)).length + (DB.checkins || []).filter(c => c.date > dayAgo(14) && c.date <= dayAgo(7)).length;
+  const wk = all.filter(i => rcDay(i) > dayAgo(7)).length + projAll('checkins').filter(c => c.date > dayAgo(7)).length;
+  const pw = all.filter(i => rcDay(i) > dayAgo(14) && rcDay(i) <= dayAgo(7)).length + projAll('checkins').filter(c => c.date > dayAgo(14) && c.date <= dayAgo(7)).length;
   const s = stateScore();
   if (!wk && !s.ok) { el.innerHTML = ''; return; }
   const dir = s.ok ? (s.delta >= 3 ? 'up' : s.delta <= -3 ? 'down' : 'flat') : (wk > pw ? 'up' : wk < pw ? 'down' : 'flat');
@@ -11962,7 +12317,7 @@ function dreamLifeContext() {
   const needs = {};
   (DB.insights || []).forEach(i => { const n = i.psy && i.psy.need; if (n) needs[n] = (needs[n] || 0) + 1; });
   const topNeeds = Object.entries(needs).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n, c]) => `${n} (${c})`);
-  const aW = checkinAvg((DB.checkins || []).filter(c => c.date > dayAgo(7)));
+  const aW = checkinAvg(projAll('checkins').filter(c => c.date > dayAgo(7)));
   const pats = (DB.patterns || []).slice(0, 4).map(p => '— ' + p.text);
   let s = 'Свежие записи дневника:\n' + (ins.length ? ins.join('\n') : '— нет') + '\n';
   if (topNeeds.length) s += 'Глубинные потребности по методу «Зачем?»: ' + topNeeds.join(', ') + '\n';
@@ -13023,7 +13378,7 @@ function rPsyWorkspace() {
   const goals = (DB.psyGoals || []).filter(g => g && g.status === 'active').slice(0, 3);
   const allGoals = (DB.psyGoals || []).slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   const eps = (DB.psyInterventionEpisodes || []).slice().sort((a, b) => String(b.dateTime).localeCompare(String(a.dateTime)));
-  const obs = (DB.psyObservations || []).slice().sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+  const obs = projAll('psyObservations').slice().sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
   const revs = (DB.psyReviews || []).slice().sort((a, b) => String(b.periodEnd).localeCompare(String(a.periodEnd)));
   const nextReview = allGoals.map(g => g.reviewAt).filter(Boolean).sort()[0] || null;
 
@@ -13286,7 +13641,7 @@ function psyFormSubmit() {
     const s = Date.parse(input.periodStart), e = Date.parse(input.periodEnd);
     const inRange = (v) => { const t = Date.parse(v); return isFinite(t) && t >= s && t <= e; };
     input.interventionEpisodeRefs = (DB.psyInterventionEpisodes || []).filter(x => inRange(x.dateTime)).map(x => x.id);
-    input.observationRefs = (DB.psyObservations || []).filter(x => inRange(x.timestamp)).map(x => x.id);
+    input.observationRefs = (DB.psyObservations || []).filter(x => inRange(x.timestamp)).map(x => x.id);   // raw intentionally: только идентификаторы
     input.goalRefs = (DB.psyGoals || []).filter(g => g.status === 'active').map(g => g.id);
     const f = psyActiveFormulation(); if (f) input.formulationRef = f.id;
   }
@@ -13852,7 +14207,7 @@ function psyExpComplete(id, resultText, limitations) {
 // (contextTag наблюдения = метка условия). Считаются только введённые значения.
 function psyExpAnalysis(exp, dbArg) {
   const db = dbArg || DB;
-  const obs = (db.psyObservations || []).filter(o => o && exp.targetOutcomeMetricIds.includes(o.metricId));
+  const obs = projAll('psyObservations', db).filter(o => o && exp.targetOutcomeMetricIds.includes(o.metricId));
   return exp.conditions.map(cond => {
     const rows = obs.filter(o => (o.contextTag || '') === cond);
     const nums = rows.map(o => o.valueNumber).filter(v => typeof v === 'number' && isFinite(v));
@@ -14202,7 +14557,7 @@ function mbMatchThemes(text) {
 function mbPsychEvents(dbArg) {
   const db = dbArg || DB;
   const out = [];
-  (db.psyObservations || []).forEach(o => {
+  projAll('psyObservations', db).forEach(o => {
     if (!o || !o.timestamp) return;
     const text = [o.metricId, o.contextTag, o.valueText,
       ...(o.episode ? Object.values(o.episode) : [])].join(' ');
@@ -14214,7 +14569,7 @@ function mbPsychEvents(dbArg) {
     const themes = mbMatchThemes([e.targetProblem, e.targetMechanism, e.interventionSummary].join(' '));
     if (themes.length) out.push({ coll: 'psyInterventionEpisodes', id: e.id, day: String(e.dateTime).slice(0, 10), themes, contextTag: e.targetMechanism || null });
   });
-  (db.moments || []).forEach(m => {
+  projAll('moments', db).forEach(m => {
     if (!m || !m.day) return;
     const themes = mbMatchThemes([m.emo, m.note].join(' '));
     if (themes.length) out.push({ coll: 'moments', id: m.id, day: m.day, themes, contextTag: m.emo || null });
@@ -14227,7 +14582,7 @@ function mbIsRedFlag(key) { return MB_RED_FLAG_KW.some(k => key.includes(k)); }
 // симптомы не сливаются по похожему тексту.
 function mbHealthEvents(dbArg) {
   const db = dbArg || DB;
-  return (db.symptoms || [])
+  return projAll('symptoms', db)
     .filter(s => s && s.name && s.day)
     .map(s => ({ id: s.id, day: s.day, key: mbSymptomKey(s.name), severity: s.severity ?? null, redFlag: mbIsRedFlag(mbSymptomKey(s.name)) }));
 }
@@ -14254,7 +14609,7 @@ function mindBodyAssociations(dbArg) {
     if (!m.has(h.day)) m.set(h.day, []);
     m.get(h.day).push(h.id);
   });
-  const medDays = new Set((db.medIntakes || []).filter(x => x && x.status === 'taken')
+  const medDays = new Set(projAll('medIntakes', db).filter(x => x && x.status === 'taken')
     .map(x => String(x.at || x.createdAt || '').slice(0, 10)));
 
   const out = [];
@@ -16342,7 +16697,28 @@ function extPinVolatileFields(type, newRec, curRec, data) {
 // ЕДИНСТВЕННЫЙ писатель обновления записи — используется И на плановом
 // кандидате (preview), И на commit-кандидате: preview и commit физически
 // не могут разойтись в том, что именно будет записано.
-function extApplyUpdateToRecord(rec, u) {
+function extApplyUpdateToRecord(rec, u, db) {
+  // §5: явный override обязан РАЗРЕШИТЬ активные коррекции владельца по тем
+  // полям, которые заменяет источник. Иначе коррекция сразу же снова легла бы
+  // поверх нового значения — «замена версией источника» оказалась бы ложью.
+  // Разрешение остаётся append-only: пишется коррекция-заместитель со
+  // значением источника и честным origin='import_override'; прежняя запись
+  // владельца остаётся в истории и видна в инспекторе.
+  const d = db || DB;
+  if (u.mode === 'override' && (u.corrFieldsTouched || []).length && Array.isArray(d.corrections)) {
+    (u.corrFieldsTouched || []).forEach(f => {
+      if (u.newValues[f] === undefined) return;
+      const { head } = corrActiveHead(u.coll, rec.id, f, d);
+      if (!head) return;
+      d.corrections.push({
+        id: psyUid('corr'), kType: 'correction', coll: u.coll, targetId: rec.id,
+        patch: { [f]: JSON.parse(JSON.stringify(u.newValues[f])) },
+        reason: 'заменено версией источника по явному выбору',
+        supersedesCorrectionId: head.id, origin: 'import_override',
+        createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
+      });
+    });
+  }
   (u.updatedFields || []).forEach(f => {
     if (u.newValues[f] === undefined) { delete rec[f]; return; }
     rec[f] = JSON.parse(JSON.stringify(u.newValues[f]));
@@ -16540,13 +16916,28 @@ async function extClassifyExisting(a) {
   // снимка импорта. Legacy-запись без снимка: расхождение только в
   // ext-слое безопасно (ext правит только импорт), расхождение полей
   // записи неатрибутируемо — конфликт.
-  let userUntouched;
+  //
+  // КРИТИЧНО (решение владельца §5): активная коррекция владельца по
+  // import-owned полю — ЭТО локальная правка. Коррекции намеренно не трогают
+  // сырую запись, поэтому сравнение сырых полей со снимком импорта их не
+  // видит и молча дало бы «пользователь не трогал» → тихая перезапись.
+  // Считаем хеш по ЭФФЕКТИВНОЙ записи. Конфликт коррекций тоже считаем
+  // локальным изменением: содержимое поля неатрибутируемо — fail closed.
+  // Что доказуемо безопасно: если множество полей, которые меняет источник,
+  // НЕ пересекается с полями, где у владельца активная коррекция, обновление
+  // не перезаписывает и не прячет ни одной коррекции. Пересечение или
+  // неразрешённый конфликт коррекций — fail closed, без угадывания.
+  const effectiveRec = proj(coll, existingRec, ctx.db);
+  const corrConflicted = Array.isArray(effectiveRec._corrConflicts) && effectiveRec._corrConflicts.length > 0;
+  const corrFieldsTouched = (effectiveRec._corrFields || []).filter(f => changedFields.includes(f));
+  let rawUntouched;
   if (oldExt && oldExt.importHash && Array.isArray(oldExt.importedFields)) {
     const curHash = await extFieldsHash(existingRec, oldExt.importedFields);
-    userUntouched = curHash === oldExt.importHash;
+    rawUntouched = curHash === oldExt.importHash;
   } else {
-    userUntouched = !changedFields.length;
+    rawUntouched = !changedFields.length;
   }
+  const userUntouched = rawUntouched && !corrFieldsTouched.length && !corrConflicted;
   const newImportedFields = ownedFields.slice();
   const newImportHash = await extFieldsHash(newRec, newImportedFields);
   const expectedFields = [...new Set([
@@ -16573,6 +16964,11 @@ async function extClassifyExisting(a) {
     expectedFields,
     expectedValues: JSON.parse(JSON.stringify(extPickFields(existingRec, expectedFields))),
     mode: userUntouched ? 'update' : 'override',
+    // §5: какие активные коррекции владельца затрагивает эта версия
+    // источника. Override обязан их ЯВНО заменить, иначе после замены
+    // коррекция мгновенно снова наложилась бы поверх значения источника.
+    corrFieldsTouched: corrFieldsTouched.slice(),
+    corrConflicted,
   };
   // §19 fail-closed unknown order: содержимое отличается, но временной
   // порядок версий недоказуем (нет метаданных с одной из сторон, либо
@@ -16591,9 +16987,14 @@ async function extClassifyExisting(a) {
       reason: `новая версия источника: обновятся ${changedFields.length ? 'поля ' + changedFields.join(', ') : 'только provenance/claim-слой'}`,
     };
   }
+  const why = corrConflicted
+    ? ' (по записи есть неразрешённый конфликт исправлений)'
+    : corrFieldsTouched.length
+      ? ` (у тебя есть исправление: ${corrFieldsTouched.join(', ')})`
+      : changedFields.length ? ' (' + changedFields.join(', ') + ')' : '';
   return {
     ...base, status: 'changed-conflict', update, merge: mergeInfo,
-    reason: `источник изменился, но запись правилась локально${changedFields.length ? ' (' + changedFields.join(', ') + ')' : ''} — по умолчанию сохраняются твои изменения; замена только по явному выбору`,
+    reason: `источник изменился, но запись правилась локально${why} — по умолчанию сохраняются твои изменения; замена только по явному выбору`,
   };
 }
 
@@ -16776,7 +17177,7 @@ async function extBuildPlan(rawText, shared) {
       // сущности этого пакета и следующие пакеты feed видят обновлённое
       // состояние — commit применит ровно то же самое тем же писателем.
       if (items[eIdx].status === 'changed' && existingRec) {
-        extApplyUpdateToRecord(existingRec, items[eIdx].update);
+        extApplyUpdateToRecord(existingRec, items[eIdx].update, db);
         feedTouched.add(String(prov.sourceId));
       }
       continue;
@@ -17028,7 +17429,7 @@ function extCommitPlan(plan, selection, opts) {
       if (extCanonicalJson(extPickFields(rec, u.expectedFields)) !== extCanonicalJson(u.expectedValues)) {
         throw new Error(`запись ${u.coll}#${u.id} изменилась после предпросмотра — обнови предпросмотр и подтверди заново`);
       }
-      extApplyUpdateToRecord(rec, { ...u, mode });
+      extApplyUpdateToRecord(rec, { ...u, mode }, candidate);
       updatedRefs.push({
         coll: u.coll, id: u.id, updatedFields: u.updatedFields.slice(), mode,
         prevEntityHash: u.prevEntityHash, entityHash: u.newEntityHash,
