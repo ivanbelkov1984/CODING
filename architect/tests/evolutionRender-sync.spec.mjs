@@ -118,6 +118,118 @@ console.log('\nЭВОЛЮЦИЯ · ОТРИСОВКА И КЛАССИФИКАЦ�
   ok(!/undefined/.test(render.text), 'в разметке нет undefined', render.text.slice(0, 120));
 }
 
+// ── 1b. ШКАЛА СТРОГАЯ: только целые 0..3, ничего не подтягивается ────
+// Прежний Math.min(n, 3) молча объявлял 4/5/100 «Трансформировало», то есть
+// выдумывал смысл приложения за источник. Шкала — РОВНО четыре ступени.
+{
+  const idx = await page.evaluate(() => {
+    const probe = [0, 1, 2, 3, 4, 5, 100, -1, -0.5, 2.5, 0.1, NaN, Infinity, -Infinity,
+      '0', '3', '4', '-1', '2.5', '', '   ', 'этап', 'уровень 3', null, undefined, true, false, [], {}];
+    return probe.map(v => {
+      let key;
+      if (typeof v === 'number') key = Object.is(v, -0) ? '-0' : String(v);
+      else if (typeof v === 'string') key = JSON.stringify(v);
+      else key = String(v);
+      return [key, evoLevelIndex(v)];
+    });
+  });
+  const got = new Map(idx);
+  const valid = [['0', 0], ['1', 1], ['2', 2], ['3', 3], ['"0"', 0], ['"3"', 3]];
+  const badValid = valid.filter(([k, want]) => got.get(k) !== want);
+  ok(badValid.length === 0,
+    'валидны РОВНО целые 0,1,2,3 (и их строковая запись) — 0 остаётся валидным',
+    badValid.map(([k, w]) => `${k}: ожидали ${w}, получили ${got.get(k)}`).join('\n'));
+
+  const offscale = ['4', '5', '100', '"4"', '-1', '"-1"', '-0.5', '2.5', '0.1', '"2.5"',
+    'NaN', 'Infinity', '-Infinity', '""', '"   "', '"этап"', '"уровень 3"',
+    'null', 'undefined', 'true', 'false', '', '[object Object]'];
+  const leaked = offscale.filter(k => got.has(k) && got.get(k) !== null);
+  ok(leaked.length === 0,
+    'вне шкалы: 4, 100, −1, 2.5, NaN, пусто, произвольная строка → индекса нет',
+    leaked.map(k => `${k} → ${got.get(k)}`).join('\n'));
+  // Явно по требованию владельца: 4 и 100 НЕ третий уровень, −1 НЕ нулевой.
+  ok(got.get('4') === null && got.get('100') === null,
+    '4 и 100 НЕ становятся уровнем 3 «Трансформировало»');
+  ok(got.get('-1') === null, '−1 НЕ становится уровнем 0 «Наблюдение»');
+  ok(got.get('2.5') === null, 'дробное 2.5 вне шкалы');
+
+  // Представление: вне шкалы человеку показывают источник, а не ступень.
+  const views = await page.evaluate(() => {
+    const mk = lv => { const v = evoView({ lv }); return { lb: v.lb, c: v.c, d: v.d }; };
+    return { four: mk(4), hundred: mk(100), neg: mk(-1), frac: mk(2.5),
+      str: mk('произвольная формулировка'), empty: mk(''), miss: mk(undefined),
+      zero: mk(0), three: mk(3) };
+  });
+  ok(views.zero.lb === 'Наблюдение' && views.zero.c === 'el0' &&
+    views.three.lb === 'Трансформировало' && views.three.c === 'el3',
+    'уровни 0 и 3 по-прежнему называются именами шкалы', JSON.stringify(views.zero));
+  const off = [views.four, views.hundred, views.neg, views.frac, views.str, views.empty, views.miss];
+  ok(off.every(v => v.c === 'elx' && v.d === 'edx'),
+    'всё вне шкалы рисуется нейтральным стилем', JSON.stringify(off.map(v => v.c)));
+  ok(off.every(v => !/Наблюдение|Понято|Прочувствовано|Трансформировало/.test(v.lb)),
+    'вне шкалы НЕ подписывается ни одним именем шкалы', JSON.stringify(off.map(v => v.lb)));
+  ok(/4/.test(views.four.lb) && /100/.test(views.hundred.lb) && /2\.5/.test(views.frac.lb),
+    'числовой уровень вне шкалы остаётся видимым как значение источника',
+    JSON.stringify([views.four.lb, views.hundred.lb, views.frac.lb]));
+  ok(views.str.lb === 'произвольная формулировка',
+    'строковая формулировка источника показана как есть', views.str.lb);
+
+  // Отрисовка: ни один рендерер не падает и не печатает undefined.
+  const render = await page.evaluate(() => {
+    DB.evolution = [4, 100, -1, 2.5, NaN, 'этап', '', 0, 3, null, undefined]
+      .map((lv, i) => ({ id: 990100 + i, lv, text: 'веха ' + i, dt: '01.01.2026', sv: SCHEMA_VERSION }));
+    const el = document.createElement('div');
+    let list, retro;
+    try { rEvoList(el); list = { ok: true, text: el.textContent || '' }; }
+    catch (e) { list = { ok: false, error: e.message }; }
+    try { retro = { ok: true, text: String(CMDS['/ретро']()).replace(/<[^>]*>/g, ' ') }; }
+    catch (e) { retro = { ok: false, error: e.message }; }
+    return { list, retro, levels: el.querySelectorAll('.elv').length };
+  });
+  ok(render.list.ok && render.retro.ok,
+    'весь набор внешкальных значений рендерится без исключения',
+    (render.list.error || '') + ' ' + (render.retro.error || ''));
+  ok(!/undefined/.test(render.list.text) && !/undefined/.test(render.retro.text),
+    'в разметке нет undefined ни в списке, ни в /ретро');
+  ok(render.levels === 11, `отрисованы все 11 вех (${render.levels})`);
+
+  // Внешний числовой уровень вне диапазона доходит до записи КАК ЕСТЬ.
+  await reset();
+  const imp = await importPkg(evoPkg('TEST-EVO-S1B', [
+    evoEnt('TEST-EVO-FOUR', { text: 'веха с уровнем 4', lv: 4 }),
+    evoEnt('TEST-EVO-HUNDRED', { text: 'веха с уровнем 100', lv: 100 }),
+    evoEnt('TEST-EVO-FRAC', { text: 'веха с уровнем 2.5', lv: 2.5 }),
+    evoEnt('TEST-EVO-NEG', { text: 'веха с уровнем -1', lv: -1 }),
+  ]));
+  const stored = await page.evaluate(() => DB.evolution.map(e => ({ t: typeof e.lv, v: e.lv })));
+  ok(imp.ok && stored.length === 4, `4 внешкальные вехи импортированы (${stored.length})`,
+    (imp.errors || []).join('; '));
+  ok(stored.every(x => x.t === 'number'),
+    'внешний числовой уровень вне диапазона сохранён числом, а не потерян как «этап»',
+    JSON.stringify(stored));
+  ok(stored.some(x => x.v === 4) && stored.some(x => x.v === 100) &&
+     stored.some(x => x.v === 2.5) && stored.some(x => x.v === -1),
+    'значения 4 / 100 / 2.5 / −1 сохранены как есть, без подтягивания в шкалу',
+    JSON.stringify(stored));
+  const impRender = await page.evaluate(() => {
+    const el = document.createElement('div');
+    rEvoList(el);
+    return (el.textContent || '').replace(/\s+/g, ' ');
+  });
+  ok(!/Трансформировало/.test(impRender) && !/Наблюдение/.test(impRender),
+    'ни одна внешкальная веха не подписана ступенью шкалы', impRender.slice(0, 160));
+
+  // Миграции данных нет: строгая шкала ничего не переписывает в базе.
+  const nonDestructive = await page.evaluate(() => {
+    const before = JSON.stringify(DB.evolution);
+    const el = document.createElement('div');
+    rEvoList(el); evoView(DB.evolution[0]); evoLevelIndex(DB.evolution[0].lv);
+    try { CMDS['/ретро'](); } catch (_) { }
+    return before === JSON.stringify(DB.evolution);
+  });
+  ok(nonDestructive, 'строгая шкала не мигрирует и не переписывает записи');
+}
+
 // ── 2. Легаси-запись lv='этап' читаема БЕЗ переписывания базы ────────
 {
   const render = await page.evaluate(() => {

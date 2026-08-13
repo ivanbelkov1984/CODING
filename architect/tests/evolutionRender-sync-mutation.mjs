@@ -39,15 +39,56 @@ const MUTANTS = [
     // источнике нет.
     id: 'unknown-level-claims-observation',
     what: 'уровень вне шкалы молча объявляется «Наблюдением»',
-    find: '  const i = evoLevelIndex(rec && rec.lv);\n  if (i != null) return EVO_LV[i];',
-    replace: '  const i = evoLevelIndex(rec && rec.lv);\n  if (i == null) return EVO_LV[0];\n  if (i != null) return EVO_LV[i];',
+    find: '  const i = evoLevelIndex(raw);\n  if (i != null) return EVO_LV[i];',
+    replace: '  const i = evoLevelIndex(raw);\n  if (i == null) return EVO_LV[0];\n  if (i != null) return EVO_LV[i];',
     expectFail: 'формулировка источника показана человеку',
+  },
+  {
+    // ВОЗВРАТ ЗАЖИМА: 4/5/100 снова молча объявляются высшей ступенью.
+    id: 'scale-clamps-out-of-range',
+    what: 'уровень вне диапазона снова зажимается в шкалу через Math.min',
+    find: '  return Number.isInteger(n) && n >= 0 && n < EVO_LV.length ? n : null;',
+    replace: '  return Number.isInteger(n) && n >= 0 ? Math.min(n, EVO_LV.length - 1) : null;',
+    expectFail: '4 и 100 НЕ становятся уровнем 3',
+  },
+  {
+    // Отрицательный уровень снова считается валидным нулевым.
+    id: 'scale-accepts-negative',
+    what: 'отрицательный уровень снова считается уровнем 0',
+    find: '  return Number.isInteger(n) && n >= 0 && n < EVO_LV.length ? n : null;',
+    replace: '  return Number.isInteger(n) && n < EVO_LV.length ? Math.max(n, 0) : null;',
+    expectFail: '−1 НЕ становится уровнем 0',
+  },
+  {
+    // Дробное значение снова округляется до ступени шкалы.
+    id: 'scale-accepts-fractional',
+    what: 'дробный уровень снова округляется в ступень шкалы',
+    find: "  const n = typeof v === 'number' ? v\n    : (typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);\n  return Number.isInteger(n) && n >= 0 && n < EVO_LV.length ? n : null;",
+    replace: "  const n0 = typeof v === 'number' ? v\n    : (typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);\n  const n = Number.isFinite(n0) ? Math.round(n0) : NaN;\n  return Number.isInteger(n) && n >= 0 && n < EVO_LV.length ? n : null;",
+    expectFail: 'дробное 2.5 вне шкалы',
+  },
+  {
+    // Числовой уровень вне шкалы перестаёт быть виден человеку —
+    // источник теряется за безликим «Этап».
+    id: 'offscale-number-hidden',
+    what: 'числовой уровень вне шкалы перестаёт показываться',
+    find: "  const own = typeof raw === 'string' ? raw.trim()\n    : (typeof raw === 'number' && Number.isFinite(raw) ? `вне шкалы: ${raw}` : '');",
+    replace: "  const own = typeof raw === 'string' ? raw.trim() : '';",
+    expectFail: 'числовой уровень вне шкалы остаётся видимым как значение источника',
+  },
+  {
+    // Адаптер снова теряет внешкальное число источника.
+    id: 'adapter-drops-out-of-range-number',
+    what: 'адаптер снова теряет внешнее число вне шкалы (превращает в «этап»)',
+    find: "    const lv = lvNum != null ? lvNum\n      : (typeof rawLv === 'number' && Number.isFinite(rawLv) ? rawLv : (extStr(rawLv, 40) || 'этап'));",
+    replace: "    const lv = lvNum != null ? lvNum : (extStr(rawLv, 40) || 'этап');",
+    expectFail: 'внешний числовой уровень вне диапазона сохранён числом',
   },
   {
     // Адаптер снова теряет числовой уровень (в т.ч. валидный 0).
     id: 'adapter-drops-numeric-level',
     what: 'адаптер снова превращает числовой уровень в строку «этап»',
-    find: '    const lv = lvNum != null ? lvNum : (extStr(rawLv, 40) || \'этап\');',
+    find: "    const lv = lvNum != null ? lvNum\n      : (typeof rawLv === 'number' && Number.isFinite(rawLv) ? rawLv : (extStr(rawLv, 40) || 'этап'));",
     replace: "    const lv = extStr(d.lv || d.level, 40) || 'этап';",
     expectFail: 'числовой уровень 0 сохранён числом',
   },
