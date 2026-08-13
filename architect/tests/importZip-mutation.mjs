@@ -83,6 +83,33 @@ const MUTANTS = [
     expectFail: 'файл с UTF-8 BOM импортируется',
   },
   {
+    // Потоковый лимит распаковки снимается — ZIP-бомба с лживым usize
+    // снова буферизуется целиком (ловится лишь пост-проверкой размера).
+    id: 'inflate-cap-removed',
+    what: 'потоковый лимит фактических байтов распаковки перестаёт действовать',
+    find: "    if (total > cap) {\n      try { await reader.cancel(); } catch (_) { }\n      throw new Error('распакованные данные превышают заявленный размер — архив отклонён');\n    }",
+    replace: "    if (false) {\n      try { await reader.cancel(); } catch (_) { }\n      throw new Error('распакованные данные превышают заявленный размер — архив отклонён');\n    }",
+    expectFail: 'лживый usize отклонён потоковым лимитом',
+  },
+  {
+    // SHA256SUMS снова резолвится по basename — чужой путь с верной суммой
+    // считался бы «найденным».
+    id: 'sums-basename-fallback-restored',
+    what: 'SHA256SUMS снова допускает совпадение по basename',
+    find: '        const entry = byName.get(path);',
+    replace: '        const entry = byName.get(path) || zip.entries.find(x => extZipBase(x.name) === extZipBase(path));',
+    expectFail: 'SHA256SUMS: чужой путь с верной суммой отклонён',
+  },
+  {
+    // Автоисточник снова создаётся персистентно на предпросмотре —
+    // отмена/перезагрузка оставляли бы сироту в хранилище.
+    id: 'orphan-connection-persisted',
+    what: 'источник поставки снова персистентен до подтверждения',
+    find: '    _extPendingConn = rec;\n    _extConnActive = rec.id;',
+    replace: '    DB.externalConnections.push(rec); persist();\n    _extConnActive = rec.id;',
+    expectFail: 'предпросмотр не создаёт персистентного источника',
+  },
+  {
     // Разбивка по разделам исчезает из предпросмотра поставки.
     id: 'breakdown-removed',
     what: 'предпросмотр перестаёт показывать разбивку по разделам',

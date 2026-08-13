@@ -14133,13 +14133,20 @@ function extNormalizeContainer(c) {
 }
 
 function extConnUid() { return 'extConn:' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
-function extConnFind(id, dbArg) { return ((dbArg || DB).externalConnections || []).find(c => c && c.id === id) || null; }
-function extConnCreate(label, kind) {
-  if (typeof isWriteLocked === 'function' && isWriteLocked()) return { ok: false, errors: ['профиль в режиме восстановления'] };
+// Pending-источник архивной поставки: живёт ТОЛЬКО в памяти (вне DB) до
+// подтверждения импорта, поэтому никакой persist() не может сохранить его
+// раньше времени. Материализуется в DB в момент apply одной транзакцией.
+let _extPendingConn = null;
+function extConnFind(id, dbArg) {
+  const hit = ((dbArg || DB).externalConnections || []).find(c => c && c.id === id) || null;
+  if (hit) return hit;
+  return (!dbArg && _extPendingConn && _extPendingConn.id === id) ? _extPendingConn : null;
+}
+function extConnNewRec(label, kind) {
   const lbl = String(label || '').trim().slice(0, 120);
-  if (!lbl) return { ok: false, errors: ['нужно название источника'] };
+  if (!lbl) return null;
   const k = EXT_CHANNEL_KINDS.includes(kind) ? kind : 'other';
-  const rec = {
+  return {
     id: extConnUid(), label: lbl, kind: k, status: 'ready',
     createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now(),
     privacyClass: 'sensitive',
@@ -14148,6 +14155,11 @@ function extConnCreate(label, kind) {
     container: null,          // provenance-контейнер (файл/архив), НЕ идентичность записей
     sourceStatusNote: null,   // «источник недоступен» — provenance-статус, НЕ удаление данных
   };
+}
+function extConnCreate(label, kind) {
+  if (typeof isWriteLocked === 'function' && isWriteLocked()) return { ok: false, errors: ['профиль в режиме восстановления'] };
+  const rec = extConnNewRec(label, kind);
+  if (!rec) return { ok: false, errors: ['нужно название источника'] };
   const snap = JSON.parse(JSON.stringify(DB.externalConnections || []));
   if (!Array.isArray(DB.externalConnections)) DB.externalConnections = [];
   DB.externalConnections.push(rec);
@@ -14545,7 +14557,26 @@ function extConnUiApply() {
   ((_bridgePending && _bridgePending.batches) || []).forEach(b => {
     if (!b.skipped && b.plan) Object.entries(b.plan.byTarget || {}).forEach(([c, n]) => { byColl[c] = (byColl[c] || 0) + n; });
   });
+  // Pending-источник материализуется в DB ровно на время apply: успешный
+  // swap+persist сохраняет его атомарно вместе с записями; любой не-успех
+  // (blocked/rollback/persist-fail) вычищает его из DB и из хранилища —
+  // осиротевших автосозданных подключений не бывает.
+  const pending = (_extPendingConn && _extConnActive === _extPendingConn.id) ? _extPendingConn : null;
+  if (pending) {
+    if (!Array.isArray(DB.externalConnections)) DB.externalConnections = [];
+    DB.externalConnections.push(pending);
+    _extPendingConn = null;
+  }
   const r = extBridgeApply(_extConnActive);
+  if (pending && !r.ok && !r.degraded) {
+    // Поставка не применена: убрать сироту и из памяти, и из хранилища
+    // (сбойный путь apply мог успеть сохранить DB со статусом ошибки).
+    // Поиск ПО ID: сбойные ветки apply восстанавливают массив соединений
+    // из снимка-клона, и идентичность объекта теряется.
+    const i = (DB.externalConnections || []).findIndex(c => c && c.id === pending.id);
+    if (i >= 0) { DB.externalConnections.splice(i, 1); persist(); }
+    _extPendingConn = pending;   // предпросмотр можно честно повторить
+  }
   if (!r.ok) {
     // Два честных не-успеха: rolledBack — весь feed откатен (canonical не
     // изменён); degraded — записи применены, но чекпойнт не сохранён.
@@ -15139,6 +15170,10 @@ let _extPlan = null, _extSel = { items: {}, links: {}, conflicts: {} };
 function openExtImport() {
   _extPlan = null; _extSel = { items: {}, links: {}, conflicts: {} };
   _extBatchFeed = null;
+  if (_extPendingConn) {
+    if (_extConnActive === _extPendingConn.id) _extConnActive = null;
+    _extPendingConn = null;   // жил только в памяти — чистить в хранилище нечего
+  }
   const t = $('ext-text'); if (t) { t.value = ''; t.rows = 5; }
   const f = $('ext-file'); if (f) f.value = '';
   const fn = $('ext-file-note'); if (fn) fn.textContent = '';
@@ -15249,18 +15284,38 @@ function extZipEntries(buf) {
   if (!entries.length) return { ok: false, errors: ['архив пуст'] };
   return { ok: true, errors: [], entries, u8, dv };
 }
-async function extZipInflateRaw(bytes) {
+async function extZipInflateRaw(bytes, maxOut) {
   if (typeof DecompressionStream !== 'function') {
     throw new Error('устройство не поддерживает распаковку deflate — обнови систему или пришли архив без сжатия');
   }
+  // Заявленному в central directory размеру ВЕРИТЬ НЕЛЬЗЯ: злонамеренный
+  // deflate-поток может раздуться сколь угодно. Читаем поток кусками и
+  // считаем ФАКТИЧЕСКИЕ байты; первый байт сверх лимита — немедленный
+  // обрыв, без предварительной аллокации целого буфера.
   const ds = new DecompressionStream('deflate-raw');
-  const stream = new Blob([bytes]).stream().pipeThrough(ds);
-  const out = new Uint8Array(await new Response(stream).arrayBuffer());
+  const reader = new Blob([bytes]).stream().pipeThrough(ds).getReader();
+  const cap = Math.min(Number(maxOut) || 0, EXT_ZIP_LIMITS.maxFileBytes);
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > cap) {
+      try { await reader.cancel(); } catch (_) { }
+      throw new Error('распакованные данные превышают заявленный размер — архив отклонён');
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.length; }
   return out;
 }
 // Данные одной записи: local header → срез → распаковка → проверка CRC и
 // размера. Любое расхождение = повреждённый архив, fail closed.
 async function extZipEntryData(zip, e) {
+  if (e._data) return e._data;
   const { u8, dv } = zip;
   if (e.lho + 30 > u8.length || dv.getUint32(e.lho, true) !== 0x04034b50) {
     throw new Error(`«${e.name.slice(0, 60)}»: local header не читается`);
@@ -15270,9 +15325,10 @@ async function extZipEntryData(zip, e) {
   const start = e.lho + 30 + nameLen + extraLen;
   if (start + e.csize > u8.length) throw new Error(`«${e.name.slice(0, 60)}»: данные обрезаны`);
   const packed = u8.subarray(start, start + e.csize);
-  const data = e.method === 0 ? packed.slice() : await extZipInflateRaw(packed);
+  const data = e.method === 0 ? packed.slice() : await extZipInflateRaw(packed, e.usize);
   if (data.length !== e.usize) throw new Error(`«${e.name.slice(0, 60)}»: размер после распаковки не совпал`);
   if (extCrc32(data) !== e.crc) throw new Error(`«${e.name.slice(0, 60)}»: контрольная сумма CRC не совпала`);
+  e._data = data;
   return data;
 }
 // UTF-8 → текст. TextDecoder по умолчанию срезает BOM — реальный owner-корпус
@@ -15313,7 +15369,9 @@ async function extZipBatchBuild(arrayBuffer, fileName) {
         if (!m) return { ok: false, errors: [`SHA256SUMS.txt: нечитаемая строка «${line.slice(0, 60)}»`] };
         const want = m[1].toLowerCase();
         const path = m[2].trim();
-        const entry = byName.get(path) || zip.entries.find(x => extZipBase(x.name) === extZipBase(path));
+        // Только ТОЧНЫЙ путь записи: совпадение по basename позволило бы
+        // подсунуть одноимённый файл из другого каталога.
+        const entry = byName.get(path);
         if (!entry) return { ok: false, errors: [`SHA256SUMS.txt: файл «${path.slice(0, 60)}» отсутствует в архиве`] };
         const got = await extZipSha256Hex(await extZipEntryData(zip, entry));
         if (got !== want) return { ok: false, errors: [`контрольная сумма не совпала: «${path.slice(0, 60)}» — архив повреждён или подменён`] };
@@ -15338,12 +15396,27 @@ async function extZipBatchBuild(arrayBuffer, fileName) {
         if (rows.some(r => !r.file || typeof r.file !== 'string')) {
           return { ok: false, errors: ['манифест: у элемента списка пакетов нет имени файла'] };
         }
-        rows.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+        // order: либо отсутствует у всех (порядок массива), либо задан у всех
+        // уникальными положительными целыми. Молчаливая «какая-то» сортировка
+        // при дублях/мусоре недопустима.
+        const withOrder = rows.filter(r => r.order !== undefined && r.order !== null);
+        if (withOrder.length) {
+          if (withOrder.length !== rows.length) return { ok: false, errors: ['манифест: order задан не у всех пакетов'] };
+          const nums = rows.map(r => Number(r.order));
+          if (nums.some(n => !Number.isInteger(n) || n <= 0)) return { ok: false, errors: ['манифест: order должен быть положительным целым'] };
+          if (new Set(nums).size !== nums.length) return { ok: false, errors: ['манифест: значения order повторяются — порядок неоднозначен'] };
+          rows.sort((a, b) => Number(a.order) - Number(b.order));
+        }
         const used = new Set();
         ordered = [];
         for (const r of rows) {
           const base = extZipBase(r.file);
-          const entry = feedEntries.find(x => extZipBase(x.name) === base);
+          // Точный путь приоритетен; basename допустим ТОЛЬКО когда он
+          // однозначен в архиве (двойники — fail closed).
+          const exact = feedEntries.find(x => x.name === r.file);
+          const byBase = exact ? [exact] : feedEntries.filter(x => extZipBase(x.name) === base);
+          if (byBase.length > 1) return { ok: false, errors: [`манифест: имя «${base.slice(0, 60)}» неоднозначно — в архиве несколько таких файлов`] };
+          const entry = byBase[0];
           if (!entry) return { ok: false, errors: [`манифест указывает файл «${base.slice(0, 60)}», которого нет в архиве`] };
           if (used.has(entry.name)) return { ok: false, errors: [`манифест указывает файл «${base.slice(0, 60)}» дважды`] };
           used.add(entry.name);
@@ -15414,12 +15487,16 @@ async function extZipSelect(file, arrayBuffer) {
   // feed-apply). Если источник не выбран — он создаётся из имени поставки:
   // владелец не обязан настраивать что-либо до первого импорта.
   if (!(_extConnActive && extConnFind(_extConnActive))) {
-    const created = extConnCreate(`Поставка: ${_extBatchFeed.label}`.slice(0, 120), 'external_connector');
-    if (!created.ok) {
-      if (out) out.innerHTML = `<div class="psy-adv" role="alert">${esc(created.errors[0] || 'не удалось подготовить источник')}</div>`;
+    // Источник поставки до подтверждения — ТОЛЬКО в памяти (вне DB):
+    // отмена, закрытие или перезагрузка не оставляют осиротевшего
+    // подключения в хранилище. Персистентным он становится в apply.
+    const rec = extConnNewRec(`Поставка: ${_extBatchFeed.label}`.slice(0, 120), 'external_connector');
+    if (!rec) {
+      if (out) out.innerHTML = `<div class="psy-adv" role="alert">не удалось подготовить источник поставки</div>`;
       return;
     }
-    _extConnActive = created.rec.id;
+    _extPendingConn = rec;
+    _extConnActive = rec.id;
     extRenderConnections();
   }
   extConnUiRefresh();
@@ -15521,6 +15598,10 @@ function extPreviewPrimary() {
 function extResetToStep1() {
   _extPlan = null; _extSel = { items: {}, links: {}, conflicts: {} };
   _extBatchFeed = null;
+  if (_extPendingConn) {
+    if (_extConnActive === _extPendingConn.id) _extConnActive = null;
+    _extPendingConn = null;   // жил только в памяти — чистить в хранилище нечего
+  }
   const t = $('ext-text'); if (t) { t.value = ''; t.rows = 5; }
   const f = $('ext-file'); if (f) f.value = '';
   const fn = $('ext-file-note'); if (fn) fn.textContent = '';

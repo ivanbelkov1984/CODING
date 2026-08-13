@@ -58,10 +58,11 @@ function makeZip(files) {
     const method = f.method === 0 ? 0 : 8;
     const packed = method === 0 ? data : deflateRawSync(data);
     const crc = typeof f.crc === 'number' ? f.crc : crc32(data);
+    const usize = typeof f.usize === 'number' ? f.usize : data.length;   // лживый usize для бомбы
     const lh = Buffer.concat([u32(0x04034b50), u16(20), u16(0), u16(method), u16(0), u16(0),
-      u32(crc), u32(packed.length), u32(data.length), u16(name.length), u16(0), name, packed]);
+      u32(crc), u32(packed.length), u32(usize), u16(name.length), u16(0), name, packed]);
     central.push(Buffer.concat([u32(0x02014b50), u16(20), u16(20), u16(0), u16(method), u16(0), u16(0),
-      u32(crc), u32(packed.length), u32(data.length), u16(name.length), u16(0), u16(0), u16(0), u16(0),
+      u32(crc), u32(packed.length), u32(usize), u16(name.length), u16(0), u16(0), u16(0), u16(0),
       u32(0), u32(offset), name]));
     chunks.push(lh); offset += lh.length;
   }
@@ -125,7 +126,7 @@ const reset = () => page.evaluate((colls) => {
   DB._del = {};
   try { resolveRecovery('discarded'); } catch (_) {}
   if (typeof extBridgeCancel === 'function') extBridgeCancel();
-  _extConnActive = null; _extBatchFeed = null;
+  _extConnActive = null; _extBatchFeed = null; _extPendingConn = null;
   openExtImport();
 }, COLLS);
 const canonSnap = () => page.evaluate((colls) => JSON.stringify(Object.fromEntries(
@@ -578,6 +579,94 @@ console.log('\nИМПОРТ ПОСТАВКИ (.zip)\n');
   await applyBatch();
   const val = await page.evaluate(() => (DB.psyInterventionEpisodes[0] || {}).acceptability);
   ok(val === 'unknown', 'семантика не расширена: значение приведено к unknown');
+}
+
+// ── 19. ZIP-бомба: лживый usize отклоняется ПОТОКОВЫМ лимитом ────────
+{
+  await reset();
+  // central directory заявляет 10 байт, deflate раздувается в 200 КБ.
+  const big = Buffer.alloc(200 * 1024, 0x30);
+  const p1 = await pickZip(makeZip([{ name: 'FEEDS/01.json', data: big, method: 8, usize: 10, crc: crc32(big) }]), false);
+  ok(/превышают заявленный размер/.test(p1.out),
+    'лживый usize отклонён потоковым лимитом (обрыв ДО буферизации)', p1.out.slice(0, 160));
+  ok((await stateCounts()).journal === 0, 'бомба: ноль мутаций');
+}
+
+// ── 20. SHA256SUMS: только точный путь записи ────────────────────────
+{
+  await reset();
+  const feedData = JSON.stringify(pkg('TEST-ZIP-SP1', [dream('TEST-ZIP-SPD1', 'нарратив', 1)]));
+  // сумма ВЕРНАЯ, но путь указывает на другой каталог — совпадение по
+  // basename было бы подменой.
+  const p1 = await pickZip(makeZip([
+    { name: 'FEEDS/x.json', data: feedData },
+    { name: 'SHA256SUMS.txt', data: `${sha256(feedData)}  OTHER/x.json` },
+  ]), false);
+  ok(/OTHER\/x\.json.*отсутствует в архиве|отсутствует в архиве/.test(p1.out),
+    'SHA256SUMS: чужой путь с верной суммой отклонён как отсутствующий файл', p1.out.slice(0, 160));
+}
+
+// ── 21. Манифест: дубли order и неоднозначный basename — fail closed ─
+{
+  await reset();
+  const a = JSON.stringify(pkg('TEST-ZIP-MO1', [dream('TEST-ZIP-MOD1', 'н1', 1)]));
+  const b = JSON.stringify(pkg('TEST-ZIP-MO2', [dream('TEST-ZIP-MOD2', 'н2', 1)]));
+  let p1 = await pickZip(makeZip([
+    { name: 'FEEDS/01.json', data: a },
+    { name: 'FEEDS/02.json', data: b },
+    { name: 'OWNER-IMPORT-MANIFEST.json', data: JSON.stringify({ packages: [
+      { order: 1, file: '01.json' }, { order: 1, file: '02.json' }] }) },
+  ]), false);
+  ok(/order.*повторяются/.test(p1.out), 'дубль order в манифесте отклонён', p1.out.slice(0, 140));
+
+  p1 = await pickZip(makeZip([
+    { name: 'FEEDS/x.json', data: a },
+    { name: 'SUB/FEEDS/x.json', data: b },
+    { name: 'OWNER-IMPORT-MANIFEST.json', data: JSON.stringify({ packages: [{ order: 1, file: 'x.json' }] }) },
+  ]), false);
+  ok(/неоднозначно/.test(p1.out), 'неоднозначный basename в манифесте отклонён', p1.out.slice(0, 140));
+}
+
+// ── 22. Автоисточник не персистентен до подтверждения ────────────────
+{
+  // чистое состояние → предпросмотр → источников в DB нет
+  await reset();
+  await pickZip(delivery([pkg('TEST-ZIP-PC1', [dream('TEST-ZIP-PCD1', 'нарратив', 1)])]));
+  let sources = await page.evaluate(() => { persist(); return DB.externalConnections.length; });
+  ok(sources === 0, `предпросмотр не создаёт персистентного источника (${sources})`);
+  // отмена/сброс → по-прежнему ноль
+  await page.evaluate(() => extResetToStep1());
+  sources = await page.evaluate(() => { persist(); return DB.externalConnections.length; });
+  ok(sources === 0, 'после отмены источников нет');
+
+  // битый архив → ноль
+  await pickZip(Buffer.from('PK\x03\x04мусор'), false);
+  sources = await page.evaluate(() => DB.externalConnections.length);
+  ok(sources === 0, 'битый архив не оставляет источника');
+
+  // предпросмотр → сбой persist на apply → ноль
+  await page.evaluate(() => extResetToStep1());
+  uid = 700;
+  await pickZip(delivery([pkg('TEST-ZIP-PC2', [dream('TEST-ZIP-PCD2', 'нарратив', 1)])]));
+  sources = await page.evaluate(() => {
+    const orig = persist;
+    persist = () => false;
+    extConnUiConfirm(); extConnUiApply();
+    persist = orig;
+    persist();
+    return DB.externalConnections.length;
+  });
+  ok(sources === 0, `сбой apply не оставляет источника-сироты (${sources})`);
+
+  // предпросмотр → успешный apply → ровно один персистентный источник
+  await page.evaluate(() => extResetToStep1());
+  uid = 700;
+  await pickZip(delivery([pkg('TEST-ZIP-PC2', [dream('TEST-ZIP-PCD2', 'нарратив', 1)])]));
+  await applyBatch();
+  const st = await page.evaluate(() => ({ sources: DB.externalConnections.length, dreams: DB.dreams.length,
+    checkpoint: DB.externalConnections[0].checkpoint.committedPackageHashes.length }));
+  ok(st.sources === 1 && st.dreams === 1 && st.checkpoint === 1,
+    `успешный apply создаёт ровно один источник с чекпойнтом (${st.sources}/${st.dreams}/${st.checkpoint})`);
 }
 
 // ── 18. a11y и мобильная вёрстка ZIP-пути ────────────────────────────
