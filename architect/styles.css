@@ -1506,3 +1506,8 @@ body.navshell .nsh-tab:focus-visible,body.navshell .nsh-fab:focus-visible,
   padding:var(--s2) var(--s3);font-size:var(--tx2);line-height:1.45;margin-top:var(--s2)}
 .ext-need{background:var(--orange-l);color:var(--orange);border-radius:10px;
   padding:var(--s2) var(--s3);font-size:var(--tx2);line-height:1.45;margin-top:var(--s2)}
+
+/* Веха вне шкалы 0..3 (например, собственная формулировка внешнего
+   источника): нейтральный стиль — уровень не додумывается. */
+.elx{color:var(--t3)}
+.edx{background:var(--t3)}

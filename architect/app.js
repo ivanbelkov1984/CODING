@@ -8031,13 +8031,30 @@ function rSpi() {
   ).join('');
 }
 const EVO_LV = [{c:'el0',d:'ed0',lb:'Наблюдение'},{c:'el1',d:'ed1',lb:'Понято'},{c:'el2',d:'ed2',lb:'Прочувствовано'},{c:'el3',d:'ed3',lb:'Трансформировало'}];
+// Уровень вехи 0..3 — шкала приложения. Значение вне шкалы (пусто, строка-
+// формулировка из внешнего источника, легаси) НЕ додумывается до «Наблюдения»:
+// запись показывается нейтральным стилем со СВОЕЙ формулировкой. Прямой
+// EVO_LV[Math.min(lv,3)] небезопасен: Math.min('этап',3) → NaN → undefined.
+const EVO_LV_OFFSCALE = { c: 'elx', d: 'edx', lb: 'Этап' };
+function evoLevelIndex(v) {
+  const n = typeof v === 'number' ? v
+    : (typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
+  return Number.isInteger(n) && n >= 0 ? Math.min(n, EVO_LV.length - 1) : null;
+}
+// Единая точка представления вехи для ВСЕХ рендереров.
+function evoView(rec) {
+  const i = evoLevelIndex(rec && rec.lv);
+  if (i != null) return EVO_LV[i];
+  const own = typeof (rec && rec.lv) === 'string' ? rec.lv.trim() : '';
+  return own ? { ...EVO_LV_OFFSCALE, lb: own } : EVO_LV_OFFSCALE;
+}
 function rEvoList(el) {
   if (!el) return;
   el.innerHTML = DB.evolution.map(e => {
-    const lv = EVO_LV[Math.min(e.lv,3)];
+    const lv = evoView(e);
     return `<div class="evo">
       <div class="edc"><div class="edot ${lv.d}"></div><div class="eline"></div></div>
-      <div style="flex:1"><div class="elv ${lv.c}">${lv.lb}</div><div class="etx">${esc(e.text)}</div><div class="edt">${e.dt}</div></div>
+      <div style="flex:1"><div class="elv ${lv.c}">${esc(lv.lb)}</div><div class="etx">${esc(e.text)}</div><div class="edt">${esc(e.dt || '')}</div></div>
     </div>`;
   }).join('');
 }
@@ -10298,7 +10315,11 @@ async function runSync({ manual = false } = {}) {
       const payload = await packPayload();
       const d = await api('/api/space/' + CFG.spaceKey, { method:'PUT', body:{ name: CFG.userName || 'Архитектор', ...payload } });
       CFG.lastSync = d.updated_at; persistLocal();
-      renderAfterSync();
+      // Обмен завершён и сохранён. Сбой ПЕРЕрисовки после этого — не провал
+      // синхронизации: сервер и устройство уже согласованы, и повторный синк
+      // ничего не чинит. Ошибку не проглатываем — она видна в журнале и
+      // отдельным сообщением на экране.
+      safeRenderAfterSync();
       setSyncBadge('ok');
       if (manual) { hptMed(); toast('Синхронизировано', 'ok'); }
     }
@@ -10312,6 +10333,15 @@ async function runSync({ manual = false } = {}) {
   } finally {
     _syncing = false;
     if (_dirty) scheduleSync(1500);
+  }
+}
+// Отрисовка после успешного обмена данными изолирована от статуса синка.
+function safeRenderAfterSync() {
+  try { renderAfterSync(); return true; }
+  catch (err) {
+    log('error', 'ошибка отрисовки после синхронизации', (err && err.message) || String(err));
+    toast('Данные синхронизированы, но обновить экран не удалось — открой раздел заново', 'warn');
+    return false;
   }
 }
 function renderAfterSync() {
@@ -10912,7 +10942,7 @@ const CMDS = {
   },
   '/ретро': () =>
     `<div style="font-size:var(--tx2);font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);margin-bottom:1rem">━━ РЕТРО ━━</div>
-    ${DB.evolution.slice(0,3).map(e=>{const lv=EVO_LV[Math.min(e.lv,3)];return`<div style="padding:.5rem 0;border-bottom:1px solid var(--bd)"><div class="elv ${lv.c}">${lv.lb}</div><div style="font-size:var(--tx3);color:var(--t2)">${esc(e.text.slice(0,100))}</div><div style="font-size:var(--tx2);color:var(--t3)">${e.dt}</div></div>`;}).join('')}`,
+    ${DB.evolution.slice(0,3).map(e=>{const lv=evoView(e);return`<div style="padding:.5rem 0;border-bottom:1px solid var(--bd)"><div class="elv ${lv.c}">${esc(lv.lb)}</div><div style="font-size:var(--tx3);color:var(--t2)">${esc(String(e.text || '').slice(0,100))}</div><div style="font-size:var(--tx2);color:var(--t3)">${esc(e.dt || '')}</div></div>`;}).join('')}`,
   '/помощь': () =>
     `<div style="font-size:var(--tx2);font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);margin-bottom:1rem">━━ КОМАНДЫ ━━</div>
     ${['/актуально','/книга','/паттерны','/карта','/состояние','/дайджест','/ретро'].map(k=>
@@ -15101,7 +15131,14 @@ const EXT_ADAPTERS = {
   evolution(e, d, ctx) {
     const text = extStr(d.text || d.body, 8000);
     if (!text) return { reject: 'нет текста вехи' };
-    return { rec: { id: ctx.nextId(), lv: extStr(d.lv || d.level, 40) || 'этап', text, dt: ctx.dateFull,
+    // `d.lv || d.level` терял валидный 0 (falsy), а extStr отбрасывал ЛЮБОЕ
+    // число — числовой уровень источника молча превращался в строку «этап».
+    // Теперь: число 0..3 сохраняется числом, строка — собственной
+    // формулировкой источника; renderer-невалидных значений не создаётся.
+    const rawLv = (d.lv !== undefined && d.lv !== null) ? d.lv : d.level;
+    const lvNum = evoLevelIndex(typeof rawLv === 'number' ? rawLv : (typeof rawLv === 'string' ? rawLv : null));
+    const lv = lvNum != null ? lvNum : (extStr(rawLv, 40) || 'этап');
+    return { rec: { id: ctx.nextId(), lv, text, dt: ctx.dateFull,
       createdAt: ctx.createdAt, day: ctx.day, sv: SCHEMA_VERSION } };
   },
   relationshipContext(e, d, ctx) {
