@@ -1488,3 +1488,21 @@ body.navshell .nsh-tab:focus-visible,body.navshell .nsh-fab:focus-visible,
 .about-col{min-width:0}
 .about-name{font-weight:600;color:var(--t1)}
 .about-sub{font-size:var(--tx2);color:var(--t3)}
+
+/* ── Импорт данных: индикатор трёх шагов ─────────────────────────────
+   Шаг подсвечивается по факту (файл → проверка → готово), а не «на всякий
+   случай»: пользователю видно, что до последнего шага ничего не применено. */
+.ext-steps{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;
+  font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;font-weight:600;
+  color:var(--t4);padding:var(--s2) 0}
+.ext-step{padding:.2rem .5rem;border-radius:999px;background:var(--bg2);color:var(--t4)}
+.ext-step.on{background:var(--teal-l);color:var(--teal)}
+.ext-step.done{color:var(--green)}
+.ext-sum{display:flex;justify-content:space-between;gap:var(--s3);
+  padding:.3rem 0;border-bottom:1px solid var(--hair);font-variant-numeric:tabular-nums}
+.ext-sum:last-child{border-bottom:0}
+.ext-sum b{font-weight:600;color:var(--t1)}
+.ext-safe{background:var(--green-l);color:var(--green);border-radius:10px;
+  padding:var(--s2) var(--s3);font-size:var(--tx2);line-height:1.45;margin-top:var(--s2)}
+.ext-need{background:var(--orange-l);color:var(--orange);border-radius:10px;
+  padding:var(--s2) var(--s3);font-size:var(--tx2);line-height:1.45;margin-top:var(--s2)}
