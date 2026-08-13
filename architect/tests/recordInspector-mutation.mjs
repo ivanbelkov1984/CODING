@@ -30,6 +30,24 @@ const MUTANTS = [
     expectFail: 'строковый id не обрывает атрибут обработчика',
   },
   {
+    // Идентичность записи снова схлопывается: id=1 и id="1" считаются одной
+    // записью — инспектор открывает чужую, правка уходит не туда.
+    id: 'id-identity-collapsed',
+    what: 'идентичность записи снова сравнивается через String()',
+    find: '  return (DB[_recDet.coll] || []).find(r => r && r.id === _recDet.id) || null;',
+    replace: '  return (DB[_recDet.coll] || []).find(r => r && String(r.id) === String(_recDet.id)) || null;',
+    expectFail: 'открытие id="1" (строка) открывает именно строковую запись',
+  },
+  {
+    // Пустая правка снова пишет запись: новый `_u`, лишняя запись в
+    // хранилище и лишний обмен при синхронизации на ровном месте.
+    id: 'noop-edit-writes',
+    what: 'сохранение без изменений снова трогает запись и хранилище',
+    find: '  if (!writes.length) return { ok: true, noop: true };',
+    replace: '  if (false) return { ok: true, noop: true };',
+    expectFail: 'сохранение без изменений не тронуло запись',
+  },
+  {
     // Правка снова трогает снимок версии источника — детектор локальных
     // правок слепнет, более новая ревизия молча перезаписывает владельца.
     id: 'edit-rewrites-import-hash',
@@ -78,8 +96,8 @@ function recSaveEdit() {`,
     // review и измерений снова переписываются на месте.
     id: 'evidence-fields-writable',
     what: 'период/решение review и значения измерений снова переписываются',
-    find: '  const writes = Object.keys(patch).filter(k => allowed.includes(k));',
-    replace: '  const writes = Object.keys(patch);',
+    find: '  const writes = Object.keys(patch)\n    .filter(k => allowed.includes(k))\n    .filter(k => !Object.is(rec[k], coerce(rec[k], patch[k])));',
+    replace: '  const writes = Object.keys(patch)\n    .filter(k => !Object.is(rec[k], coerce(rec[k], patch[k])));',
     expectFail: 'B2: прямой вызов не переписал период, решение, доказательства и гипотезы',
   },
   {

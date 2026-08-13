@@ -892,6 +892,166 @@ let importSnap;
   await closeRec();
 }
 
+// ── 17b. Идентичность записи СТРОГАЯ: id=1 и id="1" — разные записи ──
+// recArg намеренно сохраняет разницу число/строка, потому что всё
+// приложение сравнивает id через === (delUndo, tomb, ссылки между
+// записями). Сравнение через String() схлопнуло бы их в одну запись:
+// открылась бы чужая, правка ушла бы не туда, удалилось бы не то.
+{
+  const seed = () => page.evaluate(() => {
+    const base = { tag: 'personal', w: 1, date: '01.04.2026', createdAt: nowISO(),
+      day: todayKey(), sv: SCHEMA_VERSION, src: 'вручную', links: [], media: [], _u: 1 };
+    DB.insights = [
+      { ...base, id: 1, title: 'числовая запись', body: 'тело числовой' },
+      { ...base, id: '1', title: 'строковая запись', body: 'тело строковой' },
+    ];
+    persist();
+  });
+
+  await seed();
+  const num = await page.evaluate(() => {
+    recOpen('insights', 1);
+    const r = recDetRecord();
+    const out = { id: r && r.id, t: typeof (r && r.id), title: r && r.title,
+      text: ($('rec-det-body').textContent || '') };
+    closeOv('ov-rec-det');
+    return out;
+  });
+  ok(num.id === 1 && num.t === 'number' && num.title === 'числовая запись',
+    'открытие id=1 (число) открывает именно числовую запись', JSON.stringify(num));
+  ok(/тело числовой/.test(num.text) && !/тело строковой/.test(num.text),
+    'на экране содержимое числовой записи, не строковой');
+
+  const str = await page.evaluate(() => {
+    recOpen('insights', '1');
+    const r = recDetRecord();
+    const out = { id: r && r.id, t: typeof (r && r.id), title: r && r.title,
+      text: ($('rec-det-body').textContent || '') };
+    closeOv('ov-rec-det');
+    return out;
+  });
+  ok(str.id === '1' && str.t === 'string' && str.title === 'строковая запись',
+    'открытие id="1" (строка) открывает именно строковую запись', JSON.stringify(str));
+  ok(/тело строковой/.test(str.text) && !/тело числовой/.test(str.text),
+    'на экране содержимое строковой записи, не числовой');
+
+  // Правка каждой меняет ТОЛЬКО её.
+  const edited = await page.evaluate(() => {
+    const doEdit = (id, val) => {
+      recOpen('insights', id);
+      _recDet.editing = true; recRenderDetail();
+      $('rec-f-body').value = val;
+      recSaveEdit();
+      closeOv('ov-rec-det');
+    };
+    doEdit(1, 'правка числовой TEST-RI');
+    const afterNum = DB.insights.map(r => ({ id: r.id, t: typeof r.id, body: r.body }));
+    doEdit('1', 'правка строковой TEST-RI');
+    const afterStr = DB.insights.map(r => ({ id: r.id, t: typeof r.id, body: r.body }));
+    return { afterNum, afterStr };
+  });
+  const n1 = edited.afterNum.find(r => r.t === 'number'), s1 = edited.afterNum.find(r => r.t === 'string');
+  ok(n1.body === 'правка числовой TEST-RI' && s1.body === 'тело строковой',
+    'правка числовой записи не тронула строковую', JSON.stringify(edited.afterNum));
+  const n2 = edited.afterStr.find(r => r.t === 'number'), s2 = edited.afterStr.find(r => r.t === 'string');
+  ok(s2.body === 'правка строковой TEST-RI' && n2.body === 'правка числовой TEST-RI',
+    'правка строковой записи не тронула числовую', JSON.stringify(edited.afterStr));
+
+  // Удаление тоже строгое: удаляется ровно адресованная запись.
+  const del = await page.evaluate(() => {
+    const origConfirm = window.confirm; window.confirm = () => true;
+    recOpen('insights', 1);
+    recDelFromDetail();
+    window.confirm = origConfirm;
+    return { left: DB.insights.map(r => ({ id: r.id, t: typeof r.id })),
+      tombNum: !!(DB._del && DB._del[1]) };
+  });
+  ok(del.left.length === 1 && del.left[0].t === 'string' && del.left[0].id === '1',
+    'удаление id=1 (число) удалило числовую и оставило строковую', JSON.stringify(del.left));
+
+  // Оба id живут в списке и открываются каждый своей строкой.
+  await seed();
+  const rows = await page.evaluate(() => {
+    openRecords();
+    const sel = $('rec-coll'); sel.value = 'insights'; rRecords();
+    const btns = [...document.querySelectorAll('#records-list .si-row button.si-body')];
+    // getAttribute отдаёт УЖЕ раскодированное значение — именно это и
+    // доказывает, что кавычки доехали до JS через `&quot;`, а не оборвали
+    // атрибут. Сырую разметку проверяем отдельно.
+    const attrs = btns.map(b => b.getAttribute('onclick'));
+    const rawHtml = document.getElementById('records-list').innerHTML;
+    const opened = [];
+    btns.forEach(b => {
+      b.click();
+      const r = recDetRecord();
+      opened.push({ id: r && r.id, t: typeof (r && r.id), title: r && r.title });
+      closeOv('ov-rec-det');
+    });
+    return { attrs, rawHtml, opened };
+  });
+  ok(rows.attrs.some(a => a === `recOpen('insights',1)`) &&
+     rows.attrs.some(a => a === `recOpen('insights',"1")`),
+    'в списке два разных обработчика: число без кавычек, строка в кавычках',
+    JSON.stringify(rows.attrs));
+  ok(/recOpen\(&#39;insights&#39;,&quot;1&quot;\)|recOpen\('insights',&quot;1&quot;\)/.test(rows.rawHtml),
+    'в сырой разметке кавычки строкового id экранированы (атрибут не рвётся)',
+    rows.rawHtml.slice(0, 200));
+  const kinds = rows.opened.map(o => o.t).sort().join(',');
+  ok(kinds === 'number,string' && rows.opened.every(o => o.title),
+    'тап по каждой строке открывает свою запись, типы не схлопнулись',
+    JSON.stringify(rows.opened));
+}
+
+// ── 17c. Пустая правка ничего не пишет и не гоняет синхронизацию ─────
+{
+  const res = await page.evaluate(() => {
+    DB.insights = [{ id: 'TEST-RI-NOOP-1', tag: 'personal', w: 1, title: 'заголовок',
+      body: 'текст', date: '01.04.2026', createdAt: nowISO(), day: todayKey(),
+      sv: SCHEMA_VERSION, src: 'вручную', links: [], media: [], _u: 111 }];
+    persist();
+    const before = JSON.stringify(DB.insights[0]);
+    let persists = 0;
+    const origPersist = persist; persist = (...a) => { persists++; return origPersist(...a); };
+    const toasts = []; const origToast = toast; toast = (m, k) => toasts.push(k + ':' + m);
+    // Открыть форму и сохранить, ничего не изменив.
+    recOpen('insights', 'TEST-RI-NOOP-1');
+    _recDet.editing = true; recRenderDetail();
+    recSaveEdit();
+    const afterNoop = JSON.stringify(DB.insights[0]);
+    const noopPersists = persists;
+    // Теперь реальная правка — она обязана записаться.
+    _recDet.editing = true; recRenderDetail();
+    $('rec-f-body').value = 'настоящая правка TEST-RI';
+    recSaveEdit();
+    const realPersists = persists - noopPersists;
+    persist = origPersist; toast = origToast;
+    closeOv('ov-rec-det');
+    return { unchanged: before === afterNoop, noopPersists, realPersists,
+      toasts, u: DB.insights[0]._u, body: DB.insights[0].body };
+  });
+  ok(res.unchanged, 'сохранение без изменений не тронуло запись (включая `_u`)');
+  ok(res.noopPersists === 0, `пустая правка не пишет в хранилище (persist вызван ${res.noopPersists} раз)`);
+  ok(res.toasts.some(t => /Изменений нет/.test(t)),
+    'человеку честно сказано «изменений нет», а не «сохранено»', res.toasts.join(' | '));
+  ok(res.realPersists === 1 && res.body === 'настоящая правка TEST-RI' && res.u > 111,
+    'настоящая правка по-прежнему пишется и обновляет метку синхронизации',
+    JSON.stringify({ p: res.realPersists, u: res.u }));
+
+  // Прямой вызов писателя: пустая правка возвращает noop и не трогает `_u`.
+  const direct = await page.evaluate(() => {
+    const r = DB.insights[0];
+    const u = r._u;
+    const same = recApplyLocalEdit(r, 'insights', { body: r.body, title: r.title });
+    const uSame = r._u;
+    const diff = recApplyLocalEdit(r, 'insights', { body: r.body + ' (ещё)' });
+    return { same, uKept: uSame === u, diff, uMoved: r._u !== u };
+  });
+  ok(direct.same.ok && direct.same.noop === true && direct.uKept,
+    'писатель возвращает noop и не двигает `_u`, когда значения совпали', JSON.stringify(direct.same));
+  ok(direct.diff.ok && !direct.diff.noop && direct.uMoved,
+    'при реальном изменении писатель работает как прежде');
+}
+
 // ── 18. Разметка из данных не инъецируется ───────────────────────────
 {
   const xss = await page.evaluate(() => {

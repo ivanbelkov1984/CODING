@@ -2485,9 +2485,14 @@ function recOpen(coll, id) {
   recRenderDetail();
   openOv('ov-rec-det');
 }
+// Идентичность записи — СТРОГАЯ, как и везде в приложении (delUndo, tomb,
+// ссылки между записями сравнивают id через ===). Сравнение через String()
+// схлопывало бы id=1 и id="1" в одну запись: инспектор открыл бы чужую,
+// правка ушла бы не туда, удаление сработало бы не по той. Ради этого же
+// recArg сохраняет разницу число/строка при передаче id в обработчик.
 function recDetRecord() {
   if (!_recDet) return null;
-  return (DB[_recDet.coll] || []).find(r => r && String(r.id) === String(_recDet.id)) || null;
+  return (DB[_recDet.coll] || []).find(r => r && r.id === _recDet.id) || null;
 }
 function recRenderDetail() {
   const box = $('rec-det-body'); const act = $('rec-det-actions');
@@ -2571,7 +2576,15 @@ function recApplyLocalEdit(rec, coll, patch) {
   const allowed = em.fields || [];
   const coerce = (prev, next) =>
     (typeof prev === 'number' && next !== '' && !Number.isNaN(Number(next))) ? Number(next) : next;
-  const writes = Object.keys(patch).filter(k => allowed.includes(k));
+  // Пустая правка — не правка: если ни одно разрешённое поле фактически не
+  // изменилось, запись не трогаем вовсе. Иначе открыть и закрыть форму
+  // означало бы новый `_u`, лишнюю запись в хранилище и лишний обмен при
+  // синхронизации — а на устройстве владельца это ещё и ложный «свежее
+  // локально» при слиянии.
+  const writes = Object.keys(patch)
+    .filter(k => allowed.includes(k))
+    .filter(k => !Object.is(rec[k], coerce(rec[k], patch[k])));
+  if (!writes.length) return { ok: true, noop: true };
   if (em.build && typeof PSY_BUILDERS === 'object' && PSY_BUILDERS[em.build]) {
     const probe = { ...rec };
     writes.forEach(k => { probe[k] = coerce(rec[k], patch[k]); });
@@ -2590,6 +2603,12 @@ function recSaveEdit() {
   const snap = JSON.parse(JSON.stringify(rec));
   const r = recApplyLocalEdit(rec, _recDet.coll, patch);
   if (!r.ok) { toast(r.error, 'warn'); return; }
+  if (r.noop) {   // ничего не изменилось — ни записи, ни синхронизации
+    _recDet.editing = false;
+    recRenderDetail();
+    toast('Изменений нет', 'ok');
+    return;
+  }
   if (!persist()) {
     Object.keys(rec).forEach(k => { delete rec[k]; });
     Object.assign(rec, snap);
