@@ -580,15 +580,27 @@ console.log('\n── FINAL A: Universal External Sources Bridge ──');
 // ═══ 13. Никаких провайдерских учётных данных и сети ════════════════
 {
   const bundle = readFileSync(FILE.replace('file://', ''), 'utf8');
-  const providerEndpoints = ['accounts.google.com', 'oauth2.googleapis.com', 'www.googleapis.com/drive', 'drive.googleapis.com'];
-  ok(providerEndpoints.every(u => !bundle.includes(u)),
-    'в бандле нет обращений к Google OAuth/Drive API (ядро provider-neutral)');
+  // ИЗМЕНЕНИЕ КОНТРАКТА (решение владельца D-1, Drive Sync Hub v1).
+  // Раньше здесь проверялось, что обращений к Google в сборке нет вовсе.
+  // Прямой Drive OAuth утверждён владельцем, поэтому запрет «ни одного
+  // упоминания» больше не соответствует продукту. Защитный смысл проверки
+  // сохранён и стал точнее: Google допустим ТОЛЬКО как read-адаптер Drive
+  // и только в узкой границе.
+  const restricted = ['auth/drive.readonly', 'auth/drive.metadata', 'auth/drive.activity'];
+  ok(restricted.every(s => !bundle.includes(s)),
+    'restricted-скоупы Google (drive.readonly / metadata / activity) в сборке не запрашиваются');
+  ok(bundle.includes('auth/drive.file'),
+    'Drive использует ровно non-sensitive per-file scope drive.file');
+  ok(!/<script[^>]+(accounts\.google\.com|apis\.google\.com)/.test(bundle),
+    'скрипты Google не подключены в разметке — только ленивая загрузка по действию владельца');
+  ok(!/AIza[0-9A-Za-z_-]{20,}|GOCSPX-[0-9A-Za-z_-]{10,}|client_secret/.test(bundle),
+    'учётных данных и секретов провайдера в сборке нет');
   const adapters = await page.evaluate(() => ({
     kinds: EXT_CHANNEL_KINDS.slice(),
     reads: Object.values(EXT_CHANNEL_ADAPTERS).map(a => a.read),
   }));
   ok(adapters.kinds.length === 5 && adapters.reads.every(r => r === 'owner_mediated'),
-    'все каналы читаются owner-mediated (файл/вставка/готовая подача) — единый интерфейс адаптера');
+    'каналы моста читаются owner-mediated — ядро приёма остаётся provider-neutral');
   const creds = await page.evaluate(() => {
     const c = DB.externalConnections[0] || {};
     const keys = JSON.stringify(Object.keys(c));
