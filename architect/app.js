@@ -10503,6 +10503,8 @@ function rCfgForm() {
   const di = $('cfg-domain'); if(di) di.value = CFG.domainLabel||'Книга';
   const ai = $('cfg-api');    if(ai) ai.value = CFG.apiUrl||'';
   const ki = $('cfg-space');  if(ki) ki.value = CFG.spaceKey||'';
+  const dci = $('cfg-drive-client'); if (dci) dci.value = CFG.driveClientId || '';
+  driveCfgNote();
   const ls = $('cfg-lastsync');
   if (ls) ls.textContent = CFG.lastSync ? 'Последняя синхронизация: '+new Date(CFG.lastSync).toLocaleString('ru') : 'Ещё не синхронизировано';
   const pi = $('cfg-pass'); if (pi) pi.value = getPass();
@@ -10547,6 +10549,12 @@ function saveCfg() {
   CFG.apiUrl      = $('cfg-api')?.value.trim()||'';
   const keyVal    = $('cfg-space')?.value.trim()||'';
   CFG.spaceKey    = keyVal;  // позволяет вставить ключ с другого устройства
+  // Drive: ПУБЛИЧНЫЙ идентификатор приложения. Токена доступа здесь нет и
+  // быть не может — он живёт только в памяти сессии (решение D-2).
+  const dcRaw = $('cfg-drive-client')?.value || '';
+  const dc = driveClientIdNormalize(dcRaw);
+  if (dc.ok) CFG.driveClientId = dc.value;
+  else { toast(dc.error, 'warn'); return; }
   if (CFG.axes.domain) CFG.axes.domain.lbl = CFG.domainLabel;
   persist(); closeOv('ov-cfg');
   updateDomainLabel(); rCompass(); rVit(); checkApiStatus();
@@ -15407,13 +15415,42 @@ function driveNetReal() {
     const tok = driveTokenPeek();
     if (!tok) { const e = new Error('нет действующей авторизации Google'); e.needAuth = true; throw e; }
     const r = await fetch(url, { headers: { Authorization: 'Bearer ' + tok } });
-    if (r.status === 401 || r.status === 403) {
+    // 401 и 403 — РАЗНЫЕ события, и путать их нельзя.
+    //   401 → сам токен недействителен/истёк: гасим его и просим переподключиться.
+    //   403 → токен рабочий, но конкретная операция запрещена. Причина внутри
+    //         тела ответа: потеря прав на файл — это «объект недоступен»
+    //         (D-5: canonical не трогаем), а квота/лимит — это ошибка сервиса,
+    //         которую НЕЛЬЗЯ выдавать ни за истёкший вход, ни за исчезнувший
+    //         файл, иначе источник ложно помечается недоступным.
+    if (r.status === 401) {
       driveTokenClear();
-      const e = new Error('доступ к файлу закрыт или авторизация истекла');
-      e.needAuth = r.status === 401; e.forbidden = r.status === 403;
+      const e = new Error('авторизация Google истекла');
+      e.needAuth = true;
+      throw e;
+    }
+    if (r.status === 403) {
+      let reason;
+      try {
+        const body = await r.clone().json();
+        const errs = (body && body.error && body.error.errors) || [];
+        reason = String((errs[0] && errs[0].reason) || (body && body.error && body.error.status) || '');
+      } catch (_) { reason = ''; }
+      const quota = /rateLimitExceeded|userRateLimitExceeded|quotaExceeded|dailyLimitExceeded|backendError|RESOURCE_EXHAUSTED/i.test(reason);
+      if (quota) {
+        // Токен НЕ гасим и файл НЕ объявляем недоступным: это временная
+        // ошибка сервиса. Fail closed — просто отказ с честной причиной.
+        const e = new Error('Google временно ограничил частоту запросов — повтори позже');
+        e.rateLimited = true;
+        throw e;
+      }
+      // Потеря прав на объект. Токен остаётся действительным: другие файлы
+      // источника могут читаться дальше.
+      const e = new Error('доступ к этому файлу закрыт');
+      e.forbidden = true;
       throw e;
     }
     if (r.status === 404) { const e = new Error('файл не найден'); e.notFound = true; throw e; }
+    if (r.status === 429) { const e = new Error('Google временно ограничил частоту запросов — повтори позже'); e.rateLimited = true; throw e; }
     if (!r.ok) throw new Error('Drive ответил ошибкой ' + r.status);
     return r;
   };
@@ -15511,6 +15548,9 @@ async function driveReadFeed(connId, net) {
     try {
       meta = await nt.getMeta(f.fileId);
     } catch (e) {
+      // Квота/лимит — НЕ «источник исчез» и НЕ «вход истёк». Отказываем
+      // целиком и честно, не помечая объект недоступным.
+      if (e && e.rateLimited) return { ok: false, errors: [`«${f.name}»: ${String((e && e.message) || e).slice(0, 120)}`], rateLimited: true };
       // D-5: недоступность источника — НИКОГДА не удаление canonical.
       if (e && (e.notFound || e.forbidden)) { missing.push(f.name); continue; }
       if (e && e.needAuth) return { ok: false, errors: ['авторизация Google истекла — подключись заново'], needAuth: true };
@@ -15524,6 +15564,7 @@ async function driveReadFeed(connId, net) {
     try {
       text = await nt.getContent(f.fileId);
     } catch (e) {
+      if (e && e.rateLimited) return { ok: false, errors: [`«${f.name}»: ${String((e && e.message) || e).slice(0, 120)}`], rateLimited: true };
       if (e && (e.notFound || e.forbidden)) { missing.push(f.name); continue; }
       if (e && e.needAuth) return { ok: false, errors: ['авторизация Google истекла — подключись заново'], needAuth: true };
       return { ok: false, errors: [`«${f.name}»: ${String((e && e.message) || e).slice(0, 120)}`] };
@@ -15653,6 +15694,40 @@ function driveConnCreate(label) {
   return extConnCreate(String(label || 'Google Drive').slice(0, 120), 'google_drive_export');
 }
 
+// ── Публичный client id: нормализация и понятная настройка ──────────
+// Это ИДЕНТИФИКАТОР приложения, а не секрет: он виден в любом браузерном
+// OAuth-клиенте Google. Токен доступа рядом с этим полем не появляется
+// никогда — он живёт только в памяти сессии.
+function driveClientIdNormalize(raw) {
+  const v = String(raw == null ? '' : raw).trim();
+  if (!v) return { ok: true, value: '' };            // пусто = Drive не настроен
+  if (v.length > 200) return { ok: false, error: 'идентификатор приложения слишком длинный — проверь, что скопирован только Client ID' };
+  if (/\s/.test(v)) return { ok: false, error: 'в идентификаторе приложения не бывает пробелов — скопируй его целиком без переносов' };
+  // Явная защита от вставки не того: секреты Google начинаются иначе.
+  if (/^GOCSPX-/i.test(v)) return { ok: false, error: 'это Client SECRET, а не Client ID — секрет в приложение вставлять нельзя' };
+  if (/^ya29\.|^AIza/i.test(v)) return { ok: false, error: 'это токен или API-ключ, а не Client ID — сюда они не вставляются' };
+  if (!/\.apps\.googleusercontent\.com$/i.test(v)) {
+    return { ok: false, error: 'Client ID Google заканчивается на .apps.googleusercontent.com — проверь, что скопировал именно его' };
+  }
+  return { ok: true, value: v };
+}
+const driveClientIdSet = () => !!String((CFG && CFG.driveClientId) || '').trim();
+function driveCfgNote() {
+  const el = $('cfg-drive-note'); if (!el) return;
+  el.textContent = driveClientIdSet()
+    ? 'Идентификатор задан — Google Drive можно подключить в разделе «Источники».'
+    : 'Пока не задан: чтение Google Drive недоступно. Всё остальное приложение работает как обычно.';
+}
+// Переход из «Источников» прямо в нужное место настроек: тупикового
+// сообщения об ошибке быть не должно.
+function driveOpenSettings() {
+  try { closeOv('ov-ext-import'); } catch (_) { }
+  openOv('ov-cfg');
+  try { rCfgForm(); } catch (_) { }
+  const el = $('cfg-drive-client');
+  if (el) { try { el.scrollIntoView({ block: 'center' }); } catch (_) { } el.focus(); }
+}
+
 // ── Одна кнопка «Синхронизировать» (D-3) ────────────────────────────
 // Явное действие владельца: read + normalize + preview. Canonical-commit
 // по-прежнему требует отдельного явного подтверждения — эта функция его
@@ -15698,6 +15773,79 @@ async function driveSyncNow(connId, net) {
 // ── UI подключений (внутри существующего экрана импорта) ────────────
 let _extConnTargets = [];
 let _extConnActive = null;
+// ── Панель Google Drive внутри существующего списка источников ──────
+// Отдельного экрана и отдельного предпросмотра НЕТ: после «Синхронизировать»
+// подача идёт в тот же самый предпросмотр моста и то же подтверждение.
+// Токен доступа здесь не показывается и в разметку не попадает — только
+// состояние «подключено в этой сессии / нет».
+function drivePanelHtml(c, i) {
+  const feeds = driveFeedsOf(c);
+  const authed = driveAuthState() === 'active';
+  if (!driveClientIdSet()) {
+    return `<div class="ext-need" id="drive-need-cid-${i}">Google Drive пока не настроен: нужен публичный идентификатор приложения (Client ID).
+      <div class="psy-actions"><button type="button" class="btn btn-s btn-sm" id="drive-goto-cfg-${i}" onclick="driveOpenSettings()">Открыть настройки Google Drive</button></div></div>`;
+  }
+  const feedRows = feeds.length
+    ? feeds.map((f, k) => `<div class="si-row" data-drive-feed="${esc(String(f.fileId))}"><div class="si-body"><div class="si-text">${esc(f.name)}</div>
+        <div class="si-text" style="font-size:.7rem;color:var(--t4)">${f.cursor ? 'уже импортировано' : 'ещё не читалось'}</div></div>
+        <button type="button" class="btn btn-s" id="drive-rm-${i}-${k}" onclick="driveUiAction(${i},'remove',${recArg(f.fileId)})">Убрать</button></div>`).join('')
+    : '<div class="ai-sp-empty">Подачи не выбраны.</div>';
+  return `<div class="psy-fld" style="margin-top:.4rem;border-top:1px solid var(--ln);padding-top:.5rem">
+    <div class="si-text" style="font-size:.75rem;color:var(--t3)" id="drive-auth-${i}">Доступ к Google: ${authed ? '<b>подключено в этой сессии</b>' : 'не подключено'}. Ключ доступа хранится только в памяти вкладки и исчезает при перезапуске.</div>
+    <div class="psy-actions">
+      <button type="button" class="btn btn-s btn-sm" id="drive-auth-btn-${i}" onclick="driveUiAction(${i},'connect')">${authed ? 'Переподключить Google' : 'Подключить Google'}</button>
+      <button type="button" class="btn btn-s btn-sm" id="drive-pick-${i}" onclick="driveUiAction(${i},'pick')">Выбрать файлы</button>
+      <button type="button" class="btn btn-p btn-sm" id="drive-sync-${i}" onclick="driveUiAction(${i},'sync')">Синхронизировать</button>
+      ${authed ? `<button type="button" class="btn btn-s btn-sm" id="drive-signout-${i}" onclick="driveUiAction(${i},'signout')">Выйти из Google</button>` : ''}
+    </div>
+    <div class="f-lbl" style="margin-top:.4rem">Выбранные подачи (${feeds.length})</div>
+    ${feedRows}
+  </div>`;
+}
+async function driveUiAction(i, action, fileId) {
+  const t = _extConnTargets[i]; if (!t) return;
+  const conn = extConnFind(t.id); if (!conn) return;
+  _extConnActive = t.id;
+  const out = $('ext-conn-out');
+  const fail = msg => { if (out) out.innerHTML = `<div class="psy-adv" role="alert">${esc(msg)}</div>`; };
+  if (action === 'remove') {
+    driveFeedsRemove(t.id, fileId);
+    extRenderConnections();
+    return;
+  }
+  if (action === 'signout') {
+    driveTokenClear(); driveCursorsDrop();
+    extRenderConnections();
+    toast('Выход из Google выполнен. Импортированные записи остаются.', 'ok');
+    return;
+  }
+  if (action === 'connect' || action === 'pick') {
+    if (!driveClientIdSet()) { driveOpenSettings(); return; }
+    try {
+      if (action === 'connect') { await driveConnect(); toast('Google подключён на эту сессию', 'ok'); }
+      else {
+        const r = await drivePickFeeds(t.id);
+        if (!r.ok) { fail(r.errors[0]); extRenderConnections(); return; }
+        toast(r.added ? `Добавлено подач: ${r.added}` : 'Новых файлов не выбрано', 'ok');
+      }
+    } catch (e) {
+      const msg = String((e && e.message) || e).slice(0, 200);
+      fail((e && e.noClient) ? 'Google Drive не настроен — укажи публичный Client ID в настройках.' : msg);
+    }
+    extRenderConnections();
+    return;
+  }
+  if (action === 'sync') {
+    if (!driveClientIdSet()) { driveOpenSettings(); return; }
+    if (!driveAuthState || driveAuthState() !== 'active') {
+      fail('Сначала подключи Google — доступ действует только в текущей сессии.');
+      return;
+    }
+    await driveSyncNow(t.id);
+    extRenderConnections();
+    return;
+  }
+}
 function extConnUiCreate() {
   const lbl = ($('extc-label') || {}).value || '';
   const kind = ($('extc-kind') || {}).value || 'other';
@@ -15865,6 +16013,7 @@ function extRenderConnections() {
       <b>${esc(c.label)}</b> · ${esc(EXT_CHANNEL_RU[c.kind] || c.kind)} · <span class="psy-status">${esc(EXT_SOURCE_STATUS_RU[c.status] || c.status)}</span>
       <div class="si-text" style="font-size:.72rem;color:var(--t3)">Последний импорт: ${cp.lastRefreshAt ? esc(String(cp.lastRefreshAt).slice(0, 16).replace('T', ' ')) : 'ещё не было'} · записей добавлено: ${(c.stats || {}).recordsCreated || 0}${c.container && (c.container.label || c.container.id) ? ' · откуда: ' + esc(c.container.label || c.container.id) : ''}</div>
       ${cp.lastError ? `<div class="psy-adv">${esc(cp.lastError)}</div>` : ''}
+      ${driveIsDriveConn(c) ? drivePanelHtml(c, i) : ''}
       <div class="psy-actions">
         ${!active ? `<button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'select')">Выбрать</button>` : ''}
         ${c.status === 'disconnected' || c.status === 'source_unavailable' || c.status === 'error_requires_user' ? `<button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'resume')">Включить снова</button>` : `<button type="button" class="btn btn-s btn-sm" onclick="extConnUiAction(${i},'disconnect')">Отключить</button>`}

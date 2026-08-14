@@ -1742,6 +1742,12 @@
         <button class="btn btn-s btn-sm" onclick="copySpaceKey()"><i data-lucide="copy"></i>Копировать ключ</button>
         <button class="btn btn-g btn-sm" onclick="pullData()"><i data-lucide="download-cloud"></i>Загрузить с сервера</button>
       </div>
+      <div id="cfg-drive-block">
+        <div class="f-lbl">Google Drive · идентификатор приложения (Client ID)</div>
+        <input class="field" id="cfg-drive-client" placeholder="1234567890-abc….apps.googleusercontent.com" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <div style="font-size:var(--tx2);color:var(--t3);margin-top:var(--s2)">Это <b>публичный</b> идентификатор приложения из Google Cloud Console, а не пароль и не токен. Он виден в любом браузерном приложении Google и хранится в обычных настройках. Ключ доступа к твоему Drive здесь не хранится никогда: он живёт только в памяти открытой вкладки и исчезает при перезапуске.</div>
+        <div id="cfg-drive-note" style="font-size:var(--tx2);color:var(--t3);margin-top:var(--s2)"></div>
+      </div>
       <div>
         <div class="f-lbl">Парольная фраза (end-to-end шифрование)</div>
         <input class="field" id="cfg-pass" type="password" placeholder="Оставь пустым, чтобы не шифровать" autocapitalize="off" autocorrect="off" spellcheck="false">
