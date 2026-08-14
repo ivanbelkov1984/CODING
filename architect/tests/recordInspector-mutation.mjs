@@ -129,8 +129,8 @@ function recSaveEdit() {`,
     // Инспектор снова показывает только сводку — полного текста не видно.
     id: 'body-truncated-to-summary',
     what: 'экран записи снова показывает лишь короткую сводку',
-    find: '    return `<div class="psy-fld"><div class="f-lbl">${esc(f.l)}</div><div class="si-text" style="white-space:pre-wrap;line-height:1.55">${esc(t)}</div></div>`;',
-    replace: '    return `<div class="psy-fld"><div class="f-lbl">${esc(f.l)}</div><div class="si-text">${esc(t.slice(0, 40))}</div></div>`;',
+    find: '    return `<div class="psy-fld"><div class="f-lbl">${esc(f.l)}${mark}</div><div class="si-text" style="white-space:pre-wrap;line-height:1.55">${esc(t)}</div></div>`;',
+    replace: '    return `<div class="psy-fld"><div class="f-lbl">${esc(f.l)}${mark}</div><div class="si-text">${esc(t.slice(0, 40))}</div></div>`;',
     expectFail: 'полный текст импортированных записей всех девяти типов виден в инспекторе',
   },
   {
@@ -153,8 +153,8 @@ function recSaveEdit() {`,
     // Значения полей перестают экранироваться при чтении.
     id: 'detail-not-escaped',
     what: 'значения полей вставляются в разметку без экранирования',
-    find: 'style="white-space:pre-wrap;line-height:1.55">${esc(t)}</div>',
-    replace: 'style="white-space:pre-wrap;line-height:1.55">${t}</div>',
+    find: '${mark}</div><div class="si-text" style="white-space:pre-wrap;line-height:1.55">${esc(t)}</div>',
+    replace: '${mark}</div><div class="si-text" style="white-space:pre-wrap;line-height:1.55">${t}</div>',
     expectFail: 'значения полей экранируются при чтении',
   },
   {
