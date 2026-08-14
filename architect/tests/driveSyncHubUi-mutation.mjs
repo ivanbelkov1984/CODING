@@ -123,7 +123,11 @@ const MUTANTS = [
   },
 ];
 
-const run = (bundle) => new Promise(res => {
+// Повтор ТОЛЬКО когда прогон не дал ни одной красной строки: это признак
+// того, что сюита умерла раньше проверок (нехватка ресурсов на раннере), а не
+// того, что защита действительно снята. Настоящий выживший мутант выживает и
+// во второй раз, поэтому строгость проверки не снижается.
+const runOnce = (bundle) => new Promise(res => {
   const p = spawn(process.execPath, [SPEC], {
     cwd: join(DIR, '..'),
     env: { ...process.env, DRIVE_BUNDLE: bundle },
@@ -133,6 +137,12 @@ const run = (bundle) => new Promise(res => {
   p.stderr.on('data', d => { out += d; });
   p.on('close', code => res({ code, out }));
 });
+const run = async (bundle) => {
+  const first = await runOnce(bundle);
+  const reds = first.out.split('\n').filter(l => l.trimStart().startsWith('✗'));
+  if (reds.length) return first;
+  return await runOnce(bundle);
+};
 
 let pass = 0, fail = 0;
 const ok = (cond, msg, detail) => {
@@ -158,7 +168,7 @@ for (const m of MUTANTS) {
     `[${m.id}] ${m.what} → сценарий «${m.expectFail}» покраснел (${reds.length} провалов)`,
     code === 0 ? 'ПРОВЕРКА ЛОЖНОЗЕЛЁНАЯ: обработчик снят, но браузерная сюита прошла.'
       : hit ? null
-        : `Упало не на ожидаемом сценарии. Красные:\n${reds.slice(0, 6).join('\n') || '(нет)'}`);
+        : `Упало не на ожидаемом сценарии. Красные:\n${reds.slice(0, 6).join('\n') || '(нет)'}\nХвост вывода:\n${out.split('\n').slice(-12).join('\n')}`);
 }
 
 console.log(`\nDRIVE UI mutation sanity: ${pass} passed, ${fail} failed`);
