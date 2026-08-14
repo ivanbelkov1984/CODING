@@ -524,6 +524,267 @@ const v1Pkg = (n, body) => ({
   ok(un.projIsRaw, 'проекция для неподдерживаемой коллекции возвращает запись как есть');
 }
 
+// ── 18. §1 БЛОКЕР: снимок берётся в момент ПОКАЗА формы ──────────────
+// Между показом формы и сохранением с другого устройства может прилететь
+// чужая коррекция. Если снимок брать при сохранении, владелец молча заместит
+// исправление, которого никогда не видел. Здесь это ровно и проверяется.
+{
+  // A. Форма открыта: значение 5, исправлений НЕТ.
+  // B. С другого устройства приходит исправление на 7 (форму не переоткрывали).
+  // C. Владелец вводит 8 и сохраняет.
+  const st = await page.evaluate(() => {
+    DB.corrections = []; DB.psyObservations = [];
+    DB.psyObservations = [{ id: 'TEST-CORR-S1', metricId: 'm', valueNumber: 5, timestamp: nowISO(), sv: SCHEMA_VERSION }];
+    persist();
+    const out = {};
+    // Снимок читаем защищённо: под мутацией его может не быть вовсе, и тест
+    // обязан это ПОКАЗАТЬ красным, а не упасть исключением.
+    const snapOf = f => ((_recDet && _recDet.corrSnap && _recDet.corrSnap.heads && _recDet.corrSnap.heads[f]) || { state: 'НЕТ-СНИМКА' });
+    recOpen('psyObservations', 'TEST-CORR-S1'); recCorrOpen();
+    out.sawFive = /сейчас: 5/.test($('rec-det-body').textContent);
+    out.snapNone = snapOf('valueNumber').state === 'none';
+    // B — приходит с синхронизацией, форма НЕ перерисовывается человеком.
+    DB.corrections.push({ id: 'TEST-CORR-S1-C1', kType: 'correction', coll: 'psyObservations',
+      targetId: 'TEST-CORR-S1', patch: { valueNumber: 7 }, reason: 'со второго устройства',
+      supersedesCorrectionId: null, origin: 'user', createdAt: nowISO(), sv: SCHEMA_VERSION });
+    const nBefore = DB.corrections.length;
+    const rawBefore = JSON.stringify(DB.psyObservations[0]);
+    const storeBefore = localStorage.getItem('arch5_db_' + activeId());
+    // C
+    $('rec-c-valueNumber').value = '8';
+    recCorrSave();
+    out.noNewCorrection = DB.corrections.length === nBefore;
+    out.noEight = !DB.corrections.some(c => c.patch && c.patch.valueNumber === 8);
+    out.effStays7 = projOne('psyObservations', 'TEST-CORR-S1').valueNumber === 7;
+    out.rawUntouched = JSON.stringify(DB.psyObservations[0]) === rawBefore;
+    out.noPersist = localStorage.getItem('arch5_db_' + activeId()) === storeBefore;
+    out.banner = /Данные изменились с момента открытия формы/.test($('rec-det-body').textContent);
+    out.stillCorrecting = _recDet.correcting === true;
+    // Ожидание НЕ обновилось само: повтор сохранения снова отклоняется.
+    out.snapNotRefreshed = snapOf('valueNumber').state === 'none';
+    // Явное действие человека — и только оно — обновляет ожидание.
+    recCorrReload();
+    out.afterReloadHead = snapOf('valueNumber').state === 'head'
+      && snapOf('valueNumber').id === 'TEST-CORR-S1-C1';
+    if ($('rec-c-valueNumber')) $('rec-c-valueNumber').value = '8';
+    recCorrSave();
+    out.afterReloadSaved = projOne('psyObservations', 'TEST-CORR-S1').valueNumber === 8;
+    out.afterReloadSupersedes = (DB.corrections.find(c => c.patch && c.patch.valueNumber === 8) || {}).supersedesCorrectionId === 'TEST-CORR-S1-C1';
+    closeOv('ov-rec-det');
+    return out;
+  });
+  ok(st.sawFive && st.snapNone, 'снимок берётся при ПОКАЗЕ формы и типизирован (нет головы)', JSON.stringify(st));
+  ok(st.noNewCorrection && st.noEight, 'устаревший показ → исправление НЕ записано (ноль мутаций)', JSON.stringify(st));
+  ok(st.effStays7, 'эффективное значение осталось 7 — чужая коррекция не замещена', JSON.stringify(st));
+  ok(st.rawUntouched && st.noPersist, 'провалившееся сохранение ничего не записало в хранилище', JSON.stringify(st));
+  ok(st.banner && st.stillCorrecting, 'человеку честно сказано, что данные изменились с момента открытия');
+  ok(st.snapNotRefreshed, 'ожидание НЕ обновилось автоматически после отказа');
+  ok(st.afterReloadHead && st.afterReloadSaved && st.afterReloadSupersedes,
+    'после ЯВНОГО обновления формы исправление проходит и явно заменяет увиденную голову', JSON.stringify(st));
+
+  // Второй сценарий: форма открыта поверх головы C1, синк добавляет C2,
+  // заменяющую C1. Сохранение против визуально устаревшей C1 отклоняется.
+  const st2 = await page.evaluate(() => {
+    DB.corrections = []; DB.checkins = [];
+    DB.checkins = [{ id: 'TEST-CORR-S2', date: '2026-04-02', sl: 5, sq: 5, cl: 5, st: 5, mv: 5, note: '', sv: SCHEMA_VERSION }];
+    const c1 = addCorrection('checkins', 'TEST-CORR-S2', { sl: 6 }, 'первое');
+    recOpen('checkins', 'TEST-CORR-S2'); recCorrOpen();
+    const seenId = ((_recDet.corrSnap && _recDet.corrSnap.heads && _recDet.corrSnap.heads.sl) || {}).id;
+    DB.corrections.push({ id: 'TEST-CORR-S2-C2', kType: 'correction', coll: 'checkins',
+      targetId: 'TEST-CORR-S2', patch: { sl: 7 }, reason: 'со второго устройства',
+      supersedesCorrectionId: c1.rec.id, origin: 'user', createdAt: nowISO(), sv: SCHEMA_VERSION });
+    const nBefore = DB.corrections.length;
+    $('rec-c-sl').value = '9';
+    recCorrSave();
+    const out = {
+      seenWasC1: seenId === String(c1.rec.id),
+      rejected: DB.corrections.length === nBefore && !DB.corrections.some(c => c.patch && c.patch.sl === 9),
+      eff: projOne('checkins', 'TEST-CORR-S2').sl,
+      banner: /Данные изменились с момента открытия формы/.test($('rec-det-body').textContent),
+    };
+    closeOv('ov-rec-det');
+    return out;
+  });
+  ok(st2.seenWasC1, 'снимок показа зафиксировал именно ту голову, которую видел человек');
+  ok(st2.rejected && st2.eff === 7 && st2.banner,
+    'замещение головы, которую человек не видел, отклонено (эффективное осталось 7)', JSON.stringify(st2));
+
+  // Многополевое исправление: КАЖДОЕ поле сверяется со своим снимком.
+  const st3 = await page.evaluate(() => {
+    DB.corrections = []; DB.checkins = [];
+    DB.checkins = [{ id: 'TEST-CORR-S3', date: '2026-04-03', sl: 5, sq: 5, cl: 5, st: 5, mv: 5, note: '', sv: SCHEMA_VERSION }];
+    recOpen('checkins', 'TEST-CORR-S3'); recCorrOpen();
+    // Чужая коррекция приходит ТОЛЬКО по одному из двух правимых полей.
+    DB.corrections.push({ id: 'TEST-CORR-S3-C1', kType: 'correction', coll: 'checkins',
+      targetId: 'TEST-CORR-S3', patch: { sq: 9 }, reason: 'со второго устройства',
+      supersedesCorrectionId: null, origin: 'user', createdAt: nowISO(), sv: SCHEMA_VERSION });
+    const nBefore = DB.corrections.length;
+    $('rec-c-sl').value = '8'; $('rec-c-sq').value = '3';
+    recCorrSave();
+    const out = {
+      rejected: DB.corrections.length === nBefore,
+      slNotWritten: !DB.corrections.some(c => c.patch && c.patch.sl === 8),
+      eff: projOne('checkins', 'TEST-CORR-S3'),
+    };
+    closeOv('ov-rec-det');
+    return { rejected: out.rejected, slNotWritten: out.slNotWritten, sl: out.eff.sl, sq: out.eff.sq };
+  });
+  ok(st3.rejected && st3.slNotWritten && st3.sl === 5 && st3.sq === 9,
+    'многополевое исправление: расхождение по ОДНОМУ полю отклоняет всё исправление целиком', JSON.stringify(st3));
+
+  // Введённое значение СЛУЧАЙНО совпало с чужой коррекцией. Это всё равно
+  // устаревший показ: сказать «Изменений нет» значит выдать чужую правку за
+  // свою уже применённую.
+  const st4 = await page.evaluate(() => {
+    DB.corrections = []; DB.checkins = [];
+    DB.checkins = [{ id: 'TEST-CORR-S4', date: '2026-04-04', sl: 5, sq: 5, cl: 5, st: 5, mv: 5, note: '', sv: SCHEMA_VERSION }];
+    recOpen('checkins', 'TEST-CORR-S4'); recCorrOpen();
+    DB.corrections.push({ id: 'TEST-CORR-S4-C1', kType: 'correction', coll: 'checkins',
+      targetId: 'TEST-CORR-S4', patch: { sl: 7 }, reason: 'со второго устройства',
+      supersedesCorrectionId: null, origin: 'user', createdAt: nowISO(), sv: SCHEMA_VERSION });
+    $('rec-c-sl').value = '7';   // ровно то же значение, что прилетело
+    recCorrSave();
+    const out = {
+      staleBanner: /Данные изменились с момента открытия формы/.test($('rec-det-body').textContent),
+      notSilentNoop: _recDet.correcting === true,
+    };
+    closeOv('ov-rec-det');
+    return out;
+  });
+  ok(st4.staleBanner && st4.notSilentNoop,
+    'совпадение с чужой коррекцией — это устаревший показ, а не «Изменений нет»', JSON.stringify(st4));
+}
+
+// ── 19. §2 ЦЕЛОСТНОСТЬ ЦЕПОЧКИ (слитые/легаси данные) ────────────────
+// Повреждённую структуру нельзя «починить по времени»: createdAt при слиянии
+// с другого устройства ничего не доказывает. Любая поломка = fail closed.
+{
+  const mk = (id, coll, targetId, patch, sup) => ({
+    id, kType: 'correction', coll, targetId, patch, reason: 'фикстура',
+    supersedesCorrectionId: sup === undefined ? null : sup, origin: 'user',
+    createdAt: '2026-04-01T10:00:00.000Z', sv: 9,
+  });
+  const cases = [
+    ['цикл A↔B', [['A', { severity: 8 }, 'B'], ['B', { severity: 9 }, 'A']]],
+    ['самозамещение', [['A', { severity: 8 }, 'A']]],
+    ['висячая ссылка на несуществующее', [['A', { severity: 8 }, 'НЕТ-ТАКОЙ']]],
+    ['дубль идентификатора', [['A', { severity: 8 }, null], ['A', { severity: 9 }, null]]],
+    ['цикл рядом с валидной ветвью', [['R', { severity: 6 }, null], ['H', { severity: 7 }, 'R'],
+      ['X', { severity: 8 }, 'Y'], ['Y', { severity: 9 }, 'X']]],
+  ];
+  for (const [name, nodes] of cases) {
+    const r = await page.evaluate(({ nodes, mkSrc }) => {
+      const mk = eval('(' + mkSrc + ')');
+      DB.corrections = []; DB.symptoms = [];
+      DB.symptoms = [{ id: 'TEST-CORR-BAD', name: 'боль', severity: 3, day: dayAgo(1), sv: SCHEMA_VERSION }];
+      DB.corrections = nodes.map(([id, patch, sup]) => mk('TEST-CORR-' + id, 'symptoms', 'TEST-CORR-BAD', patch, sup));
+      const eff = projOne('symptoms', 'TEST-CORR-BAD');
+      const hist = corrHistory('symptoms', DB.symptoms[0]);
+      const write = addCorrection('symptoms', 'TEST-CORR-BAD', { severity: 4 }, 'поверх поломки');
+      const head = corrActiveHead('symptoms', 'TEST-CORR-BAD', 'severity');
+      recOpen('symptoms', 'TEST-CORR-BAD');
+      const shown = $('rec-det-body').textContent.replace(/\s+/g, ' ');
+      const list = projAll('symptoms');
+      closeOv('ov-rec-det');
+      return {
+        effOriginal: eff.severity === 3,
+        flagged: Array.isArray(eff._corrInvalid) && eff._corrInvalid.includes('severity'),
+        noApplied: !(eff._corrFields || []).length,
+        histInvalid: !!(hist[0] && hist[0].invalid && hist[0].invalid.length),
+        writeBlocked: !write.ok && write.invalid === 'INVALID_CORRECTION_CHAIN',
+        headNotGuessed: head.head === null,
+        uiShows: /История исправлений повреждена|повреждена/.test(shown),
+        engineOriginal: list[0].severity === 3,
+      };
+    }, { nodes, mkSrc: mk.toString() });
+    ok(r.effOriginal && r.flagged && r.noApplied,
+      `[${name}] эффективное значение = ОРИГИНАЛ, поле помечено повреждённым`, JSON.stringify(r));
+    ok(r.writeBlocked && r.headNotGuessed,
+      `[${name}] запись новых исправлений закрыта, голова не угадана`, JSON.stringify(r));
+    ok(r.histInvalid && r.uiShows, `[${name}] инспектор показывает проблему целостности`, JSON.stringify(r));
+    ok(r.engineOriginal, `[${name}] движки не потребляют угаданное исправленное значение`, JSON.stringify(r));
+  }
+
+  // Две независимые первые коррекции — это КОНФЛИКТ, а не поломка данных:
+  // приложение не должно объявлять честную конкурентную правку «повреждением».
+  const two = await page.evaluate(() => {
+    DB.corrections = []; DB.symptoms = [];
+    DB.symptoms = [{ id: 'TEST-CORR-TWOROOT', name: 'боль', severity: 3, day: dayAgo(1), sv: SCHEMA_VERSION }];
+    DB.corrections = [
+      { id: 'TEST-CORR-R1', kType: 'correction', coll: 'symptoms', targetId: 'TEST-CORR-TWOROOT', patch: { severity: 7 }, supersedesCorrectionId: null, origin: 'user', createdAt: nowISO(), sv: SCHEMA_VERSION },
+      { id: 'TEST-CORR-R2', kType: 'correction', coll: 'symptoms', targetId: 'TEST-CORR-TWOROOT', patch: { severity: 9 }, supersedesCorrectionId: null, origin: 'user', createdAt: nowISO(), sv: SCHEMA_VERSION },
+    ];
+    const eff = projOne('symptoms', 'TEST-CORR-TWOROOT');
+    return { conflict: (eff._corrConflicts || []).includes('severity'),
+      notInvalid: !(eff._corrInvalid || []).length, value: eff.severity };
+  });
+  ok(two.conflict && two.notInvalid && two.value === 3,
+    'две независимые первые коррекции = КОНФЛИКТ (не «повреждение»), действует оригинал', JSON.stringify(two));
+
+  // Variant B: по записи с повреждённой цепочкой обновление источника
+  // не считается безопасным — fail closed, а не тихая перезапись.
+  const vb = await page.evaluate(() => {
+    DB.corrections = []; DB.symptoms = [];
+    DB.symptoms = [{ id: 'TEST-CORR-VB', name: 'боль', severity: 3, day: dayAgo(1), sv: SCHEMA_VERSION }];
+    DB.corrections = [
+      { id: 'TEST-CORR-VB-A', kType: 'correction', coll: 'symptoms', targetId: 'TEST-CORR-VB', patch: { severity: 8 }, supersedesCorrectionId: 'TEST-CORR-VB-B', origin: 'user', createdAt: nowISO(), sv: SCHEMA_VERSION },
+      { id: 'TEST-CORR-VB-B', kType: 'correction', coll: 'symptoms', targetId: 'TEST-CORR-VB', patch: { severity: 9 }, supersedesCorrectionId: 'TEST-CORR-VB-A', origin: 'user', createdAt: nowISO(), sv: SCHEMA_VERSION },
+    ];
+    const eff = proj('symptoms', DB.symptoms[0]);
+    return { broken: (eff._corrInvalid || []).includes('severity'), value: eff.severity };
+  });
+  ok(vb.broken && vb.value === 3, 'повреждённая цепочка видна потребителям как _corrInvalid + оригинал', JSON.stringify(vb));
+}
+
+// ── 20. §3 Явная очистка nullable-значения ───────────────────────────
+// Пустое поле ввода означает «не трогать» — переинтерпретировать его как
+// null нельзя. Значит для явного «нет числового значения» нужен отдельный
+// путь, иначе ошибочное число нечем убрать.
+{
+  const nl = await page.evaluate(() => {
+    DB.corrections = []; DB.psyObservations = [];
+    DB.psyObservations = [{ id: 'TEST-CORR-NULL', metricId: 'm', valueNumber: 42, valueText: '', timestamp: nowISO(), sv: SCHEMA_VERSION }];
+    const out = {};
+    recOpen('psyObservations', 'TEST-CORR-NULL'); recCorrOpen();
+    out.hasClearAction = !!$('rec-c-null-valueNumber');
+    // Пустой ввод без отметки — по-прежнему «оставить как есть».
+    $('rec-c-valueNumber').value = '';
+    recCorrSave();
+    out.blankIsNoop = DB.corrections.length === 0 && projOne('psyObservations', 'TEST-CORR-NULL').valueNumber === 42;
+    // Явная очистка.
+    recOpen('psyObservations', 'TEST-CORR-NULL'); recCorrOpen();
+    $('rec-c-null-valueNumber').checked = true;
+    recCorrSave();
+    const eff = projOne('psyObservations', 'TEST-CORR-NULL');
+    out.effNull = eff.valueNumber === null;
+    out.originalKept = DB.psyObservations[0].valueNumber === 42;
+    out.corrWritten = DB.corrections.length === 1 && DB.corrections[0].patch.valueNumber === null;
+    out.histShows = (corrHistory('psyObservations', DB.psyObservations[0])[0] || {}).original === 42;
+    // Повторная очистка уже пустого значения — не новая коррекция.
+    recOpen('psyObservations', 'TEST-CORR-NULL'); recCorrOpen();
+    $('rec-c-null-valueNumber').checked = true;
+    recCorrSave();
+    out.repeatNoop = DB.corrections.length === 1;
+    // Отметка «очистить» + введённое значение — противоречие, отклоняется.
+    recOpen('psyObservations', 'TEST-CORR-NULL'); recCorrOpen();
+    $('rec-c-null-valueNumber').checked = true; $('rec-c-valueNumber').value = '7';
+    recCorrSave();
+    out.contradictionRejected = DB.corrections.length === 1;
+    // Не-nullable поле такой отметки не получает.
+    DB.checkins = [{ id: 'TEST-CORR-NN', date: '2026-04-05', sl: 5, sq: 5, cl: 5, st: 5, mv: 5, note: '', sv: SCHEMA_VERSION }];
+    recOpen('checkins', 'TEST-CORR-NN'); recCorrOpen();
+    out.noClearOnNonNullable = !$('rec-c-null-sl');
+    closeOv('ov-rec-det');
+    return out;
+  });
+  ok(nl.hasClearAction, 'у nullable-поля есть явное действие «нет числового значения (очистить)»');
+  ok(nl.blankIsNoop, 'пустой ввод по-прежнему означает «оставить как есть», а не null');
+  ok(nl.effNull && nl.corrWritten, 'явная очистка даёт эффективное значение null');
+  ok(nl.originalKept && nl.histShows, 'оригинал (42) сохранён и виден в истории');
+  ok(nl.repeatNoop && nl.contradictionRejected, 'повторная очистка и противоречивый ввод не создают исправлений');
+  ok(nl.noClearOnNonNullable, 'у не-nullable поля действия очистки нет');
+}
+
 ok(errors.length === 0, `JS-ошибок нет за весь прогон (${errors.length})`, errors.slice(0, 3).join('\n'));
 
 // ── Privacy canary ──────────────────────────────────────────────────

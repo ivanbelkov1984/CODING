@@ -2554,9 +2554,11 @@ function recCorrHistoryHtml(coll, rec, hist) {
     const steps = h.chain.map((c, i) => `<div class="si-text" style="line-height:1.5">${i + 1}. ${esc(val(c.value))}${
       c.reason ? ` — ${esc(c.reason)}` : ''}<br><span style="color:var(--t4);font-size:.72rem">${esc(String(c.at || '').slice(0, 16).replace('T', ' '))} UTC · ${esc(CORR_ORIGIN_RU[c.origin] || c.origin)}${
       c.supersedes ? ' · заменяет предыдущее' : ''}</span></div>`).join('');
-    const head = h.conflict
-      ? `<div class="ext-need">Конфликт исправлений: ${h.heads.length} независимых версии этого поля. Пока конфликт не разрешён, используется ОРИГИНАЛ — приложение не выбирает «кто новее» само.</div>`
-      : `<div class="si-text" style="color:var(--t3);font-size:.75rem">Сейчас принято: ${esc(val(h.active ? h.active.patch[h.field] : h.original))}</div>`;
+    const head = h.invalid
+      ? `<div class="ext-need">История исправлений этого поля повреждена: ${esc(h.invalid.join('; '))}. Пока это не исправлено, используется ОРИГИНАЛ — приложение не восстанавливает порядок по времени и не угадывает принятое значение. Исправления по этому полю закрыты.</div>`
+      : h.conflict
+        ? `<div class="ext-need">Конфликт исправлений: ${h.heads.length} независимых версии этого поля. Пока конфликт не разрешён, используется ОРИГИНАЛ — приложение не выбирает «кто новее» само.</div>`
+        : `<div class="si-text" style="color:var(--t3);font-size:.75rem">Сейчас принято: ${esc(val(h.active ? h.active.patch[h.field] : h.original))}</div>`;
     return `<div class="psy-fld"><div class="f-lbl">${esc(label(h.field))}</div>
       <div class="si-text" style="color:var(--t3);font-size:.75rem">Оригинал: ${esc(val(h.original))}</div>
       ${steps}${head}</div>`;
@@ -2618,16 +2620,20 @@ function recRenderDetail() {
   }
   const corrFields = eff && Array.isArray(eff._corrFields) ? eff._corrFields : [];
   const corrConf = eff && Array.isArray(eff._corrConflicts) ? eff._corrConflicts : [];
+  const corrBad = eff && Array.isArray(eff._corrInvalid) ? eff._corrInvalid : [];
   const rows = view.map(f => {
     const t = recFieldText(eff, f);
     if (!t) return '';
     // §4: исправленное поле помечается нейтрально и заметно; поле с
-    // неразрешённым конфликтом показывает ОРИГИНАЛ и честно говорит почему.
-    const mark = corrConf.includes(f.k)
-      ? `<span class="ext-need" style="display:inline-block;padding:.05rem .35rem;margin-left:.35rem;font-size:.7rem">Конфликт исправлений — показан оригинал</span>`
-      : corrFields.includes(f.k)
-        ? `<span style="margin-left:.35rem;font-size:.7rem;color:var(--t3)">· Исправлено</span>`
-        : '';
+    // неразрешённым конфликтом или повреждённой цепочкой показывает ОРИГИНАЛ
+    // и честно говорит почему.
+    const mark = corrBad.includes(f.k)
+      ? `<span class="ext-need" style="display:inline-block;padding:.05rem .35rem;margin-left:.35rem;font-size:.7rem">История исправлений повреждена — показан оригинал</span>`
+      : corrConf.includes(f.k)
+        ? `<span class="ext-need" style="display:inline-block;padding:.05rem .35rem;margin-left:.35rem;font-size:.7rem">Конфликт исправлений — показан оригинал</span>`
+        : corrFields.includes(f.k)
+          ? `<span style="margin-left:.35rem;font-size:.7rem;color:var(--t3)">· Исправлено</span>`
+          : '';
     return `<div class="psy-fld"><div class="f-lbl">${esc(f.l)}${mark}</div><div class="si-text" style="white-space:pre-wrap;line-height:1.55">${esc(t)}</div></div>`;
   }).filter(Boolean).join('') || '<div class="bk-empty">У записи нет заполненных полей.</div>';
   const prov = ext ? `<div class="psy-fld"><div class="f-lbl">Происхождение</div><div class="si-text" style="line-height:1.55">Импортировано из внешнего источника${ext.sourceLabel ? ' · ' + esc(ext.sourceLabel) : ''}.${
@@ -2742,22 +2748,61 @@ function recSaveEdit() {
 function recCorrOpen() {
   if (!_recDet) return;
   _recDet.correcting = true;
+  _recDet.corrSnap = null;      // новый показ формы — новый снимок «что видно»
+  _recDet.corrStale = null;
   recRenderDetail();
 }
+// Единственный способ обновить ожидание — ЯВНОЕ действие человека. Молча
+// подхватить чужую коррекцию и продолжить сохранение запрещено: владелец
+// заместил бы исправление, которого не видел.
+function recCorrReload() {
+  if (!_recDet) return;
+  _recDet.corrSnap = null;
+  _recDet.corrStale = null;
+  recRenderDetail();
+}
+const recCorrKey = (coll, id) => `${coll}|${JSON.stringify(id)}`;
 function recCorrRender(coll, rec, box, act) {
   const specs = REC_CORR[coll] || [];
   const eff = proj(coll, rec);
   const conf = Array.isArray(eff._corrConflicts) ? eff._corrConflicts : [];
+  const bad = Array.isArray(eff._corrInvalid) ? eff._corrInvalid : [];
   const val = v => (v === undefined || v === null ? '' : String(v));
+  // Снимок берётся ОДИН раз на открытие формы и переживает перерисовки.
+  // Иначе любая перерисовка (в том числе после отказа) тихо согласилась бы с
+  // чужой коррекцией и сделала бы проверку бессмысленной.
+  const key = recCorrKey(coll, rec.id);
+  if (!_recDet.corrSnap || _recDet.corrSnap.key !== key) {
+    _recDet.corrSnap = { key, heads: corrViewSnapshot(coll, rec.id, specs.map(s => s.k)) };
+  }
+  if (_recDet.corrStale && _recDet.corrStale.length) {
+    const names = _recDet.corrStale.map(k => (specs.find(s => s.k === k) || { l: k }).l);
+    box.innerHTML = `<div class="ext-need" id="rec-c-stale">Данные изменились с момента открытия формы: ${esc(names.join(', '))}. Исправление НЕ сохранено — в записи ничего не изменилось. Обнови форму, посмотри актуальное значение и повтори, если оно всё ещё требует исправления.</div>` +
+      specs.map(sp => `<div class="psy-fld"><div class="f-lbl">${esc(sp.l)}</div>
+        <div class="si-text" style="color:var(--t3);font-size:.75rem">сейчас: ${esc(val(eff[sp.k]) || '—')}</div></div>`).join('');
+    if (act) act.innerHTML = `<button type="button" class="btn btn-p btn-full" onclick="recCorrReload()">Обновить и показать актуальное</button>
+      <button type="button" class="btn btn-s btn-full" onclick="_recDet.correcting=false;_recDet.corrStale=null;recRenderDetail()">Отмена</button>`;
+    return;
+  }
   box.innerHTML = `<div class="ext-safe">Оригинал остаётся в истории навсегда: исправление добавляется отдельным событием и не переписывает исходную запись. Пустое поле = оставить как есть.</div>` +
     specs.map(sp => {
-      const locked = conf.includes(sp.k);
+      const broken = bad.includes(sp.k);
+      const locked = broken || conf.includes(sp.k);
       const hint = `сейчас: ${esc(val(eff[sp.k]) || '—')}${val(rec[sp.k]) !== val(eff[sp.k]) ? ` · оригинал: ${esc(val(rec[sp.k]) || '—')}` : ''}`;
+      // §3: у nullable-поля нужна ЯВНАЯ очистка. Пустая строка ввода означает
+      // «не трогать» и переинтерпретации не подлежит — иначе форма молча
+      // обнуляла бы поля, которых человек не касался.
+      const nullBox = (!locked && sp.nullable)
+        ? `<label class="si-text" style="display:flex;gap:.4rem;align-items:center;margin-top:.3rem;font-size:.75rem;color:var(--t3)">
+             <input type="checkbox" id="rec-c-null-${esc(sp.k)}"> нет числового значения (очистить)</label>`
+        : '';
       return `<div class="psy-fld"><label class="f-lbl" for="rec-c-${esc(sp.k)}">${esc(sp.l)}</label>
         <div class="si-text" style="color:var(--t3);font-size:.72rem;margin-bottom:.2rem">${hint}</div>
-        ${locked
-          ? `<div class="ext-need">По этому полю неразрешённый конфликт исправлений — исправлять его нельзя, пока конфликт не разрешён.</div>`
-          : `<input type="text" id="rec-c-${esc(sp.k)}" class="field" value="" placeholder="${esc(sp.enums ? sp.enums.join(' / ') : sp.day ? 'ГГГГ-ММ-ДД' : '')}">`}</div>`;
+        ${broken
+          ? `<div class="ext-need">История исправлений этого поля повреждена — новые исправления по нему закрыты, пока целостность не восстановлена.</div>`
+          : locked
+            ? `<div class="ext-need">По этому полю неразрешённый конфликт исправлений — исправлять его нельзя, пока конфликт не разрешён.</div>`
+            : `<input type="text" id="rec-c-${esc(sp.k)}" class="field" value="" placeholder="${esc(sp.enums ? sp.enums.join(' / ') : sp.day ? 'ГГГГ-ММ-ДД' : '')}">`}${nullBox}</div>`;
     }).join('') +
     `<div class="psy-fld"><label class="f-lbl" for="rec-c-reason">Причина исправления (необязательно)</label>
       <input type="text" id="rec-c-reason" class="field" value=""></div>`;
@@ -2769,16 +2814,40 @@ function recCorrSave() {
   const coll = _recDet.coll;
   const specs = REC_CORR[coll] || [];
   const patch = {};
+  const acted = [];   // поля, по которым человек реально что-то сделал
+  const eff = proj(coll, rec);
   for (const sp of specs) {
     const el = $('rec-c-' + sp.k);
     if (!el) continue;
     const rawIn = el.value;
-    if (String(rawIn).trim() === '' && !(sp.nullable && sp.touched)) continue;   // пусто = не трогаем
-    const v = recCorrValidate(sp, rawIn);
+    // §3: явная очистка nullable-значения — отдельное действие, а не пустая
+    // строка. Пустое поле по-прежнему значит «оставить как есть».
+    const nullEl = sp.nullable ? $('rec-c-null-' + sp.k) : null;
+    const wantNull = !!(nullEl && nullEl.checked);
+    if (wantNull && String(rawIn).trim() !== '') {
+      toast(`«${sp.l}»: выбрано «нет значения», но поле ввода заполнено — оставь что-то одно`, 'warn'); return;
+    }
+    if (!wantNull && String(rawIn).trim() === '') continue;   // пусто = не трогаем
+    acted.push(sp.k);
+    const v = wantNull ? { ok: true, value: null } : recCorrValidate(sp, rawIn);
     if (!v.ok) { toast(v.error, 'warn'); return; }
-    const eff = proj(coll, rec);
-    if (Object.is(eff[sp.k], v.value)) continue;   // значение не изменилось
+    if (wantNull ? eff[sp.k] == null : Object.is(eff[sp.k], v.value)) continue;   // значение не изменилось
     patch[sp.k] = v.value;
+  }
+  // §1: сверка с тем, что человек ВИДЕЛ при открытии формы. Любое расхождение —
+  // отказ: ноль мутаций, ноль записи, ожидание НЕ обновляется автоматически.
+  //
+  // Сверяются ВСЕ поля, по которым человек что-то сделал, а не только те, что
+  // дошли до patch. Иначе введённое значение, случайно совпавшее с чужой
+  // коррекцией, увидело бы «Изменений нет» — и человек решил бы, что это его
+  // собственная правка уже применена.
+  const seen = (_recDet.corrSnap && _recDet.corrSnap.key === recCorrKey(coll, rec.id)) ? _recDet.corrSnap.heads : null;
+  const stale = corrViewStale(coll, rec.id, seen, acted);
+  if (stale.length) {
+    _recDet.corrStale = stale;
+    recRenderDetail();
+    toast('Данные изменились с момента открытия формы — обнови и повтори', 'warn');
+    return;
   }
   const fields = Object.keys(patch);
   if (!fields.length) { toast('Изменений нет', 'ok'); _recDet.correcting = false; recRenderDetail(); return; }
@@ -3498,6 +3567,15 @@ function saveCI() {
 const CORRECTABLE_COLLS = Object.freeze(['moments', 'whys', 'checkins', 'sphereLogs',
   'psyObservations', 'medIntakes', 'cravings', 'symptoms', 'measures', 'labObservations']);
 const CORRECTION_CONFLICT = 'CORRECTION_CONFLICT';
+// Структурная поломка цепочки (цикл, самозамещение, висячая ссылка, дубль id,
+// несвязанная ветка). Отличается от конфликта: конфликт — это две честные
+// конкурирующие версии, а это — данные, которым нельзя доверять вовсе.
+// Последствие одинаковое и намеренно жёсткое: fail closed.
+// Легаси-формы с висячей ссылкой не существует: в `DB.corrections` пишут
+// ровно два места — addCorrection и extApplyUpdateToRecord (override), и оба
+// с самого появления коллекции проставляют supersedesCorrectionId явно.
+// Поэтому висячая ссылка — это всегда повреждение, а не старый формат.
+const INVALID_CORRECTION_CHAIN = 'INVALID_CORRECTION_CHAIN';
 
 // Цепочка коррекций по ОДНОМУ полю (решение владельца §1): на пару
 // «запись + поле» может быть только одна активная голова. Более новая
@@ -3531,27 +3609,69 @@ function corrFieldChains(coll, targetId, db, index) {
       byField.get(f).push(c);
     });
   });
+  const allIds = new Set(all.map(c => String(c.id)));
   const out = new Map();
   byField.forEach((list, f) => {
-    // Внутри поля: голова — та, которую никто из этого же поля не заменил.
+    // ЦЕЛОСТНОСТЬ ЦЕПОЧКИ. Слитые/легаси данные могут быть повреждены; чинить
+    // их «по времени» запрещено — createdAt при слиянии с другого устройства
+    // ничего не доказывает. Любая структурная поломка = INVALID_CORRECTION_CHAIN,
+    // поле остаётся ОРИГИНАЛЬНЫМ, движки исправленное значение не потребляют.
+    const invalid = [];
+    const byId = new Map();
+    list.forEach(c => {
+      const k = String(c.id);
+      if (byId.has(k)) invalid.push('дубль идентификатора исправления');
+      byId.set(k, c);
+    });
+    list.forEach(c => {
+      const sup = c.supersedesCorrectionId;
+      if (sup == null) return;                                   // легаси/корень: ссылки нет
+      if (String(sup) === String(c.id)) invalid.push('исправление ссылается само на себя');
+      else if (!allIds.has(String(sup))) invalid.push('ссылка на несуществующее прежнее исправление');
+    });
+    // Голова — та, которую никто из этого же поля не заменил.
     const supersededIds = new Set(list.map(c => c.supersedesCorrectionId).filter(x => x != null).map(String));
     const heads = list.filter(c => !supersededIds.has(String(c.id)));
-    // Порядок цепочки — по ссылкам supersedes, а не по времени: время
-    // ненадёжно при слиянии с другого устройства.
-    const byId = new Map(list.map(c => [String(c.id), c]));
+    // Корень — узел без ссылки на предыдущее. РОВНО один корень НЕ требуется:
+    // две независимые первые коррекции — это честный КОНФЛИКТ двух версий
+    // (обрабатывается выше как две головы), а не повреждение данных. Поломка —
+    // когда начала нет вовсе или действующей версии нет вовсе: и то и другое
+    // возможно только при цикле ссылок.
+    const roots = list.filter(c => c.supersedesCorrectionId == null);
+    if (list.length && !roots.length) invalid.push('в цепочке нет начала (цикл ссылок)');
+    if (list.length && !heads.length) invalid.push('в цепочке нет действующей версии (цикл ссылок)');
+    // Порядок цепочки — по ссылкам supersedes, а не по времени.
     const chain = [];
-    if (heads.length === 1) {
-      let cur = heads[0], guard = 0;
-      while (cur && guard++ < 100) { chain.unshift(cur); cur = cur.supersedesCorrectionId != null ? byId.get(String(cur.supersedesCorrectionId)) : null; }
+    if (heads.length === 1 && !invalid.length) {
+      const seen = new Set();
+      let cur = heads[0];
+      while (cur) {
+        const k = String(cur.id);
+        if (seen.has(k)) { invalid.push('цикл в цепочке исправлений'); break; }
+        seen.add(k); chain.unshift(cur);
+        cur = cur.supersedesCorrectionId != null ? byId.get(String(cur.supersedesCorrectionId)) : null;
+      }
+      // Проход от головы обязан покрыть ВСЕ узлы поля: иначе есть висячая
+      // ветка, и «какое значение принято» недоказуемо.
+      if (!invalid.length && seen.size !== list.length) invalid.push('в цепочке есть несвязанная ветка');
     }
-    out.set(f, { heads, chain, all: list });
+    out.set(f, {
+      heads: invalid.length ? [] : heads,
+      chain: invalid.length ? [] : chain,
+      all: list,
+      invalid: invalid.length ? [...new Set(invalid)] : null,
+    });
   });
   return out;
 }
 // Активная голова поля: одна — значение принимается; несколько — конфликт.
 function corrActiveHead(coll, targetId, field, db) {
   const ch = corrFieldChains(coll, targetId, db).get(field);
-  if (!ch || !ch.heads.length) return { head: null, conflict: false };
+  if (!ch) return { head: null, conflict: false };
+  // Повреждённая цепочка НЕ выглядит как «коррекций нет»: иначе следующая
+  // запись создала бы ещё один корень и добила бы структуру окончательно.
+  if (ch.invalid) return { head: null, conflict: false, invalid: ch.invalid };
+  if (!ch.heads.length) return { head: null, conflict: false };
   if (ch.heads.length > 1) return { head: null, conflict: true, heads: ch.heads };
   return { head: ch.heads[0], conflict: false };
 }
@@ -3580,7 +3700,10 @@ function addCorrection(coll, targetId, patch, reason, opts) {
   // непонятно, что именно заменяется. Расхождение — не повод угадывать.
   const headIds = new Set();
   for (const f of fields) {
-    const { head, conflict } = corrActiveHead(coll, targetId, f);
+    const { head, conflict, invalid } = corrActiveHead(coll, targetId, f);
+    // Повреждённую цепочку не «дописывают»: новое исправление опиралось бы на
+    // структуру, которую невозможно прочитать однозначно.
+    if (invalid) return { ok: false, error: `по полю «${f}» повреждена история исправлений (${invalid.join('; ')}) — запись новых исправлений закрыта`, invalid: INVALID_CORRECTION_CHAIN };
     if (conflict) return { ok: false, error: `по полю «${f}» уже есть неразрешённый конфликт исправлений — сначала разреши его`, conflict: CORRECTION_CONFLICT };
     headIds.add(head ? String(head.id) : '');
   }
@@ -3626,6 +3749,37 @@ function corrHeadSnapshot(coll, targetId, fields, db) {
   const v = [...ids][0] || '';
   return { supersedes: v || null };
 }
+// §1 БЛОКЕР: снимок того, ЧТО ЧЕЛОВЕК ВИДЕЛ в момент показа формы. Отличается
+// от corrHeadSnapshot принципиально: тот берётся в момент сохранения и
+// доказывает только «сейчас». Между показом и сохранением с другого устройства
+// может прилететь чужая коррекция — и сохранение молча заместило бы
+// исправление, которого владелец никогда не видел.
+//
+// Снимок типизирован ПО КАЖДОМУ ПОЛЮ отдельно: нет головы / конкретная голова /
+// конфликт / повреждённая цепочка. Разные поля не схлопываются в одно общее
+// ожидание — иначе расхождение по одному полю пряталось бы за другим.
+function corrViewSnapshot(coll, targetId, fields, db) {
+  const out = {};
+  (fields || []).forEach(f => {
+    const r = corrActiveHead(coll, targetId, f, db);
+    out[f] = r.invalid ? { state: 'invalid' }
+      : r.conflict ? { state: 'conflict' }
+        : r.head ? { state: 'head', id: String(r.head.id) }
+          : { state: 'none' };
+  });
+  return out;
+}
+// Поля, состояние которых разошлось со снимком показа. Поле, которого в
+// снимке нет вовсе, тоже считается расхождением: писать можно только то, что
+// человеку показали.
+function corrViewStale(coll, targetId, snap, fields, db) {
+  const now = corrViewSnapshot(coll, targetId, fields, db);
+  return (fields || []).filter(f => {
+    const was = snap && snap[f];
+    if (!was) return true;
+    return was.state !== now[f].state || String(was.id || '') !== String(now[f].id || '');
+  });
+}
 // Проекция записи: оригинал ⊕ активные головы полей. Оригинал НЕ мутируется.
 // Поле с конфликтом остаётся ОРИГИНАЛЬНЫМ (fail closed) и перечисляется в
 // `_corrConflicts` — молчаливого выбора «кто новее» не существует.
@@ -3640,17 +3794,22 @@ function proj(coll, rec, db, index) {
   const out = { ...rec };
   const applied = [];
   const conflicts = [];
+  const broken = [];
   const headIds = new Set();
   chains.forEach((ch, f) => {
+    if (ch.invalid) { broken.push(f); return; }
     if (ch.heads.length > 1) { conflicts.push(f); return; }
     if (ch.heads.length === 1) { out[f] = ch.heads[0].patch[f]; applied.push(f); headIds.add(String(ch.heads[0].id)); }
   });
-  if (!applied.length && !conflicts.length) return rec;
+  if (!applied.length && !conflicts.length && !broken.length) return rec;
   // `_corrected` — число ПРИМЕНЁННЫХ исправлений (записей), а не полей: одно
   // исправление может менять несколько полей сразу.
   out._corrected = headIds.size;
   out._corrFields = applied;
   if (conflicts.length) out._corrConflicts = conflicts;
+  // Поле с повреждённой цепочкой остаётся ОРИГИНАЛЬНЫМ: движки не потребляют
+  // «угаданное» исправленное значение, а инспектор показывает проблему.
+  if (broken.length) out._corrInvalid = broken;
   return out;
 }
 function projAll(coll, db) {
@@ -3677,6 +3836,7 @@ function corrHistory(coll, rec, db) {
       field: f,
       original: rec[f],
       conflict: ch.heads.length > 1,
+      invalid: ch.invalid || null,
       heads: ch.heads.map(c => c.id),
       active: ch.heads.length === 1 ? ch.heads[0] : null,
       chain: (ch.heads.length === 1 ? ch.chain : ch.all.slice()).map(c => ({
@@ -16929,6 +17089,9 @@ async function extClassifyExisting(a) {
   // неразрешённый конфликт коррекций — fail closed, без угадывания.
   const effectiveRec = proj(coll, existingRec, ctx.db);
   const corrConflicted = Array.isArray(effectiveRec._corrConflicts) && effectiveRec._corrConflicts.length > 0;
+  // Повреждённая цепочка исправлений — тоже fail closed: по такой записи
+  // недоказуемо, что владелец её не правил, а значит тихо обновлять нельзя.
+  const corrBroken = Array.isArray(effectiveRec._corrInvalid) && effectiveRec._corrInvalid.length > 0;
   const corrFieldsTouched = (effectiveRec._corrFields || []).filter(f => changedFields.includes(f));
   let rawUntouched;
   if (oldExt && oldExt.importHash && Array.isArray(oldExt.importedFields)) {
@@ -16937,7 +17100,7 @@ async function extClassifyExisting(a) {
   } else {
     rawUntouched = !changedFields.length;
   }
-  const userUntouched = rawUntouched && !corrFieldsTouched.length && !corrConflicted;
+  const userUntouched = rawUntouched && !corrFieldsTouched.length && !corrConflicted && !corrBroken;
   const newImportedFields = ownedFields.slice();
   const newImportHash = await extFieldsHash(newRec, newImportedFields);
   const expectedFields = [...new Set([
@@ -16969,6 +17132,7 @@ async function extClassifyExisting(a) {
     // коррекция мгновенно снова наложилась бы поверх значения источника.
     corrFieldsTouched: corrFieldsTouched.slice(),
     corrConflicted,
+    corrBroken,
   };
   // §19 fail-closed unknown order: содержимое отличается, но временной
   // порядок версий недоказуем (нет метаданных с одной из сторон, либо
@@ -16989,9 +17153,11 @@ async function extClassifyExisting(a) {
   }
   const why = corrConflicted
     ? ' (по записи есть неразрешённый конфликт исправлений)'
-    : corrFieldsTouched.length
-      ? ` (у тебя есть исправление: ${corrFieldsTouched.join(', ')})`
-      : changedFields.length ? ' (' + changedFields.join(', ') + ')' : '';
+    : corrBroken
+      ? ' (по записи повреждена история исправлений)'
+      : corrFieldsTouched.length
+        ? ` (у тебя есть исправление: ${corrFieldsTouched.join(', ')})`
+        : changedFields.length ? ' (' + changedFields.join(', ') + ')' : '';
   return {
     ...base, status: 'changed-conflict', update, merge: mergeInfo,
     reason: `источник изменился, но запись правилась локально${why} — по умолчанию сохраняются твои изменения; замена только по явному выбору`,

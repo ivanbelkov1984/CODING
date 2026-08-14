@@ -22,6 +22,7 @@ const MUTANTS = [
     id: 'lww-restored',
     what: 'молчаливый last-write-wins по времени возвращается вместо цепочки',
     find: `  chains.forEach((ch, f) => {
+    if (ch.invalid) { broken.push(f); return; }
     if (ch.heads.length > 1) { conflicts.push(f); return; }
     if (ch.heads.length === 1) { out[f] = ch.heads[0].patch[f]; applied.push(f); headIds.add(String(ch.heads[0].id)); }
   });`,
@@ -93,7 +94,7 @@ const MUTANTS = [
     // §5: Variant B снова слеп к активной коррекции — тихая перезапись.
     id: 'variantb-ignores-correction',
     what: 'Variant B снова считает запись «нетронутой» при активной коррекции',
-    find: '  const userUntouched = rawUntouched && !corrFieldsTouched.length && !corrConflicted;',
+    find: '  const userUntouched = rawUntouched && !corrFieldsTouched.length && !corrConflicted && !corrBroken;',
     replace: '  const userUntouched = rawUntouched;',
     expectFail: 'более новая ревизия по ИСПРАВЛЕННОМУ полю → changed-conflict',
   },
@@ -137,6 +138,72 @@ const MUTANTS = [
     find: '  box.innerHTML = rows + prov + histHtml + noteC + noteB + tech;',
     replace: '  box.innerHTML = rows + prov + noteC + noteB + tech;',
     expectFail: 'универсальная история: оригинал, цепочка, причина',
+  },
+  {
+    // §1 БЛОКЕР: снимок «что видел человек» возвращается на момент СОХРАНЕНИЯ.
+    // Ровно та дыра, из-за которой владелец молча заместил бы чужую коррекцию,
+    // которой не видел.
+    id: 'snapshot-back-to-save-time',
+    what: 'снимок берётся при сохранении, а не при показе формы',
+    find: '  const seen = (_recDet.corrSnap && _recDet.corrSnap.key === recCorrKey(coll, rec.id)) ? _recDet.corrSnap.heads : null;',
+    replace: '  const seen = corrViewSnapshot(coll, rec.id, acted);',
+    expectFail: 'эффективное значение осталось 7 — чужая коррекция не замещена',
+  },
+  {
+    // §1: сверка со снимком показа снята целиком.
+    id: 'stale-view-check-removed',
+    what: 'сверка с открытым видом формы снята',
+    find: '  const stale = corrViewStale(coll, rec.id, seen, acted);',
+    replace: '  const stale = [];',
+    expectFail: 'замещение головы, которую человек не видел, отклонено (эффективное осталось 7)',
+  },
+  {
+    // §2: детектор целостности перестаёт влиять на результат — повреждённая
+    // цепочка снова даёт «принятое» значение.
+    id: 'chain-integrity-off',
+    what: 'повреждённая цепочка снова считается рабочей',
+    find: `    out.set(f, {
+      heads: invalid.length ? [] : heads,
+      chain: invalid.length ? [] : chain,
+      all: list,
+      invalid: invalid.length ? [...new Set(invalid)] : null,
+    });`,
+    replace: '    out.set(f, { heads, chain, all: list, invalid: null });',
+    expectFail: '[висячая ссылка на несуществующее] эффективное значение = ОРИГИНАЛ, поле помечено повреждённым',
+  },
+  {
+    // §2: проекция перестаёт сообщать о поломке потребителям.
+    id: 'proj-hides-invalid-chain',
+    what: 'проекция перестаёт помечать поле с повреждённой цепочкой',
+    find: '    if (ch.invalid) { broken.push(f); return; }',
+    replace: '    if (false) { broken.push(f); return; }',
+    expectFail: '[цикл A↔B] эффективное значение = ОРИГИНАЛ, поле помечено повреждённым',
+  },
+  {
+    // §2: поверх повреждённой цепочки снова можно писать.
+    id: 'write-on-broken-chain',
+    what: 'запись исправления поверх повреждённой цепочки снова разрешена',
+    find: "    if (invalid) return { ok: false, error: `по полю «${f}» повреждена история исправлений (${invalid.join('; ')}) — запись новых исправлений закрыта`, invalid: INVALID_CORRECTION_CHAIN };",
+    replace: '    if (false) return { ok: false };',
+    expectFail: '[цикл A↔B] запись новых исправлений закрыта, голова не угадана',
+  },
+  {
+    // §3: явное «нет числового значения» перестаёт работать — ошибочное
+    // число снова нечем убрать.
+    id: 'nullable-clear-ignored',
+    what: 'явная очистка nullable-значения перестаёт срабатывать',
+    find: '    const wantNull = !!(nullEl && nullEl.checked);',
+    replace: '    const wantNull = false;',
+    expectFail: 'явная очистка даёт эффективное значение null',
+  },
+  {
+    // §3: пустой ввод снова переинтерпретируется как null — форма молча
+    // обнуляет поле, которого человек не касался.
+    id: 'blank-means-null',
+    what: 'пустое поле ввода снова означает null, а не «не трогать»',
+    find: "    if (!wantNull && String(rawIn).trim() === '') continue;   // пусто = не трогаем",
+    replace: "    if (!wantNull && !sp.nullable && String(rawIn).trim() === '') continue;",
+    expectFail: 'пустой ввод по-прежнему означает «оставить как есть», а не null',
   },
   {
     // §8: исправление начинает мутировать оригинал — история теряется.

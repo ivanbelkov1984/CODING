@@ -20,7 +20,7 @@ const MUTANTS = [
     // Раздел 3 owner decision: локальные правки нельзя затирать молча.
     id: 'local-edit-guard-forced-safe',
     what: 'детектор локальных правок снят — любая правка считается «нетронуто», источник затирает её',
-    find: '  const userUntouched = rawUntouched && !corrFieldsTouched.length && !corrConflicted;',
+    find: '  const userUntouched = rawUntouched && !corrFieldsTouched.length && !corrConflicted && !corrBroken;',
     replace: '  const userUntouched = true;',
     expectFail: 'локальная правка import-owned поля + изменение источника → конфликт',
   },
