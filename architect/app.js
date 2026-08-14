@@ -15380,6 +15380,23 @@ const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';   // non-sensi
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const DRIVE_MAX_FEEDS = 25;          // размер allowlist одного источника
 const DRIVE_META_FIELDS = 'id,name,mimeType,modifiedTime,version,md5Checksum,size,trashed';
+// Причины 403 — ДОКУМЕНТИРОВАННЫЕ Google (Drive API «Handle errors»), а не
+// придуманные. Классификация только положительная: всё, что не опознано,
+// остаётся неопознанным и НЕ выдаётся за потерю доступа к объекту.
+const DRIVE_403_ACCESS = Object.freeze([   // доступ к КОНКРЕТНОМУ объекту потерян
+  'appNotAuthorizedToFile', 'insufficientFilePermissions', 'domainPolicy',
+  'downloadRestrictedForRevision', 'fileNotDownloadable', 'fileNotExportable',
+  'teamDriveMembershipRequired', 'cannotModifyInheritedTeamDrivePermission',
+  'fileOwnerNotMemberOfTeamDrive', 'fileWriterTeamDriveMoveInDisabled',
+  'teamDrivesFolderMoveInNotSupported', 'teamDrivesParentLimit',
+]);
+const DRIVE_403_LIMIT = Object.freeze([    // квота/лимит/частота — временно
+  'activeItemCreationLimitExceeded', 'dailyLimitExceeded', 'rateLimitExceeded',
+  'myDriveHierarchyDepthLimitExceeded', 'numChildrenInNonRootLimitExceeded',
+  'sharingRateLimitExceeded', 'storageQuotaExceeded', 'teamDriveFileLimitExceeded',
+  'teamDriveHierarchyTooDeep', 'UrlLeaseLimitExceeded', 'userRateLimitExceeded',
+  'RESOURCE_EXHAUSTED',
+]);
 
 // ── Токен: только память сессии (D-2) ───────────────────────────────
 // Намеренно НЕ часть DB/CFG и намеренно без единой записи в хранилище.
@@ -15435,18 +15452,25 @@ function driveNetReal() {
         const errs = (body && body.error && body.error.errors) || [];
         reason = String((errs[0] && errs[0].reason) || (body && body.error && body.error.status) || '');
       } catch (_) { reason = ''; }
-      const quota = /rateLimitExceeded|userRateLimitExceeded|quotaExceeded|dailyLimitExceeded|backendError|RESOURCE_EXHAUSTED/i.test(reason);
-      if (quota) {
-        // Токен НЕ гасим и файл НЕ объявляем недоступным: это временная
-        // ошибка сервиса. Fail closed — просто отказ с честной причиной.
-        const e = new Error('Google временно ограничил частоту запросов — повтори позже');
-        e.rateLimited = true;
+      const has = list => list.some(x => x.toLowerCase() === reason.toLowerCase());
+      // Лимит/квота: вход рабочий, файл на месте — просто сейчас нельзя.
+      if (has(DRIVE_403_LIMIT)) {
+        const e = new Error('Google ограничил частоту или квоту запросов — повтори позже');
+        e.rateLimited = true; e.reason = reason;
         throw e;
       }
-      // Потеря прав на объект. Токен остаётся действительным: другие файлы
-      // источника могут читаться дальше.
-      const e = new Error('доступ к этому файлу закрыт');
-      e.forbidden = true;
+      // Потеря доступа К ОБЪЕКТУ — только по ПОЛОЖИТЕЛЬНО опознанной причине.
+      if (has(DRIVE_403_ACCESS)) {
+        const e = new Error('доступ к этому файлу закрыт');
+        e.forbidden = true; e.reason = reason;
+        throw e;
+      }
+      // Неопознанный 403 НЕ считается потерей доступа к файлу. Иначе ошибка
+      // политики, приложения или API молча превратилась бы в «объект пропал»
+      // и пометила бы источник недоступным. Fail closed: честная ошибка
+      // сервиса, токен не гасим, файл недоступным не объявляем.
+      const e = new Error(`Google вернул ошибку доступа (403${reason ? ', причина: ' + reason : ', причина не указана'}) — это не потеря доступа к файлу и не истёкший вход`);
+      e.serviceError = true; e.reason = reason;
       throw e;
     }
     if (r.status === 404) { const e = new Error('файл не найден'); e.notFound = true; throw e; }
@@ -15550,7 +15574,9 @@ async function driveReadFeed(connId, net) {
     } catch (e) {
       // Квота/лимит — НЕ «источник исчез» и НЕ «вход истёк». Отказываем
       // целиком и честно, не помечая объект недоступным.
-      if (e && e.rateLimited) return { ok: false, errors: [`«${f.name}»: ${String((e && e.message) || e).slice(0, 120)}`], rateLimited: true };
+      if (e && (e.rateLimited || e.serviceError)) {
+        return { ok: false, errors: [`«${f.name}»: ${String((e && e.message) || e).slice(0, 160)}`], rateLimited: !!e.rateLimited, serviceError: !!e.serviceError };
+      }
       // D-5: недоступность источника — НИКОГДА не удаление canonical.
       if (e && (e.notFound || e.forbidden)) { missing.push(f.name); continue; }
       if (e && e.needAuth) return { ok: false, errors: ['авторизация Google истекла — подключись заново'], needAuth: true };
@@ -15564,7 +15590,9 @@ async function driveReadFeed(connId, net) {
     try {
       text = await nt.getContent(f.fileId);
     } catch (e) {
-      if (e && e.rateLimited) return { ok: false, errors: [`«${f.name}»: ${String((e && e.message) || e).slice(0, 120)}`], rateLimited: true };
+      if (e && (e.rateLimited || e.serviceError)) {
+        return { ok: false, errors: [`«${f.name}»: ${String((e && e.message) || e).slice(0, 160)}`], rateLimited: !!e.rateLimited, serviceError: !!e.serviceError };
+      }
       if (e && (e.notFound || e.forbidden)) { missing.push(f.name); continue; }
       if (e && e.needAuth) return { ok: false, errors: ['авторизация Google истекла — подключись заново'], needAuth: true };
       return { ok: false, errors: [`«${f.name}»: ${String((e && e.message) || e).slice(0, 120)}`] };

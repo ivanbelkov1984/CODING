@@ -82,9 +82,36 @@ const MUTANTS = [
     // помечался бы недоступным из-за временной ошибки сервиса.
     id: 'quota-masked-as-unavailable',
     what: 'ошибка квоты снова выдаётся за недоступность файла',
-    find: "      if (e && e.rateLimited) return { ok: false, errors: [`«${f.name}»: ${String((e && e.message) || e).slice(0, 120)}`], rateLimited: true };\n      // D-5: недоступность источника — НИКОГДА не удаление canonical.",
+    find: "      if (e && (e.rateLimited || e.serviceError)) {\n        return { ok: false, errors: [`«${f.name}»: ${String((e && e.message) || e).slice(0, 160)}`], rateLimited: !!e.rateLimited, serviceError: !!e.serviceError };\n      }\n      // D-5: недоступность источника — НИКОГДА не удаление canonical.",
     replace: "      if (e && e.rateLimited) { missing.push(f.name); continue; }\n      // D-5: недоступность источника — НИКОГДА не удаление canonical.",
     expectFail: 'квота при чтении → отказ, но источник НЕ помечен недоступным',
+  },
+  {
+    // БЛОКЕР ревью: неопознанный 403 снова становится «потерей доступа к
+    // файлу». Так ошибка политики/приложения молча превращалась бы в
+    // missing[] → source_unavailable.
+    id: 'unknown-403-guessed-as-forbidden',
+    what: 'неопознанный 403 снова выдаётся за потерю доступа к файлу',
+    find: "      const e = new Error(`Google вернул ошибку доступа (403${reason ? ', причина: ' + reason : ', причина не указана'}) — это не потеря доступа к файлу и не истёкший вход`);\n      e.serviceError = true; e.reason = reason;",
+    replace: "      const e = new Error('доступ к этому файлу закрыт');\n      e.forbidden = true; e.reason = reason;",
+    expectFail: 'явная ошибка сервиса: НЕ потеря доступа, НЕ истёкший вход, НЕ квота',
+  },
+  {
+    // Положительный список причин подменяется «всё подряд — это доступ»:
+    // классификация снова перестаёт быть доказательной.
+    id: 'access-list-matches-everything',
+    what: 'список причин потери доступа начинает совпадать с чем угодно',
+    find: '      if (has(DRIVE_403_ACCESS)) {',
+    replace: '      if (true) {',
+    expectFail: 'явная ошибка сервиса: НЕ потеря доступа, НЕ истёкший вход, НЕ квота',
+  },
+  {
+    // Неопознанный 403 в пути чтения снова помечает источник недоступным.
+    id: 'unknown-403-marks-source-unavailable',
+    what: 'неопознанный 403 при чтении снова помечает источник недоступным',
+    find: "      if (e && (e.rateLimited || e.serviceError)) {\n        return { ok: false, errors: [`«${f.name}»: ${String((e && e.message) || e).slice(0, 160)}`], rateLimited: !!e.rateLimited, serviceError: !!e.serviceError };\n      }\n      // D-5: недоступность источника — НИКОГДА не удаление canonical.",
+    replace: "      if (e && (e.rateLimited || e.serviceError)) { missing.push(f.name); continue; }\n      // D-5: недоступность источника — НИКОГДА не удаление canonical.",
+    expectFail: 'неопознанный 403 НЕ портит статус источника и НЕ гасит вход',
   },
   {
     // Токен просачивается в разметку панели.

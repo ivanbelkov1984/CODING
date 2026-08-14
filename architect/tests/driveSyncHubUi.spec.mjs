@@ -427,13 +427,21 @@ console.log('\nDRIVE SYNC HUB — ИНТЕРФЕЙС\n');
       const real = driveNetReal();
       driveTokenPut('TEST-DRV-TOKEN-secret', 3600);
       try { await real.getMeta('X'); return { err: 'нет ошибки' }; }
-      catch (e) { return { needAuth: !!e.needAuth, forbidden: !!e.forbidden, rateLimited: !!e.rateLimited, tokenAfter: driveAuthState() }; }
+      catch (e) { return { needAuth: !!e.needAuth, forbidden: !!e.forbidden, rateLimited: !!e.rateLimited, serviceError: !!e.serviceError, message: String(e.message || ''), tokenAfter: driveAuthState() }; }
       finally { window.fetch = orig; }
     };
     return {
       a401: await probe(401, {}),
       a403perm: await probe(403, { error: { errors: [{ reason: 'insufficientFilePermissions' }] } }),
+      a403app: await probe(403, { error: { errors: [{ reason: 'appNotAuthorizedToFile' }] } }),
       a403quota: await probe(403, { error: { errors: [{ reason: 'userRateLimitExceeded' }] } }),
+      a403daily: await probe(403, { error: { errors: [{ reason: 'dailyLimitExceeded' }] } }),
+      // НЕОПОЗНАННЫЙ 403: ни потеря доступа к объекту, ни квота.
+      a403unknown: await probe(403, { error: { errors: [{ reason: 'somePolicyThingWeDoNotKnow' }] } }),
+      // Голый PERMISSION_DENIED — это общий статус 403, а НЕ доказательство
+      // потери доступа именно к файлу.
+      a403generic: await probe(403, { error: { status: 'PERMISSION_DENIED' } }),
+      a403empty: await probe(403, {}),
       a429: await probe(429, {}),
     };
   });
@@ -443,7 +451,20 @@ console.log('\nDRIVE SYNC HUB — ИНТЕРФЕЙС\n');
     '403 «нет прав на файл» → объект недоступен, вход НЕ объявляется истёкшим', JSON.stringify(codes.a403perm));
   ok(codes.a403quota.rateLimited && !codes.a403quota.forbidden && codes.a403quota.tokenAfter === 'active',
     '403 «квота/лимит» → явная ошибка сервиса, НЕ недоступность файла и НЕ истёкший вход', JSON.stringify(codes.a403quota));
+  ok(codes.a403app.forbidden && !codes.a403app.needAuth,
+    '403 appNotAuthorizedToFile → тоже опознанная потеря доступа к объекту', JSON.stringify(codes.a403app));
+  ok(codes.a403daily.rateLimited && !codes.a403daily.forbidden,
+    '403 dailyLimitExceeded → лимит, а не потеря доступа', JSON.stringify(codes.a403daily));
   ok(codes.a429.rateLimited, '429 → ограничение частоты, отдельная честная ошибка', JSON.stringify(codes.a429));
+
+  // ── НЕОПОЗНАННЫЙ 403 не угадывается ────────────────────────────────
+  for (const [name, c] of [['неизвестная причина', codes.a403unknown], ['PERMISSION_DENIED без причины', codes.a403generic], ['пустое тело', codes.a403empty]]) {
+    ok(!c.forbidden && !c.needAuth && !c.rateLimited && c.serviceError === true,
+      `403 (${name}) → явная ошибка сервиса: НЕ потеря доступа, НЕ истёкший вход, НЕ квота`, JSON.stringify(c));
+    ok(c.tokenAfter === 'active', `403 (${name}) → токен остаётся действительным`, JSON.stringify(c));
+    ok(/не потеря доступа к файлу и не истёкший вход/.test(c.message || ''),
+      `403 (${name}) → человеку названа честная причина`, String(c.message).slice(0, 110));
+  }
 
   // Квота не должна помечать источник недоступным.
   await fakeNet([{ id: 'TEST-DRV-UI-Q', name: 'квота.json', rateLimited: true }]);
@@ -459,6 +480,39 @@ console.log('\nDRIVE SYNC HUB — ИНТЕРФЕЙС\n');
     'квота при чтении → отказ, но источник НЕ помечен недоступным', JSON.stringify(q));
   ok(q.status !== 'source_unavailable' && q.auth === 'active',
     'при квоте вход остаётся действительным, статус источника не испорчен', JSON.stringify(q));
+
+  // Тот же путь для НЕОПОЗНАННОГО 403 — сквозь настоящий транспорт.
+  const unk = await page.evaluate(async () => {
+    DB.externalConnections = []; DB.insights = [{ id: 'TEST-DRV-KEEP', title: 'цела', body: 'b', sv: SCHEMA_VERSION }]; persist();
+    const c = driveConnCreate('TEST-DRV Неизвестный 403');
+    driveFeedsAdd(c.rec.id, [{ id: 'TEST-DRV-UI-U', name: 'неизвестно.json' }]);
+    driveTokenPut('TEST-DRV-TOKEN-secret', 3600);
+    const saved = { ...DRIVE_NET };
+    const orig = window.fetch;
+    window.fetch = async () => ({
+      status: 403, ok: false,
+      clone() { return { json: async () => ({ error: { errors: [{ reason: 'someUnknownPolicyReason' }] } }) }; },
+      json: async () => ({}), text: async () => '',
+    });
+    Object.keys(DRIVE_NET).forEach(k => delete DRIVE_NET[k]);
+    Object.assign(DRIVE_NET, driveNetReal());
+    const before = JSON.stringify(DB.insights);
+    const r = await driveReadFeed(c.rec.id);
+    window.fetch = orig;
+    Object.keys(DRIVE_NET).forEach(k => delete DRIVE_NET[k]);
+    Object.assign(DRIVE_NET, saved);
+    return {
+      failed: !r.ok, serviceError: !!r.serviceError, unavailable: !!r.unavailable, needAuth: !!r.needAuth,
+      status: extConnFind(c.rec.id).status, auth: driveAuthState(),
+      canonicalIntact: JSON.stringify(DB.insights) === before,
+      msg: (r.errors || [])[0] || '',
+    };
+  });
+  ok(unk.failed && unk.serviceError && !unk.unavailable && !unk.needAuth,
+    'неопознанный 403 при чтении → явная ошибка сервиса, НЕ недоступность и НЕ истёкший вход', JSON.stringify(unk));
+  ok(unk.status !== 'source_unavailable' && unk.auth === 'active',
+    'неопознанный 403 НЕ портит статус источника и НЕ гасит вход', JSON.stringify(unk));
+  ok(unk.canonicalIntact, 'неопознанный 403 не тронул canonical', JSON.stringify(unk));
 }
 
 // ── Безопасность UI: секретов в разметке нет ─────────────────────────
