@@ -143,6 +143,27 @@ const createDriveSource = async (label) => {
   await page.locator('#ext-connections button', { hasText: 'Добавить источник' }).click({ force: true });
 };
 
+// Ожидание УСЛОВИЯ, а не фиксированной паузы: под нагрузкой полного прогона
+// коммит успевает медленнее, и жёсткий таймаут делал сюиту плавающей.
+const waitUntil = async (fn, ms = 15000) => {
+  const t0 = Date.now();
+  for (;;) {
+    try { if (await page.evaluate(fn)) return true; } catch (_) { }
+    if (Date.now() - t0 > ms) return false;
+    await page.waitForTimeout(100);
+  }
+};
+// Подтверждение подачи существующими кнопками моста + ожидание результата.
+const applyBridge = async (expectFn) => {
+  const imp = page.locator('#ext-conn-out button', { hasText: 'Импортировать' });
+  if (!(await imp.count())) return false;
+  await imp.first().click({ force: true });
+  await page.waitForTimeout(120);
+  const yes = page.locator('#ext-conn-out button', { hasText: 'Да, импортировать' });
+  if (await yes.count()) await yes.first().click({ force: true });
+  return expectFn ? await waitUntil(expectFn) : true;
+};
+
 console.log('\nDRIVE SYNC HUB — ИНТЕРФЕЙС\n');
 
 // ── A. Путь достижим: экран источников открывается видимой кнопкой ───
@@ -230,7 +251,7 @@ console.log('\nDRIVE SYNC HUB — ИНТЕРФЕЙС\n');
 {
   const before = await page.evaluate(() => (DB.insights || []).length);
   await page.locator('[id^="drive-sync-"]').first().click({ force: true });
-  await page.waitForTimeout(400);
+  await waitUntil(() => /Что изменится/.test((($('ext-conn-out') || {}).textContent) || ''));
   const out = await page.locator('#ext-conn-out').textContent();
   const after = await page.evaluate(() => (DB.insights || []).length);
   ok(/Что изменится/.test(out || ''), 'G+H. кнопка «Синхронизировать» привела к СУЩЕСТВУЮЩЕМУ предпросмотру моста', String(out).slice(0, 90));
@@ -240,11 +261,8 @@ console.log('\nDRIVE SYNC HUB — ИНТЕРФЕЙС\n');
 
 // ── J+K+L. Подтверждение → commit, ledger и курсор ───────────────────
 {
-  await page.locator('#ext-conn-out button', { hasText: 'Импортировать' }).first().click({ force: true });
-  await page.waitForTimeout(200);
-  const confirm = page.locator('#ext-conn-out button', { hasText: 'Да, импортировать' });
-  if (await confirm.count()) await confirm.first().click({ force: true });
-  await page.waitForTimeout(500);
+  const committed = await applyBridge(() => (DB.insights || []).length === 1);
+  ok(committed, 'подтверждение довело подачу до canonical (без гонки на таймауте)');
   const st = await page.evaluate(() => {
     const c = (DB.externalConnections || [])[0] || {};
     return {
@@ -264,7 +282,7 @@ console.log('\nDRIVE SYNC HUB — ИНТЕРФЕЙС\n');
 // ── Точный повтор через UI → ноль дублей ─────────────────────────────
 {
   await page.locator('[id^="drive-sync-"]').first().click({ force: true });
-  await page.waitForTimeout(400);
+  await waitUntil(() => (($('ext-conn-out') || {}).textContent || '').length > 0);
   const st = await page.evaluate(() => ({
     insights: (DB.insights || []).length,
     out: ($('ext-conn-out') || {}).textContent || '',
@@ -297,7 +315,7 @@ console.log('\nDRIVE SYNC HUB — ИНТЕРФЕЙС\n');
     extRenderConnections();
   });
   await page.locator('[id^="drive-sync-"]').first().click({ force: true });
-  await page.waitForTimeout(250);
+  await waitUntil(() => (($('ext-conn-out') || {}).textContent || '').length > 0);
   const out = await page.locator('#ext-conn-out').textContent();
   ok(/подключи Google|истекла|переподключ/i.test(out || ''),
     'без действующего входа синхронизация отказывает и просит переподключиться', String(out).slice(0, 100));
@@ -312,7 +330,7 @@ console.log('\nDRIVE SYNC HUB — ИНТЕРФЕЙС\n');
   await fakeNet([{ id: 'TEST-DRV-UI-1', name: 'жизнь.json', gone: true }]);
   await page.evaluate(async () => { await window.driveConnect(); extRenderConnections(); });
   await page.locator('[id^="drive-sync-"]').first().click({ force: true });
-  await page.waitForTimeout(300);
+  await waitUntil(() => ((DB.externalConnections || [])[0] || {}).status === 'source_unavailable');
   const st = await page.evaluate(() => ({
     status: ((DB.externalConnections || [])[0] || {}).status,
     insights: (DB.insights || []).length,
@@ -362,12 +380,9 @@ console.log('\nDRIVE SYNC HUB — ИНТЕРФЕЙС\n');
   await createDriveSource('TEST-DRV Конфликт');
   await page.evaluate(async () => { await window.driveConnect(); const c = (DB.externalConnections || [])[0]; await window.drivePickFeeds(c.id); extRenderConnections(); });
   await page.locator('[id^="drive-sync-"]').first().click({ force: true });
-  await page.waitForTimeout(400);
-  await page.locator('#ext-conn-out button', { hasText: 'Импортировать' }).first().click({ force: true });
-  await page.waitForTimeout(150);
-  const cf = page.locator('#ext-conn-out button', { hasText: 'Да, импортировать' });
-  if (await cf.count()) await cf.first().click({ force: true });
-  await page.waitForTimeout(400);
+  await waitUntil(() => /Что изменится/.test((($('ext-conn-out') || {}).textContent) || ''));
+  const seeded = await applyBridge(() => (DB.insights || []).length === 1);
+  ok(seeded, 'исходная версия импортирована — база для проверки конфликта готова');
   // Владелец правит запись локально, источник присылает более новую версию.
   await page.evaluate(() => { DB.insights[0].title = 'Правка владельца'; DB.insights[0]._u = Date.now(); persist(); });
   await page.evaluate(() => {
@@ -383,15 +398,9 @@ console.log('\nDRIVE SYNC HUB — ИНТЕРФЕЙС\n');
     });
   });
   await page.locator('[id^="drive-sync-"]').first().click({ force: true });
-  await page.waitForTimeout(400);
-  const applyBtn = page.locator('#ext-conn-out button', { hasText: 'Импортировать' });
-  if (await applyBtn.count()) {
-    await applyBtn.first().click({ force: true });
-    await page.waitForTimeout(150);
-    const c2 = page.locator('#ext-conn-out button', { hasText: 'Да, импортировать' });
-    if (await c2.count()) await c2.first().click({ force: true });
-    await page.waitForTimeout(400);
-  }
+  await waitUntil(() => (($('ext-conn-out') || {}).textContent || '').length > 0);
+  await applyBridge(null);
+  await page.waitForTimeout(600);   // дать шанс ошибочному применению проявиться
   const st = await page.evaluate(() => ({
     title: ((DB.insights || [])[0] || {}).title,
     n: (DB.insights || []).length,
