@@ -2503,6 +2503,29 @@ const REC_CORR = {
     RC('valueText', 'Значение (текст)'), RC('unit', 'Единица'),
     RC('contextTag', 'Контекст (условие эксперимента)'), RC('timestamp', 'Когда', { iso: true })],
 };
+// ── D-DATE-01: строгая календарная проверка ─────────────────────────
+// Date.parse НЕ доказывает существование даты: JavaScript тихо нормализует
+// «2026-02-31» в 3 марта, и невозможный день сохранился бы как будто он
+// настоящий (а движки читали бы уже ДРУГОЙ день). Существование проверяется
+// по календарю: месяц 01–12, день в пределах длины месяца, високосность по
+// григорианским правилам. Эти три помощника — ЕДИНСТВЕННАЯ календарная
+// семантика приложения; все write-path валидаторы (коррекции, импорт,
+// psy-контракт) обязаны опираться на них, а не на Date.parse.
+const isRealCalendarDate = (y, m, d) => {
+  if (!(m >= 1 && m <= 12 && d >= 1)) return false;
+  const feb = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 29 : 28;
+  return d <= [31, feb, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1];
+};
+const isRealIsoDay = s => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) &&
+  isRealCalendarDate(+s.slice(0, 4), +s.slice(5, 7), +s.slice(8, 10));
+// Календарная часть в начале строки даты-времени («2026-02-31T10:00»,
+// «2026-2-31 10:00»): если она есть и такого дня не существует, Date.parse
+// нормализовал бы её в другую дату — это запрещено. Строки без ведущей
+// даты проверяет по-прежнему Date.parse (формат не сужается).
+const dateHeadImpossible = s => {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/.exec(String(s == null ? '' : s));
+  return !!m && !isRealCalendarDate(+m[1], +m[2], +m[3]);
+};
 // Доменная проверка одного исправленного значения. Отклонение — это отказ,
 // а не «поправим как сможем»: доказательное поле не угадывается.
 function recCorrValidate(spec, raw) {
@@ -2522,13 +2545,18 @@ function recCorrValidate(spec, raw) {
     return { ok: true, value: s };
   }
   if (spec.day) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(s + 'T00:00:00Z'))) {
-      return { ok: false, error: `«${spec.l}»: нужна дата в виде ГГГГ-ММ-ДД` };
+    // D-DATE-01: существование дня, а не только формат.
+    if (!isRealIsoDay(s)) {
+      return { ok: false, error: `«${spec.l}»: нужна существующая дата в виде ГГГГ-ММ-ДД` };
     }
     return { ok: true, value: s };
   }
   if (spec.iso) {
-    if (!s || Number.isNaN(Date.parse(s))) return { ok: false, error: `«${spec.l}»: нужны корректные дата и время` };
+    // D-DATE-01: несуществующий день в дате-времени — отказ, а не тихая
+    // нормализация в другую дату (2026-02-31T10:00 превращался в 3 марта).
+    if (!s || dateHeadImpossible(s) || Number.isNaN(Date.parse(s))) {
+      return { ok: false, error: `«${spec.l}»: нужны корректные дата и время` };
+    }
     return { ok: true, value: new Date(s).toISOString() };
   }
   if (spec.req && !s) return { ok: false, error: `«${spec.l}»: значение обязательно` };
@@ -2555,12 +2583,15 @@ function recCorrHistoryHtml(coll, rec, hist) {
       c.reason ? ` — ${esc(c.reason)}` : ''}<br><span style="color:var(--t4);font-size:.72rem">${esc(String(c.at || '').slice(0, 16).replace('T', ' '))} UTC · ${esc(CORR_ORIGIN_RU[c.origin] || c.origin)}${
       c.supersedes ? ' · заменяет предыдущее' : ''}</span></div>`).join('');
     const head = h.invalid
-      ? `<div class="ext-need">История исправлений этого поля повреждена: ${esc(h.invalid.join('; '))}. Пока это не исправлено, используется ОРИГИНАЛ — приложение не восстанавливает порядок по времени и не угадывает принятое значение. Исправления по этому полю закрыты.</div>`
+      ? `<div class="ext-need">История исправлений этого поля повреждена: ${esc(h.invalid.join('; '))}. Пока это не исправлено, используется базовое значение текущей версии — приложение не восстанавливает порядок по времени и не угадывает принятое значение. Исправления по этому полю закрыты.</div>`
       : h.conflict
-        ? `<div class="ext-need">Конфликт исправлений: ${h.heads.length} независимых версии этого поля. Пока конфликт не разрешён, используется ОРИГИНАЛ — приложение не выбирает «кто новее» само.</div>`
+        ? `<div class="ext-need">Конфликт исправлений: ${h.heads.length} независимых версии этого поля. Пока конфликт не разрешён, используется базовое значение текущей версии — приложение не выбирает «кто новее» само.</div>`
         : `<div class="si-text" style="color:var(--t3);font-size:.75rem">Сейчас принято: ${esc(val(h.active ? h.active.patch[h.field] : h.original))}</div>`;
+    // «Базовое значение текущей версии», НЕ «оригинал»: обновление из
+    // источника (Variant B) переписывает сырое поле, поэтому здесь может
+    // стоять уже не первое значение, когда-либо попавшее в систему.
     return `<div class="psy-fld"><div class="f-lbl">${esc(label(h.field))}</div>
-      <div class="si-text" style="color:var(--t3);font-size:.75rem">Оригинал: ${esc(val(h.original))}</div>
+      <div class="si-text" style="color:var(--t3);font-size:.75rem">Базовое значение текущей версии: ${esc(val(h.original))}</div>
       ${steps}${head}</div>`;
   }).join('');
   const inactive = list.some(h => h.inactive)
@@ -2628,9 +2659,9 @@ function recRenderDetail() {
     // неразрешённым конфликтом или повреждённой цепочкой показывает ОРИГИНАЛ
     // и честно говорит почему.
     const mark = corrBad.includes(f.k)
-      ? `<span class="ext-need" style="display:inline-block;padding:.05rem .35rem;margin-left:.35rem;font-size:.7rem">История исправлений повреждена — показан оригинал</span>`
+      ? `<span class="ext-need" style="display:inline-block;padding:.05rem .35rem;margin-left:.35rem;font-size:.7rem">История исправлений повреждена — показано базовое значение</span>`
       : corrConf.includes(f.k)
-        ? `<span class="ext-need" style="display:inline-block;padding:.05rem .35rem;margin-left:.35rem;font-size:.7rem">Конфликт исправлений — показан оригинал</span>`
+        ? `<span class="ext-need" style="display:inline-block;padding:.05rem .35rem;margin-left:.35rem;font-size:.7rem">Конфликт исправлений — показано базовое значение</span>`
         : corrFields.includes(f.k)
           ? `<span style="margin-left:.35rem;font-size:.7rem;color:var(--t3)">· Исправлено</span>`
           : '';
@@ -2654,7 +2685,7 @@ function recRenderDetail() {
   const histHtml = recCorrHistoryHtml(coll, rec, hist);
   const tech = `
     <details class="psy-det"><summary class="si-text" style="color:var(--t3)">Технические данные</summary>
-      <div class="f-lbl" style="margin-top:.4rem">A · Оригинал записи (как записан)</div>
+      <div class="f-lbl" style="margin-top:.4rem">A · Базовая запись текущей версии (как хранится)</div>
       <div class="si-text" style="font-size:.72rem;color:var(--t4);white-space:pre-wrap;word-break:break-word">${esc(JSON.stringify(rec, null, 1).slice(0, 4000))}</div>
       <div class="f-lbl" style="margin-top:.6rem">B · Цепочка исправлений</div>
       <div class="si-text" style="font-size:.72rem;color:var(--t4);white-space:pre-wrap;word-break:break-word">${esc(hist.length ? JSON.stringify(hist, null, 1).slice(0, 4000) : 'исправлений нет')}</div>
@@ -2784,11 +2815,11 @@ function recCorrRender(coll, rec, box, act) {
       <button type="button" class="btn btn-s btn-full" onclick="_recDet.correcting=false;_recDet.corrStale=null;recRenderDetail()">Отмена</button>`;
     return;
   }
-  box.innerHTML = `<div class="ext-safe">Оригинал остаётся в истории навсегда: исправление добавляется отдельным событием и не переписывает исходную запись. Пустое поле = оставить как есть.</div>` +
+  box.innerHTML = `<div class="ext-safe">Исправление не переписывает запись: оно добавляется отдельным событием, а базовое значение остаётся видимым в истории. Пустое поле = оставить как есть.</div>` +
     specs.map(sp => {
       const broken = bad.includes(sp.k);
       const locked = broken || conf.includes(sp.k);
-      const hint = `сейчас: ${esc(val(eff[sp.k]) || '—')}${val(rec[sp.k]) !== val(eff[sp.k]) ? ` · оригинал: ${esc(val(rec[sp.k]) || '—')}` : ''}`;
+      const hint = `сейчас: ${esc(val(eff[sp.k]) || '—')}${val(rec[sp.k]) !== val(eff[sp.k]) ? ` · базовое: ${esc(val(rec[sp.k]) || '—')}` : ''}`;
       // §3: у nullable-поля нужна ЯВНАЯ очистка. Пустая строка ввода означает
       // «не трогать» и переинтерпретации не подлежит — иначе форма молча
       // обнуляла бы поля, которых человек не касался.
@@ -2861,7 +2892,7 @@ function recCorrSave() {
   recRenderDetail();
   rRecords();
   try { renderAfterSync(); } catch (e) { }
-  toast('Исправлено — оригинал сохранён в истории', 'ok');
+  toast('Исправлено — прежнее значение видно в истории', 'ok');
 }
 function recDelFromDetail() {
   if (!_recDet) return;
@@ -4148,7 +4179,7 @@ function correctMoment() {
   if (!res.ok) { toast(res.error, 'warn'); return; }
   openMoment(id);
   try { rHomeMoments(); rMomentTrend(); rWeekSummary(); } catch (e) {}
-  toast('Исправлено (оригинал сохранён в истории)', 'ok');
+  toast('Исправлено (прежнее значение видно в истории)', 'ok');
 }
 function deleteWhyDet() {
   const id = STATE.whyDetId; if (id == null) return;
@@ -13180,7 +13211,8 @@ function psyMethod(id) { return PSY_METHOD_REGISTRY.find(m => m.methodId === id)
 
 // ── Общие помощники валидации ───────────────────────────────────────
 const psyStr = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max || 8000) : '');
-const psyIsIso = v => typeof v === 'string' && !Number.isNaN(Date.parse(v));
+// D-DATE-01: несуществующий календарный день (2026-02-31T…) — не дата.
+const psyIsIso = v => typeof v === 'string' && !dateHeadImpossible(v) && !Number.isNaN(Date.parse(v));
 const psyEnum = (v, list, dflt) => (list.includes(v) ? v : dflt);
 const psyArr = v => (Array.isArray(v) ? v : []);
 // Ссылки на существующие записи: { coll, id }. Fail-closed — «висячая»
@@ -15624,8 +15656,10 @@ function extNormalizeSourceVersion(v) {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
   const out = {};
   if (typeof v.sequence === 'number' && isFinite(v.sequence)) out.sequence = v.sequence;
+  // D-DATE-01: невозможный календарный день не является доказательством
+  // порядка — такое значение отбрасывается, порядок честно 'unknown'.
   const mAt = extStr(v.modifiedAt, 40);
-  if (mAt && !Number.isNaN(Date.parse(mAt))) out.modifiedAt = mAt;
+  if (mAt && !dateHeadImpossible(mAt) && !Number.isNaN(Date.parse(mAt))) out.modifiedAt = mAt;
   const rid = extStr(v.revisionId, 200);
   if (rid) out.revisionId = rid;
   return Object.keys(out).length ? out : null;
@@ -15695,7 +15729,9 @@ function extScanUnsafe(node, depth, errors, path) {
   }
 }
 const extStr = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max || EXT_LIMITS.maxString) : '');
-const extIsIsoDay = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v + 'T00:00:00Z'));
+// D-DATE-01: тот же строгий календарь, что в коррекциях, — у импорта не
+// может быть более мягкой семантики дня, чем у ручного исправления.
+const extIsIsoDay = v => isRealIsoDay(v);
 
 // Один валидатор для source где угодно: пакет, запись, ссылка на источник.
 // Пустой/чужой kind отклоняется fail-closed, как и на уровне пакета.
@@ -15788,8 +15824,8 @@ function extValidatePackage(raw) {
         if (sv.sequence != null && !(typeof sv.sequence === 'number' && isFinite(sv.sequence))) {
           errors.push(`entities[${i}]: sourceVersion.sequence должен быть конечным числом`);
         }
-        if (sv.modifiedAt != null && (typeof sv.modifiedAt !== 'string' || Number.isNaN(Date.parse(sv.modifiedAt)))) {
-          errors.push(`entities[${i}]: sourceVersion.modifiedAt должен быть корректной датой-временем ISO`);
+        if (sv.modifiedAt != null && (typeof sv.modifiedAt !== 'string' || dateHeadImpossible(sv.modifiedAt) || Number.isNaN(Date.parse(sv.modifiedAt)))) {
+          errors.push(`entities[${i}]: sourceVersion.modifiedAt должен быть корректной датой-временем ISO (существующий календарный день)`);
         }
         if (sv.revisionId != null && !extStr(sv.revisionId, 200)) {
           errors.push(`entities[${i}]: sourceVersion.revisionId должен быть непустой строкой`);
