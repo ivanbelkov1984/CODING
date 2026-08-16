@@ -8,6 +8,7 @@ import { readFile, writeFile, rm } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { spawn } from 'child_process';
+import { makeRun, redLines, selfTestRetryPolicy } from './mutation-run.mjs';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = join(DIR, '..', 'dist');
@@ -137,7 +138,7 @@ const MUTANTS = [
     what: 'универсальная история исправлений перестаёт показываться',
     find: '  box.innerHTML = rows + prov + histHtml + noteC + noteB + tech;',
     replace: '  box.innerHTML = rows + prov + noteC + noteB + tech;',
-    expectFail: 'универсальная история: оригинал, цепочка, причина',
+    expectFail: 'универсальная история: базовое значение, цепочка, причина',
   },
   {
     // §1 БЛОКЕР: снимок «что видел человек» возвращается на момент СОХРАНЕНИЯ.
@@ -206,6 +207,63 @@ const MUTANTS = [
     expectFail: 'пустой ввод по-прежнему означает «оставить как есть», а не null',
   },
   {
+    // ПРОБЕЛ АУДИТА: снимаются ТОЛЬКО стражи конфликта/поломки цепочки, а
+    // страж corrFieldsTouched остаётся. Прежний мутант (вся строка целиком)
+    // убивался сценарием одиночной головы и НЕ доказывал покрытие именно
+    // этих двух условий: у конфликтного поля _corrFields пуст, поэтому без
+    // отдельного стража конфликтная запись выглядела бы «нетронутой».
+    id: 'variantb-conflict-broken-guards-removed',
+    what: 'сняты только стражи corrConflicted/corrBroken в Variant B',
+    find: '  const userUntouched = rawUntouched && !corrFieldsTouched.length && !corrConflicted && !corrBroken;',
+    replace: '  const userUntouched = rawUntouched && !corrFieldsTouched.length;',
+    expectFail: 'КОНФЛИКТ исправлений (две активные головы) сам по себе даёт changed-conflict на пути моста',
+  },
+  {
+    // То же, но снят ТОЛЬКО страж повреждённой цепочки: конфликтный страж
+    // не должен маскировать отсутствие стража поломки.
+    id: 'variantb-broken-guard-removed',
+    what: 'снят только страж corrBroken в Variant B',
+    find: '  const userUntouched = rawUntouched && !corrFieldsTouched.length && !corrConflicted && !corrBroken;',
+    replace: '  const userUntouched = rawUntouched && !corrFieldsTouched.length && !corrConflicted;',
+    expectFail: 'ПОВРЕЖДЁННАЯ цепочка исправлений сама по себе даёт changed-conflict на пути моста',
+  },
+  {
+    // D-DATE-01: календарная проверка деградирует обратно до Date.parse —
+    // «2026-02-31» снова считается датой (JS нормализует её в 3 марта).
+    id: 'calendar-back-to-date-parse',
+    what: 'строгий календарь дня возвращён к regex + Date.parse',
+    find: `const isRealIsoDay = s => typeof s === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(s) &&
+  isRealCalendarDate(+s.slice(0, 4), +s.slice(5, 7), +s.slice(8, 10));`,
+    replace: `const isRealIsoDay = s => typeof s === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(s) && !Number.isNaN(Date.parse(s + 'T00:00:00Z'));`,
+    expectFail: 'несуществующий день (2026-02-31 и семья) отклонён строгим календарём',
+  },
+  {
+    // D-DATE-01: тихая нормализация даты-времени возвращается — ввод
+    // 2026-02-31T10:00 снова молча стал бы 3 марта.
+    id: 'iso-normalization-restored',
+    what: 'из ISO-проверки коррекций снят страж несуществующего дня',
+    find: '    if (!s || dateHeadImpossible(s) || Number.isNaN(Date.parse(s))) {',
+    replace: '    if (!s || Number.isNaN(Date.parse(s))) {',
+    expectFail: 'дата-время с несуществующим днём не нормализуется молча',
+  },
+  {
+    // D-DATE-01: psy-контракт снова принимает несуществующий день.
+    id: 'psy-timestamp-permissive',
+    what: 'psyIsIso возвращён к Date.parse без календарной проверки',
+    find: "const psyIsIso = v => typeof v === 'string' && !dateHeadImpossible(v) && !Number.isNaN(Date.parse(v));",
+    replace: "const psyIsIso = v => typeof v === 'string' && !Number.isNaN(Date.parse(v));",
+    expectFail: 'extIsIsoDay и psyIsIso держат ту же календарную семантику',
+  },
+  {
+    // D-DATE-01: валидация пакета снова принимает невозможный modifiedAt —
+    // несуществующий день становился бы «доказательством» порядка версий.
+    id: 'modifiedat-impossible-accepted',
+    what: 'валидация пакета снова принимает несуществующий modifiedAt',
+    find: "        if (sv.modifiedAt != null && (typeof sv.modifiedAt !== 'string' || dateHeadImpossible(sv.modifiedAt) || Number.isNaN(Date.parse(sv.modifiedAt)))) {",
+    replace: "        if (sv.modifiedAt != null && (typeof sv.modifiedAt !== 'string' || Number.isNaN(Date.parse(sv.modifiedAt)))) {",
+    expectFail: 'импорт держит ту же календарную семантику: sourceDate/modifiedAt с несуществующим днём отклонены',
+  },
+  {
     // §8: исправление начинает мутировать оригинал — история теряется.
     id: 'correction-mutates-original',
     what: 'исправление начинает переписывать оригинал записи',
@@ -218,7 +276,11 @@ const MUTANTS = [
   },
 ];
 
-const run = (bundle) => new Promise(res => {
+// Политика повтора — общая и доказанная (см. mutation-run.mjs). Ключевое:
+// прогон с code 0 и нулём красных строк — это ВЫЖИВШИЙ мутант, а не сорванный
+// прогон, и повтора он не получает: иначе флейковый второй прогон зачёл бы
+// снятую защиту как пойманную.
+const runOnce = (bundle) => new Promise(res => {
   const p = spawn(process.execPath, [SPEC], {
     cwd: join(DIR, '..'),
     env: { ...process.env, CORRECTIONS_BUNDLE: bundle },
@@ -228,6 +290,7 @@ const run = (bundle) => new Promise(res => {
   p.stderr.on('data', d => { out += d; });
   p.on('close', code => res({ code, out }));
 });
+const run = makeRun(runOnce);
 
 let pass = 0, fail = 0;
 const ok = (cond, msg, detail) => {
@@ -236,6 +299,10 @@ const ok = (cond, msg, detail) => {
 };
 
 console.log('\n── ИСПРАВЛЕНИЯ mutation sanity: каждая снятая защита обязана уронить свой сценарий ──');
+
+// Сначала доказываем сам критерий убийства: без этого «27 из 27» ничего не
+// стоит, потому что повтор мог бы превращать выжившего мутанта в убитого.
+await selfTestRetryPolicy(ok);
 
 for (const m of MUTANTS) {
   if (!src.includes(m.find)) {
@@ -257,13 +324,13 @@ for (const m of MUTANTS) {
   await writeFile(file, mutated);
   const { code, out } = await run(file);
   await rm(file, { force: true });
-  const reds = out.split('\n').filter(l => l.trimStart().startsWith('✗')).map(l => l.trim());
+  const reds = redLines(out);
   const hitExpected = reds.some(l => l.includes(m.expectFail));
   ok(code !== 0 && hitExpected,
     `[${m.id}] ${m.what} → сценарий «${m.expectFail}» покраснел (${reds.length} провалов)`,
     code === 0 ? 'ПРОВЕРКА ЛОЖНОЗЕЛЁНАЯ: защита снята, но вся сюита прошла.'
       : hitExpected ? null
-        : `Сюита упала, но НЕ на ожидаемом сценарии. Красные:\n${reds.slice(0, 6).join('\n') || '(нет)'}`);
+        : `Сюита упала, но НЕ на ожидаемом сценарии. Красные:\n${reds.slice(0, 6).join('\n') || '(нет)'}\nХвост вывода:\n${out.split('\n').slice(-12).join('\n')}`);
 }
 
 console.log(`\nИСПРАВЛЕНИЯ mutation sanity: ${pass} passed, ${fail} failed`);

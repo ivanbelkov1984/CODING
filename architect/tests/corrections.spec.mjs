@@ -460,9 +460,13 @@ const v1Pkg = (n, body) => ({
     const acts = [...$('rec-det-actions').querySelectorAll('button')].map(b => b.textContent.trim());
     const out = {
       effShown: /8/.test(human), marked: /Исправлено/.test(human),
-      hist: /История исправлений/.test(all), orig: /Оригинал: 5/.test(all),
+      hist: /История исправлений/.test(all), orig: /Базовое значение текущей версии: 5/.test(all),
       reason: /пересчитал по трекеру/.test(all),
-      techA: /A · Оригинал записи/.test(all), techB: /B · Цепочка исправлений/.test(all), techC: /C · Эффективная запись/.test(all),
+      // Подпись «Оригинал» семантически неверна: после обновления из
+      // источника (Variant B) сырое поле уже переписано, и «оригиналом»
+      // текущее базовое значение не является. UI обязан этого не утверждать.
+      noOriginalClaim: !/Оригинал/.test(all),
+      techA: /A · Базовая запись текущей версии/.test(all), techB: /B · Цепочка исправлений/.test(all), techC: /C · Эффективная запись/.test(all),
       corrBtn: acts.some(a => /Исправить значение/.test(a)),
       noRawJsonInNormal: !/"sv":/.test(human),
     };
@@ -470,8 +474,9 @@ const v1Pkg = (n, body) => ({
     return out;
   });
   ok(insp.effShown && insp.marked, 'инспектор показывает ЭФФЕКТИВНОЕ значение и метку «Исправлено»', JSON.stringify(insp));
-  ok(insp.hist && insp.orig && insp.reason, 'универсальная история: оригинал, цепочка, причина', JSON.stringify(insp));
-  ok(insp.techA && insp.techB && insp.techC, 'технический блок: A оригинал · B цепочка · C эффективная запись');
+  ok(insp.hist && insp.orig && insp.reason, 'универсальная история: базовое значение, цепочка, причина', JSON.stringify(insp));
+  ok(insp.noOriginalClaim, 'инспектор больше не называет базовое значение «Оригиналом»', JSON.stringify(insp));
+  ok(insp.techA && insp.techB && insp.techC, 'технический блок: A базовая запись · B цепочка · C эффективная запись');
   ok(insp.noRawJsonInNormal, 'в обычном виде сырого JSON нет');
   ok(insp.corrBtn, 'у доказательной записи есть путь «Исправить значение»');
 }
@@ -783,6 +788,227 @@ const v1Pkg = (n, body) => ({
   ok(nl.originalKept && nl.histShows, 'оригинал (42) сохранён и виден в истории');
   ok(nl.repeatNoop && nl.contradictionRejected, 'повторная очистка и противоречивый ввод не создают исправлений');
   ok(nl.noClearOnNonNullable, 'у не-nullable поля действия очистки нет');
+}
+
+// ── 21. МОСТ × CORRECTION_CONFLICT: две активные головы ──────────────
+// Пробел, найденный аудитом: production был fail-closed, но ни один тест не
+// проводил запись с конфликтом (или поломкой) цепочки ЧЕРЕЗ мост. Мутация,
+// снимавшая только `!corrConflicted && !corrBroken`, выживала. Эти секции
+// закрывают ровно этот пробел end-to-end: конфликт/поломка БЕЗ пересечения
+// с corrFieldsTouched (у конфликтного поля _corrFields пуст — прежний
+// сценарий с одной головой этот путь не сторожит).
+{
+  await reset();
+  const seed = await page.evaluate(async (p) => {
+    const c = extConnCreate('TEST-CORR мост-конфликт', 'manual_file');
+    await extBridgeRefresh(c.rec.id, p);
+    const a = extBridgeApply(c.rec.id);
+    const rec = DB.moments[0];
+    DB.corrections.push(
+      { id: 'TEST-CORR-H1', kType: 'correction', coll: 'moments', targetId: rec.id, patch: { valence: 90 }, reason: 'устройство A', supersedesCorrectionId: null, origin: 'user', createdAt: '2026-04-02T10:00:00.000Z', day: '2026-04-02', sv: SCHEMA_VERSION, _u: 2 },
+      { id: 'TEST-CORR-H2', kType: 'correction', coll: 'moments', targetId: rec.id, patch: { valence: 70 }, reason: 'устройство B', supersedesCorrectionId: null, origin: 'user', createdAt: '2026-04-03T10:00:00.000Z', day: '2026-04-03', sv: SCHEMA_VERSION, _u: 3 });
+    persist();
+    const eff = projOne('moments', rec.id);
+    return { ok: a.ok, connId: c.rec.id, id: rec.id, eff: eff.valence, conflicts: eff._corrConflicts || [] };
+  }, JSON.stringify(v1Pkg(31, 'исходная заметка источника')));
+  ok(seed.ok && seed.eff === 40 && seed.conflicts.includes('valence'),
+    'проекция при двух головах не выбирает «кто новее»: действует базовое значение', JSON.stringify(seed));
+
+  // Подача из ДВУХ пакетов: обновление конфликтной записи + честная новая
+  // запись. Атомарный контракт: блокируется ВСЁ, включая new.
+  const r = await page.evaluate(async ({ connId, updPkg, newPkg }) => {
+    const feed = JSON.stringify({ format: EXT_FEED_FORMAT,
+      container: { kind: 'zip_archive', id: null, label: 'TEST-CORR контейнер' },
+      packages: [JSON.parse(updPkg), JSON.parse(newPkg)] });
+    const pr = await extBridgeRefresh(connId, feed);
+    const it = pr.batches[0].plan.items[0];
+    const before = {
+      moments: JSON.stringify(DB.moments), corrections: JSON.stringify(DB.corrections),
+      ledger: DB.externalWorkSessions.length,
+      checkpoint: (extConnFind(connId).checkpoint.committedPackageHashes || []).length,
+    };
+    const ap = extBridgeApply(connId);
+    const rec = DB.moments[0];
+    const eff = projOne('moments', rec.id);
+    return {
+      totals: pr.totals, status: it.status,
+      corrConflicted: !!(it.update && it.update.corrConflicted),
+      corrFieldsTouched: it.update ? it.update.corrFieldsTouched.length : -1,
+      applyOk: ap.ok, blocked: !!ap.blocked,
+      rawSame: JSON.stringify(DB.moments) === before.moments,
+      corrSame: JSON.stringify(DB.corrections) === before.corrections,
+      ledgerSame: DB.externalWorkSessions.length === before.ledger,
+      checkpointSame: (extConnFind(connId).checkpoint.committedPackageHashes || []).length === before.checkpoint,
+      newNotCreated: DB.moments.length === 1,
+      raw: rec.valence, eff: eff.valence,
+      prov: { sourceId: rec.ext.sourceId, textOrigin: rec.ext.textOrigin },
+    };
+  }, { connId: seed.connId, updPkg: (() => { const p = JSON.parse(JSON.stringify(v1Pkg(32, 'исходная заметка источника'))); p.entities[0].data.valence = 15; return JSON.stringify(p); })(),
+       newPkg: (() => { const p = JSON.parse(JSON.stringify(v1Pkg(33, 'вторая запись'))); p.entities[0].sourceId = 'TEST-CORR-SRC-ATOMIC'; p.entities[0].clientRef = 'atomic1'; p.session.clientRef = 'TEST-CORR-S-ATOMIC'; return JSON.stringify(p); })() });
+  ok(r.status === 'changed-conflict' && r.corrConflicted && r.corrFieldsTouched === 0,
+    'КОНФЛИКТ исправлений (две активные головы) сам по себе даёт changed-conflict на пути моста', JSON.stringify({ status: r.status, corrConflicted: r.corrConflicted, touched: r.corrFieldsTouched }));
+  ok(!r.applyOk && r.blocked && r.newNotCreated,
+    'мост при конфликте исправлений блокирует ВСЮ подачу атомарно (new из того же feed не применён)', JSON.stringify({ applyOk: r.applyOk, blocked: r.blocked, newNotCreated: r.newNotCreated }));
+  ok(r.rawSame && r.corrSame && r.ledgerSame && r.checkpointSame,
+    'блокировка конфликта: canonical, исправления, журнал и чекпойнт не изменились ни на запись', JSON.stringify(r));
+  ok(r.raw === 40 && r.eff === 40, 'после блокировки действует базовое значение, головы не «разрешены» временем', JSON.stringify({ raw: r.raw, eff: r.eff }));
+  ok(r.prov.sourceId === 'TEST-CORR-SRC-1' && r.prov.textOrigin === 'user_words',
+    'provenance записи не повреждён блокированной подачей', JSON.stringify(r.prov));
+
+  // Ручной путь: без явного выбора пакет отклоняется целиком.
+  const manual = await page.evaluate(async (p) => {
+    const before = JSON.stringify(DB);
+    const plan = await extBuildPlan(p);
+    const res = extCommitPlan(plan, null);
+    return { ok: res.ok, unresolved: res.unresolvedConflicts, same: JSON.stringify(DB) === before };
+  }, (() => { const p = JSON.parse(JSON.stringify(v1Pkg(34, 'исходная заметка источника'))); p.entities[0].data.valence = 15; return JSON.stringify(p); })());
+  ok(!manual.ok && manual.unresolved === 1 && manual.same,
+    'ручной extCommitPlan без явного выбора отклоняет пакет целиком (конфликт голов)', JSON.stringify(manual));
+}
+
+// ── 22. МОСТ × INVALID_CORRECTION_CHAIN: висячая ссылка ──────────────
+{
+  await reset();
+  const r = await page.evaluate(async ({ seedPkg, updPkg }) => {
+    const c = extConnCreate('TEST-CORR мост-поломка', 'manual_file');
+    await extBridgeRefresh(c.rec.id, seedPkg);
+    extBridgeApply(c.rec.id);
+    const rec = DB.moments[0];
+    DB.corrections.push({ id: 'TEST-CORR-DNG', kType: 'correction', coll: 'moments', targetId: rec.id, patch: { valence: 90 }, reason: 'висячая ссылка', supersedesCorrectionId: 'TEST-CORR-NOPE', origin: 'user', createdAt: '2026-04-02T10:00:00.000Z', day: '2026-04-02', sv: SCHEMA_VERSION, _u: 2 });
+    persist();
+    const pr = await extBridgeRefresh(c.rec.id, updPkg);
+    const it = pr.batches[0].plan.items[0];
+    const before = { moments: JSON.stringify(DB.moments), corrections: JSON.stringify(DB.corrections), ledger: DB.externalWorkSessions.length };
+    const ap = extBridgeApply(c.rec.id);
+    const eff = projOne('moments', rec.id);
+    const manual = await (async () => {
+      const plan = await extBuildPlan(updPkg);
+      const res = extCommitPlan(plan, null);
+      return { ok: res.ok, unresolved: res.unresolvedConflicts };
+    })();
+    return {
+      status: it.status, corrBroken: !!(it.update && it.update.corrBroken),
+      corrConflicted: !!(it.update && it.update.corrConflicted),
+      applyOk: ap.ok, blocked: !!ap.blocked,
+      rawSame: JSON.stringify(DB.moments) === before.moments,
+      corrSame: JSON.stringify(DB.corrections) === before.corrections,
+      ledgerSame: DB.externalWorkSessions.length === before.ledger,
+      raw: DB.moments[0].valence, eff: eff.valence, invalid: eff._corrInvalid || [],
+      prov: { sourceId: DB.moments[0].ext.sourceId }, manual,
+    };
+  }, { seedPkg: JSON.stringify(v1Pkg(35, 'исходная заметка источника')),
+       updPkg: (() => { const p = JSON.parse(JSON.stringify(v1Pkg(36, 'исходная заметка источника'))); p.entities[0].data.valence = 15; return JSON.stringify(p); })() });
+  ok(r.status === 'changed-conflict' && r.corrBroken && !r.corrConflicted,
+    'ПОВРЕЖДЁННАЯ цепочка исправлений сама по себе даёт changed-conflict на пути моста', JSON.stringify({ status: r.status, corrBroken: r.corrBroken }));
+  ok(!r.applyOk && r.blocked && r.rawSame && r.corrSame && r.ledgerSame,
+    'блокировка повреждённой цепочки: raw не изменён, исправления не удалены, журнал не продвинут', JSON.stringify(r));
+  ok(r.raw === 40 && r.eff === 40 && r.invalid.includes('valence') && r.prov.sourceId === 'TEST-CORR-SRC-1',
+    'поле остаётся базовым и помеченным _corrInvalid, provenance цел', JSON.stringify({ raw: r.raw, eff: r.eff, invalid: r.invalid }));
+  ok(!r.manual.ok && r.manual.unresolved === 1,
+    'ручной extCommitPlan без явного выбора отклоняет пакет и при повреждённой цепочке', JSON.stringify(r.manual));
+}
+
+// ── 23. D-DATE-01: строгий календарь во всех write-path валидаторах ──
+// Date.parse нормализует «2026-02-31» в 3 марта; ни один writer не имеет
+// права сохранить (или молча подменить) несуществующий день.
+{
+  const d = await page.evaluate(() => {
+    const daySpec = REC_CORR.moments.find(f => f.k === 'day');
+    const isoSpec = REC_CORR.psyObservations.find(f => f.k === 'timestamp');
+    const day = s => recCorrValidate(daySpec, s).ok;
+    const iso = s => recCorrValidate(isoSpec, s);
+    return {
+      badDays: ['2026-02-31', '2026-02-30', '2025-02-29', '2026-04-31', '2026-06-31', '2026-09-31', '2026-11-31', '2026-13-01', '2026-00-10', '2026-01-00', '2026-01-32'].filter(day),
+      goodDays: ['2024-02-29', '2026-02-28', '2026-04-30', '2026-12-31', '2000-02-29'].filter(s => !day(s)),
+      century: day('1900-02-29'),                              // 1900 — не високосный
+      isoBad: iso('2026-02-31T10:00:00Z'), isoBadLoose: iso('2026-2-31 10:00'),
+      isoGood: iso('2026-02-28T10:00:00Z'), isoLocal: iso('2026-04-01T10:30'), isoOffset: iso('2026-04-01T10:30:00+03:00'),
+      importDay: extIsIsoDay('2026-02-31'), importDayOk: extIsIsoDay('2024-02-29'),
+      psyBad: psyIsIso('2026-02-31T10:00:00Z'), psyOk: psyIsIso(nowISO()),
+    };
+  });
+  ok(d.badDays.length === 0,
+    'несуществующий день (2026-02-31 и семья) отклонён строгим календарём', JSON.stringify(d.badDays));
+  ok(d.goodDays.length === 0 && !d.century,
+    'високосный год: 2024-02-29 и 2000-02-29 приняты, 1900-02-29 и 2025-02-29 отклонены', JSON.stringify({ good: d.goodDays, century: d.century }));
+  ok(!d.isoBad.ok && !d.isoBadLoose.ok,
+    'дата-время с несуществующим днём не нормализуется молча (2026-02-31T10:00 ≠ 3 марта)', JSON.stringify({ isoBad: d.isoBad, loose: d.isoBadLoose }));
+  ok(d.isoGood.ok && d.isoLocal.ok && d.isoOffset.ok,
+    'корректные ISO-варианты (Z, локальный, offset) принимаются как раньше', JSON.stringify({ g: d.isoGood.ok, l: d.isoLocal.ok, o: d.isoOffset.ok }));
+  ok(d.importDay === false && d.importDayOk === true && d.psyBad === false && d.psyOk === true,
+    'extIsIsoDay и psyIsIso держат ту же календарную семантику, что и коррекции', JSON.stringify({ importDay: d.importDay, psyBad: d.psyBad }));
+
+  // Настоящий writer-путь: невозможная дата не доходит до DB.corrections.
+  const wr = await page.evaluate(() => {
+    DB.corrections = [];
+    DB.moments = [{ id: 'TEST-CORR-DT', valence: 50, activation: 50, day: '2026-04-01', createdAt: '2026-04-01T10:00:00.000Z', sv: SCHEMA_VERSION, _u: 1 }];
+    recOpen('moments', 'TEST-CORR-DT'); recCorrOpen();
+    $('rec-c-day').value = '2026-02-31'; recCorrSave();
+    const rejected = DB.corrections.length === 0;
+    $('rec-c-day').value = '2024-02-29'; recCorrSave();
+    const accepted = DB.corrections.length === 1 && projOne('moments', 'TEST-CORR-DT').day === '2024-02-29';
+    closeOv('ov-rec-det');
+    // ISO-writer: невозможный день не сохраняется и не подменяется.
+    DB.labObservations = [{ id: 'TEST-CORR-LAB', testName: 'тест', valueText: '1', collectedAt: '2026-04-01T10:00:00.000Z', sv: SCHEMA_VERSION, _u: 1 }];
+    recOpen('labObservations', 'TEST-CORR-LAB'); recCorrOpen();
+    $('rec-c-collectedAt').value = '2026-02-31T10:00:00Z'; recCorrSave();
+    const isoRejected = DB.corrections.length === 1 &&
+      !JSON.stringify(DB.corrections).includes('2026-03-03');
+    closeOv('ov-rec-det');
+    return { rejected, accepted, isoRejected };
+  });
+  ok(wr.rejected && wr.accepted, 'writer коррекций: 2026-02-31 отклонён, 2024-02-29 сохранён', JSON.stringify(wr));
+  ok(wr.isoRejected, 'writer коррекций: ISO с несуществующим днём не записан и не подменён на 3 марта', JSON.stringify(wr));
+
+  // Импорт: те же дни невозможны и в пакете.
+  const imp = await page.evaluate((base) => {
+    const mk = (mut) => { const p = JSON.parse(base); mut(p); return extValidatePackage(JSON.stringify(p)); };
+    const badSourceDate = mk(p => { p.entities[0].sourceDate = '2026-02-31'; });
+    const badModified = mk(p => { p.entities[0].sourceVersion = { modifiedAt: '2026-02-31T10:00:00Z' }; });
+    const goodModified = mk(p => { p.entities[0].sourceVersion = { modifiedAt: '2026-02-28T10:00:00Z' }; });
+    const cmp = extCompareSourceVersions({ modifiedAt: '2026-02-31T10:00:00Z' }, { modifiedAt: '2026-03-01T00:00:00Z' });
+    return { badSourceDate: badSourceDate.ok, badModified: badModified.ok, goodModified: goodModified.ok, cmp };
+  }, JSON.stringify(v1Pkg(37, 'проверка дат')));
+  ok(imp.badSourceDate === false && imp.badModified === false && imp.goodModified === true,
+    'импорт держит ту же календарную семантику: sourceDate/modifiedAt с несуществующим днём отклонены', JSON.stringify(imp));
+  ok(imp.cmp === 'unknown',
+    'несуществующий modifiedAt не является доказательством порядка версий (unknown, fail closed)', JSON.stringify(imp.cmp));
+}
+
+// ── 24. Инспектор после обновления из источника: «база», не «оригинал» ─
+// corrHistory берёт базовое значение из ЖИВОЙ записи; после override сырое
+// поле уже переписано источником, и прежняя подпись «Оригинал» лгала.
+{
+  await reset();
+  const r = await page.evaluate(async ({ seedPkg, updPkg }) => {
+    const c = extConnCreate('TEST-CORR инспектор', 'manual_file');
+    await extBridgeRefresh(c.rec.id, seedPkg);
+    extBridgeApply(c.rec.id);
+    const id = DB.moments[0].id;
+    addCorrection('moments', id, { valence: 90 }, 'исправление владельца');
+    const plan = await extBuildPlan(updPkg);
+    const res = extCommitPlan(plan, { conflicts: { 0: 'override' } });
+    recOpen('moments', id);
+    const all = $('rec-det-body').textContent.replace(/\s+/g, ' ');
+    closeOv('ov-rec-det');
+    const eff = projOne('moments', id);
+    return {
+      overrideOk: res.ok, raw: DB.moments[0].valence, eff: eff.valence,
+      firstHistoricalGone: DB.moments[0].valence !== 40,
+      noOriginalClaim: !/Оригинал/.test(all),
+      baseLabel: /Базовое значение текущей версии: 15/.test(all),
+      techA: /A · Базовая запись текущей версии/.test(all),
+      techC: /C · Эффективная запись/.test(all),
+      chainVisible: /заменено версией источника/.test(all),
+    };
+  }, { seedPkg: JSON.stringify(v1Pkg(38, 'исходная заметка источника')),
+       updPkg: (() => { const p = JSON.parse(JSON.stringify(v1Pkg(39, 'исходная заметка источника'))); p.entities[0].data.valence = 15; return JSON.stringify(p); })() });
+  ok(r.overrideOk && r.raw === 15 && r.eff === 15 && r.firstHistoricalGone,
+    'подготовка: после override базовое значение уже НЕ первое историческое', JSON.stringify(r));
+  ok(r.noOriginalClaim && r.baseLabel,
+    'после обновления из источника инспектор не называет базу «Оригиналом»', JSON.stringify({ no: r.noOriginalClaim, base: r.baseLabel }));
+  ok(r.techA && r.techC && r.chainVisible,
+    'инспектор: различие «базовая запись vs эффективная» сохранено, происхождение замены видно', JSON.stringify(r));
 }
 
 ok(errors.length === 0, `JS-ошибок нет за весь прогон (${errors.length})`, errors.slice(0, 3).join('\n'));
