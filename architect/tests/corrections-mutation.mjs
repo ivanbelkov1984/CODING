@@ -8,6 +8,7 @@ import { readFile, writeFile, rm } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { spawn } from 'child_process';
+import { makeRun, redLines, selfTestRetryPolicy } from './mutation-run.mjs';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = join(DIR, '..', 'dist');
@@ -275,10 +276,10 @@ const MUTANTS = [
   },
 ];
 
-// Повтор ТОЛЬКО когда прогон не дал ни одной красной строки: это признак
-// того, что сюита умерла раньше проверок (нехватка ресурсов на раннере), а не
-// того, что защита действительно снята. Настоящий выживший мутант выживает и
-// во второй раз, поэтому строгость проверки не снижается.
+// Политика повтора — общая и доказанная (см. mutation-run.mjs). Ключевое:
+// прогон с code 0 и нулём красных строк — это ВЫЖИВШИЙ мутант, а не сорванный
+// прогон, и повтора он не получает: иначе флейковый второй прогон зачёл бы
+// снятую защиту как пойманную.
 const runOnce = (bundle) => new Promise(res => {
   const p = spawn(process.execPath, [SPEC], {
     cwd: join(DIR, '..'),
@@ -289,12 +290,7 @@ const runOnce = (bundle) => new Promise(res => {
   p.stderr.on('data', d => { out += d; });
   p.on('close', code => res({ code, out }));
 });
-const run = async (bundle) => {
-  const first = await runOnce(bundle);
-  const reds = first.out.split('\n').filter(l => l.trimStart().startsWith('✗'));
-  if (reds.length) return first;
-  return await runOnce(bundle);
-};
+const run = makeRun(runOnce);
 
 let pass = 0, fail = 0;
 const ok = (cond, msg, detail) => {
@@ -303,6 +299,10 @@ const ok = (cond, msg, detail) => {
 };
 
 console.log('\n── ИСПРАВЛЕНИЯ mutation sanity: каждая снятая защита обязана уронить свой сценарий ──');
+
+// Сначала доказываем сам критерий убийства: без этого «27 из 27» ничего не
+// стоит, потому что повтор мог бы превращать выжившего мутанта в убитого.
+await selfTestRetryPolicy(ok);
 
 for (const m of MUTANTS) {
   if (!src.includes(m.find)) {
@@ -324,7 +324,7 @@ for (const m of MUTANTS) {
   await writeFile(file, mutated);
   const { code, out } = await run(file);
   await rm(file, { force: true });
-  const reds = out.split('\n').filter(l => l.trimStart().startsWith('✗')).map(l => l.trim());
+  const reds = redLines(out);
   const hitExpected = reds.some(l => l.includes(m.expectFail));
   ok(code !== 0 && hitExpected,
     `[${m.id}] ${m.what} → сценарий «${m.expectFail}» покраснел (${reds.length} провалов)`,
