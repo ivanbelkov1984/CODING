@@ -48,6 +48,7 @@ const hideChrome = () => page.evaluate(() => {
 });
 await hideChrome();
 
+const KEY = 'TEST-DRV-UI-PICKER-KEY-000000000000';
 const CID = 'TEST-DRV-000000000000-abcdefg.apps.googleusercontent.com';
 const TOKEN = 'TEST-DRV-TOKEN-secret';
 
@@ -67,6 +68,7 @@ const reset = () => page.evaluate(() => {
   ['insights', 'externalConnections', 'externalWorkSessions'].forEach(c => { DB[c] = []; });
   DB._del = {};
   CFG.driveClientId = '';
+  CFG.driveDeveloperKey = '';
   try { resolveRecovery('discarded'); } catch (_) { }
   if (typeof extBridgeCancel === 'function') extBridgeCancel();
   if (typeof driveCursorsDrop === 'function') driveCursorsDrop();
@@ -223,6 +225,44 @@ console.log('\nDRIVE SYNC HUB — ИНТЕРФЕЙС\n');
     return raw.includes('driveClientId');
   });
   ok(persisted, 'C3. Client ID сохраняется существующим механизмом CFG');
+
+  // C4-C6: одного Client ID мало. Пока нет Browser API key для Picker,
+  // источник обязан оставаться НЕнастроенным и честно называть недостающее.
+  const halfWay = await page.evaluate(() => ({ missing: driveConfigMissing(), ready: driveConfigMissing().length === 0 }));
+  ok(!halfWay.ready && halfWay.missing.length === 1 && /Browser API key/.test(halfWay.missing[0]),
+    'C4. с одним Client ID источник ещё НЕ настроен — не хватает ключа Picker', JSON.stringify(halfWay));
+
+  // Успешное сохранение закрывает настройки — дальше открываем их тем же
+  // production-путём, которым это делает кнопка из панели источника.
+  const openCfgAt = async (focus) => {
+    await page.evaluate((f) => driveOpenSettings(f), focus);
+    await page.waitForSelector('#ov-cfg.on', { state: 'attached' });
+  };
+  const clickSave = async () => {
+    const btn = page.locator('#ov-cfg button', { hasText: 'Сохранить' }).first();
+    await btn.scrollIntoViewIfNeeded();
+    await btn.click({ force: true });
+    await page.waitForTimeout(200);
+  };
+
+  await openCfgAt();
+  const keyFocus = await page.evaluate(() => document.activeElement && document.activeElement.id);
+  ok(keyFocus === 'cfg-drive-key',
+    'C5. когда не хватает именно ключа, фокус ведёт в поле ключа, а не в Client ID', String(keyFocus));
+
+  await page.fill('#cfg-drive-key', CID);
+  await clickSave();
+  const wrongType = await page.evaluate(() => ({ key: CFG.driveDeveloperKey || '', toast: ($('toasts') || {}).textContent || '' }));
+  ok(wrongType.key === '' && /Client ID/.test(wrongType.toast),
+    'C6. Client ID в поле ключа отклонён с точной причиной', JSON.stringify(wrongType).slice(0, 140));
+  await page.waitForTimeout(2600);
+
+  await openCfgAt('cfg-drive-key');
+  await page.fill('#cfg-drive-key', ' ' + KEY + ' ');
+  await clickSave();
+  const savedKey = await page.evaluate(() => ({ key: CFG.driveDeveloperKey || '', ready: driveConfigMissing().length === 0 }));
+  ok(savedKey.key === KEY, 'C7. Browser API key сохранён обычным путём настроек (с обрезкой пробелов)', JSON.stringify(savedKey));
+  ok(savedKey.ready, 'C8. только теперь, с ОБЕИМИ настройками, источник считается готовым');
 }
 
 // ── D+E+F. Подключение и выбор файлов видимыми кнопками ──────────────
@@ -368,7 +408,7 @@ console.log('\nDRIVE SYNC HUB — ИНТЕРФЕЙС\n');
 // ── Конфликт остаётся заблокированным и в UI ─────────────────────────
 {
   await reset();
-  await page.evaluate((cid) => { CFG.driveClientId = cid; persist(); }, CID);
+  await page.evaluate((c) => { CFG.driveClientId = c.cid; CFG.driveDeveloperKey = c.key; persist(); }, { cid: CID, key: KEY });
   await fakeNet([{ id: 'TEST-DRV-UI-C', name: 'конфликт.json', modifiedTime: 't1', version: '1', md5: 'k1', text: JSON.stringify({
     format: 'architect-external-work-v1',
     source: { kind: 'google_drive', label: 'TEST-DRV источник', module: 'TEST-DRV-MODULE' },

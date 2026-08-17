@@ -1746,6 +1746,9 @@
         <div class="f-lbl">Google Drive · идентификатор приложения (Client ID)</div>
         <input class="field" id="cfg-drive-client" placeholder="1234567890-abc….apps.googleusercontent.com" autocapitalize="off" autocorrect="off" spellcheck="false">
         <div style="font-size:var(--tx2);color:var(--t3);margin-top:var(--s2)">Это <b>публичный</b> идентификатор приложения из Google Cloud Console, а не пароль и не токен. Он виден в любом браузерном приложении Google и хранится в обычных настройках. Ключ доступа к твоему Drive здесь не хранится никогда: он живёт только в памяти открытой вкладки и исчезает при перезапуске.</div>
+        <div class="f-lbl" style="margin-top:var(--s3)">Google Drive · Browser API key для Picker</div>
+        <input class="field" id="cfg-drive-key" placeholder="ключ из того же проекта Google Cloud" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <div style="font-size:var(--tx2);color:var(--t3);margin-top:var(--s2)">Отдельная от Client ID вещь: без неё окно выбора файлов Google (Picker) не открывается. Как получить: тот же проект Google Cloud → включить <b>Google Picker API</b> → создать ключ типа «API key».<br>Ключ обязательно <b>ограничить</b>: в разделе ограничений приложения выбрать <b>HTTP referrer</b> и указать адрес этого приложения, а в ограничениях API оставить только те Google API, которые ему нужны. Без ограничений ключ сможет использовать чужой сайт и расходовать твою квоту — поэтому это и не пароль, и не безобидная публичная строка.<br><b>Токен доступа сюда не вводится никогда</b> — он появляется только при входе в Google и живёт лишь в памяти вкладки.</div>
         <div id="cfg-drive-note" style="font-size:var(--tx2);color:var(--t3);margin-top:var(--s2)"></div>
       </div>
       <div>

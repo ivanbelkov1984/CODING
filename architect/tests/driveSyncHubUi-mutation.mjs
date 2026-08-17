@@ -66,7 +66,7 @@ const MUTANTS = [
     // Тупик вместо пути в настройки.
     id: 'no-setup-path',
     what: 'при отсутствии Client ID снова показывается тупиковое сообщение',
-    find: '      <div class="psy-actions"><button type="button" class="btn btn-s btn-sm" id="drive-goto-cfg-${i}" onclick="driveOpenSettings()">Открыть настройки Google Drive</button></div></div>`;',
+    find: '      <div class="psy-actions"><button type="button" class="btn btn-s btn-sm" id="drive-goto-cfg-${i}" onclick="driveOpenSettings(\'${focus}\')">Открыть настройки Google Drive</button></div></div>`;',
     replace: '      </div>`;',
     expectFail: 'без Client ID показан не тупик, а кнопка перехода в настройки',
   },

@@ -77,6 +77,9 @@ const DEFAULT_CFG = {
   // виден в любом браузерном OAuth-клиенте). Сам access-token сюда НЕ
   // попадает никогда: он живёт только в памяти сессии (решение D-2).
   driveClientId: '',
+  // Browser API key для Google Picker (см. driveDeveloperKeyNormalize).
+  // ТРЕТЬЯ, отдельная сущность: не Client ID и не токен доступа.
+  driveDeveloperKey: '',
   aiModel: 'claude-opus-4-8',
   trustedContact: '',   // близкий человек — под рукой в кризисном протоколе
   newAxColor: '#1056CC',
@@ -10535,6 +10538,7 @@ function rCfgForm() {
   const ai = $('cfg-api');    if(ai) ai.value = CFG.apiUrl||'';
   const ki = $('cfg-space');  if(ki) ki.value = CFG.spaceKey||'';
   const dci = $('cfg-drive-client'); if (dci) dci.value = CFG.driveClientId || '';
+  const dki = $('cfg-drive-key'); if (dki) dki.value = CFG.driveDeveloperKey || '';
   driveCfgNote();
   const ls = $('cfg-lastsync');
   if (ls) ls.textContent = CFG.lastSync ? 'Последняя синхронизация: '+new Date(CFG.lastSync).toLocaleString('ru') : 'Ещё не синхронизировано';
@@ -10586,6 +10590,12 @@ function saveCfg() {
   const dc = driveClientIdNormalize(dcRaw);
   if (dc.ok) CFG.driveClientId = dc.value;
   else { toast(dc.error, 'warn'); return; }
+  // Drive: Browser API key для Picker. Отдельная сущность и отдельная
+  // проверка — Client ID, секрет и токен доступа сюда не принимаются.
+  const dkRaw = $('cfg-drive-key')?.value || '';
+  const dk = driveDeveloperKeyNormalize(dkRaw);
+  if (dk.ok) CFG.driveDeveloperKey = dk.value;
+  else { toast(dk.error, 'warn'); return; }
   if (CFG.axes.domain) CFG.axes.domain.lbl = CFG.domainLabel;
   persist(); closeOv('ov-cfg');
   updateDomainLabel(); rCompass(); rVit(); checkApiStatus();
@@ -15728,12 +15738,28 @@ async function drivePickFeeds(connId) {
   if (!gapi || !gapi.load) throw new Error('Google Picker недоступен');
   await new Promise(res => gapi.load('picker', res));
   const cid = String((CFG && CFG.driveClientId) || '').trim();
+  // Fail-closed ДО построения Picker: без Browser API key он не работает
+  // (PickerBuilder.setDeveloperKey — часть документированной сборки), и
+  // молча открывать заведомо нерабочее окно нельзя.
+  const dkey = String((CFG && CFG.driveDeveloperKey) || '').trim();
+  if (!dkey) {
+    const e = new Error('не указан Browser API key для Picker — заполни его в настройках');
+    e.noPickerKey = true; throw e;
+  }
   const files = await new Promise((resolve, reject) => {
     const view = new window.google.picker.DocsView(window.google.picker.ViewId.DOCS)
       .setMimeTypes('application/json,text/plain');
+    // Рекомендация Google для scope, отличного от drive/drive.readonly:
+    // список вместо сетки, потому что доступа к миниатюрам у нас нет.
+    // Scope это не расширяет и на состав выбранного не влияет.
+    try {
+      const m = window.google.picker.DocsViewMode;
+      if (m && m.LIST && view.setMode) view.setMode(m.LIST);
+    } catch (_) { }
     const picker = new window.google.picker.PickerBuilder()
       .setAppId(cid.split('-')[0])
       .setOAuthToken(driveTokenPeek())
+      .setDeveloperKey(dkey)
       .addView(view)
       .enableFeature(window.google.picker.Feature.MULTISELECT_ENABLED)
       .setCallback(data => {
@@ -15772,19 +15798,59 @@ function driveClientIdNormalize(raw) {
   return { ok: true, value: v };
 }
 const driveClientIdSet = () => !!String((CFG && CFG.driveClientId) || '').trim();
+
+// ── Browser API key для Picker: ТРЕТЬЯ сущность, отдельная проверка ──
+// Три вещи, которые нельзя смешивать:
+//   OAuth Client ID     — идентификация web-приложения при входе;
+//   Browser API key     — обязателен Google Picker (PickerBuilder.setDeveloperKey);
+//   OAuth access token  — доступ владельца к выбранным файлам, только память.
+// Ключ НЕ «пароль от Drive», но и не безусловно безопасный идентификатор:
+// официальная рекомендация Google — ограничивать его по HTTP-referrer и по
+// списку разрешённых API, иначе чужой сайт сможет расходовать твою квоту.
+// Проверка намеренно отдельная от driveClientIdNormalize: другой тип —
+// другой валидатор, иначе ошибка «вставил не туда» осталась бы незамеченной.
+function driveDeveloperKeyNormalize(raw) {
+  const v = String(raw == null ? '' : raw).trim();
+  if (!v) return { ok: true, value: '' };            // пусто = Picker не настроен
+  if (v.length > 200) return { ok: false, error: 'ключ слишком длинный — проверь, что скопирован только Browser API key' };
+  if (/\s/.test(v)) return { ok: false, error: 'в ключе не бывает пробелов — скопируй его целиком без переносов' };
+  // Явная защита от вставки не того: у каждой из трёх сущностей своя форма.
+  if (/\.apps\.googleusercontent\.com$/i.test(v)) {
+    return { ok: false, error: 'это Client ID, а не ключ Picker — Client ID вводится в поле выше' };
+  }
+  if (/^GOCSPX-/i.test(v)) return { ok: false, error: 'это Client SECRET, а не ключ Picker — секрет в приложение вставлять нельзя' };
+  if (/^ya29\./i.test(v)) return { ok: false, error: 'это токен доступа, а не ключ Picker — токен вводить сюда нельзя, он живёт только в памяти сессии' };
+  // Форма ключа по документации Google: «a long string containing uppercase
+  // and lowercase letters, numbers, underscores, and hyphens». Префикс не
+  // навязываем — он не зафиксирован документацией.
+  if (!/^[A-Za-z0-9_-]{20,}$/.test(v)) {
+    return { ok: false, error: 'ключ Google состоит из латинских букв, цифр, «_» и «-» — проверь, что скопирован именно Browser API key' };
+  }
+  return { ok: true, value: v };
+}
+const driveDeveloperKeySet = () => !!String((CFG && CFG.driveDeveloperKey) || '').trim();
+// Drive готов к подключению, только когда заданы ОБЕ настройки: без ключа
+// Picker не построится, и объявлять источник «настроенным» нельзя.
+const driveConfigMissing = () => [
+  ...(driveClientIdSet() ? [] : ['Client ID']),
+  ...(driveDeveloperKeySet() ? [] : ['Browser API key для Picker']),
+];
 function driveCfgNote() {
   const el = $('cfg-drive-note'); if (!el) return;
-  el.textContent = driveClientIdSet()
-    ? 'Идентификатор задан — Google Drive можно подключить в разделе «Источники».'
-    : 'Пока не задан: чтение Google Drive недоступно. Всё остальное приложение работает как обычно.';
+  const miss = driveConfigMissing();
+  el.textContent = miss.length
+    ? `Пока не заполнено: ${miss.join(' и ')}. Чтение Google Drive недоступно, всё остальное приложение работает как обычно.`
+    : 'Обе настройки заданы — Google Drive можно подключить в разделе «Источники».';
 }
 // Переход из «Источников» прямо в нужное место настроек: тупикового
-// сообщения об ошибке быть не должно.
-function driveOpenSettings() {
+// сообщения об ошибке быть не должно. Фокус ведём в то поле, которого
+// не хватает, а не всегда в первое.
+function driveOpenSettings(field) {
   try { closeOv('ov-ext-import'); } catch (_) { }
   openOv('ov-cfg');
   try { rCfgForm(); } catch (_) { }
-  const el = $('cfg-drive-client');
+  const want = field || (driveClientIdSet() ? 'cfg-drive-key' : 'cfg-drive-client');
+  const el = $(want) || $('cfg-drive-client');
   if (el) { try { el.scrollIntoView({ block: 'center' }); } catch (_) { } el.focus(); }
 }
 
@@ -15841,9 +15907,14 @@ let _extConnActive = null;
 function drivePanelHtml(c, i) {
   const feeds = driveFeedsOf(c);
   const authed = driveAuthState() === 'active';
-  if (!driveClientIdSet()) {
-    return `<div class="ext-need" id="drive-need-cid-${i}">Google Drive пока не настроен: нужен публичный идентификатор приложения (Client ID).
-      <div class="psy-actions"><button type="button" class="btn btn-s btn-sm" id="drive-goto-cfg-${i}" onclick="driveOpenSettings()">Открыть настройки Google Drive</button></div></div>`;
+  // Fail-closed UX: источник не считается готовым, пока не заданы ОБЕ
+  // настройки. Сообщение называет именно то, чего не хватает, а кнопка
+  // ведёт фокусом в нужное поле.
+  const missing = driveConfigMissing();
+  if (missing.length) {
+    const focus = driveClientIdSet() ? 'cfg-drive-key' : 'cfg-drive-client';
+    return `<div class="ext-need" id="drive-need-cid-${i}">Google Drive пока не настроен — не хватает: ${esc(missing.join(' и '))}.
+      <div class="psy-actions"><button type="button" class="btn btn-s btn-sm" id="drive-goto-cfg-${i}" onclick="driveOpenSettings('${focus}')">Открыть настройки Google Drive</button></div></div>`;
   }
   const feedRows = feeds.length
     ? feeds.map((f, k) => `<div class="si-row" data-drive-feed="${esc(String(f.fileId))}"><div class="si-body"><div class="si-text">${esc(f.name)}</div>
@@ -15880,7 +15951,7 @@ async function driveUiAction(i, action, fileId) {
     return;
   }
   if (action === 'connect' || action === 'pick') {
-    if (!driveClientIdSet()) { driveOpenSettings(); return; }
+    if (driveConfigMissing().length) { driveOpenSettings(); return; }
     try {
       if (action === 'connect') { await driveConnect(); toast('Google подключён на эту сессию', 'ok'); }
       else {
@@ -15890,13 +15961,14 @@ async function driveUiAction(i, action, fileId) {
       }
     } catch (e) {
       const msg = String((e && e.message) || e).slice(0, 200);
-      fail((e && e.noClient) ? 'Google Drive не настроен — укажи публичный Client ID в настройках.' : msg);
+      fail((e && e.noClient) ? 'Google Drive не настроен — укажи публичный Client ID в настройках.'
+        : (e && e.noPickerKey) ? 'Не задан Browser API key для Picker — укажи его в настройках Google Drive.' : msg);
     }
     extRenderConnections();
     return;
   }
   if (action === 'sync') {
-    if (!driveClientIdSet()) { driveOpenSettings(); return; }
+    if (driveConfigMissing().length) { driveOpenSettings(); return; }
     if (!driveAuthState || driveAuthState() !== 'active') {
       fail('Сначала подключи Google — доступ действует только в текущей сессии.');
       return;
