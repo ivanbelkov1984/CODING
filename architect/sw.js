@@ -164,8 +164,13 @@ self.addEventListener('fetch', e => {
   let url;
   try { url = new URL(req.url); } catch (_) { return; }
 
-  // Данные и внешние сервисы — не кэшируем (свежесть/приватность)
+  // Данные и внешние сервисы — не кэшируем (свежесть/приватность).
+  // Google-хосты здесь ОБЯЗАТЕЛЬНЫ: через них идут OAuth и чтение Drive.
+  // Без этого ответы googleapis (личное содержимое подач владельца) осели бы
+  // в кэше service worker — то есть приватные данные пережили бы сессию,
+  // хотя токен по решению D-2 живёт только в памяти.
   if (/railway\.app|api\.anthropic\.com|backboard\.railway/.test(url.host)) return;
+  if (/(^|\.)googleapis\.com$|(^|\.)google\.com$|(^|\.)gstatic\.com$/.test(url.host)) return;
 
   if (req.mode === 'navigate') { e.respondWith(handleNavigate(req)); return; }
   e.respondWith(handleAsset(req));
