@@ -5632,12 +5632,17 @@ function loadAstroEngine() {
 // знака — невозможный день считался как настоящий, молча и без признаков
 // ошибки. Астрологический метод не меняется: у существующих даты и времени
 // результат прежний, отклоняется только несуществующий вход.
+// Проверяется именно СУЩЕСТВОВАНИЕ момента. Правдоподобие часового пояса —
+// другой вопрос и другое место: офсет вне [−12, +14] даёт вполне
+// существующий момент, просто зона такая не встречается. Его отклоняют
+// write-path (saveAstroBirth, saveAstroPartner), а не расчёт, иначе
+// computeNatalChart перестал бы быть чистой функцией на всей области
+// определения — что и поймал метаморфический слой Wave 3.
 const astroInstantUTC = (date, time, utcOffset) => {
   if (!isRealIsoDay(date)) return null;
   const tp = time || '12:00';
   if (!isRealClockTime(tp)) return null;
-  const off = Number(utcOffset || 0);
-  if (!(off >= -12 && off <= 14)) return null;
+  const off = Number(utcOffset) || 0;
   const ms = Date.parse(date + 'T' + tp + ':00Z');
   if (!Number.isFinite(ms)) return null;
   return new Date(ms - off * 3600e3);

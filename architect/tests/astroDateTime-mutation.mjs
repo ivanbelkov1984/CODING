@@ -81,12 +81,21 @@ const MUTANTS = [
     expectFail: '60-я минута (00:60) отклонён и НЕ сохранён',
   },
   {
-    // Диапазон часовых поясов снят: офсет уезжает в физически невозможный.
-    id: 'instant-timezone-range-off',
-    what: 'сборка момента перестаёт ограничивать UTC-офсет',
-    find: '  if (!(off >= -12 && off <= 14)) return null;',
-    replace: '',
-    expectFail: 'astroInstantUTC отдаёт null на каждом невозможном входе',
+    // Собственные данные рождения перестают проверять часовой пояс. После
+    // D-DATE-02 расчёт зону не сторожит, значит вся ответственность здесь.
+    id: 'birth-timezone-check-removed',
+    what: 'данные рождения перестают проверять UTC-офсет',
+    find: `  if (!(utcOffset >= -12 && utcOffset <= 14)) {
+    toast('UTC-офсет должен быть от −12 до +14 (укажите смещение, действовавшее в дату рождения)', 'warn');
+    return;
+  }
+  const lat = parseFloat($('ab-lat')`,
+    replace: `  if (false) {
+    toast('x', 'warn');
+    return;
+  }
+  const lat = parseFloat($('ab-lat')`,
+    expectFail: 'нереальный UTC-офсет 99 отклонён на входе и НЕ сохранён',
   },
   {
     // Карта партнёра снова принимает несуществующий день.

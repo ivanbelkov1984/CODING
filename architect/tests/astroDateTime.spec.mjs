@@ -124,6 +124,20 @@ for (const t of ['00:00', '23:59', '12:30']) {
   ok(r.saved && r.saved.time === t, `настоящее время ${t} сохранено`, `toast=${r.toast}`);
 }
 
+// Правдоподобие часового пояса проверяет именно write-path (см. § 5): раз
+// расчёт его больше не сторожит, обе точки входа обязаны быть доказаны.
+for (const z of [99, -30, 20]) {
+  await reset();
+  const r = await typeBirth('1984-06-15', '12:00', { utc: z });
+  ok(r.saved === null && /от −12 до \+14/.test(r.toast),
+    `нереальный UTC-офсет ${z} отклонён на входе и НЕ сохранён`, `toast=${r.toast}`);
+}
+for (const z of [-12, 14, 5.75, 0]) {
+  await reset();
+  const r = await typeBirth('1984-06-15', '12:00', { utc: z });
+  ok(r.saved && r.saved.utcOffset === z, `настоящая зона ${z} сохранена`, `toast=${r.toast}`);
+}
+
 console.log('\n── § 4. Главное: невозможный день НЕ считается как другой день ──');
 // Раньше карта «31 февраля» была карта 3 марта — с точностью до последнего
 // знака и без единого признака ошибки. Здесь это ловится напрямую: сначала
@@ -179,8 +193,11 @@ const nanProbe = await page.evaluate(() => {
       astroInstantUTC('2026-13-01', '12:00', 0),
       astroInstantUTC('1984-06-15', '25:99', 0),
       astroInstantUTC('1984-06-15', '24:00', 0),
-      astroInstantUTC('1984-06-15', '12:00', 99),
     ].map(v => v === null),
+    // Правдоподобие зоны — НЕ дело сборки момента: офсет вне [−12, +14] даёт
+    // существующий момент, его отклоняет write-path. Иначе computeNatalChart
+    // перестал бы быть чистой функцией на всей области определения.
+    instantOddZone: (() => { const v = astroInstantUTC('1984-06-15', '12:00', 20); return v ? v.toISOString() : null; })(),
     instantGood: (() => { const v = astroInstantUTC('1984-06-15', '14:30', 3); return v ? v.toISOString() : null; })(),
   };
 });
@@ -192,8 +209,11 @@ for (const [k, why] of [['badMonth', '13-й месяц'], ['badHour', 'час 25
 ok(nanProbe.good.computed === true && nanProbe.good.anyNaN === false,
   'настоящие дата и время дают карту без единого NaN', JSON.stringify(nanProbe.good));
 ok(nanProbe.instantNull.every(Boolean),
-  'astroInstantUTC отдаёт null на каждом невозможном входе (включая офсет вне [−12, +14])',
+  'astroInstantUTC отдаёт null на каждом НЕСУЩЕСТВУЮЩЕМ входе',
   JSON.stringify(nanProbe.instantNull));
+ok(nanProbe.instantOddZone === '1984-06-14T16:00:00.000Z',
+  'нереальная зона (+20) НЕ ломает сборку момента: это дело write-path, а не расчёта',
+  String(nanProbe.instantOddZone));
 ok(nanProbe.instantGood === '1984-06-15T11:30:00.000Z',
   'astroInstantUTC корректно применяет UTC-офсет (14:30 при +3 → 11:30Z)', String(nanProbe.instantGood));
 
