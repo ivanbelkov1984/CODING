@@ -2533,6 +2533,15 @@ const dateHeadImpossible = s => {
   const m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/.exec(String(s == null ? '' : s));
   return !!m && !isRealCalendarDate(+m[1], +m[2], +m[3]);
 };
+// ── D-DATE-02: строгое время суток ──────────────────────────────────
+// Тот же дефект, что у дат, только по второй координате. Формат «ЧЧ:ММ» сам
+// по себе не гарантирует ничего: ему соответствуют и «25:99», и «24:60», а
+// Date.parse отдаёт на них NaN — расчёт молча уходит в никуда. «24:00» ISO
+// допускает как маркер конца суток, но временем рождения оно быть не может:
+// Date.parse тихо переносит его на следующий день, то есть подменяет ДАТУ.
+// Поэтому часы 00–23, минуты 00–59 — и никаких исключений.
+const isRealClockTime = s => typeof s === 'string' && /^\d{2}:\d{2}$/.test(s) &&
+  +s.slice(0, 2) <= 23 && +s.slice(3, 5) <= 59;
 // Доменная проверка одного исправленного значения. Отклонение — это отказ,
 // а не «поправим как сможем»: доказательное поле не угадывается.
 function recCorrValidate(spec, raw) {
@@ -5615,14 +5624,43 @@ function loadAstroEngine() {
   });
   return _astroLoad;
 }
+// D-DATE-02: ЕДИНСТВЕННАЯ точка сборки момента из (дата, время, UTC-офсет).
+// Возвращает null на любом невозможном входе, поэтому дальше по расчётам
+// физически не возникает ни NaN, ни «тихо другая дата»: «2026-02-31» не
+// становится 3 марта, «25:99» не доходит до движка. Проверено на живом
+// движке: у 2026-02-31 и 2026-03-03 долгота Солнца совпадала до последнего
+// знака — невозможный день считался как настоящий, молча и без признаков
+// ошибки. Астрологический метод не меняется: у существующих даты и времени
+// результат прежний, отклоняется только несуществующий вход.
+const astroInstantUTC = (date, time, utcOffset) => {
+  if (!isRealIsoDay(date)) return null;
+  const tp = time || '12:00';
+  if (!isRealClockTime(tp)) return null;
+  const off = Number(utcOffset || 0);
+  if (!(off >= -12 && off <= 14)) return null;
+  const ms = Date.parse(date + 'T' + tp + ':00Z');
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms - off * 3600e3);
+};
+// Причина отказа не должна подменяться: «нет сети» и «несуществующая дата
+// рождения» чинятся по-разному, а раньше оба показывались одним текстом.
+const astroFailHtml = (e, fallback) => `<div class="ai-sp-empty">${esc(e && e.badInstant ? e.message : fallback)}</div>`;
+// Отказ расчёта на невозможных данных рождения. Такие данные могли быть
+// сохранены до D-DATE-02 (валидатор проверял только форму строки), поэтому
+// защита стоит и на входе в расчёт, а не только на write-path.
+const astroBadInstant = () => {
+  const e = new Error('в данных рождения несуществующая дата или время — исправь их в настройках расчёта');
+  e.badInstant = true;
+  return e;
+};
 // Расчёт натальной карты по birth evidence. Чистая функция от (birth, Astronomy).
 function computeNatalChart(birth) {
   const A = window.Astronomy;
   if (!A) throw new Error('движок не загружен');
   // Явный UTC-офсет пользователя; неизвестное время → полдень НЕ подставляем,
   // считаем только долготы планет на дату (суточная погрешность — честно видима).
-  const timePart = birth.timeKnown ? birth.time : '12:00';
-  const utc = new Date(Date.parse(birth.date + 'T' + timePart + ':00Z') - (birth.utcOffset || 0) * 3600e3);
+  const utc = astroInstantUTC(birth.date, birth.timeKnown ? birth.time : '12:00', birth.utcOffset);
+  if (!utc) throw astroBadInstant();
   const t = A.MakeTime(utc);
   const planets = ASTRO_BODIES.map(b => {
     let lon, speed;
@@ -5818,8 +5856,9 @@ const TROP_LUNAR_MONTH = 27.321582;   // тропический лунный м�
 const NAIBOD_DEG_PER_YEAR = 0.985647; // дуга Найбода 59′08″/год
 const YEAR_DAYS = 365.2425;
 function birthUTCDate(birth) {
-  const timePart = birth.timeKnown ? birth.time : '12:00';
-  return new Date(Date.parse(birth.date + 'T' + timePart + ':00Z') - (birth.utcOffset || 0) * 3600e3);
+  const utc = astroInstantUTC(birth.date, birth.timeKnown ? birth.time : '12:00', birth.utcOffset);
+  if (!utc) throw astroBadInstant();
+  return utc;
 }
 function bodiesAt(t) {
   const A = window.Astronomy;
@@ -5990,7 +6029,8 @@ function rectifyCandidateMinutes(rangeMode, stepMin) {
 function rectifyEventContext(birth, ev, noonPlanets) {
   const A = window.Astronomy;
   const base = { ...birth, time: '12:00', timeKnown: true };
-  const at = new Date(ev.date + 'T12:00:00Z');
+  const at = astroInstantUTC(ev.date, '12:00', 0);
+  if (!at) throw astroBadInstant();
   const prog = computeProgressions(base, at, 'secondary');
   const sunN = noonPlanets.find(p => p.body === 'Sun').lon;
   const sunP = prog.planets.find(p => p.body === 'Sun').lon;
@@ -6007,7 +6047,8 @@ function rectifyEventContext(birth, ev, noonPlanets) {
 function rectifyScoreCandidate(minute, birth, noonPlanets, evCtxs) {
   const A = window.Astronomy;
   const time = rectifyMinToTime(minute);
-  const utc = new Date(Date.parse(birth.date + 'T' + time + ':00Z') - (birth.utcOffset || 0) * 3600e3);
+  const utc = astroInstantUTC(birth.date, time, birth.utcOffset);
+  if (!utc) throw astroBadInstant();
   const t = A.MakeTime(utc);
   const eps = 23.4392911;
   const lst = (A.SiderealTime(t) * 15 + birth.lon + 360) % 360;
@@ -6051,11 +6092,12 @@ function rectifyScoreCandidate(minute, birth, noonPlanets, evCtxs) {
 // Полный прогон: кандидаты → score → кластеры соседних сильных кандидатов.
 function rectifyRun(birth, events, rangeMode, stepMin) {
   const A = window.Astronomy;
-  const noonUTC = new Date(Date.parse(birth.date + 'T12:00:00Z') - (birth.utcOffset || 0) * 3600e3);
+  const noonUTC = astroInstantUTC(birth.date, '12:00', birth.utcOffset);
+  if (!noonUTC) throw astroBadInstant();
   const noonPlanets = bodiesAt(A.MakeTime(noonUTC));
   const b0 = noonUTC.getTime();
   const evCtxs = events
-    .filter(ev => /^\d{4}-\d{2}-\d{2}$/.test(ev.date) && Date.parse(ev.date + 'T12:00:00Z') > b0)
+    .filter(ev => isRealIsoDay(ev.date) && Date.parse(ev.date + 'T12:00:00Z') > b0)
     .map(ev => rectifyEventContext(birth, ev, noonPlanets));
   const candidates = rectifyCandidateMinutes(rangeMode, stepMin)
     .map(m => rectifyScoreCandidate(m, birth, noonPlanets, evCtxs));
@@ -6412,7 +6454,7 @@ async function rPartsStars() {
       FIXED_STARS.map(st => `<span class="snpill" style="font-size:.72rem"${ruleAttr(STAR_KEYS[st.name] ? 'star.' + STAR_KEYS[st.name] : '', `Звезда ${st.name}`)}>${esc(st.name)}</span>`).join('') + '</div>';
     html += '<div class="be-note" style="color:var(--t3)">Историко-символический слой (классические трактаты; каталог Hipparcos + прецессия). Без драматизации: это не события и не диагнозы. Первичные дирекции и ректификация — research-preview, не реализованы.</div>';
     out.innerHTML = html;
-  } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
+  } catch (e) { out.innerHTML = astroFailHtml(e, 'Не удалось рассчитать.'); }
 }
 
 // Сетка South Indian: фиксированные позиции знаков (по часовой от Овна).
@@ -6589,7 +6631,7 @@ async function rJyotish() {
     }
     html += '<div class="be-note" style="color:var(--t3)">Джйотиш — сидерическая традиция. Символическое; не прогноз и не диагноз. Айанамша — линейная аппроксимация (±минуты дуги); вара без коррекции на восход; D16–D60 и полная Шадбала — отложены.</div>';
     out.innerHTML = html;
-  } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
+  } catch (e) { out.innerHTML = astroFailHtml(e, 'Не удалось рассчитать.'); }
 }
 
 // Темы домов (для профекций и текстов; краткие, без предписаний).
@@ -6688,7 +6730,7 @@ async function rPrognostics() {
     }
     html += '<div class="be-note" style="color:var(--t3)">Символический тайминг (день=год; Найбод; эллинистические профекции). Не событие и не прогноз.</div>';
     out.innerHTML = html;
-  } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
+  } catch (e) { out.innerHTML = astroFailHtml(e, 'Не удалось рассчитать.'); }
 }
 async function rReturns() {
   const out = $('astro-ret'); if (!out) return;
@@ -6708,11 +6750,14 @@ async function rReturns() {
     if (type === 'solar') {
       // Год: соляр ищется вокруг дня рождения выбранного года.
       const y = /^\d{4}$/.test(period) ? parseInt(period, 10) : new Date().getFullYear();
-      const [, bm, bd] = (DB.astroBirth.date || '2000-01-01').split('-').map(Number);
+      // Разбор на месяц/день имеет смысл только у существующей даты: у
+      // несуществующей Date.UTC увёл бы поиск соляра к другому дню.
+      if (!isRealIsoDay(DB.astroBirth.date || '')) throw astroBadInstant();
+      const [, bm, bd] = (DB.astroBirth.date || '').split('-').map(Number);
       ret = searchReturn('Sun', sunN, new Date(Date.UTC(y, bm - 1, bd - 10)), 30);   // отрицательный день корректно уходит в прошлый месяц
       title = `Соляр ${y}`;
     } else {
-      const near = /^\d{4}-\d{2}-\d{2}$/.test(period) ? new Date(period + 'T00:00:00Z') : new Date();
+      const near = isRealIsoDay(period) ? new Date(period + 'T00:00:00Z') : new Date();
       ret = searchReturn('Moon', moonN, new Date(near.getTime() - 15 * 864e5), 30);
       title = 'Лунар';
     }
@@ -6748,7 +6793,7 @@ async function rReturns() {
           <div class="si-text" style="color:var(--t4);font-size:.72rem"${tx ? ruleAttr(tx.ruleId, `${h.transit} к вашему ${h.natal}`) : ''}>${esc(h.aspect)} · точность ${h.exact}°${tx && astroHasText(tx.ruleId) ? ' · <span style="color:var(--accent)">подробнее</span>' : ''}</div></div></div>`; }).join('');
     html += '<div class="be-note" style="color:var(--t3)">Момент точного возвращения светила в натальную долготу — символическая карта периода, не прогноз.</div>';
     out.innerHTML = html;
-  } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
+  } catch (e) { out.innerHTML = astroFailHtml(e, 'Не удалось рассчитать.'); }
 }
 // Мидпоинты — классическая уранская астрология (Витте/Эбертин), формула
 // общеизвестна: середина КОРОТКОЙ дуги между двумя долготами. Дерево
@@ -7119,8 +7164,14 @@ async function runTransits() {
     const di = $('astro-tr-date');
     const dv = (di && di.value.trim()) || '';
     let at = new Date();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dv)) at = new Date(dv + 'T12:00:00');
-    else if (di) di.value = todayKey();
+    // D-DATE-02: пустое поле — это «сегодня» и молчаливый возврат к нему
+    // нормален. А вот введённый несуществующий день молчать не должен:
+    // раньше «2026-02-31» тихо считался как 3 марта.
+    if (isRealIsoDay(dv)) at = new Date(dv + 'T12:00:00');
+    else {
+      if (dv) toast('Такой даты нет в календаре — показываю сегодняшний день', 'warn');
+      if (di) di.value = todayKey();
+    }
     const isToday = !dv || dv === todayKey();
     const last = (DB.astroCharts || []).slice(-1)[0];
     const tr = computeTransits(last && last.chart, at);
@@ -7158,17 +7209,19 @@ async function runTransits() {
     html += `<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Символический снимок момента в западной традиции. Не событие и не прогноз.</div>`;
     if (out) out.innerHTML = html;
   } catch (e) {
-    if (out) out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать. Попробуй ещё раз.</div>';
+    if (out) out.innerHTML = astroFailHtml(e, 'Не удалось рассчитать. Попробуй ещё раз.');
   }
 }
 // Режим 2 с экрана транзитов: результат показывается на экране карты.
 async function aiDeepFromTransits() { await aiDeepAstroAnalysis(); asub('natal'); }
 function saveAstroBirth() {
   const date = ($('ab-date') ? $('ab-date').value : '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast('Дата в формате ГГГГ-ММ-ДД', 'warn'); return; }
+  // D-DATE-02: форма строки ничего не доказывает. «2026-02-31» ей
+  // соответствует, но такого дня нет — и он посчитался бы как 3 марта.
+  if (!isRealIsoDay(date)) { toast('Дата в формате ГГГГ-ММ-ДД, и такой день должен существовать в календаре', 'warn'); return; }
   const timeKnown = $('ab-time-known') ? $('ab-time-known').classList.contains('on') : false;
   const time = ($('ab-time') ? $('ab-time').value : '').trim();
-  if (timeKnown && !/^\d{2}:\d{2}$/.test(time)) { toast('Время в формате ЧЧ:ММ', 'warn'); return; }
+  if (timeKnown && !isRealClockTime(time)) { toast('Время в формате ЧЧ:ММ: часы 00–23, минуты 00–59', 'warn'); return; }
   const utcOffset = parseFloat($('ab-utc') ? $('ab-utc').value : '0') || 0;
   // Wave 3 (issue #154, ревью п.7): реальные зоны лежат в [−12, +14].
   // Значение вне диапазона — почти всегда опечатка, а она молча сдвигает
@@ -7204,7 +7257,7 @@ async function runNatalChart() {
     });
     persist(); rAstroChart(chart);
   } catch (e) {
-    if (out) out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать (нет сети для загрузки движка?). Попробуй ещё раз.</div>';
+    if (out) out.innerHTML = astroFailHtml(e, 'Не удалось рассчитать (нет сети для загрузки движка?). Попробуй ещё раз.');
   }
 }
 // Экран настроек после расчёта: короткое понятное подтверждение вместо
@@ -8094,14 +8147,21 @@ function synNarrativeHtml(hits, partnerLabel) {
 }
 function saveAstroPartner() {
   const date = ($('sp-date') ? $('sp-date').value : '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast('Дата в формате ГГГГ-ММ-ДД', 'warn'); return; }
+  if (!isRealIsoDay(date)) { toast('Дата в формате ГГГГ-ММ-ДД, и такой день должен существовать в календаре', 'warn'); return; }
   const timeKnown = $('sp-time-known') ? $('sp-time-known').classList.contains('on') : false;
   const time = ($('sp-time') ? $('sp-time').value : '').trim();
-  if (timeKnown && !/^\d{2}:\d{2}$/.test(time)) { toast('Время в формате ЧЧ:ММ', 'warn'); return; }
+  if (timeKnown && !isRealClockTime(time)) { toast('Время в формате ЧЧ:ММ: часы 00–23, минуты 00–59', 'warn'); return; }
+  // Тот же диапазон зон, что и для собственных данных: вне [−12, +14] офсет
+  // молча сдвигает Asc/MC/дома партнёра, и причину увидеть неоткуда.
+  const utcOffset = parseFloat($('sp-utc') ? $('sp-utc').value : '0') || 0;
+  if (!(utcOffset >= -12 && utcOffset <= 14)) {
+    toast('UTC-офсет должен быть от −12 до +14 (укажите смещение, действовавшее в дату рождения)', 'warn');
+    return;
+  }
   const lat = parseFloat($('sp-lat') ? $('sp-lat').value : ''); const lon = parseFloat($('sp-lon') ? $('sp-lon').value : '');
   const birth = {
     date, time: timeKnown ? time : '', timeKnown,
-    utcOffset: parseFloat($('sp-utc') ? $('sp-utc').value : '0') || 0,
+    utcOffset,
     lat: isFinite(lat) ? lat : null, lon: isFinite(lon) ? lon : null,
     houseSystem: (DB.astroBirth && DB.astroBirth.houseSystem) || 'whole',
   };
@@ -8115,7 +8175,7 @@ function saveAstroPartner() {
     });
     persist(); toast('Карта партнёра сохранена', 'ok');
     rSynastry();
-  }).catch(() => toast('Движок не загрузился', 'warn'));
+  }).catch(e => toast(e && e.badInstant ? e.message : 'Движок не загрузился', 'warn'));
 }
 async function rSynastry() {
   const out = $('astro-syn'); if (!out) return;
@@ -8142,7 +8202,7 @@ async function rSynastry() {
     } else html += '<div class="si-text" style="color:var(--t3)">Точных мажорных аспектов между картами нет (орб 4°).</div>';
     html += '<div class="be-note" style="margin-top:.6rem;color:var(--t3)">Символическое описание взаимодействия двух карт — не «процент совместимости», не вердикт о паре и не совет. Тап по строке со значком › — развёрнутый текст. Данные партнёра хранятся только на устройстве.</div>';
     out.innerHTML = html;
-  } catch (e) { out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать.</div>'; }
+  } catch (e) { out.innerHTML = astroFailHtml(e, 'Не удалось рассчитать.'); }
 }
 
 // Экран «Астероиды и точки»: астероиды, Лилит, Вертекс, Точка Судьбы, антисции.
@@ -8273,7 +8333,7 @@ function rRectify() {
   const box = $('astro-rect-form'); if (!box) return;
   const R = rectifyDB();
   const b = DB.astroBirth;
-  const ready = b && /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') && isFinite(b.lat) && isFinite(b.lon);
+  const ready = b && isRealIsoDay(b.date || '') && isFinite(b.lat) && isFinite(b.lon);
   if (!ready) {
     box.innerHTML = `<div class="card mx tap" style="padding:1rem;cursor:pointer" onclick="asub('setup')" role="button">
       <div class="si-text" style="font-weight:600">Сначала — дата и место рождения</div>
@@ -8311,8 +8371,11 @@ function rRectify() {
 function rectifyAddEvent() {
   const type = ($('rect-ev-type') ? $('rect-ev-type').value : 'other') || 'other';
   const date = ($('rect-ev-date') ? $('rect-ev-date').value : '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast('Дата события в формате ГГГГ-ММ-ДД', 'warn'); return; }
+  if (!isRealIsoDay(date)) { toast('Дата события в формате ГГГГ-ММ-ДД, и такой день должен существовать в календаре', 'warn'); return; }
   const b = DB.astroBirth;
+  // Сравнение с невозможной датой рождения даёт NaN, а «NaN <= NaN» — false:
+  // проверка «после рождения» молча пропускала бы что угодно. Fail closed.
+  if (b && !isRealIsoDay(b.date || '')) { toast('Сначала исправь дату рождения: сохранён несуществующий день', 'warn'); return; }
   if (b && Date.parse(date) <= Date.parse(b.date)) { toast('Событие должно быть после даты рождения', 'warn'); return; }
   const R = rectifyDB();
   R.events.push({ id: Date.now(), type, date });
@@ -8335,7 +8398,7 @@ async function runRectify() {
     R._u = Date.now(); persist();
     out.innerHTML = rectifyResultHtml(res, R);
   } catch (e) {
-    out.innerHTML = '<div class="ai-sp-empty">Не удалось рассчитать (нет сети для загрузки движка?). Попробуй ещё раз.</div>';
+    out.innerHTML = astroFailHtml(e, 'Не удалось рассчитать (нет сети для загрузки движка?). Попробуй ещё раз.');
   }
 }
 function rectifyResultHtml(res, R) {
