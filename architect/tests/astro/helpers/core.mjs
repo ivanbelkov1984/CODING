@@ -49,7 +49,10 @@ export function randomBirth(rnd, opts = {}) {
     date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
     time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
     timeKnown: opts.timeKnown !== undefined ? opts.timeKnown : rnd() > 0.2,
-    utcOffset: Math.round((rnd() * 28 - 12) * 2) / 2,   // -12..+14 с шагом 0.5
+    // Ширина ровно 26: rnd() ∈ [0,1) → (rnd()*26−12)*2 ∈ [−24, 28) → после
+    // округления [−24, 28] → /2 даёт [−12, +14] включительно, шаг 0.5. С
+    // прежней шириной 28 верхняя граница уезжала до +16 — зон, которых нет.
+    utcOffset: Math.round((rnd() * 26 - 12) * 2) / 2,   // -12..+14 с шагом 0.5
     lat: +(rnd() * 2 * latRange - latRange).toFixed(4),
     lon: +(rnd() * 360 - 180).toFixed(4),
     houseSystem: opts.houseSystem || ['whole', 'equal', 'placidus', 'koch', 'campanus', 'regiomontanus'][Math.floor(rnd() * 6)],
