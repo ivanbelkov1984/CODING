@@ -3139,11 +3139,12 @@ const nsh = await page.evaluate(() => {
   navGo('overview'); r.overview = document.getElementById('pg-sys').classList.contains('on');
   navGo('today');    r.today = document.getElementById('pg-home').classList.contains('on');
   r.todayActive = document.querySelector('.nsh-tab[data-nav="today"]').classList.contains('on');
-  // «Ещё» открывает сгруппированный хаб (1.1) со всеми разделами.
-  navGo('more');     r.more = document.getElementById('ov-more').classList.contains('on');
-  r.moreRows = document.querySelectorAll('#ov-more .srow').length;
-  r.moreActive = document.querySelector('.nsh-tab[data-nav="more"]').classList.contains('on');
-  closeOv('ov-more');
+  // Experience 2.0: свалки «Ещё» больше нет — «Меню» открывает полноценный
+  // drawer (тот же sidebar со всеми разделами, сгруппированно).
+  navGo('menu');     r.more = document.body.classList.contains('nav-open');
+  r.moreRows = document.querySelectorAll('#nsh-nav-groups .navlink').length;
+  r.moreActive = document.querySelector('.nsh-tab[data-nav="menu"]').classList.contains('on');
+  closeNav();
   // Полный лаунчер «Записать» (1.2): все типы записи; «Запись сферы» не падает без сфер.
   openCapture();     r.capture = document.getElementById('ov-capture').classList.contains('on');
   r.capBtns = document.querySelectorAll('#ov-capture .nsh-cap').length;
@@ -3205,8 +3206,8 @@ const nsh2 = await page.evaluate(async () => {
   goTo('home');
   openCapture(); r.hashCap = location.hash === '#/capture';
   closeOv('ov-capture'); nshHashToPage(); r.hashBackToday = location.hash === '#/today';
-  navGo('more'); r.hashMore = location.hash === '#/more';
-  closeOv('ov-more'); nshHashToPage();
+  navGo('menu'); r.hashMore = location.hash === '#/menu';
+  closeNav();
   // 4) История: переходы → pushState; back/forward работают.
   goTo('map'); goTo('sys');
   await new Promise(res => { const h = () => { window.removeEventListener('hashchange', h); res(); }; window.addEventListener('hashchange', h); history.back(); });
