@@ -1391,9 +1391,10 @@ function msub(tab, el) {
   if (el) el.classList.add('on');
   // Experience 2.0: пункты sidebar с data-sub (Сны/Психология/Закономерности/
   // Дневник) подсвечиваются по активной подвкладке, а не только по странице.
+  const OWN_SUB = ['psychology', 'patterns'];
   document.querySelectorAll('#nsh-nav-groups .navlink[data-tab="map"]').forEach(n => {
-    n.classList.toggle('on', (n.dataset.sub || 'overview') === tab ||
-      (tab !== 'overview' && !n.dataset.sub && false));
+    const sub = n.dataset.sub || 'overview';
+    n.classList.toggle('on', sub === tab || (sub === 'overview' && !OWN_SUB.includes(tab)));
   });
   // Активное состояние landing доступно не только через CSS-класс (issue #141/#142).
   const ovPill = document.querySelector('#subnav .snpill[data-sub="overview"]');
@@ -1410,6 +1411,7 @@ function msub(tab, el) {
   if (tab==='overview')  rDiaryOverview();
   if (tab==='psychology') rPsyWorkspace();   // Wave 7 (issue #162)
   _x2Sub = tab;
+  if (document.body.classList.contains('navshell') && typeof nshHighlight === 'function') nshHighlight('map');
   try { x2Island(); } catch (e) {}
 }
 
@@ -1735,7 +1737,34 @@ function rWholeLife() {
     ? x2Row('download', 'Источники', String(conns.length), lastImp ? 'последний импорт ' + dstr(lastImp.at || lastImp.createdAt) : 'импортов ещё не было', 'openExtImport()')
     : x2Row('download', 'Источники', '—', 'Подключи внешний источник', 'openExtImport()'));
 
-  el.innerHTML = `<div class="sec-lbl">Жизнь сейчас</div><div class="x2-grid">${rows.join('')}</div>`;
+  // Сферы — переехали из глобального меню: трекер живёт внутри «Жизни сейчас».
+  const sph = P('spheres');
+  const sphLogs = P('checkins').filter(c => c && c.sphereId).length;
+  rows.push(sph.length
+    ? x2Row('layers', 'Сферы', String(sph.length), sphLogs ? `${sphLogs} отметок` : 'отметок ещё нет', "goTo('vit')")
+    : x2Row('layers', 'Сферы', '—', 'Заведи сферу, чтобы отмечать', "goTo('vit')"));
+
+  // Обзор недели — переехал из глобального меню: это аналитика Главной,
+  // а не второй home. Deep link #/overview продолжает работать.
+  rows.push(x2Row('bar-chart-3', 'Обзор недели', '→', 'Динамика, дайджест, карта жизни', "goTo('sys')"));
+
+  // Иерархия вместо десяти одинаковых карточек: сначала то, что требует
+  // внимания, затем сама жизнь, затем понимание и данные.
+  const GROUPS = [
+    ['Требует внимания', ['Незавершённое', 'Цели']],
+    ['Жизнь', ['Здоровье', 'Психология', 'Сны', 'Сферы', 'События жизни']],
+    ['Понимание и данные', ['Закономерности', 'Обзор недели', 'Источники']],
+  ];
+  const byTitle = {};
+  rows.forEach(r => { const m = r.match(/class="x2-t">([^<]+)</); if (m) byTitle[m[1]] = r; });
+  const html = GROUPS.map(([lbl, titles]) => {
+    const got = titles.map(t => byTitle[t]).filter(Boolean);
+    return got.length ? `<div class="sec-lbl">${lbl}</div><div class="x2-grid">${got.join('')}</div>` : '';
+  }).join('');
+  // Страховка: если разметка строки изменится, ни один блок не пропадёт молча.
+  const shown = Object.keys(byTitle).filter(t => GROUPS.some(([, ts]) => ts.includes(t))).length;
+  el.innerHTML = shown === rows.length ? html
+    : `<div class="sec-lbl">Жизнь сейчас</div><div class="x2-grid">${rows.join('')}</div>`;
   icons();
 }
 
@@ -1756,13 +1785,15 @@ const X2_ISLAND = {
 let _x2Sub = 'overview';
 function x2Island() {
   const el = $('x2-island'); if (!el) return;
-  if (!document.body.classList.contains('navshell')) { el.innerHTML = ''; el.style.display = 'none'; return; }
+  const hide = () => { el.innerHTML = ''; el.style.display = 'none'; document.body.classList.remove('has-island'); };
+  if (!document.body.classList.contains('navshell')) { hide(); return; }
   const pg = document.querySelector('.pg.on');
   const tab = pg ? pg.id.replace('pg-', '') : 'home';
   const key = tab === 'map' ? 'map/' + _x2Sub : tab;
   const acts = X2_ISLAND[key] || [];
-  if (!acts.length) { el.innerHTML = ''; el.style.display = 'none'; return; }
+  if (!acts.length) { hide(); return; }
   el.style.display = '';
+  document.body.classList.add('has-island');
   el.innerHTML = acts.slice(0, 3).map(([ico, label, act]) =>
     `<button type="button" class="x2-act" onclick="${act}"><i data-lucide="${ico}"></i><span>${label}</span></button>`).join('');
   icons();
@@ -12225,7 +12256,7 @@ function navShellEnabled() {
   } catch (e) { return true; }
 }
 // Вкладки shell → существующие id (goTo). «Ещё» открывает drawer со всеми разделами.
-const NSH_MAP = { today: 'home', diary: 'map', overview: 'sys' };
+const NSH_MAP = { today: 'home', diary: 'map' };
 function navGo(dest) {
   // Experience 2.0: свалки «Ещё» нет. Кнопка «Меню» (и старый hash #/more)
   // открывают полноценный drawer со всеми разделами — тот же sidebar.
@@ -12236,13 +12267,16 @@ function navGo(dest) {
     nshHighlight('menu'); nshPushHash('#/menu');
     return;
   }
+  if (dest === 'psy') { goTo('map'); msub('psychology'); return; }
   const tab = NSH_MAP[dest];
   if (tab) goTo(tab);
 }
 // Обратный маппinг: подсветить активную вкладку по текущему разделу.
 // Разделы вне 4 вкладок (Сферы/Здоровье/Астро/Настройки) относятся к «Меню».
 function nshHighlight(tab) {
-  const dest = tab === 'home' ? 'today' : tab === 'map' ? 'diary' : tab === 'sys' ? 'overview' : 'menu';
+  const dest = tab === 'home' ? 'today'
+    : tab === 'map' ? (_x2Sub === 'psychology' ? 'psy' : 'diary')
+    : 'menu';
   document.querySelectorAll('.nsh-tab').forEach(b => {
     const on = b.dataset.nav === dest;
     b.classList.toggle('on', on);
@@ -12354,44 +12388,32 @@ function applyNavShell() {
     }
   }
 }
-// ── iPad/desktop: сгруппированный sidebar (TARGET-IA §5) ─────────
-// При флаге плоский список заменяется группами. Каждый пункт зовёт
-// СУЩЕСТВУЮЩИЙ id; «Сферы» помещены в «День» (в §5 они не распределены,
-// а терять раздел нельзя) — отклонение задокументировано в PR.
-// Experience 2.0: каждый основной раздел доступен напрямую — пункта «Ещё»
-// больше нет нигде. Подразделы Дневника (сны, психология, закономерности)
-// получили собственные пункты: item[4] — msub-подвкладка для подсветки.
+// ── Глобальная навигация: только крупные пространства ────────────
+// IA-принцип: в глобальном меню живёт лишь то, КУДА человек идёт целиком.
+// Быстрые действия (Записать), вторичные экраны (Отчёт врачу, Обзор),
+// инструменты (Поиск, Инспектор, Резервные копии) и сервисные функции
+// (Профили, Обратная связь) переехали внутрь своих родительских
+// пространств — ни одна из них не удалена и не стала недостижимой.
+// Полная карта переездов: docs/EXPERIENCE_2_SHELL_CONTRACT.md §5.
+// item[0] — вкладка для подсветки, item[4] — msub-подвкладка Дневника.
 const NSH_SIDEBAR_GROUPS = [
   ['Жизнь', [
     ['home', 'sun', 'Главная', "goTo('home')"],
-    [null, 'plus-circle', 'Записать', 'openCapture()'],
-    ['map', 'book-open', 'Дневник', "goTo('map')", 'overview'],
-    ['vit', 'layers', 'Сферы', "goTo('vit')"],
+    ['map', 'book-open', 'Дневник', "goTo('map');msub('overview')", 'overview'],
   ]],
-  ['Разум', [
-    ['map', 'moon', 'Сны', "goTo('map');msub('dreams')", 'dreams'],
+  ['Работа с собой', [
     ['map', 'brain', 'Психология', "goTo('map');msub('psychology')", 'psychology'],
-    ['map', 'target', 'Цели', "goTo('map');msub('psychology');x2ScrollPsyGoals()", 'psychology'],
+    ['health', 'heart-pulse', 'Здоровье', "goTo('health')"],
+  ]],
+  ['Анализ', [
+    ['astro', 'sparkles', 'Астрология', "goTo('astro')"],
     ['map', 'git-branch', 'Закономерности', "goTo('map');msub('patterns')", 'patterns'],
   ]],
-  ['Тело', [
-    ['health', 'heart-pulse', 'Здоровье', "goTo('health')"],
-    [null, 'file-text', 'Отчёт врачу', "goTo('health');openOv('ov-doc-report')"],
-  ]],
-  ['Понимание', [
-    ['sys', 'bar-chart-3', 'Обзор', "goTo('sys')"],
-    ['astro', 'sparkles', 'Астрология', "goTo('astro')"],
-    [null, 'search', 'Поиск', "openOv('ov-search')"],
-    [null, 'list-checks', 'Инспектор записей', 'openRecords()'],
-  ]],
   ['Данные', [
-    [null, 'download', 'Источники и импорт', 'openExtImport()'],
-    [null, 'shield', 'Резервные копии', 'openEncBackup()'],
+    [null, 'download', 'Источники', 'openExtImport()'],
   ]],
   ['Система', [
-    [null, 'users', 'Профили', 'openProfiles()'],
     ['settings', 'settings', 'Настройки', "goTo('settings')"],
-    [null, 'message-square', 'Обратная связь', "openOv('ov-feedback')"],
   ]],
 ];
 // «Цели» ведут в рабочее пространство психологии и подводят к блоку целей.

@@ -70,11 +70,10 @@ ok(menu.noMoreOverlay && menu.noMoreTab, 'ни разметки ov-more, ни в
 ok(menu.menuBtn && menu.ariaBefore === 'false', 'кнопка «Меню» — настоящий <button> с aria-expanded');
 ok(menu.open && menu.hash === '#/menu', 'меню открывает drawer, hash #/menu адресуем', JSON.stringify([menu.open, menu.hash]));
 ok(menu.closed && menu.hashAfterClose !== '#/menu', 'закрытие возвращает hash раздела', menu.hashAfterClose);
-const REQUIRED = ['Главная', 'Дневник', 'Сны', 'Психология', 'Цели', 'Закономерности',
-  'Здоровье', 'Обзор', 'Астрология', 'Поиск', 'Инспектор записей',
-  'Источники и импорт', 'Резервные копии', 'Профили', 'Настройки', 'Сферы'];
+const REQUIRED = ['Главная', 'Дневник', 'Психология', 'Здоровье',
+  'Астрология', 'Закономерности', 'Источники', 'Настройки'];
 const missing = REQUIRED.filter(r => !menu.items.includes(r));
-ok(missing.length === 0, `все ${REQUIRED.length} обязательных пространств доступны напрямую`, 'нет: ' + missing.join(', '));
+ok(missing.length === 0, `все ${REQUIRED.length} крупных пространств доступны напрямую`, 'нет: ' + missing.join(', '));
 ok(menu.allButtons, 'каждый пункт — настоящий <button>');
 ok(!menu.items.some(t => /Ещё|Wave|wave/.test(t)), 'ни «Ещё», ни внутренних Wave-названий в навигации');
 
@@ -87,7 +86,11 @@ const dest = await page.evaluate(async () => {
     document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
     document.body.classList.remove('nav-open');
     try { n.click(); } catch (e) { results.push([label, 'THROW: ' + e.message]); continue; }
-    await new Promise(r => setTimeout(r, 30));
+    for (let i = 0; i < 30; i++) {
+      if (document.querySelector('.ov.on') || document.body.classList.contains('nav-open')) break;
+      await new Promise(r => setTimeout(r, 20));
+    }
+    await new Promise(r => setTimeout(r, 20));
     const pg = document.querySelector('.pg.on');
     const ov = document.querySelector('.ov.on');
     const drawer = document.body.classList.contains('nav-open');
@@ -100,9 +103,9 @@ const dest = await page.evaluate(async () => {
 const dead = dest.filter(([label, pg, ov]) => String(pg).startsWith('THROW') || (!pg && !ov));
 ok(dead.length === 0, `все ${dest.length} пунктов открывают страницу или экран`, JSON.stringify(dead));
 const byLabel = Object.fromEntries(dest.map(([l, pg, ov]) => [l, { pg, ov }]));
-ok(byLabel['Поиск'] && byLabel['Поиск'].ov === 'ov-search', '«Поиск» открывает поиск', JSON.stringify(byLabel['Поиск']));
-ok(byLabel['Инспектор записей'] && byLabel['Инспектор записей'].ov === 'ov-records', '«Инспектор записей» открывает Inspector');
-ok(byLabel['Источники и импорт'] && byLabel['Источники и импорт'].ov === 'ov-ext-import', '«Источники» открывают экран импорта/моста');
+ok(byLabel['Источники'] && byLabel['Источники'].ov === 'ov-ext-import', '«Источники» открывают экран импорта/моста', JSON.stringify(byLabel['Источники']));
+ok(!byLabel['Поиск'] && !byLabel['Инспектор записей'],
+  'Поиск и Инспектор — инструменты, а не пункты меню (их пути проверяются в §13)');
 // Под file:// ESM-модуль копий намеренно не грузится (null-origin CORS,
 // задокументировано в index.html); openEncBackup честно говорит об этом
 // тостом. На HTTP/HTTPS модуль открывается — это доказывает Backup Evidence
@@ -129,8 +132,10 @@ const hl = await page.evaluate(() => {
   goTo('home');
   return out;
 });
-ok(hl.dreams.includes('Сны') && !hl.dreams.includes('Психология'), 'на подвкладке снов подсвечены именно «Сны»', JSON.stringify(hl.dreams));
-ok(hl.psy.includes('Психология') && hl.psy.includes('Цели'), 'психология подсвечивает «Психология» (и «Цели» — то же пространство)', JSON.stringify(hl.psy));
+ok(hl.dreams.length === 1 && hl.dreams[0] === 'Дневник',
+  'на подвкладке снов подсвечен родитель «Дневник» — видно, где находишься', JSON.stringify(hl.dreams));
+ok(hl.psy.length === 1 && hl.psy[0] === 'Психология',
+  'психология подсвечивает ровно «Психологию», не залезая в Дневник', JSON.stringify(hl.psy));
 ok(hl.pat.includes('Закономерности'), 'закономерности подсвечены', JSON.stringify(hl.pat));
 ok(hl.health.includes('Здоровье') && !hl.health.some(t => ['Сны', 'Психология', 'Закономерности'].includes(t)),
   'уход со страницы Дневника снимает подсветку подвкладок', JSON.stringify(hl.health));
@@ -199,7 +204,11 @@ const life = await page.evaluate(() => {
     blocks: filled.map(t => t.slice(0, 20)),
   };
 });
-ok(life.emptyCount === 8, `восемь блоков «Жизнь сейчас» (${life.emptyCount})`);
+ok(life.emptyCount === 10, `десять блоков «Жизнь сейчас» (${life.emptyCount})`);
+const lifeGroups = await page.evaluate(() =>
+  [...document.querySelectorAll('#x2-life .sec-lbl')].map(g => g.textContent.trim()));
+ok(lifeGroups.length === 3 && lifeGroups[0] === 'Требует внимания',
+  'Главная подаёт блоки иерархией, а не плоским списком: ' + lifeGroups.join(' · '), JSON.stringify(lifeGroups));
 ok(life.emptyHuman, 'пустые состояния человеческие — без undefined/NaN/JSON');
 ok(life.filledGoal, 'активная цель видна с числом и названием', JSON.stringify(life.blocks));
 ok(life.unfCountsGoal, '«Незавершённое» честно считает активную цель');
@@ -441,6 +450,259 @@ ok(!afterReload.labels.includes('Ещё') && afterReload.labels.includes('Мен
   'после перезагрузки таб-бар: ' + afterReload.labels.join(' · '));
 ok(afterReload.hash === '#/menu' && afterReload.open, 'старая ссылка #/more открывает drawer и переписывает hash в #/menu',
   JSON.stringify(afterReload));
+
+
+console.log('\n── § 12. Компактная IA: в меню только крупные пространства ──');
+await page.goto(FILE);
+await page.waitForSelector('#nsh-tabbar', { state: 'attached' });
+await page.evaluate(() => { const s = document.getElementById('splash'); if (s) s.style.display = 'none'; });
+await page.waitForTimeout(700);
+await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
+
+const PRIMARY = ['Главная', 'Дневник', 'Психология', 'Здоровье', 'Астрология',
+  'Закономерности', 'Источники', 'Настройки'];
+const ia = await page.evaluate(() => ({
+  items: [...document.querySelectorAll('#nsh-nav-groups .navlink')].map(n => n.textContent.trim()),
+  groups: [...document.querySelectorAll('#nsh-nav-groups .nsh-grp-lbl')].map(g => g.textContent.trim()),
+  tabs: [...document.querySelectorAll('#nsh-tabbar .nsh-tab')].map(b => b.textContent.trim()),
+}));
+ok(ia.items.length <= 8, `в глобальном меню ${ia.items.length} пунктов (≤8)`, ia.items.join(' · '));
+ok(PRIMARY.every(p => ia.items.includes(p)) && ia.items.every(i => PRIMARY.includes(i)),
+  'меню — ровно утверждённые пространства', 'есть: ' + ia.items.join(' · '));
+ok(!ia.items.includes('Ещё') && !ia.tabs.includes('Ещё'), 'ни «Ещё», ни его следов');
+ok(!/Wave|wave|X2|Experience/.test(ia.items.join(' ') + ia.groups.join(' ')), 'нет внутренних названий');
+// Вторичные функции НЕ являются nav destination
+const REMOVED = ['Записать', 'Сферы', 'Сны', 'Цели', 'Отчёт врачу', 'Обзор',
+  'Поиск', 'Инспектор записей', 'Резервные копии', 'Профили', 'Обратная связь'];
+const stillThere = REMOVED.filter(r => ia.items.includes(r));
+ok(stillThere.length === 0, `все ${REMOVED.length} вторичных функций убраны из меню`, 'остались: ' + stillThere.join(', '));
+ok(!ia.tabs.includes('Обзор'), 'таб-бар не предлагает второй home', ia.tabs.join(' · '));
+
+console.log('\n── § 13. Достижимость: ни одна убранная функция не потеряна ──');
+// Правило: путь начинается ТОЛЬКО с компактного меню, шапки или экрана —
+// никаких прямых вызовов скрытых роутов как единственного доказательства.
+const openMenu = async () => {
+  await page.evaluate(() => { document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')); closeNav(); });
+  await page.evaluate(() => document.querySelector('[data-nav="menu"]').click());
+  await settled(() => document.body.classList.contains('nav-open'));
+};
+const clickNav = async label => {
+  await openMenu();
+  const hit = await page.evaluate(l => {
+    const n = [...document.querySelectorAll('#nsh-nav-groups .navlink')].find(x => x.textContent.trim() === l);
+    if (!n) return false; n.click(); return true;
+  }, label);
+  await settled(() => !document.body.classList.contains('nav-open'));
+  await page.waitForTimeout(120);
+  return hit;
+};
+// Клик по видимому элементу экрана — по тексту, как это делает человек.
+const clickText = async (sel, text) => page.evaluate(([s, t]) => {
+  const n = [...document.querySelectorAll(s)].find(x => (x.textContent || '').includes(t) &&
+    x.offsetParent !== null);
+  if (!n) return false; n.click(); return true;
+}, [sel, text]);
+const ovOpen = id => page.evaluate(i => { const e = document.getElementById(i); return !!e && e.classList.contains('on'); }, id);
+const pgOn = () => page.evaluate(() => (document.querySelector('.pg.on') || {}).id);
+
+// 1. Дневник → новая запись (через меню, затем Action Island)
+await clickNav('Дневник');
+ok(await pgOn() === 'pg-map', 'меню → Дневник открывает дневник');
+await clickText('#x2-island .x2-act', 'Запись');
+ok(await ovOpen('ov-add'), 'Дневник → остров «Запись» открывает существующую форму инсайта');
+
+// 2. Сны — через поднавигацию Дневника (2 действия от меню)
+await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
+const dreamHit = await clickText('#subnav .snpill', 'Сны');
+await page.waitForTimeout(120);
+const dreamsOn = await page.evaluate(() => getComputedStyle(document.getElementById('ms-dreams')).display !== 'none');
+ok(dreamHit && dreamsOn, 'Дневник → Сны достижимы за 2 действия от меню');
+ok(await clickText('#x2-island .x2-act', 'Записать сон') && await ovOpen('ov-drm'),
+  'на снах остров даёт «Записать сон» — форма та же');
+
+// 3. Психология и цели
+await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
+await clickNav('Психология');
+const psyOn = await page.evaluate(() => getComputedStyle(document.getElementById('ms-psychology')).display !== 'none');
+ok(psyOn, 'меню → Психология открывает рабочее пространство');
+
+// 4. Цели — с Главной, через проекцию «Жизнь сейчас»
+await clickNav('Главная');
+ok(await pgOn() === 'pg-home', 'меню → Главная');
+const goalHit = await clickText('#x2-life .x2-row', 'Цели');
+await page.waitForTimeout(150);
+ok(goalHit && await pgOn() === 'pg-map', 'Главная → «Цели» ведут в психологию, где живут цели');
+
+// 5. Сферы — с Главной
+await clickNav('Главная');
+const sphHit = await clickText('#x2-life .x2-row', 'Сферы');
+await page.waitForTimeout(150);
+ok(sphHit && await pgOn() === 'pg-vit', 'Главная → «Сферы» открывают раздел сфер');
+
+// 6. Обзор — с Главной (не второй home, а аналитика внутри)
+await clickNav('Главная');
+const ovwHit = await clickText('#x2-life .x2-row', 'Обзор недели');
+await page.waitForTimeout(150);
+ok(ovwHit && await pgOn() === 'pg-sys', 'Главная → «Обзор недели» открывает аналитику');
+
+// 7. Здоровье: измерение и отчёт врачу
+await clickNav('Здоровье');
+ok(await pgOn() === 'pg-health', 'меню → Здоровье');
+ok(await clickText('#x2-island .x2-act', 'Измерение') && await ovOpen('ov-measure'),
+  'Здоровье → остров «Измерение» открывает существующую форму');
+await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
+const docHit = await clickText('#pg-health button', 'Отчёт врачу');
+await page.waitForTimeout(200);
+ok(docHit && await ovOpen('ov-doc-report'), 'Здоровье → «Отчёт врачу» — инструмент внутри Здоровья, не пункт меню');
+
+// 8. Астрология и Закономерности
+await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
+await clickNav('Астрология');
+ok(await pgOn() === 'pg-astro', 'меню → Астрология');
+await clickNav('Закономерности');
+const patOn = await page.evaluate(() => getComputedStyle(document.getElementById('ms-patterns')).display !== 'none');
+ok(patOn, 'меню → Закономерности открывают Pattern Engine');
+
+// 9. Поиск — из шапки, а не из меню
+const searchHit = await page.evaluate(() => {
+  const b = [...document.querySelectorAll('.topbar .ib')].find(x => x.getAttribute('aria-label') === 'Поиск');
+  if (!b) return false; b.click(); return true;
+});
+await page.waitForTimeout(150);
+ok(searchHit && await ovOpen('ov-search'), 'Поиск всегда доступен из шапки, хотя убран из меню');
+
+// 10. Источники / Drive
+await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
+await clickNav('Источники');
+ok(await ovOpen('ov-ext-import'), 'меню → Источники открывают мост импорта (Drive/ChatGPT/файлы)');
+
+// 11. Настройки: Инспектор, Резервные копии, Профили, Обратная связь
+await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
+await clickNav('Настройки');
+ok(await pgOn() === 'pg-settings', 'меню → Настройки');
+const inSettings = await page.evaluate(() => {
+  const txt = document.getElementById('pg-settings').textContent;
+  return { rec: /Мои записи/.test(txt), bak: /Зашифрованная резервная копия/.test(txt),
+    prof: /Профиль/.test(txt), fb: /Обратная связь/.test(txt), src: /Импорт внешней работы/.test(txt) };
+});
+ok(inSettings.rec && inSettings.bak && inSettings.prof && inSettings.fb,
+  'Настройки содержат Инспектор, Резервные копии, Профиль и Обратную связь', JSON.stringify(inSettings));
+ok(await clickText('#pg-settings .srow', 'Мои записи') && await ovOpen('ov-records'),
+  'Настройки → «Мои записи» открывают Инспектор записей');
+await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
+ok(await clickText('#pg-settings .srow', 'Обратная связь') && await ovOpen('ov-feedback'),
+  'Настройки → «Обратная связь» открывает форму');
+await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
+const bakHit = await clickText('#pg-settings .srow', 'Зашифрованная резервная копия');
+await page.waitForTimeout(250);
+const bakState = await page.evaluate(() => ({
+  open: !!document.querySelector('#ov-backup-enc.on'),
+  toast: (document.getElementById('toasts') || {}).textContent || '',
+}));
+ok(bakHit && (bakState.open || bakState.toast.length > 0),
+  'Настройки → резервные копии: модуль открыт (HTTP) либо честное сообщение (file://)', JSON.stringify(bakState));
+
+// 12. Профили — карточка профиля в шторке, не пункт меню
+await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
+await openMenu();
+const profHit = await page.evaluate(() => {
+  const c = document.querySelector('#sidebar .acct'); if (!c) return false; c.click(); return true;
+});
+await page.waitForTimeout(200);
+ok(profHit && await ovOpen('ov-profiles'), 'карточка профиля в шторке — рабочий вход в профили');
+await page.evaluate(() => { document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')); closeNav(); });
+
+// 13. Инспектор из записи, а не только из Настроек
+const fromRecord = await page.evaluate(async () => {
+  DB.insights = [{ id: 777001, tag: 'growth', w: 1, title: 'TEST-X2-IA', body: 'TEST-X2-IA запись',
+    date: '01.01', createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION }];
+  openRecords();
+  await new Promise(r => setTimeout(r, 150));
+  const sel = document.getElementById('rec-coll');
+  const hasIns = !!(sel && [...sel.options].some(o => o.value === 'insights'));
+  if (hasIns) { sel.value = 'insights'; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+  await new Promise(r => setTimeout(r, 150));
+  const on = !!document.querySelector('#ov-records.on');
+  const listed = /TEST-X2-IA/.test((document.getElementById('ov-records') || {}).textContent || '');
+  return { on, hasIns, listed };
+});
+ok(fromRecord.on && fromRecord.hasIns && fromRecord.listed,
+  'Инспектор показывает реальную запись — слой не ослаблен', JSON.stringify(fromRecord));
+
+console.log('\n── § 14. Legacy deep links живут после сокращения меню ──');
+for (const [slug, expect] of [['spheres', 'pg-vit'], ['overview', 'pg-sys'], ['health', 'pg-health'],
+                              ['astro', 'pg-astro'], ['diary', 'pg-map'], ['settings', 'pg-settings'],
+                              ['today', 'pg-home']]) {
+  await page.goto(FILE + '#/' + slug);
+  await page.waitForSelector('#nsh-tabbar', { state: 'attached' });
+  await settled(s => (document.querySelector('.pg.on') || {}).id === s, 3000);
+  const got = await pgOn();
+  ok(got === expect, `deep link #/${slug} по-прежнему открывает ${expect}`, 'открылось ' + got);
+}
+// Неизвестный hash по-прежнему безопасно ведёт на Главную
+await page.goto(FILE + '#/kosmos');
+await page.waitForSelector('#nsh-tabbar', { state: 'attached' });
+await settled(() => (document.querySelector('.pg.on') || {}).id === 'pg-home');
+ok(await pgOn() === 'pg-home', 'неизвестный deep link безопасно ведёт на Главную');
+
+console.log('\n── § 15. Мобильная шторка помещается без длинной прокрутки ──');
+await page.goto(FILE);
+await page.waitForSelector('#nsh-tabbar', { state: 'attached' });
+await page.evaluate(() => { const s = document.getElementById('splash'); if (s) s.style.display = 'none'; });
+await page.waitForTimeout(600);
+await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
+await openMenu();
+const fit = await page.evaluate(() => {
+  const nav = document.getElementById('nav');
+  const items = [...document.querySelectorAll('#nsh-nav-groups .navlink')];
+  const box = nav.getBoundingClientRect();
+  const visible = items.filter(n => { const r = n.getBoundingClientRect();
+    return r.top >= box.top - 1 && r.bottom <= box.bottom + 1; });
+  return { total: items.length, visible: visible.length, scroll: nav.scrollHeight - nav.clientHeight };
+});
+ok(fit.visible === fit.total, `все ${fit.total} пунктов видны без прокрутки (видно ${fit.visible})`, JSON.stringify(fit));
+ok(fit.scroll <= 24, `шторка не требует прокрутки (запас ${fit.scroll}px)`, JSON.stringify(fit));
+
+
+console.log('\n── § 16. Action Island не закрывает собой контент ──');
+await page.goto(FILE);
+await page.waitForSelector('#nsh-tabbar', { state: 'attached' });
+await page.evaluate(() => { const s = document.getElementById('splash'); if (s) s.style.display = 'none'; });
+await page.waitForTimeout(700);
+await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
+for (const [name, go, wantIsland] of [
+  ['Главная', "goTo('home')", false],
+  ['Дневник', "goTo('map');msub('overview')", true],
+  ['Сны', "goTo('map');msub('dreams')", true],
+  ['Здоровье', "goTo('health')", true],
+  ['Настройки', "goTo('settings')", false],
+]) {
+  await page.evaluate(g => (new Function(g))(), go);
+  await page.waitForTimeout(180);
+  const r = await page.evaluate(() => {
+    const el = document.getElementById('x2-island');
+    const shown = getComputedStyle(el).display !== 'none';
+    const pad = parseInt(getComputedStyle(document.querySelector('.content')).paddingBottom, 10);
+    const acts = [...el.querySelectorAll('.x2-act')].map(b => b.textContent.trim());
+    return { shown, pad, acts, cls: document.body.classList.contains('has-island') };
+  });
+  ok(r.shown === wantIsland, `${name}: остров ${wantIsland ? 'показан' : 'скрыт'} — как и должно быть`, JSON.stringify(r));
+  // Место под плавающий остров зарезервировано ровно тогда, когда он есть.
+  ok(r.shown ? (r.cls && r.pad >= 120) : (!r.cls && r.pad <= 80),
+    `${name}: запас под остров ${r.shown ? 'зарезервирован' : 'не занимает место зря'} (${r.pad}px)`, JSON.stringify(r));
+  if (r.shown) ok(r.acts.length >= 1 && r.acts.length <= 3,
+    `${name}: остров — 1–3 действия (${r.acts.join(' · ')})`, JSON.stringify(r.acts));
+}
+// Остров — действия, а не навигация: ни одно название не совпадает с пунктом меню.
+const islandNav = await page.evaluate(() => {
+  const menu = [...document.querySelectorAll('#nsh-nav-groups .navlink')].map(n => n.textContent.trim());
+  const seen = [];
+  ["goTo('map');msub('overview')", "goTo('map');msub('dreams')", "goTo('health')", "goTo('vit')"]
+    .forEach(g => { (new Function(g))();
+      [...document.querySelectorAll('#x2-island .x2-act')].forEach(b => seen.push(b.textContent.trim())); });
+  return seen.filter(a => menu.includes(a));
+});
+ok(islandNav.length === 0, 'остров содержит только действия, не дубли пунктов меню', islandNav.join(', '));
 
 await browser.close();
 console.log(`\nEXPERIENCE 2.0 SHELL: ${pass} passed, ${fail} failed`);

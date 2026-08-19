@@ -3136,7 +3136,8 @@ const nsh = await page.evaluate(() => {
   r.hasFab = !!document.getElementById('nsh-fab');
   // Вкладки shell ведут на СУЩЕСТВУЮЩИЕ разделы (ничего не потеряно).
   navGo('diary');    r.diary = document.getElementById('pg-map').classList.contains('on');
-  navGo('overview'); r.overview = document.getElementById('pg-sys').classList.contains('on');
+  navGo('psy');      r.psy = document.getElementById('pg-map').classList.contains('on') &&
+                              getComputedStyle(document.getElementById('ms-psychology')).display !== 'none';
   navGo('today');    r.today = document.getElementById('pg-home').classList.contains('on');
   r.todayActive = document.querySelector('.nsh-tab[data-nav="today"]').classList.contains('on');
   // Experience 2.0: свалки «Ещё» больше нет — «Меню» открывает полноценный
@@ -3154,7 +3155,7 @@ const nsh = await page.evaluate(() => {
   closeOv('ov-capture');
   // Hash-роутинг (1.5): destination сериализуется и восстанавливается.
   navGo('diary');    r.hashDiary = location.hash === '#/diary';
-  navGo('overview'); r.hashOverview = location.hash === '#/overview';
+  goTo('sys');       r.hashOverview = location.hash === '#/overview';   // deep link Обзора жив
   location.hash = '#/spheres'; window.dispatchEvent(new HashChangeEvent('hashchange'));
   r.hashRestore = document.getElementById('pg-vit').classList.contains('on');
   // Тап-цели навигации ≥44px (accessibility).
@@ -3175,11 +3176,12 @@ const nsh = await page.evaluate(() => {
 ok(nsh.freshProfileOn && nsh.freshTabbarVisible, 'rollout 1.4: без сохранённого значения (свежий профиль) — новая навигация ON по умолчанию');
 ok(nsh.onClass && nsh.tabs === 4 && nsh.hasFab, 'nav shell ON: body.navshell, 4 вкладки + FAB');
 ok(nsh.addLabel === 'Записать' && nsh.offLabel === 'Новый инсайт', 'nav shell: ＋ = «Записать» при ON, «Новый инсайт» при OFF');
-ok(nsh.diary && nsh.overview && nsh.today, 'nav shell: вкладки ведут на существующие разделы (map/sys/home)');
-ok(nsh.todayActive && nsh.more && nsh.moreActive && nsh.moreRows >= 9, 'nav shell 1.1: «Ещё» — сгруппированный хаб со всеми разделами, вкладка подсвечена');
+ok(nsh.diary && nsh.psy && nsh.today, 'nav shell: вкладки ведут на существующие разделы (Дневник/Психология/Главная)', JSON.stringify([nsh.diary, nsh.psy, nsh.today]));
+ok(nsh.todayActive && nsh.more && nsh.moreActive && nsh.moreRows === 8,
+  'nav shell 1.1: «Меню» — компактная шторка из 8 крупных пространств, вкладка подсвечена', String(nsh.moreRows));
 ok(nsh.capture && nsh.capBtns >= 9 && nsh.plusCapture, 'nav shell 1.2: полный лаунчер «Записать» (все типы записи)');
 ok(nsh.sphereSafe, 'nav shell 1.2: «Запись сферы» безопасна без сфер (без исключений)');
-ok(nsh.hashDiary && nsh.hashOverview, 'nav shell 1.5: раздел сериализуется в hash (#/diary, #/overview)');
+ok(nsh.hashDiary && nsh.hashOverview, 'nav shell 1.5: раздел сериализуется в hash (#/diary, #/overview)', JSON.stringify([nsh.hashDiary, nsh.hashOverview]));
 ok(nsh.hashRestore, 'nav shell 1.5: hashchange восстанавливает раздел (#/spheres → Сферы)');
 ok(nsh.tapOk, 'nav shell: тап-цели вкладок и FAB ≥44px');
 ok(nsh.offAgain && nsh.plusInsightOff, 'nav shell OFF: прежнее поведение возвращается (＋ = инсайт)');
@@ -3245,11 +3247,11 @@ for (const [w, h, kind] of vps) {
     const groups = document.querySelectorAll('#nsh-nav-groups .nsh-grp-lbl').length;
     const grpBtns = document.querySelectorAll('#nsh-nav-groups .navlink').length;
     if (kind2 === 'phone') return { ok: barVisible && pad >= 64, barVisible, pad };
-    return { ok: !barVisible && sideVisible && groups === 6 && grpBtns >= 12, barVisible, sideVisible, groups, grpBtns };
+    return { ok: !barVisible && sideVisible && groups === 5 && grpBtns === 8, barVisible, sideVisible, groups, grpBtns };
   }, kind));
 }
 ok(vpRes[0].ok && vpRes[1].ok && vpRes[2].ok, 'shell v2: iPhone SE/std/Pro Max — таб-бар виден, контент не перекрыт (padding ≥64)');
-ok(vpRes[3].ok, 'shell v2: iPad portrait — постоянный сгруппированный sidebar (6 групп TARGET-IA), таб-бар скрыт');
+ok(vpRes[3].ok, 'shell v2: iPad portrait — постоянный сгруппированный sidebar (5 групп, 8 пространств), таб-бар скрыт', JSON.stringify(vpRes[3]));
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(100);
 

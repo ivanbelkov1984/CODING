@@ -1401,6 +1401,7 @@ body.navshell #sys-back{display:flex;align-items:center;gap:.3rem;min-height:44p
     background:var(--blue-btn);color:#fff;box-shadow:0 4px 14px rgba(16,86,204,.4)}
   body.navshell .nsh-fab svg{width:24px;height:24px;stroke-width:2.4}
   body.navshell .content{padding-bottom:64px}
+  body.navshell.has-island .content{padding-bottom:132px}
   /* Открытый drawer — единственный слой управления: нижний таб-бар не
      просвечивает и не принимает тапы (одним переходом со scrim). */
   body.navshell .nsh-tabbar{transition:opacity var(--drawer-dur) var(--e)}
@@ -1544,6 +1545,7 @@ body.navshell .nsh-tab:focus-visible,body.navshell .nsh-fab:focus-visible,
    mobile — над таб-баром, чтобы не закрывать контент и не спорить с FAB. */
 #x2-island{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom));z-index:40;display:flex;gap:8px;padding:6px;border-radius:999px;background:var(--sf);border:1px solid var(--bd);box-shadow:0 6px 24px rgba(0,0,0,.14)}
 body.navshell #x2-island{bottom:calc(14px + env(safe-area-inset-bottom))}
+@media(min-width:768px){ body.navshell.has-island .content{padding-bottom:84px} }
 @media(max-width:767px){body.navshell #x2-island{bottom:calc(74px + env(safe-area-inset-bottom))}}
 .x2-act{display:flex;align-items:center;gap:7px;padding:9px 14px;border-radius:999px;border:none;background:transparent;color:var(--t1);font-size:.82rem;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .x2-act:hover{background:var(--bg2)}

@@ -154,10 +154,12 @@ await journey.evaluate(() => { closeOv('ov-drm'); });
 await journey.evaluate(() => { goTo('sys'); });
 const step5 = await journey.evaluate(() => ({
   overviewOn: getComputedStyle(document.getElementById('sys-overview')).display !== 'none',
-  overviewTabActive: document.querySelector('.nsh-tab[data-nav="overview"]').classList.contains('on'),
+  noOverviewTab: !document.querySelector('.nsh-tab[data-nav="overview"]'),
+  menuTabActive: document.querySelector('.nsh-tab[data-nav="menu"]').classList.contains('on'),
   diaryStale: getComputedStyle(document.getElementById('ms-overview')).display === 'none' || document.getElementById('pg-map').classList.contains('on') === false,
 }));
-ok(step5.overviewOn && step5.overviewTabActive, 'путь 5/8: «Обзор» открывает landing недели, вкладка подсвечена');
+ok(step5.overviewOn && step5.noOverviewTab && step5.menuTabActive,
+  'путь 5/8: «Обзор» открывает landing недели; своей вкладки у него нет — подсвечено «Меню»', JSON.stringify(step5));
 ok(step5.diaryStale, 'путь 5/8: уход из Дневника не оставляет его подраздел «залипшим» видимым поверх Обзора');
 
 // Шаг 6: «Отчёт врачу» из Обзора — существующий overlay с текстом.

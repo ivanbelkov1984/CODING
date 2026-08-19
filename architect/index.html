@@ -658,6 +658,10 @@
          существующего раздела «Данные», без нового top-level раздела. -->
     <button type="button" class="srow" onclick="openExtImport()"><div class="sic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v12"/><polyline points="8 11 12 15 16 11"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></div><span class="sl2">Импорт внешней работы</span><span class="sv2">ChatGPT · Drive · JSON</span></button>
   </div>
+  <div class="sec-lbl">Поддержка</div>
+  <div class="card mx">
+    <button type="button" class="srow" onclick="openOv('ov-feedback')"><span class="sic" style="background:var(--blue-l,var(--teal-l))"><svg style="color:var(--blue,var(--teal))" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span><span class="sl2">Обратная связь</span><span class="sv2">Написать</span></button>
+  </div>
   <div class="sec-lbl">Команды</div>
   <div class="cmd-wrap mx" style="position:relative">
     <div class="cmd-bar">
@@ -828,9 +832,9 @@
 <!-- ══ NAVIGATION SHELL v2 (за флагом arch_nav_v2; скрыто без body.navshell) ══ -->
 <nav class="nsh-tabbar" id="nsh-tabbar" aria-label="Основная навигация">
   <button class="nsh-tab on" data-nav="today" onclick="navGo('today')" aria-label="Сегодня" aria-current="page"><i data-lucide="sun"></i><span>Сегодня</span></button>
-  <button class="nsh-tab" data-nav="diary" onclick="navGo('diary')" aria-label="Дневник"><i data-lucide="brain"></i><span>Дневник</span></button>
+  <button class="nsh-tab" data-nav="diary" onclick="navGo('diary')" aria-label="Дневник"><i data-lucide="book-open"></i><span>Дневник</span></button>
   <button class="nsh-fab" id="nsh-fab" onclick="openCapture()" aria-label="Записать"><i data-lucide="plus"></i></button>
-  <button class="nsh-tab" data-nav="overview" onclick="navGo('overview')" aria-label="Обзор"><i data-lucide="bar-chart-3"></i><span>Обзор</span></button>
+  <button class="nsh-tab" data-nav="psy" onclick="navGo('psy')" aria-label="Психология"><i data-lucide="brain"></i><span>Психология</span></button>
   <button class="nsh-tab" data-nav="menu" onclick="navGo('menu')" aria-label="Меню — все разделы" aria-expanded="false"><i data-lucide="menu"></i><span>Меню</span></button>
 </nav>
 
