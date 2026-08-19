@@ -27,6 +27,12 @@ const FILE = 'file://' + (process.env.X2_BUNDLE || join(ROOT, 'dist', 'app.html'
 
 let pass = 0, fail = 0;
 const errors = [];
+// Дождаться устоявшегося состояния вместо фиксированной паузы. Молча выходит
+// по таймауту — судит всегда сам assert, а не наличие/отсутствие ожидания.
+const settled = async (fn, ms = 3000) => {
+  try { await page.waitForFunction(fn, null, { timeout: ms, polling: 40 }); return true; }
+  catch (e) { return false; }
+};
 const ok = (c, m, d) => {
   if (c) { pass++; console.log('  ✓ ' + m); }
   else { fail++; console.log('  ✗ ' + m); if (d) console.log('      ' + String(d).split('\n').join('\n      ')); }
@@ -312,8 +318,12 @@ await page.evaluate(() => { document.querySelectorAll('.ov.on').forEach(o => o.c
 for (const theme of ['dark', 'light']) {
   await page.evaluate(t => document.documentElement.setAttribute('data-theme', t), theme);
   await page.evaluate(() => { const t = document.getElementById('toasts'); if (t) t.innerHTML = ''; });
+  await settled(() => !document.body.classList.contains('nav-open') &&
+    +getComputedStyle(document.getElementById('nsh-tabbar')).opacity === 1);
   await page.evaluate(() => document.querySelector('[data-nav="menu"]').click());
-  await page.waitForTimeout(320);
+  await settled(() => document.body.classList.contains('nav-open') &&
+    +getComputedStyle(document.getElementById('nsh-tabbar')).opacity === 0 &&
+    getComputedStyle(document.querySelector('.sidebar')).transform === 'none');
   const d = await page.evaluate(() => {
     const cs = s => getComputedStyle(document.querySelector(s));
     const sb = cs('.sidebar'), sc = cs('.scrim'), tb = cs('#nsh-tabbar');
@@ -371,7 +381,8 @@ for (const theme of ['dark', 'light']) {
   ok(d.aria === 'true' && d.focusInDrawer, `[${theme}] aria-expanded=true, фокус внутри drawer`);
   // Закрытие: Escape → фокус возвращается открывшему элементу
   await page.keyboard.press('Escape');
-  await page.waitForTimeout(300);
+  await settled(() => !document.body.classList.contains('nav-open') &&
+    !document.getElementById('app').hasAttribute('inert'));
   const c = await page.evaluate(() => ({
     closed: !document.body.classList.contains('nav-open'),
     inert: document.getElementById('app').hasAttribute('inert'),
@@ -384,13 +395,13 @@ for (const theme of ['dark', 'light']) {
 }
 // Тап по scrim закрывает drawer
 await page.evaluate(() => document.querySelector('[data-nav="menu"]').click());
-await page.waitForTimeout(300);
+await settled(() => document.body.classList.contains('nav-open'));
 await page.mouse.click(370, 400);
-await page.waitForTimeout(300);
+await settled(() => !document.body.classList.contains('nav-open'));
 ok(await page.evaluate(() => !document.body.classList.contains('nav-open')), 'тап по затемнению закрывает drawer');
 // Выбор пункта закрывает drawer
 await page.evaluate(() => document.querySelector('[data-nav="menu"]').click());
-await page.waitForTimeout(300);
+await settled(() => document.body.classList.contains('nav-open'));
 await page.evaluate(() => [...document.querySelectorAll('#nsh-nav-groups .navlink')].find(n => n.textContent.trim() === 'Здоровье').click());
 await page.waitForTimeout(200);
 const pick = await page.evaluate(() => ({ closed: !document.body.classList.contains('nav-open'), pg: document.querySelector('.pg.on').id }));
