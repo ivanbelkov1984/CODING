@@ -49,12 +49,11 @@ const freshState = await fresh.evaluate(() => {
   return {
     shellOn: document.body.classList.contains('navshell'),
     tabbarVisible: getComputedStyle(document.getElementById('nsh-tabbar')).display !== 'none',
-    toggleShowsOn: document.getElementById('navshell-lbl').textContent === 'Вкл',
-    ariaPressed: document.getElementById('navshell-toggle').getAttribute('aria-pressed') === 'true',
+    noUserToggle: !document.getElementById('navshell-toggle'),
   };
 });
-ok(freshState.shellOn && freshState.tabbarVisible && freshState.toggleShowsOn && freshState.ariaPressed,
-  'rollout: чистый профиль (нет сохранённого значения) получает новую навигацию ON, тумблер честно показывает «Вкл»');
+ok(freshState.shellOn && freshState.tabbarVisible && freshState.noUserToggle,
+  'rollout: чистый профиль получает Experience 2.0 как основную оболочку; пользовательского тумблера нет');
 await fresh.close();
 
 // ── 2) Существующее явное OFF сохраняется ───────────────────────────

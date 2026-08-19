@@ -176,7 +176,8 @@ const life = await page.evaluate(() => {
   // Наполненное состояние — синтетика через canonical формы данных
   DB.psyGoals = [{ id: 1, label: 'TEST-X2-GOAL', status: 'active', createdAt: nowISO(), sv: SCHEMA_VERSION }];
   DB.dreams = [{ id: 2, title: 'TEST-X2-DREAM', body: 'x', createdAt: nowISO(), sv: SCHEMA_VERSION }];
-  DB.measures = [{ id: 3, kind: 'TEST-X2-BP', value: 120, createdAt: nowISO(), sv: SCHEMA_VERSION }];
+  DB.measures = [{ id: 3, kType: 'measurement', name: 'TEST-X2-BP', value: '120', unit: '',
+    verif: 'user_confirmed', createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION }];
   rWholeLife();
   const rows = [...document.querySelectorAll('#x2-life .x2-row')];
   const filled = rows.map(r => r.textContent.trim());
@@ -227,6 +228,208 @@ console.log('\n── § 7. Приватность и чистота ──');
 const texts = await page.evaluate(() => [...document.querySelectorAll('#x2-life .x2-row')].map(r => r.textContent).join(' '));
 ok(!/[А-Я][а-я]+ [А-Я][а-я]+вич|@gmail|belkov/i.test(texts), 'в проекции нет ничего похожего на личные данные');
 ok(errors.length === 0, 'ни одной необработанной ошибки страницы', errors.slice(0, 5).join('\n'));
+
+
+console.log('\n── § 8. Единственный писатель: новая оболочка и легаси пишут в одну коллекцию ──');
+// Контракт: Experience 2.0 — это ОБОЛОЧКА. Она не создаёт своих форм и своих
+// writer-ов. Одна и та же сущность, сохранённая через новую и через старую
+// навигацию, обязана попасть в ТУ ЖЕ каноническую коллекцию тем же кодом.
+// Проверяем это не чтением исходника, а реальными записями в реальном бандле.
+const ENTITIES = [
+  { name: 'инсайт',     ov: 'ov-add',     fill: () => { document.getElementById('add-tx').value = 'TEST-X2-RT инсайт'; }, save: 'saveIns' },
+  { name: 'сон',        ov: 'ov-drm',     fill: () => { document.getElementById('drm-tx').value = 'TEST-X2-RT сон'; },    save: 'saveDrm' },
+  { name: 'измерение',  ov: 'ov-measure', fill: () => { document.getElementById('mea-name').value = 'TEST-X2-RT'; document.getElementById('mea-value').value = '42'; }, save: 'saveMeasure' },
+  { name: 'момент',     ov: 'ov-moment',  fill: () => { const n = document.getElementById('mo-note'); if (n) n.value = 'TEST-X2-RT момент'; }, save: 'saveMoment' },
+];
+
+// Снимок размеров всех массивов DB — чтобы увидеть, КУДА именно легла запись.
+const shot = () => page.evaluate(() => {
+  const o = {};
+  for (const k of Object.keys(DB)) if (Array.isArray(DB[k])) o[k] = DB[k].length;
+  return o;
+});
+const grown = (a, b) => Object.keys(b).filter(k => (b[k] || 0) > (a[k] || 0));
+
+for (const ent of ENTITIES) {
+  const runIn = async shellOn => {
+    await page.evaluate(on => {
+      localStorage.setItem('arch_nav_v2', on ? '1' : '0');
+      applyNavShell();
+    }, shellOn);
+    const before = await shot();
+    const writerId = await page.evaluate(n => {
+      // Идентичность writer-а: одна и та же функция в обеих оболочках.
+      window.__w = window.__w || {}; window.__w[n] = window[n];
+      return typeof window[n];
+    }, ent.save);
+    await page.evaluate(async e => {
+      openOv(e.ov);
+      await new Promise(r => setTimeout(r, 20));
+      (new Function('return ' + e.fill))()();
+      window[e.save]();
+      await new Promise(r => setTimeout(r, 40));
+      document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
+    }, { ov: ent.ov, fill: ent.fill.toString(), save: ent.save });
+    const after = await shot();
+    return { cols: grown(before, after), writerId };
+  };
+  const neu = await runIn(true);
+  const leg = await runIn(false);
+  const setEq = neu.cols.length && neu.cols.length === leg.cols.length &&
+    neu.cols.slice().sort().join('|') === leg.cols.slice().sort().join('|');
+  ok(setEq, `${ent.name}: обе оболочки пишут в один и тот же набор коллекций (${neu.cols.join(', ') || '—'})`,
+    'new=' + JSON.stringify(neu.cols) + ' legacy=' + JSON.stringify(leg.cols));
+  ok(neu.writerId === 'function' && leg.writerId === 'function',
+    `${ent.name}: writer ${ent.save}() — один глобальный, дубликата под X2 нет`);
+}
+// Ни один writer не был продублирован «под Experience 2.0».
+const dup = await page.evaluate(() => Object.keys(window).filter(k => /^(x2|X2).*(save|write|persist)/i.test(k)));
+ok(dup.length === 0, 'нет ни одного writer-а, созданного специально для X2', dup.join(', '));
+
+console.log('\n── § 9. Правки (corrections) читаются одинаково в обеих оболочках ──');
+await page.evaluate(() => { localStorage.setItem('arch_nav_v2', '1'); applyNavShell(); });
+const rt = await page.evaluate(async () => {
+  const rec = (DB.insights || []).find(i => /TEST-X2-RT инсайт/.test(i.body || ''));
+  if (!rec) return { err: 'нет записи' };
+  const id = rec.id;
+  // Правка через новую оболочку
+  rec.body = 'TEST-X2-RT инсайт · исправлено';
+  persist();
+  const inNew = (DB.insights.find(i => i.id === id) || {}).body;
+  // Переключаем оболочку и перечитываем ИЗ ХРАНИЛИЩА, а не из памяти
+  localStorage.setItem('arch_nav_v2', '0'); applyNavShell();
+  const raw = JSON.parse(localStorage.getItem(dbKey(activeId())) || '{}');
+  const inStore = ((raw.insights || []).find(i => i.id === id) || {}).body;
+  localStorage.setItem('arch_nav_v2', '1'); applyNavShell();
+  return { inNew, inStore, same: inNew === inStore };
+});
+ok(!rt.err && rt.same && /исправлено/.test(rt.inNew || ''),
+  'правка, сделанная в новой оболочке, видна легаси-оболочке байт-в-байт', JSON.stringify(rt));
+
+console.log('\n── § 10. Контракт открытого drawer (mobile 390) ──');
+await page.setViewportSize({ width: 390, height: 844 });
+await page.evaluate(() => { document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')); closeNav(); });
+for (const theme of ['dark', 'light']) {
+  await page.evaluate(t => document.documentElement.setAttribute('data-theme', t), theme);
+  await page.evaluate(() => { const t = document.getElementById('toasts'); if (t) t.innerHTML = ''; });
+  await page.evaluate(() => document.querySelector('[data-nav="menu"]').click());
+  await page.waitForTimeout(320);
+  const d = await page.evaluate(() => {
+    const cs = s => getComputedStyle(document.querySelector(s));
+    const sb = cs('.sidebar'), sc = cs('.scrim'), tb = cs('#nsh-tabbar');
+    const alpha = c => { const m = c.match(/rgba?\(([^)]+)\)/); if (!m) return 1;
+      const p = m[1].split(',').map(Number); return p.length > 3 ? p[3] : 1; };
+    const dur = v => Math.round(parseFloat(v) * 1000);
+    return {
+      drawerOpaque: alpha(sb.backgroundColor) === 1,
+      scrimAlpha: alpha(sc.backgroundColor),
+      scrimAboveTabbar: +sc.zIndex > +tb.zIndex,
+      scrimBelowDrawer: +sc.zIndex < +sb.zIndex,
+      tabbarHidden: +tb.opacity === 0 && tb.pointerEvents === 'none',
+      // Куда реально уходит тап по области таб-бара и по контенту
+      hitTabbar: (document.elementFromPoint(370, 815) || {}).className,
+      hitContent: (document.elementFromPoint(360, 400) || {}).className,
+      hitScrim: !!(document.elementFromPoint(360, 400) || {}).closest?.('.scrim, [inert]'),
+      dur: dur(sb.transitionDuration),
+      inert: document.getElementById('app').hasAttribute('inert'),
+      floatInert: [...document.body.children].filter(e => !['sidebar','scrim','toasts'].includes(e.id) && !e.classList.contains('ov')).every(e => e.hasAttribute('inert')),
+      aria: document.querySelector('[data-nav="menu"]').getAttribute('aria-expanded'),
+      focusInDrawer: !!(document.activeElement && document.activeElement.closest('#sidebar')),
+      bgTabbable: [...document.querySelectorAll('#app button, #app a, #app input')]
+        .filter(e => e.offsetParent !== null && !e.closest('[inert]')).length,
+    };
+  });
+  ok(d.drawerOpaque, `[${theme}] drawer непрозрачен — текст под ним не читается`);
+  ok(d.scrimAlpha >= 0.7, `[${theme}] затемнение фона ≥0.7 (${d.scrimAlpha})`);
+  // Объективная проверка «текст под шторкой не читается»: в видимой полосе фона
+  // справа от drawer у РЕАЛЬНОГО скриншота почти нет контраста между соседними
+  // пикселями. Текст даёт резкие перепады яркости; заглушенный фон — нет.
+  const strip = await page.screenshot({ clip: { x: 335, y: 120, width: 55, height: 600 } });
+  const contrast = await page.evaluate(async b64 => {
+    const img = new Image(); img.src = 'data:image/png;base64,' + b64;
+    await img.decode();
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+    const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+    const px = g.getImageData(0, 0, c.width, c.height).data;
+    let n = 0, sum = 0, sq = 0, lo = 255, hi = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      const l = 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+      n++; sum += l; sq += l * l; if (l < lo) lo = l; if (l > hi) hi = l;
+    }
+    const mu = sum / n;
+    return { sd: +Math.sqrt(Math.max(0, sq / n - mu * mu)).toFixed(2), range: +(hi - lo).toFixed(1) };
+  }, strip.toString('base64'));
+  if (contrast.sd >= 9 && process.env.X2_DEBUG) await page.screenshot({ path: '/tmp/claude-0/-home-user-CODING/67a42305-0eef-5b91-922d-6a736b02a1a7/scratchpad/fail-' + theme + '.png' });
+  ok(contrast.sd < 9, `[${theme}] под шторкой нет читаемого текста: разброс яркости ${contrast.sd} (<9)`,
+    JSON.stringify(contrast));
+  ok(d.scrimAboveTabbar && d.scrimBelowDrawer, `[${theme}] порядок слоёв: таб-бар < scrim < drawer`);
+  ok(d.tabbarHidden, `[${theme}] нижний таб-бар не просвечивает и не принимает тапы`);
+  ok(d.floatInert, `[${theme}] весь фон инертен, включая плавающие слои вне #app`);
+  ok(d.dur >= 180 && d.dur <= 260, `[${theme}] переход ${d.dur}ms — в полосе 180–260ms`);
+  ok(d.inert && d.bgTabbable === 0, `[${theme}] фон недоступен клавиатуре (inert, 0 таб-стопов)`);
+  ok(d.hitScrim, `[${theme}] тап по фону попадает в затемнение, а не в контент`, d.hitContent);
+  ok(d.aria === 'true' && d.focusInDrawer, `[${theme}] aria-expanded=true, фокус внутри drawer`);
+  // Закрытие: Escape → фокус возвращается открывшему элементу
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  const c = await page.evaluate(() => ({
+    closed: !document.body.classList.contains('nav-open'),
+    inert: document.getElementById('app').hasAttribute('inert'),
+      floatInert: [...document.body.children].filter(e => !['sidebar','scrim','toasts'].includes(e.id) && !e.classList.contains('ov')).every(e => e.hasAttribute('inert')),
+    aria: document.querySelector('[data-nav="menu"]').getAttribute('aria-expanded'),
+    focusBack: document.activeElement === document.querySelector('[data-nav="menu"]'),
+  }));
+  ok(c.closed && !c.inert && c.aria === 'false', `[${theme}] Escape закрывает drawer и снимает inert/aria`, JSON.stringify(c));
+  ok(c.focusBack, `[${theme}] фокус возвращается на кнопку «Меню»`);
+}
+// Тап по scrim закрывает drawer
+await page.evaluate(() => document.querySelector('[data-nav="menu"]').click());
+await page.waitForTimeout(300);
+await page.mouse.click(370, 400);
+await page.waitForTimeout(300);
+ok(await page.evaluate(() => !document.body.classList.contains('nav-open')), 'тап по затемнению закрывает drawer');
+// Выбор пункта закрывает drawer
+await page.evaluate(() => document.querySelector('[data-nav="menu"]').click());
+await page.waitForTimeout(300);
+await page.evaluate(() => [...document.querySelectorAll('#nsh-nav-groups .navlink')].find(n => n.textContent.trim() === 'Здоровье').click());
+await page.waitForTimeout(200);
+const pick = await page.evaluate(() => ({ closed: !document.body.classList.contains('nav-open'), pg: document.querySelector('.pg.on').id }));
+ok(pick.closed && pick.pg === 'pg-health', 'выбор пункта закрывает drawer и открывает раздел', JSON.stringify(pick));
+
+console.log('\n── § 11. «Ещё» не существует ни в одном достижимом состоянии ──');
+// Шесть состояний, в которых владелец мог увидеть старый таб.
+const STATES = [
+  ['новый профиль (флаг не сохранён)', () => localStorage.removeItem('arch_nav_v2')],
+  ['navshell явно включён', () => localStorage.setItem('arch_nav_v2', '1')],
+  ['navshell явно выключен', () => localStorage.setItem('arch_nav_v2', '0')],
+  ['сохранённое мусорное значение', () => localStorage.setItem('arch_nav_v2', 'true')],
+];
+for (const [name, set] of STATES) {
+  const r = await page.evaluate(fn => {
+    (new Function('return ' + fn))()();
+    applyNavShell();
+    const vis = el => { const s = getComputedStyle(el), b = el.getBoundingClientRect();
+      return s.display !== 'none' && s.visibility !== 'hidden' && +s.opacity > 0.01 && b.width > 0; };
+    const chain = el => { for (let n = el; n; n = n.parentElement) if (!vis(n)) return false; return true; };
+    return [...document.querySelectorAll('button,a,.srow,.navlink,.nsh-tab')]
+      .filter(e => /(^|\s)Ещё(\s|$)/.test((e.textContent || '').trim()) && chain(e))
+      .map(e => (e.textContent || '').trim().slice(0, 30));
+  }, set.toString());
+  ok(r.length === 0, `${name}: видимого «Ещё» нет`, r.join(' | '));
+}
+// И после перезагрузки, и по старой ссылке #/more
+await page.evaluate(() => localStorage.setItem('arch_nav_v2', '1'));
+await page.goto(FILE + '#/more');
+await page.waitForSelector('#nsh-tabbar', { state: 'attached' });
+await page.waitForTimeout(400);
+const afterReload = await page.evaluate(() => ({
+  labels: [...document.querySelectorAll('#nsh-tabbar .nsh-tab')].map(b => b.textContent.trim()),
+  hash: location.hash, open: document.body.classList.contains('nav-open'),
+}));
+ok(!afterReload.labels.includes('Ещё') && afterReload.labels.includes('Меню'),
+  'после перезагрузки таб-бар: ' + afterReload.labels.join(' · '));
+ok(afterReload.hash === '#/menu' && afterReload.open, 'старая ссылка #/more открывает drawer и переписывает hash в #/menu',
+  JSON.stringify(afterReload));
 
 await browser.close();
 console.log(`\nEXPERIENCE 2.0 SHELL: ${pass} passed, ${fail} failed`);

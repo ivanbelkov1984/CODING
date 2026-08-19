@@ -27,6 +27,8 @@
      Поверхности полупрозрачные: сквозь них просвечивает звёздное поле (см. слой
      «DUAL REALM» в конце файла). Имена переменных сохранены — весь var()-код цел. */
   --bg-base:#04060e; --bg-panel:rgba(17,23,41,.62); --bg-surface-2:rgba(26,33,54,.72);
+  --drawer-sf:#0B1020;                 /* drawer: сплошной фон, текст под ним нечитаем */
+  --drawer-scrim:rgba(3,5,12,.92);     /* затемнение фона под drawer */
   --bg-surface-3:rgba(38,47,72,.82); --bg-surface-4:rgba(30,38,60,.90);
   --bg:  var(--bg-base);      /* корневой фон (под ним — космос) */
   --sf:  var(--bg-panel);     /* панели-стекло: topbar, tabbar, карточки */
@@ -70,6 +72,7 @@
   /* движение: инженерное, без пружин */
   --e:cubic-bezier(.2,0,0,1); --e-in:cubic-bezier(.2,0,0,1);
   --dur1:80ms; --dur2:120ms; --dur3:150ms;
+  --drawer-dur:220ms;   /* открытие/закрытие drawer: в полосе 180–260ms */
 }
 
 [data-theme="dark"]{color-scheme:dark}
@@ -79,6 +82,7 @@
 [data-theme="light"]{
   color-scheme:light;
   --bg-base:#F7F9FC; --bg-panel:#FFFFFF; --bg-surface-2:#FFFFFF;
+  --drawer-sf:#FFFFFF; --drawer-scrim:rgba(15,23,42,.86);
   --bg-surface-3:#F1F5FA; --bg-surface-4:#FFFFFF;
   --border-subtle:rgba(15,23,42,.07); --border-medium:rgba(15,23,42,.11); --border-strong:rgba(15,23,42,.16);
   --t1:#0F1B2D; --t2:#42506A; --t3:#7D8AA0; --t4:#AAB4C4;
@@ -1040,9 +1044,17 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 #app{flex:1;max-width:none;margin:0;min-width:0}
 .content>.pg{max-width:940px;margin:0 auto;width:100%}
 .burger{display:none}
-.scrim{position:fixed;inset:0;background:rgba(6,7,20,.5);opacity:0;pointer-events:none;transition:opacity .3s var(--e);z-index:55}
+/* Scrim drawer: z-index 59 — выше нижнего таб-бара (58), ниже самого drawer
+   (60) и любых .ov-листов (100). До Experience 2.0 он был 55 и таб-бар
+   просвечивал поверх затемнения — открытый drawer читался как «полупрозрачное
+   меню с живой нижней навигацией». */
+.scrim{position:fixed;inset:0;background:var(--drawer-scrim);opacity:0;pointer-events:none;transition:opacity var(--drawer-dur,.22s) var(--e);z-index:59;
+  -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
 @media(max-width:900px){
-  .sidebar{position:fixed;left:0;top:0;bottom:0;height:auto;width:min(300px,84vw);transform:translateX(-100%);transition:transform .3s var(--e);z-index:60;padding-top:calc(20px + env(safe-area-inset-top))}
+  /* Drawer: фон сплошной (var(--drawer-sf)), не «стекло» — под ним не должен
+     читаться текст страницы. Длительность 220ms задана классом/атрибутом,
+     без setTimeout; prefers-reduced-motion гасит её глобальным правилом. */
+  .sidebar{position:fixed;left:0;top:0;bottom:0;height:auto;width:min(300px,84vw);transform:translateX(-100%);transition:transform var(--drawer-dur,.22s) var(--e);z-index:60;background:var(--drawer-sf);padding-top:calc(20px + env(safe-area-inset-top))}
   body.nav-open .sidebar{transform:none}
   body.nav-open .scrim{opacity:1;pointer-events:auto}
   .burger{display:flex}
@@ -1389,12 +1401,16 @@ body.navshell #sys-back{display:flex;align-items:center;gap:.3rem;min-height:44p
     background:var(--blue-btn);color:#fff;box-shadow:0 4px 14px rgba(16,86,204,.4)}
   body.navshell .nsh-fab svg{width:24px;height:24px;stroke-width:2.4}
   body.navshell .content{padding-bottom:64px}
+  /* Открытый drawer — единственный слой управления: нижний таб-бар не
+     просвечивает и не принимает тапы (одним переходом со scrim). */
+  body.navshell .nsh-tabbar{transition:opacity var(--drawer-dur) var(--e)}
+  body.navshell.nav-open .nsh-tabbar{opacity:0;pointer-events:none}
   body.navshell .burger{display:none}
 }
 
 /* iPad portrait (768–900): постоянный sidebar вместо скрытого drawer */
 @media(min-width:768px) and (max-width:900px){
-  body.navshell .sidebar{position:static;transform:none;transition:none;height:100dvh;width:240px;z-index:auto;padding-top:16px}
+  body.navshell .sidebar{position:static;transform:none;transition:none;height:100dvh;width:240px;z-index:auto;background:var(--sf);padding-top:16px}
   body.navshell .scrim{display:none;opacity:0;pointer-events:none}
   body.navshell .burger{display:none}
   body.navshell .nsh-tabbar{display:none}

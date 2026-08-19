@@ -3356,36 +3356,31 @@ ok(sph.oneLog && sph.oneHash, 'запись сферы: 1 сфера — её ф
 ok(sph.pickShown && sph.pickA11y, 'запись сферы: несколько сфер — доступный явный выбор (настоящие кнопки с именами)');
 ok(sph.pickSecond && sph.pickHash && sph.pickCloses, 'запись сферы: выбор НЕ первой сферы открывает её openSphereLog; лист закрывается, hash корректен');
 
-// Переключатель «Новая навигация» в Настройках: настоящий <button>,
-// aria-pressed, синхронный статус «Вкл/Выкл», клавиатурное управление.
-const tgl0 = await page.evaluate(() => {
-  localStorage.setItem('arch_nav_v2', '0'); applyNavShell(); goTo('settings');
-  const t = document.getElementById('navshell-toggle');
-  const b = t.getBoundingClientRect();
+// Experience 2.0: новая оболочка — основная, пользовательского тумблера в
+// Настройках больше нет (двусмысленный «эксперимент» убран). Аварийный откат
+// остаётся ВНУТРЕННИМ и рабочим: arch_nav_v2='0' / toggleNavShell().
+const tglGone = await page.evaluate(() => {
+  goTo('settings');
   return {
-    isButton: t.tagName === 'BUTTON' && t.getAttribute('type') === 'button',
-    named: /Новая навигация/.test(t.textContent),
-    pressedOff: t.getAttribute('aria-pressed') === 'false',
-    lblOff: document.getElementById('navshell-lbl').textContent === 'Выкл',
-    tapOk: b.height >= 44 && b.width >= 44,
+    noRow: !document.getElementById('navshell-toggle'),
+    noLabel: !document.getElementById('navshell-lbl'),
+    noText: !/Новая навигация/.test(document.getElementById('pg-settings').textContent),
   };
 });
-await page.focus('#navshell-toggle');
-await page.keyboard.press('Enter');
-const tglOn = await page.evaluate(() => ({
-  pressed: document.getElementById('navshell-toggle').getAttribute('aria-pressed') === 'true',
-  lbl: document.getElementById('navshell-lbl').textContent === 'Вкл',
-  shellOn: document.body.classList.contains('navshell'),
-}));
-await page.keyboard.press('Space');
-const tglOff = await page.evaluate(() => ({
-  pressed: document.getElementById('navshell-toggle').getAttribute('aria-pressed') === 'false',
-  lbl: document.getElementById('navshell-lbl').textContent === 'Выкл',
-  shellOff: !document.body.classList.contains('navshell'),
-}));
-ok(tgl0.isButton && tgl0.named && tgl0.tapOk, 'настройки: «Новая навигация» — настоящий <button type=button> с доступным именем, tap ≥44px');
-ok(tgl0.pressedOff && tgl0.lblOff && tglOn.pressed && tglOn.lbl && tglOn.shellOn, 'настройки: aria-pressed и «Вкл/Выкл» синхронны; Enter с клавиатуры включает');
-ok(tglOff.pressed && tglOff.lbl && tglOff.shellOff, 'настройки: Space с клавиатуры выключает — полное клавиатурное управление');
+ok(tglGone.noRow && tglGone.noLabel && tglGone.noText,
+  'настройки: пользовательского тумблера «Новая навигация» больше нет', JSON.stringify(tglGone));
+const rollback = await page.evaluate(() => {
+  const out = {};
+  localStorage.setItem('arch_nav_v2', '0'); applyNavShell();
+  out.off = !document.body.classList.contains('navshell');
+  out.legacyNav = getComputedStyle(document.getElementById('nsh-tabbar')).display === 'none';
+  toggleNavShell();                                   // внутренний откат в обе стороны
+  out.backOn = document.body.classList.contains('navshell');
+  out.flag = localStorage.getItem('arch_nav_v2');
+  return out;
+});
+ok(rollback.off && rollback.legacyNav && rollback.backOn && rollback.flag === '1',
+  'аварийный откат arch_nav_v2 работает в обе стороны и не удалён', JSON.stringify(rollback));
 
 // Возврат к дефолту (OFF) для чистоты остатка сьюта.
 await page.evaluate(() => {

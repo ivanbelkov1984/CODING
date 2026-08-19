@@ -1496,7 +1496,11 @@ document.addEventListener('keydown', e => {
     window.ArchBackup.requestClose();
     return;
   }
-  document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
+  const sheets = document.querySelectorAll('.ov.on');
+  if (sheets.length) { sheets.forEach(o => o.classList.remove('on')); return; }
+  // Листов нет — Escape закрывает drawer «Меню» (иначе он ловит фокус и
+  // клавиатурный пользователь не может из него выйти).
+  if (document.body.classList.contains('nav-open')) closeNav();
 });
 
 // ─── ТЕМА ───────────────────────────────────────────────────────
@@ -12226,8 +12230,9 @@ function navGo(dest) {
   // Experience 2.0: свалки «Ещё» нет. Кнопка «Меню» (и старый hash #/more)
   // открывают полноценный drawer со всеми разделами — тот же sidebar.
   if (dest === 'more' || dest === 'menu') {
-    document.body.classList.add('nav-open');
-    const b = $('burger'); if (b) b.setAttribute('aria-expanded', 'true');
+    // Открытие идёт через openNav(): один контракт (inert фона, фокус внутрь,
+    // aria-expanded на реальном opener) для бургера, вкладки «Меню» и hash.
+    openNav(document.querySelector('[data-nav="menu"]') || $('burger'));
     nshHighlight('menu'); nshPushHash('#/menu');
     return;
   }
@@ -12308,7 +12313,8 @@ function nshApplyHash(fromInit) {
   const slug = m[1];
   const closeSheets = () => {
     const el = $('ov-capture'); if (el && el.classList.contains('on')) el.classList.remove('on');
-    document.body.classList.remove('nav-open');
+    // Через closeNav(), иначе останутся inert на #app и aria-expanded=true.
+    if (document.body.classList.contains('nav-open')) closeNav();
   };
   if (slug === 'capture') { openOv('ov-capture'); return true; }
   // «Ещё» упразднён: старые ссылки #/more и новый #/menu открывают drawer.
@@ -12419,10 +12425,56 @@ function toggleNavShell() {
 }
 
 // ═══ SHELL: drawer-навигация, блок аккаунта, жесты ═══════════════
-function openNav()  { rSidebar(); document.body.classList.add('nav-open'); }
+// Контракт открытого drawer (единый для бургера, вкладки «Меню» и hash):
+//   • фон недоступен клавиатуре и указателю — #app помечается inert;
+//   • фокус уходит внутрь drawer, при закрытии возвращается на открывший
+//     элемент (иначе клавиатурный пользователь остаётся «нигде»);
+//   • aria-expanded ставится на РЕАЛЬНЫЙ opener, а не только на бургер;
+//   • закрытие: scrim, Escape, выбор пункта, назад — все через closeNav().
+// Анимация — только CSS (класс nav-open), никаких setTimeout на визуал.
+let _navOpener = null;
+// Постоянный sidebar (iPad portrait / desktop) — не drawer: inert и ловушка
+// фокуса там были бы багом, поэтому применяются только в режиме drawer.
+function navIsDrawer() { return window.innerWidth <= 900 && !(document.body.classList.contains('navshell') && window.innerWidth >= 768); }
+function navSetOpener(el) {
+  _navOpener = el || null;
+  document.querySelectorAll('#burger,[data-nav="menu"]').forEach(b =>
+    b.setAttribute('aria-expanded', document.body.classList.contains('nav-open') ? 'true' : 'false'));
+}
+const NAV_INERT_SKIP = el =>
+  el.id === 'sidebar' || el.id === 'scrim' || el.id === 'toasts' || el.classList.contains('ov');
+function navApplyOpen(open) {
+  const on = open && navIsDrawer();
+  [...document.body.children].forEach(el => {
+    if (NAV_INERT_SKIP(el)) { el.removeAttribute('inert'); return; }
+    if (on) el.setAttribute('inert', ''); else el.removeAttribute('inert');
+  });
+  if (on) {
+    const first = [...document.querySelectorAll('#sidebar .navlink, #sidebar button')]
+      .find(el => el.offsetParent !== null || el.getClientRects().length);
+    if (first && first.focus) { try { first.focus({ preventScroll: true }); } catch (e) { first.focus(); } }
+  }
+}
+function openNav(opener)  {
+  // Открытый drawer — единственный слой управления. Плавающая карточка отклика
+  // живёт на уровне body (z-index 520) и иначе осталась бы поверх шторки.
+  clearTimeout(window.__rcT);
+  const _rc = document.getElementById('react-card'); if (_rc) _rc.remove();
+  rSidebar();
+  document.body.classList.add('nav-open');
+  navSetOpener(opener || $('burger'));
+  navApplyOpen(true);
+}
 function closeNav() {
+  const was = document.body.classList.contains('nav-open');
   document.body.classList.remove('nav-open');
-  const b = $('burger'); if (b) b.setAttribute('aria-expanded', 'false');
+  navSetOpener(_navOpener);
+  navApplyOpen(false);
+  // Фокус возвращается открывшему элементу — только если он ещё на экране.
+  if (was && _navOpener && _navOpener.isConnected && _navOpener.offsetParent !== null) {
+    try { _navOpener.focus({ preventScroll: true }); } catch (e) {}
+  }
+  _navOpener = null;
   // Если drawer был открыт как «Меню» (hash #/menu|#/more) — вернуть hash
   // активного раздела и подсветку, чтобы «назад» вело не в меню.
   if (/^#\/(menu|more)$/.test(location.hash || '') && typeof nshHashToPage === 'function') {
@@ -12432,9 +12484,8 @@ function closeNav() {
   }
 }
 function toggleNav(){
-  const open = document.body.classList.toggle('nav-open');
-  const b = $('burger'); if (b) b.setAttribute('aria-expanded', open ? 'true' : 'false');
-  hpt();
+  if (document.body.classList.contains('nav-open')) { closeNav(); hpt(); return; }
+  openNav($('burger')); hpt();
 }
 // Блок аккаунта в сайдбаре: имя профиля, инициал, статус-точка синка
 function rSidebar() {
