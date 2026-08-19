@@ -378,7 +378,7 @@ function persistLocal() {
   }
   let json, cfgJson;
   try { json = JSON.stringify(DB); cfgJson = JSON.stringify(CFG); }
-  catch (e) { _lastPersistError = { quota: false, name: (e && e.name) || 'Error', at: Date.now() }; return false; }
+  catch (e) { _lastPersistError = { quota: false, name: (e && e.name) || 'Error', at: Date.now() }; notifyPersistFailed(); return false; }
 
   // Набор ключей, которые операция объявляет сохранёнными. Резервный слот
   // входит в транзакцию: иначе его сбой скрывался бы общим catch.
@@ -386,7 +386,7 @@ function persistLocal() {
   if (cur > 0) entries.push([bakKey(id), json]);
 
   let r = _txWrite(entries);
-  if (r.ok) { _lastPersistError = null; return true; }
+  if (r.ok) { _lastPersistError = null; persistEpisodeRecovered(); return true; }
 
   // Сбой ОТКАТА — критическое состояние: хранилище в неизвестной смеси
   // старого и нового. Никакого prune, никакого retry, немедленная блокировка.
@@ -407,6 +407,7 @@ function persistLocal() {
     r = _txWrite(entries);
     if (r.ok) {
       _lastPersistError = null;
+      persistEpisodeRecovered();
       if (typeof log === 'function') log('warn', 'persist: запись удалась после освобождения места старыми снимками');
       return true;
     }
@@ -420,6 +421,7 @@ function persistLocal() {
     return false;
   }
   _lastPersistError = { quota: false, name: (r.error && r.error.name) || 'Error', at: Date.now() };
+  notifyPersistFailed();
   return false;
 }
 // Удаляет самые старые снимки текущего профиля (не пользовательские записи).
@@ -433,7 +435,57 @@ function pruneSnapshotsForSpace(id) {
   keys.slice(0, Math.max(1, keys.length - 1)).forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
 }
 let _storageFullShown = 0;
+// ── P1-01: отказ записи вне квоты обязан быть виден ─────────────────
+// Переполнение хранилища человеку показывалось, а любой другой отказ — нет:
+// persistLocal возвращал false молча, и 83 из 103 вызовов persist() результат
+// не проверяют. Владелец видел запись на экране, в хранилище её не было, а
+// после перезагрузки она исчезала — молча и без единого признака.
+//
+// Уведомление принципиально НЕ персистентное: toast() пишет только в DOM и
+// не трогает ни DB, ни CFG, ни localStorage. Иначе предупреждение о неудачной
+// записи само вызвало бы запись — и на закрытом хранилище зациклилось бы.
+//
+// Подавление считает ЭПИЗОД, а не время: первая ошибка непрерывной серии
+// показывается, остальные молчат, первая успешная запись считается
+// восстановлением и снова взводит предупреждение. Ни таймеров, ни LWW, ни
+// хранения состояния — только память вкладки.
+let _persistFailEpisode = false;
+// ── P1-02: успех не объявляется поверх неудавшейся записи ────────────
+// 45 мест делают `persist(); … toast('…сохранено', 'ok')` не проверяя
+// результат. При отказе человек видел зелёное «сохранено» о записи, которой
+// в хранилище нет; после P1-01 к нему добавилось красное предупреждение —
+// два противоречащих сообщения об одной операции.
+//
+// Связь намеренно узкая: флаг относится к ТЕКУЩЕЙ операции, а не к истории.
+// Правило «когда-то была ошибка → глушить все будущие ok» подавило бы
+// независимый успех спустя время, поэтому флаг сбрасывается двумя
+// детерминированными способами: в начале каждого persist() (новая операция —
+// чистый лист) и на ближайшей границе макрозадачи (обработчик, в котором
+// persist и его toast всегда стоят рядом, к этому моменту уже завершён).
+// Ничего не хранится между сессиями и ничего не становится асинхронным.
+let _persistFailedNow = false;
+let _persistFailedResetPending = false;
+function markPersistFailedNow() {
+  _persistFailedNow = true;
+  if (_persistFailedResetPending) return;
+  _persistFailedResetPending = true;
+  setTimeout(() => { _persistFailedNow = false; _persistFailedResetPending = false; }, 0);
+}
+function notifyPersistFailed() {
+  markPersistFailedNow();          // до подавления: молчит сообщение, не факт
+  if (_persistFailEpisode) return;
+  _persistFailEpisode = true;
+  if (typeof toast === 'function') {
+    // Причина намеренно не называется: она может быть неизвестна, а
+    // технические подробности человеку здесь бесполезны. Слова «сохранено»
+    // в этом сообщении быть не может.
+    toast('Не удалось сохранить изменения на устройстве. Они могут исчезнуть после закрытия или перезагрузки приложения.', 'err');
+  }
+}
+// Успешная запись закрывает эпизод: следующая ошибка снова предупредит.
+function persistEpisodeRecovered() { _persistFailEpisode = false; }
 function notifyStorageFull() {
+  markPersistFailedNow();          // переполнение — тоже неудавшаяся запись
   // Не спамим: не чаще раза в минуту. Ничего не удаляем автоматически.
   if (Date.now() - _storageFullShown < 60000) return;
   _storageFullShown = Date.now();
@@ -814,6 +866,7 @@ async function storageSummary() {
 // неудачной записи метки откатываются, синк не планируется (иначе на сервер
 // ушло бы состояние, которого нет локально). Возвращает реальный статус.
 function persist() {
+  _persistFailedNow = false;       // новая операция — прежний отказ не в счёт
   if (isWriteLocked()) return false;
   const prevDbTs = DB.__ts, prevCfgTs = CFG._ts;
   const now = Date.now();
@@ -1189,6 +1242,10 @@ function openProfiles() { openOv('ov-profiles'); rProfiles(); }
 
 // ─── TOAST ──────────────────────────────────────────────────────
 function toast(msg, tp='') {
+  // P1-02: об операции, чья запись только что провалилась, «успех» не
+  // объявляется. Предупреждение P1-01 уже сказало правду; второго
+  // сообщения об ошибке здесь не добавляется.
+  if (tp === 'ok' && _persistFailedNow) return;
   const el = document.createElement('div');
   el.className = 'toast' + (tp ? ' t-'+tp : '');
   if (tp==='ok')   el.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="width:14px;height:14px;flex-shrink:0"><polyline points="20 6 9 17 4 12"/></svg>' + esc(msg);
