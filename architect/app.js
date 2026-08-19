@@ -450,7 +450,29 @@ let _storageFullShown = 0;
 // восстановлением и снова взводит предупреждение. Ни таймеров, ни LWW, ни
 // хранения состояния — только память вкладки.
 let _persistFailEpisode = false;
+// ── P1-02: успех не объявляется поверх неудавшейся записи ────────────
+// 45 мест делают `persist(); … toast('…сохранено', 'ok')` не проверяя
+// результат. При отказе человек видел зелёное «сохранено» о записи, которой
+// в хранилище нет; после P1-01 к нему добавилось красное предупреждение —
+// два противоречащих сообщения об одной операции.
+//
+// Связь намеренно узкая: флаг относится к ТЕКУЩЕЙ операции, а не к истории.
+// Правило «когда-то была ошибка → глушить все будущие ok» подавило бы
+// независимый успех спустя время, поэтому флаг сбрасывается двумя
+// детерминированными способами: в начале каждого persist() (новая операция —
+// чистый лист) и на ближайшей границе макрозадачи (обработчик, в котором
+// persist и его toast всегда стоят рядом, к этому моменту уже завершён).
+// Ничего не хранится между сессиями и ничего не становится асинхронным.
+let _persistFailedNow = false;
+let _persistFailedResetPending = false;
+function markPersistFailedNow() {
+  _persistFailedNow = true;
+  if (_persistFailedResetPending) return;
+  _persistFailedResetPending = true;
+  setTimeout(() => { _persistFailedNow = false; _persistFailedResetPending = false; }, 0);
+}
 function notifyPersistFailed() {
+  markPersistFailedNow();          // до подавления: молчит сообщение, не факт
   if (_persistFailEpisode) return;
   _persistFailEpisode = true;
   if (typeof toast === 'function') {
@@ -463,6 +485,7 @@ function notifyPersistFailed() {
 // Успешная запись закрывает эпизод: следующая ошибка снова предупредит.
 function persistEpisodeRecovered() { _persistFailEpisode = false; }
 function notifyStorageFull() {
+  markPersistFailedNow();          // переполнение — тоже неудавшаяся запись
   // Не спамим: не чаще раза в минуту. Ничего не удаляем автоматически.
   if (Date.now() - _storageFullShown < 60000) return;
   _storageFullShown = Date.now();
@@ -843,6 +866,7 @@ async function storageSummary() {
 // неудачной записи метки откатываются, синк не планируется (иначе на сервер
 // ушло бы состояние, которого нет локально). Возвращает реальный статус.
 function persist() {
+  _persistFailedNow = false;       // новая операция — прежний отказ не в счёт
   if (isWriteLocked()) return false;
   const prevDbTs = DB.__ts, prevCfgTs = CFG._ts;
   const now = Date.now();
@@ -1218,6 +1242,10 @@ function openProfiles() { openOv('ov-profiles'); rProfiles(); }
 
 // ─── TOAST ──────────────────────────────────────────────────────
 function toast(msg, tp='') {
+  // P1-02: об операции, чья запись только что провалилась, «успех» не
+  // объявляется. Предупреждение P1-01 уже сказало правду; второго
+  // сообщения об ошибке здесь не добавляется.
+  if (tp === 'ok' && _persistFailedNow) return;
   const el = document.createElement('div');
   el.className = 'toast' + (tp ? ' t-'+tp : '');
   if (tp==='ok')   el.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="width:14px;height:14px;flex-shrink:0"><polyline points="20 6 9 17 4 12"/></svg>' + esc(msg);

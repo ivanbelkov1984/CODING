@@ -201,6 +201,135 @@ ok(loss.afterReload === false, 'после перезагрузки (hydrate) о
 ok(/Не удалось сохранить изменения на устройстве/.test(loss.warned),
   'и именно поэтому человек предупреждён', loss.warned);
 
+console.log('\n── § 10. P1-02: успех не объявляется поверх неудавшейся записи ──');
+// Реальный путь дневника целиком: форма → saveIns() → persist() → сообщение.
+const diary = (errName) => page.evaluate(({ errName }) => {
+  DB.insights = [{ id: 1, title: 'TEST-P1-BASE', body: 'TEST-P1-BASE', createdAt: nowISO(), sv: SCHEMA_VERSION }];
+  persist();
+  const key = dbKey(activeId());
+  const orig = localStorage.setItem.bind(localStorage);
+  const t = document.getElementById('toasts'); if (t) t.innerHTML = '';
+  if (errName) localStorage.setItem = () => { const e = new Error('x'); e.name = errName; throw e; };
+  $('add-tx').value = 'TEST-P1-DIARY синтетическая запись';
+  $('add-src').value = '';
+  saveIns();
+  localStorage.setItem = orig;
+  const el = document.getElementById('toasts');
+  const toasts = [...(el ? el.children : [])].map(c => ({ text: (c.textContent || '').trim(), cls: c.className }));
+  const has = arr => arr.some(i => i && String(i.body || '').includes('TEST-P1-DIARY'));
+  const inMemory = has(DB.insights);
+  const inStore = has(((JSON.parse(localStorage.getItem(key) || 'null')) || {}).insights || []);
+  hydrate();
+  return {
+    toasts, inMemory, inStore,
+    afterReload: has(DB.insights || []),
+    baselineSurvived: (DB.insights || []).some(i => i && i.title === 'TEST-P1-BASE'),
+  };
+}, { errName });
+
+const green = t => t.toasts.filter(x => /t-ok/.test(x.cls));
+const red = t => t.toasts.filter(x => /t-err/.test(x.cls));
+
+// 1. Успешное сохранение — успех остаётся успехом.
+await reset();
+const okPath = await diary(null);
+ok(okPath.inStore === true, 'успешный путь: запись попала в хранилище');
+ok(green(okPath).length === 1 && /Инсайт сохранён/.test(green(okPath)[0].text),
+  'успешный путь: зелёное «Инсайт сохранён» показано', JSON.stringify(okPath.toasts));
+ok(okPath.afterReload === true, 'успешный путь: запись пережила hydrate');
+
+// 2. Отказ записи — ложного успеха быть не должно.
+await reset();
+const failPath = await diary('SecurityError');
+ok(failPath.inMemory === true, 'отказ: запись видна в памяти и на экране');
+ok(failPath.inStore === false, 'отказ: в хранилище её нет');
+ok(failPath.afterReload === false, 'отказ: после hydrate она исчезает');
+ok(failPath.baselineSurvived === true, 'отказ: базовая запись при этом уцелела');
+ok(red(failPath).length === 1 && /Не удалось сохранить/.test(red(failPath)[0].text),
+  'отказ: предупреждение P1-01 показано', JSON.stringify(failPath.toasts));
+ok(green(failPath).length === 0,
+  'отказ: зелёного «сохранено» НЕТ — ложный успех устранён', JSON.stringify(failPath.toasts));
+
+// 3. Восстановление: после успешной записи нормальный успех снова разрешён.
+const afterHeal = await diary(null);
+ok(green(afterHeal).length === 1 && afterHeal.inStore === true,
+  'восстановление: следующая успешная запись снова показывает успех',
+  JSON.stringify(afterHeal.toasts));
+
+// 3b. Две записи в ОДНОМ такте: первая падает, вторая проходит. Именно ради
+// этого случая флаг сбрасывается в начале каждого persist() — таймер тут не
+// успевает сработать, границы макрозадачи между ними нет.
+await reset();
+const sameTick = await page.evaluate(() => {
+  const orig = localStorage.setItem.bind(localStorage);
+  const t = document.getElementById('toasts'); if (t) t.innerHTML = '';
+  localStorage.setItem = () => { const e = new Error('x'); e.name = 'SecurityError'; throw e; };
+  DB.insights.push({ id: 91, title: 'TEST-P1-T1', createdAt: nowISO(), sv: SCHEMA_VERSION });
+  const first = persist();
+  localStorage.setItem = orig;                    // тот же синхронный блок
+  DB.insights.push({ id: 92, title: 'TEST-P1-T2', createdAt: nowISO(), sv: SCHEMA_VERSION });
+  const second = persist();
+  toast('Записано', 'ok');
+  const el = document.getElementById('toasts');
+  const arr = [...(el ? el.children : [])].map(c => ({ text: (c.textContent || '').trim(), cls: c.className }));
+  return { first, second, greens: arr.filter(x => /t-ok/.test(x.cls)).length };
+});
+ok(sameTick.first === false && sameTick.second === true,
+  'один такт: первая запись провалилась, вторая прошла', JSON.stringify(sameTick));
+ok(sameTick.greens === 1,
+  'один такт: успех ВТОРОЙ записи показан — прежний отказ его не глушит',
+  JSON.stringify(sameTick));
+
+// 4. Независимый успех не должен глохнуть навсегда.
+await reset();
+const unrelated = await page.evaluate(async () => {
+  const orig = localStorage.setItem.bind(localStorage);
+  localStorage.setItem = () => { const e = new Error('x'); e.name = 'SecurityError'; throw e; };
+  DB.insights.push({ id: 77, title: 'TEST-P1-U', createdAt: nowISO(), sv: SCHEMA_VERSION });
+  persist();
+  localStorage.setItem = orig;
+  const t = document.getElementById('toasts'); if (t) t.innerHTML = '';
+  // Независимое сообщение в СЛЕДУЮЩЕЙ макрозадаче — к неудавшейся записи
+  // отношения не имеет и обязано показаться.
+  await new Promise(r => setTimeout(r, 5));
+  toast('Скопировано в буфер', 'ok');
+  const el = document.getElementById('toasts');
+  return { count: el ? el.children.length : 0, text: el ? (el.textContent || '').trim() : '' };
+});
+ok(unrelated.count === 1 && /Скопировано/.test(unrelated.text),
+  'независимый успех после отказа НЕ заблокирован навсегда', JSON.stringify(unrelated));
+
+// 5. Квота: свой UX, без зелёного успеха и без дублирования.
+await reset();
+const quotaDiary = await diary('QuotaExceededError');
+ok(green(quotaDiary).length === 0, 'квота: зелёного успеха нет', JSON.stringify(quotaDiary.toasts));
+// notifyStorageFull штатно троттлится 60 секундами («не спамим»), и § 2 выше
+// это окно уже израсходовал. Поэтому здесь проверяется не факт показа —
+// его доказывает § 2 — а то, что противоречивого сообщения нет: ни зелёного
+// успеха, ни второго generic-предупреждения поверх quota-пути.
+ok(quotaDiary.toasts.every(t => !/t-ok/.test(t.cls)),
+  'квота: ни одного зелёного успеха', JSON.stringify(quotaDiary.toasts));
+ok(!quotaDiary.toasts.some(t => /Не удалось сохранить изменения на устройстве/.test(t.text)),
+  'квота: generic-предупреждение P1-01 не дублирует quota-путь', JSON.stringify(quotaDiary.toasts));
+
+// 6. Десять отказов: один эпизод предупреждения, ноль ложных успехов.
+await reset();
+const storm2 = await page.evaluate(() => {
+  const orig = localStorage.setItem.bind(localStorage);
+  const t = document.getElementById('toasts'); if (t) t.innerHTML = '';
+  localStorage.setItem = () => { const e = new Error('x'); e.name = 'SecurityError'; throw e; };
+  for (let i = 0; i < 10; i++) {
+    $('add-tx').value = 'TEST-P1-STORM-' + i;
+    saveIns();
+  }
+  localStorage.setItem = orig;
+  const el = document.getElementById('toasts');
+  const arr = [...(el ? el.children : [])].map(c => c.className);
+  return { greens: arr.filter(c => /t-ok/.test(c)).length, reds: arr.filter(c => /t-err/.test(c)).length };
+});
+ok(storm2.reds === 1, `десять отказов подряд → одно предупреждение (было ${storm2.reds})`, JSON.stringify(storm2));
+ok(storm2.greens === 0, `десять отказов подряд → ноль ложных успехов (было ${storm2.greens})`, JSON.stringify(storm2));
+
 console.log('\n── § 9. Приватность и чистота ──');
 const canary = await page.evaluate(() => {
   const txt = (DB.insights || []).map(i => i && i.title).filter(Boolean);

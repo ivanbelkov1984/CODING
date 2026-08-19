@@ -47,10 +47,10 @@ const MUTANTS = [
     // рекурсия и повторный отказ внутри обработки отказа.
     id: 'persist-warning-recursive-storage',
     what: 'уведомитель сам пишет в хранилище',
-    find: `function notifyPersistFailed() {
+    find: `  markPersistFailedNow();          // до подавления: молчит сообщение, не факт
   if (_persistFailEpisode) return;
   _persistFailEpisode = true;`,
-    replace: `function notifyPersistFailed() {
+    replace: `  markPersistFailedNow();
   if (_persistFailEpisode) return;
   _persistFailEpisode = true;
   try { localStorage.setItem('arch5_persist_warned', String(Date.now())); } catch (_) {}`,
@@ -73,7 +73,34 @@ const MUTANTS = [
     replace: '  _persistFailEpisode = true;\n  if (typeof toast === ',
     expectFail: 'показано ровно одно предупреждение на весь эпизод',
   },
-];
+  {
+    // P1-02, ГЛАВНЫЙ: гейт снят — возвращается ложный зелёный успех поверх
+    // записи, которой в хранилище нет.
+    id: 'false-success-gate-removed',
+    what: 'зелёный успех снова показывается поверх неудавшейся записи',
+    find: "  if (tp === 'ok' && _persistFailedNow) return;",
+    replace: '',
+    expectFail: 'отказ: зелёного «сохранено» НЕТ — ложный успех устранён',
+  },
+  {
+    // Гейт никогда не отпускает: после успешной записи настоящий успех
+    // перестаёт показываться — правда ценой немоты, это тоже дефект.
+    id: 'false-success-gate-never-recovers',
+    what: 'гейт не снимается после успешной записи',
+    find: '  _persistFailedNow = false;       // новая операция — прежний отказ не в счёт',
+    replace: '',
+    expectFail: 'один такт: успех ВТОРОЙ записи показан — прежний отказ его не глушит',
+  },
+  {
+    // Одноразовый сброс по границе макрозадачи снят: независимый успех
+    // спустя время оказывается заблокирован навсегда.
+    id: 'false-success-gate-reset-removed',
+    what: 'сброс флага по границе макрозадачи снят',
+    find: '  setTimeout(() => { _persistFailedNow = false; _persistFailedResetPending = false; }, 0);',
+    replace: '',
+    expectFail: 'независимый успех после отказа НЕ заблокирован навсегда',
+  },
+]
 
 const runOnce = (bundle) => new Promise(res => {
   const p = spawn(process.execPath, [SPEC], {
