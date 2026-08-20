@@ -1365,7 +1365,11 @@ function goTo(tab, el) {
   const nb = $('nt-'+tab) || el;
   if (nb) nb.classList.add('on');
   $('ptitle').textContent = TITLES[tab] || tab;
-  document.querySelectorAll('.navlink').forEach(n => n.classList.toggle('on', n.dataset.tab === tab));
+  document.querySelectorAll('.navlink').forEach(n => n.classList.toggle('on',
+    n.dataset.tab === tab && !n.dataset.sub));
+  // Дневник без выбранной подвкладки = landing «overview».
+  if (tab === 'map') document.querySelectorAll('#nsh-nav-groups .navlink[data-sub="overview"]')
+    .forEach(n => n.classList.add('on'));
   if (typeof closeNav === 'function') closeNav();
   if (typeof rSidebar === 'function') rSidebar();
   hpt();
@@ -1376,6 +1380,7 @@ function goTo(tab, el) {
   if (tab==='astro') asub('menu');
   if (tab==='settings') { rAbout(); rProfileRow(); checkApiStatus(); rPushStatus(); const kc=$('keys-cnt'); if (kc) kc.textContent = KEY_SERVICES.filter(s=>getAiKeyFor(s.p)).length + ' из ' + KEY_SERVICES.length; }
   if (document.body.classList.contains('navshell')) { nshHighlight(tab); nshWriteHash(tab); }
+  try { x2Island(); } catch (e) {}
 }
 function msub(tab, el) {
   document.querySelectorAll('[id^="ms-"]').forEach(t => t.style.display='none');
@@ -1384,6 +1389,13 @@ function msub(tab, el) {
   if (t) t.style.display = 'block';
   if (!el) el = document.querySelector(`#subnav .snpill[data-sub="${tab}"]`);  // программный переход тоже подсвечивает
   if (el) el.classList.add('on');
+  // Experience 2.0: пункты sidebar с data-sub (Сны/Психология/Закономерности/
+  // Дневник) подсвечиваются по активной подвкладке, а не только по странице.
+  const OWN_SUB = ['psychology', 'patterns'];
+  document.querySelectorAll('#nsh-nav-groups .navlink[data-tab="map"]').forEach(n => {
+    const sub = n.dataset.sub || 'overview';
+    n.classList.toggle('on', sub === tab || (sub === 'overview' && !OWN_SUB.includes(tab)));
+  });
   // Активное состояние landing доступно не только через CSS-класс (issue #141/#142).
   const ovPill = document.querySelector('#subnav .snpill[data-sub="overview"]');
   if (ovPill) { if (tab === 'overview') ovPill.setAttribute('aria-current', 'page'); else ovPill.removeAttribute('aria-current'); }
@@ -1398,6 +1410,9 @@ function msub(tab, el) {
   if (tab==='chats')     rChats();
   if (tab==='overview')  rDiaryOverview();
   if (tab==='psychology') rPsyWorkspace();   // Wave 7 (issue #162)
+  _x2Sub = tab;
+  if (document.body.classList.contains('navshell') && typeof nshHighlight === 'function') nshHighlight('map');
+  try { x2Island(); } catch (e) {}
 }
 
 // ─── ОВЕРЛЕИ ────────────────────────────────────────────────────
@@ -1483,7 +1498,11 @@ document.addEventListener('keydown', e => {
     window.ArchBackup.requestClose();
     return;
   }
-  document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
+  const sheets = document.querySelectorAll('.ov.on');
+  if (sheets.length) { sheets.forEach(o => o.classList.remove('on')); return; }
+  // Листов нет — Escape закрывает drawer «Меню» (иначе он ловит фокус и
+  // клавиатурный пользователь не может из него выйти).
+  if (document.body.classList.contains('nav-open')) closeNav();
 });
 
 // ─── ТЕМА ───────────────────────────────────────────────────────
@@ -1640,6 +1659,146 @@ function quickPat(tag) {
 }
 
 // ─── ГЛАВНАЯ ─────────────────────────────────────────────────────
+// ═══ EXPERIENCE 2.0: WHOLE LIFE — проекция всей жизни на главной ═════
+// Только чтение существующих коллекций через проекцию исправлений (projAll).
+// Никакого нового canonical-хранилища: каждый блок — счётчик/срез + переход
+// в настоящий модуль. Пустое состояние — человеческое, с действием.
+function x2Row(ico, title, value, sub, act) {
+  return `<button type="button" class="x2-row" onclick="${act}">
+    <span class="x2-ic"><i data-lucide="${ico}"></i></span>
+    <span class="x2-col"><span class="x2-t">${title}</span><span class="x2-s">${sub}</span></span>
+    <span class="x2-v">${value}</span></button>`;
+}
+function rWholeLife() {
+  const el = $('x2-life'); if (!el) return;
+  const P = c => { try { return projAll(c) || []; } catch (_) { return DB[c] || []; } };
+  const dstr = iso => { const t = Date.parse(iso || 0); return t ? new Date(t).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : ''; };
+  const rows = [];
+
+  // Цели — активные psyGoals (lifecycle доказан: status === 'active').
+  const goals = P('psyGoals').filter(g => g && g.status === 'active');
+  rows.push(goals.length
+    ? x2Row('target', 'Цели', String(goals.length), esc((goals[0].label || '').slice(0, 44)) || 'активные цели', "goTo('map');msub('psychology');x2ScrollPsyGoals()")
+    : x2Row('target', 'Цели', '—', 'Поставь рабочую цель', "goTo('map');msub('psychology')"));
+
+  // Незавершённое — ТОЛЬКО сущности с доказанным lifecycle: активные цели,
+  // идущие эксперименты, конфликты исправлений, подготовленный импорт.
+  const exps = P('psyExperiments').filter(x => x && (x.status === 'active' || x.status === 'running'));
+  let conflicts = 0;
+  ['checkins', 'symptoms', 'measures', 'insights', 'moments'].forEach(c => {
+    P(c).forEach(r => { if (r && Array.isArray(r._corrConflicts) && r._corrConflicts.length) conflicts++; });
+  });
+  const pendingImports = (DB.externalConnections || []).filter(c => c && c.status === 'preview_ready').length;
+  const unfinished = goals.length + exps.length + conflicts + pendingImports;
+  const uSub = [goals.length && `${goals.length} цел.`, exps.length && `${exps.length} эксп.`,
+    conflicts && `${conflicts} конфликт.`, pendingImports && `${pendingImports} импорт`]
+    .filter(Boolean).join(' · ');
+  rows.push(unfinished
+    ? x2Row('circle-dot', 'Незавершённое', String(unfinished), esc(uSub), conflicts ? 'openRecords()' : "goTo('map');msub('psychology')")
+    : x2Row('circle-dot', 'Незавершённое', '0', 'Открытых хвостов нет', 'openRecords()'));
+
+  // Здоровье — последнее измерение/симптом.
+  const meas = P('measures'), sym = P('symptoms');
+  const lastH = [...meas, ...sym].sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0))[0];
+  rows.push(lastH
+    ? x2Row('heart-pulse', 'Здоровье', dstr(lastH.createdAt), lastH.kind || lastH.name ? esc(String(lastH.kind || lastH.name).slice(0, 40)) : 'последняя запись', "goTo('health')")
+    : x2Row('heart-pulse', 'Здоровье', '—', 'Отметь измерение или симптом', "goTo('health')"));
+
+  // Психология — активная формулировка + последнее наблюдение.
+  const forms = P('psyFormulations').filter(f => f && f.status === 'active');
+  const obs = P('psyObservations').sort((a, b) => (Date.parse(b.timestamp || b.createdAt) || 0) - (Date.parse(a.timestamp || a.createdAt) || 0))[0];
+  rows.push((forms.length || obs)
+    ? x2Row('brain', 'Психология', forms.length ? `${forms.length} форм.` : dstr(obs && (obs.timestamp || obs.createdAt)),
+        obs ? 'последнее наблюдение ' + dstr(obs.timestamp || obs.createdAt) : 'активная формулировка', "goTo('map');msub('psychology')")
+    : x2Row('brain', 'Психология', '—', 'Начни с наблюдения', "goTo('map');msub('psychology')"));
+
+  // Сны — последний сон.
+  const drm = P('dreams')[0];
+  rows.push(drm
+    ? x2Row('moon', 'Сны', dstr(drm.createdAt), esc(String(drm.title || drm.body || '').slice(0, 44)), "goTo('map');msub('dreams')")
+    : x2Row('moon', 'Сны', '—', 'Запиши первый сон', "openOv('ov-drm')"));
+
+  // События жизни — последняя веха «эволюции».
+  const evo = P('evolution').sort((a, b) => (Date.parse(b.createdAt) || b.id || 0) - (Date.parse(a.createdAt) || a.id || 0))[0];
+  rows.push(evo
+    ? x2Row('milestone', 'События жизни', dstr(evo.createdAt), esc(String(evo.text || '').slice(0, 44)), "goTo('map');msub('evolution')")
+    : x2Row('milestone', 'События жизни', '—', 'Отметь важную веху', "goTo('map');msub('evolution')"));
+
+  // Закономерности — сохранённые паттерны.
+  const pats = P('patterns');
+  rows.push(pats.length
+    ? x2Row('git-branch', 'Закономерности', String(pats.length), esc(String((pats[0] || {}).text || '').slice(0, 44)) || 'сохранённые паттерны', "goTo('map');msub('patterns')")
+    : x2Row('git-branch', 'Закономерности', '—', 'Паттерны появятся из наблюдений', "goTo('map');msub('patterns')"));
+
+  // Источники — подключения моста/Drive и последний импорт.
+  const conns = DB.externalConnections || [];
+  const lastImp = (DB.externalWorkSessions || []).slice(-1)[0];
+  rows.push(conns.length
+    ? x2Row('download', 'Источники', String(conns.length), lastImp ? 'последний импорт ' + dstr(lastImp.at || lastImp.createdAt) : 'импортов ещё не было', 'openExtImport()')
+    : x2Row('download', 'Источники', '—', 'Подключи внешний источник', 'openExtImport()'));
+
+  // Сферы — переехали из глобального меню: трекер живёт внутри «Жизни сейчас».
+  const sph = P('spheres');
+  const sphLogs = P('checkins').filter(c => c && c.sphereId).length;
+  rows.push(sph.length
+    ? x2Row('layers', 'Сферы', String(sph.length), sphLogs ? `${sphLogs} отметок` : 'отметок ещё нет', "goTo('vit')")
+    : x2Row('layers', 'Сферы', '—', 'Заведи сферу, чтобы отмечать', "goTo('vit')"));
+
+  // Обзор недели — переехал из глобального меню: это аналитика Главной,
+  // а не второй home. Deep link #/overview продолжает работать.
+  rows.push(x2Row('bar-chart-3', 'Обзор недели', '→', 'Динамика, дайджест, карта жизни', "goTo('sys')"));
+
+  // Иерархия вместо десяти одинаковых карточек: сначала то, что требует
+  // внимания, затем сама жизнь, затем понимание и данные.
+  const GROUPS = [
+    ['Требует внимания', ['Незавершённое', 'Цели']],
+    ['Жизнь', ['Здоровье', 'Психология', 'Сны', 'Сферы', 'События жизни']],
+    ['Понимание и данные', ['Закономерности', 'Обзор недели', 'Источники']],
+  ];
+  const byTitle = {};
+  rows.forEach(r => { const m = r.match(/class="x2-t">([^<]+)</); if (m) byTitle[m[1]] = r; });
+  const html = GROUPS.map(([lbl, titles]) => {
+    const got = titles.map(t => byTitle[t]).filter(Boolean);
+    return got.length ? `<div class="sec-lbl">${lbl}</div><div class="x2-grid">${got.join('')}</div>` : '';
+  }).join('');
+  // Страховка: если разметка строки изменится, ни один блок не пропадёт молча.
+  const shown = Object.keys(byTitle).filter(t => GROUPS.some(([, ts]) => ts.includes(t))).length;
+  el.innerHTML = shown === rows.length ? html
+    : `<div class="sec-lbl">Жизнь сейчас</div><div class="x2-grid">${rows.join('')}</div>`;
+  icons();
+}
+
+// ═══ EXPERIENCE 2.0: ACTION ISLAND — действия текущего экрана ════════
+// Не навигация: 1–3 главных действия контекста. Регистр по странице и
+// подвкладке Дневника; пусто → остров скрыт (у экрана свои CTA).
+const X2_ISLAND = {
+  'map/overview':   [['plus', 'Запись', "openOv('ov-add')"], ['milestone', 'Событие', "openOv('ov-evo-add')"]],
+  'map/insights':   [['plus', 'Запись', "openOv('ov-add')"], ['milestone', 'Событие', "openOv('ov-evo-add')"]],
+  'map/dreams':     [['moon', 'Записать сон', "openOv('ov-drm')"]],
+  'map/psychology': [['activity', 'Момент', "openOv('ov-moment')"], ['help-circle', 'Разобрать «Зачем?»', "openOv('ov-why')"]],
+  'map/patterns':   [['plus', 'Паттерн', "openOv('ov-pat-add')"]],
+  'map/spiritual':  [['plus', 'Практика', "openOv('ov-spi-add')"]],
+  'map/evolution':  [['milestone', 'Веха', "openOv('ov-evo-add')"]],
+  'vit':            [['layers', 'Отметить сферу', 'captureSphere()']],
+  'health':         [['ruler', 'Измерение', "openOv('ov-measure')"], ['thermometer', 'Симптом', "openOv('ov-symptom')"]],
+};
+let _x2Sub = 'overview';
+function x2Island() {
+  const el = $('x2-island'); if (!el) return;
+  const hide = () => { el.innerHTML = ''; el.style.display = 'none'; document.body.classList.remove('has-island'); };
+  if (!document.body.classList.contains('navshell')) { hide(); return; }
+  const pg = document.querySelector('.pg.on');
+  const tab = pg ? pg.id.replace('pg-', '') : 'home';
+  const key = tab === 'map' ? 'map/' + _x2Sub : tab;
+  const acts = X2_ISLAND[key] || [];
+  if (!acts.length) { hide(); return; }
+  el.style.display = '';
+  document.body.classList.add('has-island');
+  el.innerHTML = acts.slice(0, 3).map(([ico, label, act]) =>
+    `<button type="button" class="x2-act" onclick="${act}"><i data-lucide="${ico}"></i><span>${label}</span></button>`).join('');
+  icons();
+}
+
 function rHome() {
   const now = new Date();
   const D2 = ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
@@ -1647,6 +1806,7 @@ function rHome() {
   $('h-date').textContent = `${D2[now.getDay()]}, ${now.getDate()} ${M[now.getMonth()]} ${now.getFullYear()}`;
   rHState(); rStreak(); detectPatterns();
   rNudge();
+  try { rWholeLife(); } catch (e) {}
   rStateHero(); rVector(); rAmbient('home-ambient'); rSmartInsights('home-smart'); rHeatmap('home-heatmap', 90); rGraph('home-graph', 190, true);
   rPrompts();
   rOnThisDay();
@@ -12096,16 +12256,27 @@ function navShellEnabled() {
   } catch (e) { return true; }
 }
 // Вкладки shell → существующие id (goTo). «Ещё» открывает drawer со всеми разделами.
-const NSH_MAP = { today: 'home', diary: 'map', overview: 'sys' };
+const NSH_MAP = { today: 'home', diary: 'map' };
 function navGo(dest) {
-  if (dest === 'more') { openOv('ov-more'); nshHighlight('more'); nshPushHash('#/more'); return; }
+  // Experience 2.0: свалки «Ещё» нет. Кнопка «Меню» (и старый hash #/more)
+  // открывают полноценный drawer со всеми разделами — тот же sidebar.
+  if (dest === 'more' || dest === 'menu') {
+    // Открытие идёт через openNav(): один контракт (inert фона, фокус внутрь,
+    // aria-expanded на реальном opener) для бургера, вкладки «Меню» и hash.
+    openNav(document.querySelector('[data-nav="menu"]') || $('burger'));
+    nshHighlight('menu'); nshPushHash('#/menu');
+    return;
+  }
+  if (dest === 'psy') { goTo('map'); msub('psychology'); return; }
   const tab = NSH_MAP[dest];
   if (tab) goTo(tab);
 }
 // Обратный маппinг: подсветить активную вкладку по текущему разделу.
-// Разделы вне 4 вкладок (Сферы/Здоровье/Астро/Настройки) относятся к «Ещё».
+// Разделы вне 4 вкладок (Сферы/Здоровье/Астро/Настройки) относятся к «Меню».
 function nshHighlight(tab) {
-  const dest = tab === 'home' ? 'today' : tab === 'map' ? 'diary' : tab === 'sys' ? 'overview' : 'more';
+  const dest = tab === 'home' ? 'today'
+    : tab === 'map' ? (_x2Sub === 'psychology' ? 'psy' : 'diary')
+    : 'menu';
   document.querySelectorAll('.nsh-tab').forEach(b => {
     const on = b.dataset.nav === dest;
     b.classList.toggle('on', on);
@@ -12174,9 +12345,14 @@ function nshApplyHash(fromInit) {
   const m = (location.hash || '').match(/^#\/([a-z]+)/);
   if (!m) return false;                       // нет hash — как раньше
   const slug = m[1];
-  const closeSheets = () => { ['ov-capture', 'ov-more'].forEach(id => { const el = $(id); if (el && el.classList.contains('on')) el.classList.remove('on'); }); };
+  const closeSheets = () => {
+    const el = $('ov-capture'); if (el && el.classList.contains('on')) el.classList.remove('on');
+    // Через closeNav(), иначе останутся inert на #app и aria-expanded=true.
+    if (document.body.classList.contains('nav-open')) closeNav();
+  };
   if (slug === 'capture') { openOv('ov-capture'); return true; }
-  if (slug === 'more') { openOv('ov-more'); nshHighlight('more'); return true; }
+  // «Ещё» упразднён: старые ссылки #/more и новый #/menu открывают drawer.
+  if (slug === 'more' || slug === 'menu') { navGo('menu'); return true; }
   const tab = NSH_SLUGS_REV[slug];
   if (!tab) {                                 // неизвестный hash → безопасно на «Сегодня»
     closeSheets(); goTo('home'); nshWriteHash('home', true);
@@ -12212,33 +12388,42 @@ function applyNavShell() {
     }
   }
 }
-// ── iPad/desktop: сгруппированный sidebar (TARGET-IA §5) ─────────
-// При флаге плоский список заменяется группами. Каждый пункт зовёт
-// СУЩЕСТВУЮЩИЙ id; «Сферы» помещены в «День» (в §5 они не распределены,
-// а терять раздел нельзя) — отклонение задокументировано в PR.
+// ── Глобальная навигация: только крупные пространства ────────────
+// IA-принцип: в глобальном меню живёт лишь то, КУДА человек идёт целиком.
+// Быстрые действия (Записать), вторичные экраны (Отчёт врачу, Обзор),
+// инструменты (Поиск, Инспектор, Резервные копии) и сервисные функции
+// (Профили, Обратная связь) переехали внутрь своих родительских
+// пространств — ни одна из них не удалена и не стала недостижимой.
+// Полная карта переездов: docs/EXPERIENCE_2_SHELL_CONTRACT.md §5.
+// item[0] — вкладка для подсветки, item[4] — msub-подвкладка Дневника.
 const NSH_SIDEBAR_GROUPS = [
-  ['День', [
-    ['home', 'sun', 'Сегодня', "goTo('home')"],
-    [null, 'plus-circle', 'Записать', 'openCapture()'],
-    ['vit', 'layers', 'Сферы', "goTo('vit')"],
+  ['Жизнь', [
+    ['home', 'sun', 'Главная', "goTo('home')"],
+    ['map', 'book-open', 'Дневник', "goTo('map');msub('overview')", 'overview'],
   ]],
-  ['Самопознание', [['map', 'brain', 'Дневник', "goTo('map')"]]],
-  ['Здоровье', [
+  ['Работа с собой', [
+    ['map', 'brain', 'Психология', "goTo('map');msub('psychology')", 'psychology'],
     ['health', 'heart-pulse', 'Здоровье', "goTo('health')"],
-    [null, 'file-text', 'Отчёт врачу', "goTo('health');openOv('ov-doc-report')"],
   ]],
-  ['Аналитика', [['sys', 'bar-chart-3', 'Обзор', "goTo('sys')"]]],
-  ['Инструменты', [
+  ['Анализ', [
     ['astro', 'sparkles', 'Астрология', "goTo('astro')"],
-    [null, 'search', 'Поиск', "openOv('ov-search')"],
-    [null, 'list-checks', 'Мои записи', 'openRecords()'],
+    ['map', 'git-branch', 'Закономерности', "goTo('map');msub('patterns')", 'patterns'],
+  ]],
+  ['Данные', [
+    [null, 'download', 'Источники', 'openExtImport()'],
   ]],
   ['Система', [
-    [null, 'users', 'Профили', 'openProfiles()'],
     ['settings', 'settings', 'Настройки', "goTo('settings')"],
-    [null, 'message-square', 'Обратная связь', "openOv('ov-feedback')"],
   ]],
 ];
+// «Цели» ведут в рабочее пространство психологии и подводят к блоку целей.
+function x2ScrollPsyGoals() {
+  setTimeout(() => {
+    const el = document.querySelector('#psy-ws .psy-goals-inline') ||
+      document.querySelector('#psy-ws [data-psy-goals]') || $('psy-ws');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start' });
+  }, 60);
+}
 function nshSidebarGroups(on) {
   const nav = $('nav'); if (!nav) return;
   let box = $('nsh-nav-groups');
@@ -12248,8 +12433,8 @@ function nshSidebarGroups(on) {
   box = document.createElement('div');
   box.id = 'nsh-nav-groups';
   box.innerHTML = NSH_SIDEBAR_GROUPS.map(([title, items]) =>
-    `<div class="nsh-grp-lbl">${esc(title)}</div>` + items.map(([tab, ico, label, act]) =>
-      `<button class="navlink"${tab ? ` data-tab="${tab}"` : ''} onclick="closeNav();${act}"><i data-lucide="${ico}"></i>${esc(label)}</button>`).join('')
+    `<div class="nsh-grp-lbl">${esc(title)}</div>` + items.map(([tab, ico, label, act, sub]) =>
+      `<button class="navlink"${tab ? ` data-tab="${tab}"` : ''}${sub ? ` data-sub="${sub}"` : ''} onclick="closeNav();${act}"><i data-lucide="${ico}"></i>${esc(label)}</button>`).join('')
   ).join('');
   nav.appendChild(box);
   icons();
@@ -12262,9 +12447,68 @@ function toggleNavShell() {
 }
 
 // ═══ SHELL: drawer-навигация, блок аккаунта, жесты ═══════════════
-function openNav()  { rSidebar(); document.body.classList.add('nav-open'); }
-function closeNav() { document.body.classList.remove('nav-open'); }
-function toggleNav(){ document.body.classList.toggle('nav-open'); hpt(); }
+// Контракт открытого drawer (единый для бургера, вкладки «Меню» и hash):
+//   • фон недоступен клавиатуре и указателю — #app помечается inert;
+//   • фокус уходит внутрь drawer, при закрытии возвращается на открывший
+//     элемент (иначе клавиатурный пользователь остаётся «нигде»);
+//   • aria-expanded ставится на РЕАЛЬНЫЙ opener, а не только на бургер;
+//   • закрытие: scrim, Escape, выбор пункта, назад — все через closeNav().
+// Анимация — только CSS (класс nav-open), никаких setTimeout на визуал.
+let _navOpener = null;
+// Постоянный sidebar (iPad portrait / desktop) — не drawer: inert и ловушка
+// фокуса там были бы багом, поэтому применяются только в режиме drawer.
+function navIsDrawer() { return window.innerWidth <= 900 && !(document.body.classList.contains('navshell') && window.innerWidth >= 768); }
+function navSetOpener(el) {
+  _navOpener = el || null;
+  document.querySelectorAll('#burger,[data-nav="menu"]').forEach(b =>
+    b.setAttribute('aria-expanded', document.body.classList.contains('nav-open') ? 'true' : 'false'));
+}
+const NAV_INERT_SKIP = el =>
+  el.id === 'sidebar' || el.id === 'scrim' || el.id === 'toasts' || el.classList.contains('ov');
+function navApplyOpen(open) {
+  const on = open && navIsDrawer();
+  [...document.body.children].forEach(el => {
+    if (NAV_INERT_SKIP(el)) { el.removeAttribute('inert'); return; }
+    if (on) el.setAttribute('inert', ''); else el.removeAttribute('inert');
+  });
+  if (on) {
+    const first = [...document.querySelectorAll('#sidebar .navlink, #sidebar button')]
+      .find(el => el.offsetParent !== null || el.getClientRects().length);
+    if (first && first.focus) { try { first.focus({ preventScroll: true }); } catch (e) { first.focus(); } }
+  }
+}
+function openNav(opener)  {
+  // Открытый drawer — единственный слой управления. Плавающая карточка отклика
+  // живёт на уровне body (z-index 520) и иначе осталась бы поверх шторки.
+  clearTimeout(window.__rcT);
+  const _rc = document.getElementById('react-card'); if (_rc) _rc.remove();
+  rSidebar();
+  document.body.classList.add('nav-open');
+  navSetOpener(opener || $('burger'));
+  navApplyOpen(true);
+}
+function closeNav() {
+  const was = document.body.classList.contains('nav-open');
+  document.body.classList.remove('nav-open');
+  navSetOpener(_navOpener);
+  navApplyOpen(false);
+  // Фокус возвращается открывшему элементу — только если он ещё на экране.
+  if (was && _navOpener && _navOpener.isConnected && _navOpener.offsetParent !== null) {
+    try { _navOpener.focus({ preventScroll: true }); } catch (e) {}
+  }
+  _navOpener = null;
+  // Если drawer был открыт как «Меню» (hash #/menu|#/more) — вернуть hash
+  // активного раздела и подсветку, чтобы «назад» вело не в меню.
+  if (/^#\/(menu|more)$/.test(location.hash || '') && typeof nshHashToPage === 'function') {
+    nshHashToPage();
+    const pg = document.querySelector('.pg.on');
+    if (pg && typeof nshHighlight === 'function') nshHighlight(pg.id.replace('pg-', ''));
+  }
+}
+function toggleNav(){
+  if (document.body.classList.contains('nav-open')) { closeNav(); hpt(); return; }
+  openNav($('burger')); hpt();
+}
 // Блок аккаунта в сайдбаре: имя профиля, инициал, статус-точка синка
 function rSidebar() {
   try {

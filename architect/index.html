@@ -247,6 +247,7 @@
       <span class="qa-lbl">Синк</span>
     </button>
   </div>
+  <div id="x2-life"></div>
   <div id="pat-suggest-home"></div>
   <div id="h-med-reminder"></div>
   <div id="h-moments"></div>
@@ -634,7 +635,10 @@
   <div class="card mx">
     <div class="srow" onclick="openProfiles()"><div class="sic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><span class="sl2">Профиль</span><span class="sv2" id="prof-current">—</span></div>
     <div class="srow" onclick="toggleTheme()"><div class="sic" style="background:var(--gold-l)"><svg style="color:var(--gold)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2"/></svg></div><span class="sl2">Тема</span><span class="sv2" id="thv">Дневная</span></div>
-    <button type="button" class="srow" id="navshell-toggle" onclick="toggleNavShell()" aria-pressed="false"><span class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15h18"/><path d="M9 15v6"/><path d="M15 15v6"/></svg></span><span class="sl2">Новая навигация (эксперимент)</span><span class="sv2" id="navshell-lbl" aria-hidden="true">Выкл</span></button>
+    <!-- Experience 2.0 — основная оболочка. Пользовательского тумблера нет:
+         двусмысленный «эксперимент» в Настройках убран. Аварийный откат
+         остаётся внутренним: localStorage arch_nav_v2='0' (или вызов
+         toggleNavShell()), легаси-навигация из кода не удалена. -->
     <div class="srow" onclick="enableNotifications()"><div class="sic" style="background:var(--rose,#FEE)"><svg style="color:var(--rose,#FB7185)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></div><span class="sl2">Уведомления</span><span class="sv2" id="push-status">Выключены</span></div>
     <div class="srow" onclick="openOv('ov-cfg')"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg></div><span class="sl2">Конфигурация осей + AI-ключ</span><span class="sv2">Настроить</span></div>
     <div class="srow" onclick="openKeys()"><div class="sic" style="background:var(--gold-l)"><svg style="color:var(--gold)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div><span class="sl2">Ключи сервисов</span><span class="sv2" id="keys-cnt">—</span></div>
@@ -653,6 +657,10 @@
     <!-- Wave 6 (issue #160): импорт внешней работы (ChatGPT/Drive) внутри
          существующего раздела «Данные», без нового top-level раздела. -->
     <button type="button" class="srow" onclick="openExtImport()"><div class="sic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v12"/><polyline points="8 11 12 15 16 11"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></div><span class="sl2">Импорт внешней работы</span><span class="sv2">ChatGPT · Drive · JSON</span></button>
+  </div>
+  <div class="sec-lbl">Поддержка</div>
+  <div class="card mx">
+    <button type="button" class="srow" onclick="openOv('ov-feedback')"><span class="sic" style="background:var(--blue-l,var(--teal-l))"><svg style="color:var(--blue,var(--teal))" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span><span class="sl2">Обратная связь</span><span class="sv2">Написать</span></button>
   </div>
   <div class="sec-lbl">Команды</div>
   <div class="cmd-wrap mx" style="position:relative">
@@ -824,10 +832,10 @@
 <!-- ══ NAVIGATION SHELL v2 (за флагом arch_nav_v2; скрыто без body.navshell) ══ -->
 <nav class="nsh-tabbar" id="nsh-tabbar" aria-label="Основная навигация">
   <button class="nsh-tab on" data-nav="today" onclick="navGo('today')" aria-label="Сегодня" aria-current="page"><i data-lucide="sun"></i><span>Сегодня</span></button>
-  <button class="nsh-tab" data-nav="diary" onclick="navGo('diary')" aria-label="Дневник"><i data-lucide="brain"></i><span>Дневник</span></button>
+  <button class="nsh-tab" data-nav="diary" onclick="navGo('diary')" aria-label="Дневник"><i data-lucide="book-open"></i><span>Дневник</span></button>
   <button class="nsh-fab" id="nsh-fab" onclick="openCapture()" aria-label="Записать"><i data-lucide="plus"></i></button>
-  <button class="nsh-tab" data-nav="overview" onclick="navGo('overview')" aria-label="Обзор"><i data-lucide="bar-chart-3"></i><span>Обзор</span></button>
-  <button class="nsh-tab" data-nav="more" onclick="navGo('more')" aria-label="Ещё"><i data-lucide="menu"></i><span>Ещё</span></button>
+  <button class="nsh-tab" data-nav="psy" onclick="navGo('psy')" aria-label="Психология"><i data-lucide="brain"></i><span>Психология</span></button>
+  <button class="nsh-tab" data-nav="menu" onclick="navGo('menu')" aria-label="Меню — все разделы" aria-expanded="false"><i data-lucide="menu"></i><span>Меню</span></button>
 </nav>
 
 </div><!-- end #app -->
@@ -2146,42 +2154,8 @@
 </div>
 
 <!-- ══ «ЕЩЁ» — сгруппированный хаб (nav shell v2; все разделы за ≤2 тапа) ══ -->
-<div class="ov" id="ov-more" onclick="if(event.target===this){closeOv('ov-more');nshHashToPage()}">
-  <div class="sheet">
-    <div class="sh-pull"></div>
-    <div class="sh-title">Ещё</div>
-    <div class="sec-lbl" style="padding-left:var(--s4)">Разделы</div>
-    <div class="more-list">
-      <div class="srow" onclick="closeOv('ov-more');goTo('vit')"><div class="sic" style="background:var(--green-l)"><svg style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></div><span class="sl2">Сферы</span><span class="sv2">Трекеры жизни</span></div>
-      <div class="srow" onclick="closeOv('ov-more');goTo('health')"><div class="sic" style="background:rgba(251,113,133,.16)"><svg style="color:#FB7185" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg></div><span class="sl2">Здоровье</span><span class="sv2">Приём, симптомы, измерения</span></div>
-      <div class="srow" onclick="closeOv('ov-more');goTo('astro')"><div class="sic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l1.9 5.8H20l-4.9 3.6 1.9 5.8L12 14.6 7 18.2l1.9-5.8L4 8.8h6.1z"/></svg></div><span class="sl2">Астрология</span><span class="sv2">Карта, периоды, отношения</span></div>
-      <!-- Wave 7: прямой вход в «Психологию» — пользователь не должен угадывать,
-           что раздел спрятан под «Паттернами» или «Зачем?». -->
-      <div class="srow" onclick="closeOv('ov-more');openPsyWorkspace()"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><polygon points="15.5 8.5 10.5 10.5 8.5 15.5 13.5 13.5"/></svg></div><span class="sl2">Психология</span><span class="sv2">Формулировка, цели, методы, review</span></div>
-    </div>
-    <div class="sec-lbl" style="padding-left:var(--s4)">Здоровье — быстро</div>
-    <div class="more-list">
-      <div class="srow" onclick="closeOv('ov-more');goTo('health');openOv('ov-doc-report')"><div class="sic" style="background:var(--blue-l)"><svg style="color:var(--blue-t)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg></div><span class="sl2">Отчёт врачу</span><span class="sv2">Собрать за период</span></div>
-    </div>
-    <div class="sec-lbl" style="padding-left:var(--s4)">Инструменты</div>
-    <div class="more-list">
-      <div class="srow" onclick="openOv('ov-search')"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div><span class="sl2">Поиск по памяти</span><span class="sv2">Найти запись</span></div>
-      <div class="srow" onclick="closeOv('ov-more');openRecords()"><div class="sic" style="background:var(--orange-l,#FDEDD3)"><svg style="color:var(--orange,#D97706)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><polyline points="3 5.5 4 6.5 6 4.5"/><polyline points="3 11.5 4 12.5 6 10.5"/></svg></div><span class="sl2">Мои записи</span><span class="sv2">Открыть и править</span></div>
-    </div>
-    <div class="sec-lbl" style="padding-left:var(--s4)">Данные</div>
-    <div class="more-list">
-      <div class="srow" onclick="closeOv('ov-more');openBackups()"><div class="sic" style="background:var(--blue-l)"><svg style="color:var(--blue-t)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div><span class="sl2">Резервная копия</span><span class="sv2">Создать / зашифровать</span></div>
-      <div class="srow" onclick="openOv('ov-import')"><div class="sic" style="background:var(--green-l)"><svg style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><span class="sl2">Восстановление</span><span class="sv2">Импорт из файла</span></div>
-    </div>
-    <div class="sec-lbl" style="padding-left:var(--s4)">Система</div>
-    <div class="more-list">
-      <div class="srow" onclick="closeOv('ov-more');goTo('settings')"><div class="sic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div><span class="sl2">Настройки</span><span class="sv2">Оси, AI, тема</span></div>
-      <div class="srow" onclick="closeOv('ov-more');openProfiles()"><div class="sic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><span class="sl2">Профили</span><span class="sv2">Переключить / добавить</span></div>
-      <div class="srow" onclick="closeOv('ov-more');openOv('ov-feedback')"><div class="sic" style="background:var(--gold-l)"><svg style="color:var(--gold)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div><span class="sl2">Обратная связь</span><span class="sv2">Написать</span></div>
-    </div>
-    <button class="btn btn-g" style="width:calc(100% - 2*var(--s4));margin:.6rem var(--s4) 0" onclick="closeOv('ov-more');nshHashToPage()">Закрыть</button>
-  </div>
-</div>
+
+<div id="x2-island" role="toolbar" aria-label="Действия текущего экрана" style="display:none"></div>
 
 <div id="toasts"></div>
 <script>window.ARCHITECT_API='https://coding-production-1398.up.railway.app';</script>

@@ -664,7 +664,8 @@ const V2_BASE = {
   await reset();
   const nav = await page.evaluate(() => {
     const pill = document.querySelector('#subnav .snpill[data-sub="psychology"]');
-    const moreRow = [...document.querySelectorAll('#ov-more .srow')].find(r => /Психология/.test(r.textContent));
+    // Experience 2.0: хаб «Ещё» упразднён — прямой вход живёт в sidebar/drawer.
+    const moreRow = [...document.querySelectorAll('#nsh-nav-groups .navlink')].find(r => /Психология/.test(r.textContent));
     openPsyWorkspace();
     return {
       pill: !!pill, pillText: pill && pill.textContent.trim(),
@@ -676,7 +677,7 @@ const V2_BASE = {
   });
   ok(nav.pill && /Психология/.test(nav.pillText || ''), 'в подразделах Дневника есть видимый вход «Психология»');
   ok(nav.pillIsButton, 'вход — настоящий <button> (клавиатура/скринридер)');
-  ok(nav.moreEntry, 'прямой вход есть и в хабе «Ещё»');
+  ok(nav.moreEntry, 'прямой вход есть и в глобальной навигации (sidebar/drawer)');
   ok(nav.sectionVisible && nav.onDiaryPage, 'раздел открывается внутри существующего контура Дневника');
 }
 

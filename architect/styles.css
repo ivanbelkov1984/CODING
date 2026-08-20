@@ -27,6 +27,8 @@
      Поверхности полупрозрачные: сквозь них просвечивает звёздное поле (см. слой
      «DUAL REALM» в конце файла). Имена переменных сохранены — весь var()-код цел. */
   --bg-base:#04060e; --bg-panel:rgba(17,23,41,.62); --bg-surface-2:rgba(26,33,54,.72);
+  --drawer-sf:#0B1020;                 /* drawer: сплошной фон, текст под ним нечитаем */
+  --drawer-scrim:rgba(3,5,12,.92);     /* затемнение фона под drawer */
   --bg-surface-3:rgba(38,47,72,.82); --bg-surface-4:rgba(30,38,60,.90);
   --bg:  var(--bg-base);      /* корневой фон (под ним — космос) */
   --sf:  var(--bg-panel);     /* панели-стекло: topbar, tabbar, карточки */
@@ -70,6 +72,7 @@
   /* движение: инженерное, без пружин */
   --e:cubic-bezier(.2,0,0,1); --e-in:cubic-bezier(.2,0,0,1);
   --dur1:80ms; --dur2:120ms; --dur3:150ms;
+  --drawer-dur:220ms;   /* открытие/закрытие drawer: в полосе 180–260ms */
 }
 
 [data-theme="dark"]{color-scheme:dark}
@@ -79,6 +82,7 @@
 [data-theme="light"]{
   color-scheme:light;
   --bg-base:#F7F9FC; --bg-panel:#FFFFFF; --bg-surface-2:#FFFFFF;
+  --drawer-sf:#FFFFFF; --drawer-scrim:rgba(15,23,42,.86);
   --bg-surface-3:#F1F5FA; --bg-surface-4:#FFFFFF;
   --border-subtle:rgba(15,23,42,.07); --border-medium:rgba(15,23,42,.11); --border-strong:rgba(15,23,42,.16);
   --t1:#0F1B2D; --t2:#42506A; --t3:#7D8AA0; --t4:#AAB4C4;
@@ -1040,9 +1044,17 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 #app{flex:1;max-width:none;margin:0;min-width:0}
 .content>.pg{max-width:940px;margin:0 auto;width:100%}
 .burger{display:none}
-.scrim{position:fixed;inset:0;background:rgba(6,7,20,.5);opacity:0;pointer-events:none;transition:opacity .3s var(--e);z-index:55}
+/* Scrim drawer: z-index 59 — выше нижнего таб-бара (58), ниже самого drawer
+   (60) и любых .ov-листов (100). До Experience 2.0 он был 55 и таб-бар
+   просвечивал поверх затемнения — открытый drawer читался как «полупрозрачное
+   меню с живой нижней навигацией». */
+.scrim{position:fixed;inset:0;background:var(--drawer-scrim);opacity:0;pointer-events:none;transition:opacity var(--drawer-dur,.22s) var(--e);z-index:59;
+  -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
 @media(max-width:900px){
-  .sidebar{position:fixed;left:0;top:0;bottom:0;height:auto;width:min(300px,84vw);transform:translateX(-100%);transition:transform .3s var(--e);z-index:60;padding-top:calc(20px + env(safe-area-inset-top))}
+  /* Drawer: фон сплошной (var(--drawer-sf)), не «стекло» — под ним не должен
+     читаться текст страницы. Длительность 220ms задана классом/атрибутом,
+     без setTimeout; prefers-reduced-motion гасит её глобальным правилом. */
+  .sidebar{position:fixed;left:0;top:0;bottom:0;height:auto;width:min(300px,84vw);transform:translateX(-100%);transition:transform var(--drawer-dur,.22s) var(--e);z-index:60;background:var(--drawer-sf);padding-top:calc(20px + env(safe-area-inset-top))}
   body.nav-open .sidebar{transform:none}
   body.nav-open .scrim{opacity:1;pointer-events:auto}
   .burger{display:flex}
@@ -1389,12 +1401,17 @@ body.navshell #sys-back{display:flex;align-items:center;gap:.3rem;min-height:44p
     background:var(--blue-btn);color:#fff;box-shadow:0 4px 14px rgba(16,86,204,.4)}
   body.navshell .nsh-fab svg{width:24px;height:24px;stroke-width:2.4}
   body.navshell .content{padding-bottom:64px}
+  body.navshell.has-island .content{padding-bottom:132px}
+  /* Открытый drawer — единственный слой управления: нижний таб-бар не
+     просвечивает и не принимает тапы (одним переходом со scrim). */
+  body.navshell .nsh-tabbar{transition:opacity var(--drawer-dur) var(--e)}
+  body.navshell.nav-open .nsh-tabbar{opacity:0;pointer-events:none}
   body.navshell .burger{display:none}
 }
 
 /* iPad portrait (768–900): постоянный sidebar вместо скрытого drawer */
 @media(min-width:768px) and (max-width:900px){
-  body.navshell .sidebar{position:static;transform:none;transition:none;height:100dvh;width:240px;z-index:auto;padding-top:16px}
+  body.navshell .sidebar{position:static;transform:none;transition:none;height:100dvh;width:240px;z-index:auto;background:var(--sf);padding-top:16px}
   body.navshell .scrim{display:none;opacity:0;pointer-events:none}
   body.navshell .burger{display:none}
   body.navshell .nsh-tabbar{display:none}
@@ -1511,3 +1528,26 @@ body.navshell .nsh-tab:focus-visible,body.navshell .nsh-fab:focus-visible,
    источника): нейтральный стиль — уровень не додумывается. */
 .elx{color:var(--t3)}
 .edx{background:var(--t3)}
+
+/* ═══ EXPERIENCE 2.0 — Whole Life + Action Island ═══════════════════ */
+.x2-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 var(--s4) 14px}
+.x2-row{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:12px;border:1px solid var(--bd);background:var(--sf);cursor:pointer;text-align:left;-webkit-tap-highlight-color:transparent;min-height:56px}
+.x2-row:hover{background:var(--bg2)}
+.x2-row:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.x2-ic{width:30px;height:30px;border-radius:9px;background:var(--bg2);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.x2-ic svg{width:16px;height:16px;color:var(--accent);stroke-width:2}
+.x2-col{display:flex;flex-direction:column;min-width:0;flex:1}
+.x2-t{font-weight:600;font-size:var(--tx2,.85rem);color:var(--t1)}
+.x2-s{font-size:.72rem;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.x2-v{font-weight:650;font-size:.9rem;color:var(--t2);flex-shrink:0}
+@media(max-width:520px){.x2-grid{grid-template-columns:1fr}}
+/* Остров: узкая контекстная полоса действий. Desktop — снизу по центру;
+   mobile — над таб-баром, чтобы не закрывать контент и не спорить с FAB. */
+#x2-island{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom));z-index:40;display:flex;gap:8px;padding:6px;border-radius:999px;background:var(--sf);border:1px solid var(--bd);box-shadow:0 6px 24px rgba(0,0,0,.14)}
+body.navshell #x2-island{bottom:calc(14px + env(safe-area-inset-bottom))}
+@media(min-width:768px){ body.navshell.has-island .content{padding-bottom:84px} }
+@media(max-width:767px){body.navshell #x2-island{bottom:calc(74px + env(safe-area-inset-bottom))}}
+.x2-act{display:flex;align-items:center;gap:7px;padding:9px 14px;border-radius:999px;border:none;background:transparent;color:var(--t1);font-size:.82rem;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.x2-act:hover{background:var(--bg2)}
+.x2-act:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.x2-act svg{width:16px;height:16px;color:var(--accent);stroke-width:2.1}
