@@ -45,7 +45,7 @@ const ovOn = id => page.evaluate(i => !!document.querySelector('#' + i + '.on'),
 // Навигация как у человека: открыть шторку и нажать пункт по названию.
 const viaMenu = async label => {
   await page.evaluate(() => { document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')); closeNav(); });
-  await page.evaluate(() => document.querySelector('[data-nav="menu"]').click());
+  await page.evaluate(() => document.getElementById('topbar-menu').click());
   await settled(() => document.body.classList.contains('nav-open'));
   const hit = await page.evaluate(l => {
     const n = [...document.querySelectorAll('#nsh-nav-groups .navlink')].find(x => x.textContent.trim() === l);
@@ -55,6 +55,13 @@ const viaMenu = async label => {
   await page.waitForTimeout(140);
   return hit;
 };
+// Контекстные действия экрана даёт единственный бар — context-action-dock.
+const dockClick = label => page.evaluate(l => {
+  window.__ARCH_CONTEXT_DOCK__.update();
+  const d = document.getElementById('nsh-context-dock');
+  const b = d && !d.hidden && [...d.querySelectorAll('button')].find(x => x.getAttribute('aria-label') === l);
+  if (!b) return false; b.click(); return true;
+}, label);
 const clickText = (sel, text) => page.evaluate(([s, t]) => {
   const n = [...document.querySelectorAll(s)].find(x => (x.textContent || '').includes(t) && x.offsetParent !== null);
   if (!n) return false; n.click(); return true;
@@ -80,7 +87,7 @@ for (const [label, check] of [
 step('9: запись дневника');
 await clearOv();
 await viaMenu('Дневник');
-await clickText('#x2-island .x2-act', 'Запись');
+await dockClick('Новый инсайт');
 const diary = await page.evaluate(async () => {
   document.getElementById('add-tx').value = 'TEST-SMK инсайт';
   const before = (DB.insights || []).length;
@@ -98,7 +105,7 @@ ok(diary.sv === 9, 'дневник: SCHEMA_VERSION записи = 9 (мигра�
 step('10: здоровье');
 await clearOv();
 await viaMenu('Здоровье');
-await clickText('#x2-island .x2-act', 'Измерение');
+await dockClick('Измерение');
 const health = await page.evaluate(async () => {
   document.getElementById('mea-name').value = 'TEST-SMK вес';
   document.getElementById('mea-value').value = '70';
@@ -152,7 +159,7 @@ await clearOv();
 await viaMenu('Дневник');
 await clickText('#subnav .snpill', 'Сны');
 await page.waitForTimeout(140);
-await clickText('#x2-island .x2-act', 'Записать сон');
+await dockClick('Записать сон');
 const dream = await page.evaluate(async () => {
   const on = !!document.querySelector('#ov-drm.on');
   document.getElementById('drm-tx').value = 'TEST-SMK сон про мост';
@@ -167,7 +174,7 @@ ok(dream.formOpen && dream.grew, 'сон: форма открыта из ост�
 step('13: психология');
 await clearOv();
 await viaMenu('Психология');
-await clickText('#x2-island .x2-act', 'Момент');
+await dockClick('Момент');
 const psy = await page.evaluate(async () => {
   const on = !!document.querySelector('#ov-moment.on');
   const n = document.getElementById('mo-note'); if (n) n.value = 'TEST-SMK момент';

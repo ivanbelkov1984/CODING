@@ -9,21 +9,19 @@
     position: fixed;
     z-index: 57;
     left: 50%;
-    bottom: calc(66px + env(safe-area-inset-bottom));
+    bottom: calc(84px + env(safe-area-inset-bottom));
     transform: translateX(-50%);
     align-items: stretch;
     gap: 6px;
-    max-width: calc(100vw - 24px);
+    max-width: min(86vw, 420px);
     min-height: 52px;
     padding: 6px;
     overflow-x: auto;
     overscroll-behavior-x: contain;
-    background: var(--sf);
-    border: 1px solid var(--bd2);
-    border-radius: 18px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, .28);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
+    background: var(--island-sf);
+    border: 1px solid var(--island-bd);
+    border-radius: 999px;
+    box-shadow: var(--island-sh);
   }
 
   body.navshell .nsh-context-action {
@@ -66,7 +64,7 @@
   }
 
   body.navshell.nsh-context-on .content {
-    padding-bottom: 126px;
+    padding-bottom: 148px;
   }
 }
 

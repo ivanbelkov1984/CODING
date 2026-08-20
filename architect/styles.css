@@ -28,6 +28,9 @@
      «DUAL REALM» в конце файла). Имена переменных сохранены — весь var()-код цел. */
   --bg-base:#04060e; --bg-panel:rgba(17,23,41,.62); --bg-surface-2:rgba(26,33,54,.72);
   --drawer-sf:#0B1020;                 /* drawer: сплошной фон, текст под ним нечитаем */
+  --island-sf:#121a2e;                 /* нижний island: сплошной, не «стекло» */
+  --island-bd:rgba(255,255,255,.10);
+  --island-sh:0 10px 30px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.35);
   --drawer-scrim:rgba(3,5,12,.92);     /* затемнение фона под drawer */
   --bg-surface-3:rgba(38,47,72,.82); --bg-surface-4:rgba(30,38,60,.90);
   --bg:  var(--bg-base);      /* корневой фон (под ним — космос) */
@@ -83,6 +86,8 @@
   color-scheme:light;
   --bg-base:#F7F9FC; --bg-panel:#FFFFFF; --bg-surface-2:#FFFFFF;
   --drawer-sf:#FFFFFF; --drawer-scrim:rgba(15,23,42,.86);
+  --island-sf:#FFFFFF; --island-bd:rgba(15,23,42,.09);
+  --island-sh:0 10px 28px rgba(15,23,42,.16), 0 2px 6px rgba(15,23,42,.08);
   --bg-surface-3:#F1F5FA; --bg-surface-4:#FFFFFF;
   --border-subtle:rgba(15,23,42,.07); --border-medium:rgba(15,23,42,.11); --border-strong:rgba(15,23,42,.16);
   --t1:#0F1B2D; --t2:#42506A; --t3:#7D8AA0; --t4:#AAB4C4;
@@ -134,12 +139,12 @@ input,textarea{font:inherit;color:inherit;background:none;border:none;outline:no
 #app{display:flex;flex-direction:column;height:100dvh;max-width:430px;margin:0 auto;overflow:hidden;position:relative}
 
 /* ── TOPBAR ────────────────────────────────────────────────────── */
-.topbar{display:flex;align-items:center;gap:var(--s3);padding:max(env(safe-area-inset-top),14px) var(--s4) var(--s3);background:var(--sf);border-bottom:1px solid var(--bd);flex-shrink:0;min-height:52px}
+.topbar{display:flex;align-items:center;gap:var(--s3);padding:calc(env(safe-area-inset-top) + 8px) var(--s4) 8px;background:var(--sf);border-bottom:1px solid var(--bd);flex-shrink:0;min-height:44px}
 .top-brand{display:flex;align-items:center;gap:var(--s2);flex:1;min-width:0}
 .top-dot{width:28px;height:28px;background:var(--blue-btn);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .top-dot svg{width:14px;height:14px;color:#fff}
 .top-title{font-size:var(--tx5);font-weight:500;color:var(--t1);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.top-acts{display:flex}
+.top-acts{display:flex;align-items:center;gap:2px;flex:none}
 .ib{width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:var(--r8);color:var(--t3);transition:background var(--dur1) var(--e),color var(--dur1)}
 .ib:active{background:var(--bg2);color:var(--t1)}
 .ib svg{width:20px;height:20px}
@@ -1387,21 +1392,41 @@ body.navshell #sys-back{display:flex;align-items:center;gap:.3rem;min-height:44p
 
 /* iPhone (узкий экран): нижний таб-бар из 4 вкладок + центральный FAB */
 @media(max-width:767px){
-  body.navshell .nsh-tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:58;
-    align-items:center;justify-content:space-around;
-    padding:6px 8px calc(6px + env(safe-area-inset-bottom));
-    background:var(--sf);border-top:1px solid var(--bd)}
-  body.navshell .nsh-tab{display:flex;flex-direction:column;align-items:center;gap:2px;
-    flex:1;min-width:44px;min-height:48px;justify-content:center;background:transparent;
-    color:var(--t3);font-size:.66rem;font-weight:600;letter-spacing:.01em}
-  body.navshell .nsh-tab svg{width:22px;height:22px;stroke-width:1.9}
-  body.navshell .nsh-tab.on{color:var(--accent)}
+  /* Нижняя навигация — плавающий ОСТРОВОК, а не полоса во всю ширину:
+     ~70% ширины экрана, центрирован, сплошной фон (фон страницы под ним не
+     просвечивает), висит над safe-area, а не приклеен к краю. Пять слотов:
+     Сегодня · Дневник · ＋ · Психология · Астрология. «Меню» отсюда убрано —
+     его единственный вход в шапке справа, дублировать destination в двух
+     постоянных слоях навигации незачем. */
+  body.navshell .nsh-tabbar{display:flex;position:fixed;z-index:58;
+    left:50%;transform:translateX(-50%);
+    width:70%;min-width:272px;max-width:400px;
+    bottom:calc(env(safe-area-inset-bottom) + 12px);
+    align-items:center;justify-content:space-between;
+    padding:7px 10px;
+    background:var(--island-sf);border:1px solid var(--island-bd);
+    border-radius:999px;box-shadow:var(--island-sh)}
+  /* Иконки без подписей: пять подписанных слотов в 70% ширины пришлось бы
+     сжимать до нечитаемого кегля. Доступное имя каждой вкладки живёт в
+     aria-label, полный список с названиями — в шторке «Меню». */
+  body.navshell .nsh-tab{display:flex;align-items:center;justify-content:center;
+    flex:1 1 0;min-width:44px;min-height:44px;background:transparent;
+    color:var(--t3);border-radius:999px;font-size:0;
+    transition:color var(--dur2) var(--e),background var(--dur2) var(--e)}
+  body.navshell .nsh-tab span{display:none}
+  body.navshell .nsh-tab svg{width:23px;height:23px;stroke-width:1.9}
+  body.navshell .nsh-tab.on{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent)}
+  body.navshell .nsh-tab:active{background:color-mix(in srgb,var(--t1) 8%,transparent)}
+  /* ＋ — центр острова: собран с ним в одну систему, слегка выступает,
+     но не разрывает капсулу. */
   body.navshell .nsh-fab{display:flex;align-items:center;justify-content:center;flex:none;
-    width:52px;height:52px;margin-top:-18px;border-radius:50%;
-    background:var(--blue-btn);color:#fff;box-shadow:0 4px 14px rgba(16,86,204,.4)}
+    width:50px;height:50px;margin:-12px 2px;border-radius:50%;
+    background:var(--blue-btn);color:#fff;
+    box-shadow:0 6px 18px rgba(16,86,204,.42),0 0 0 4px var(--island-sf)}
   body.navshell .nsh-fab svg{width:24px;height:24px;stroke-width:2.4}
-  body.navshell .content{padding-bottom:64px}
-  body.navshell.has-island .content{padding-bottom:132px}
+  /* ＋ в шапке дублировал бы центр острова — на телефоне он лишний. */
+  body.navshell #topbar-add{display:none}
+  body.navshell .content{padding-bottom:84px}
   /* Открытый drawer — единственный слой управления: нижний таб-бар не
      просвечивает и не принимает тапы (одним переходом со scrim). */
   body.navshell .nsh-tabbar{transition:opacity var(--drawer-dur) var(--e)}
@@ -1543,11 +1568,7 @@ body.navshell .nsh-tab:focus-visible,body.navshell .nsh-fab:focus-visible,
 @media(max-width:520px){.x2-grid{grid-template-columns:1fr}}
 /* Остров: узкая контекстная полоса действий. Desktop — снизу по центру;
    mobile — над таб-баром, чтобы не закрывать контент и не спорить с FAB. */
-#x2-island{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom));z-index:40;display:flex;gap:8px;padding:6px;border-radius:999px;background:var(--sf);border:1px solid var(--bd);box-shadow:0 6px 24px rgba(0,0,0,.14)}
-body.navshell #x2-island{bottom:calc(14px + env(safe-area-inset-bottom))}
-@media(min-width:768px){ body.navshell.has-island .content{padding-bottom:84px} }
-@media(max-width:767px){body.navshell #x2-island{bottom:calc(74px + env(safe-area-inset-bottom))}}
-.x2-act{display:flex;align-items:center;gap:7px;padding:9px 14px;border-radius:999px;border:none;background:transparent;color:var(--t1);font-size:.82rem;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent}
+body.navshell @media(max-width:767px){body.navshell }
 .x2-act:hover{background:var(--bg2)}
 .x2-act:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .x2-act svg{width:16px;height:16px;color:var(--accent);stroke-width:2.1}

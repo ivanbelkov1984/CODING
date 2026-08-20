@@ -1,4 +1,4 @@
-// EXPERIENCE 2.0 — ОБОЛОЧКА: sidebar, drawer «Меню», Action Island, Whole Life.
+// EXPERIENCE 2.0 — ОБОЛОЧКА: sidebar, drawer «Меню», контекстный dock, Whole Life.
 //
 // Что защищено:
 //   1. «Ещё» не существует: ни кнопки, ни разметки. «Меню» открывает drawer —
@@ -6,7 +6,7 @@
 //   2. Каждый пункт sidebar ведёт в РЕАЛЬНОЕ назначение (нет мёртвых кнопок).
 //   3. Подвкладки Дневника (Сны/Психология/Закономерности) имеют собственные
 //      пункты и подсвечиваются по активной подвкладке.
-//   4. Action Island — контекстные действия (1–3), скрыт там, где их нет,
+//   4. контекстный dock — контекстные действия (1–3), скрыт там, где их нет,
 //      каждая кнопка открывает настоящую форму.
 //   5. Whole Life «Жизнь сейчас» — проекция существующих данных: пустые
 //      состояния человеческие, наполненные показывают реальные числа, каждый
@@ -51,7 +51,7 @@ const menu = await page.evaluate(() => {
   const out = {};
   out.noMoreOverlay = !document.getElementById('ov-more');
   out.noMoreTab = !document.querySelector('[data-nav="more"]');
-  const btn = document.querySelector('[data-nav="menu"]');
+  const btn = document.getElementById('topbar-menu');
   out.menuBtn = !!btn && btn.tagName === 'BUTTON';
   out.ariaBefore = btn && btn.getAttribute('aria-expanded');
   navGo('menu');
@@ -140,41 +140,53 @@ ok(hl.pat.includes('Закономерности'), 'закономерност�
 ok(hl.health.includes('Здоровье') && !hl.health.some(t => ['Сны', 'Психология', 'Закономерности'].includes(t)),
   'уход со страницы Дневника снимает подсветку подвкладок', JSON.stringify(hl.health));
 
-console.log('\n── § 4. Action Island: контекстные действия, не свалка ──');
-const island = await page.evaluate(async () => {
+console.log('\n── § 4. Контекстный dock: действия текущего экрана, один бар ──');
+// Плавающий бар действий в приложении ровно один — существующий
+// context-action-dock. Отдельного Action Island больше нет: он дублировал
+// dock (два бара показывали одни и те же действия друг над другом).
+const dockD = await page.evaluate(async () => {
+  const D = () => document.getElementById('nsh-context-dock');
+  const up = () => window.__ARCH_CONTEXT_DOCK__.update();
+  const acts = () => { up(); const d = D();
+    return d && !d.hidden ? [...d.querySelectorAll('button')].map(b => b.getAttribute('aria-label')) : []; };
+  const hidden = () => { up(); const d = D(); return !d || d.hidden; };
   const out = {};
-  const acts = () => [...document.querySelectorAll('#x2-island .x2-act')].map(a => a.textContent.trim());
-  const visible = () => document.getElementById('x2-island').style.display !== 'none';
-  goTo('map'); msub('dreams');   out.dreams = { acts: acts(), visible: visible() };
+  out.singleBar = document.querySelectorAll('.nsh-context-dock').length === 1 && !document.getElementById('x2-island');
+  goTo('map'); msub('dreams');   out.dreams = acts();
   msub('psychology');            out.psy = acts();
   goTo('health');                out.health = acts();
   goTo('vit');                   out.vit = acts();
-  goTo('sys');                   out.sysHidden = !visible();
-  goTo('settings');              out.settingsHidden = !visible();
-  // каждая кнопка острова открывает НАСТОЯЩУЮ форму
-  goTo('health');
-  document.querySelector('#x2-island .x2-act').click();
-  await new Promise(r => setTimeout(r, 30));
-  const ov = document.querySelector('.ov.on');
-  out.healthActionOpens = ov ? ov.id : null;
-  if (ov) ov.classList.remove('on');
-  goTo('map'); msub('dreams');
-  document.querySelector('#x2-island .x2-act').click();
-  await new Promise(r => setTimeout(r, 30));
-  const ov2 = document.querySelector('.ov.on');
-  out.dreamActionOpens = ov2 ? ov2.id : null;
-  if (ov2) ov2.classList.remove('on');
+  goTo('settings');              out.settingsHidden = hidden();
+  const run = async (go, label) => {
+    document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
+    (new Function(go))(); up();
+    const b = [...D().querySelectorAll('button')].find(x => x.getAttribute('aria-label') === label);
+    if (!b) return 'НЕТ КНОПКИ ' + label;
+    b.click();
+    await new Promise(r => setTimeout(r, 40));
+    const ov = document.querySelector('.ov.on');
+    return ov ? ov.id : null;
+  };
+  out.healthOpens = await run("goTo('health')", 'Измерение');
+  out.dreamOpens  = await run("goTo('map');msub('dreams')", 'Записать сон');
+  out.psyOpens    = await run("goTo('map');msub('psychology')", 'Момент');
+  document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
   goTo('home');
   return out;
 });
-ok(island.dreams.visible && island.dreams.acts.length === 1 && /сон/i.test(island.dreams.acts[0]),
-  'сны: одно действие — «Записать сон»', JSON.stringify(island.dreams));
-ok(island.psy.length >= 1 && island.psy.length <= 3, `психология: ${island.psy.length} контекстных действия (1–3)`, JSON.stringify(island.psy));
-ok(island.health.length === 2, 'здоровье: измерение + симптом', JSON.stringify(island.health));
-ok(island.vit.length === 1, 'сферы: одно действие', JSON.stringify(island.vit));
-ok(island.sysHidden && island.settingsHidden, 'на аналитике и настройках остров скрыт (нет действий — нет острова)');
-ok(island.healthActionOpens === 'ov-measure', 'кнопка острова открывает настоящую форму измерения', island.healthActionOpens);
-ok(island.dreamActionOpens === 'ov-drm', 'кнопка острова открывает настоящую форму сна', island.dreamActionOpens);
+ok(dockD.singleBar, 'плавающий бар действий ровно один — дубля Action Island больше нет');
+ok(dockD.dreams.length === 1 && /сон/i.test(dockD.dreams[0]),
+  'сны: одно действие — «Записать сон»', JSON.stringify(dockD.dreams));
+ok(dockD.psy.length >= 1 && dockD.psy.length <= 3,
+  `психология: ${dockD.psy.length} контекстных действия (1–3)`, JSON.stringify(dockD.psy));
+ok(dockD.health.length >= 2 && dockD.health.length <= 3,
+  'здоровье: симптом, измерение и тяга', JSON.stringify(dockD.health));
+ok(dockD.vit.length >= 1, 'сферы: есть действие', JSON.stringify(dockD.vit));
+ok(dockD.settingsHidden, 'на настройках бар скрыт — нет действий, нет бара');
+ok(dockD.healthOpens === 'ov-measure', 'dock → «Измерение» открывает настоящую форму', String(dockD.healthOpens));
+ok(dockD.dreamOpens === 'ov-drm', 'dock → «Записать сон» открывает настоящую форму', String(dockD.dreamOpens));
+ok(dockD.psyOpens === 'ov-moment',
+  'психология не потеряла действия при удалении дубля: «Момент» открывает форму', String(dockD.psyOpens));
 
 console.log('\n── § 5. Whole Life: проекция реальных данных ──');
 const life = await page.evaluate(() => {
@@ -329,7 +341,7 @@ for (const theme of ['dark', 'light']) {
   await page.evaluate(() => { const t = document.getElementById('toasts'); if (t) t.innerHTML = ''; });
   await settled(() => !document.body.classList.contains('nav-open') &&
     +getComputedStyle(document.getElementById('nsh-tabbar')).opacity === 1);
-  await page.evaluate(() => document.querySelector('[data-nav="menu"]').click());
+  await page.evaluate(() => document.getElementById('topbar-menu').click());
   await settled(() => document.body.classList.contains('nav-open') &&
     +getComputedStyle(document.getElementById('nsh-tabbar')).opacity === 0 &&
     getComputedStyle(document.querySelector('.sidebar')).transform === 'none');
@@ -352,7 +364,7 @@ for (const theme of ['dark', 'light']) {
       dur: dur(sb.transitionDuration),
       inert: document.getElementById('app').hasAttribute('inert'),
       floatInert: [...document.body.children].filter(e => !['sidebar','scrim','toasts'].includes(e.id) && !e.classList.contains('ov')).every(e => e.hasAttribute('inert')),
-      aria: document.querySelector('[data-nav="menu"]').getAttribute('aria-expanded'),
+      aria: document.getElementById('topbar-menu').getAttribute('aria-expanded'),
       focusInDrawer: !!(document.activeElement && document.activeElement.closest('#sidebar')),
       bgTabbable: [...document.querySelectorAll('#app button, #app a, #app input')]
         .filter(e => e.offsetParent !== null && !e.closest('[inert]')).length,
@@ -396,20 +408,20 @@ for (const theme of ['dark', 'light']) {
     closed: !document.body.classList.contains('nav-open'),
     inert: document.getElementById('app').hasAttribute('inert'),
       floatInert: [...document.body.children].filter(e => !['sidebar','scrim','toasts'].includes(e.id) && !e.classList.contains('ov')).every(e => e.hasAttribute('inert')),
-    aria: document.querySelector('[data-nav="menu"]').getAttribute('aria-expanded'),
-    focusBack: document.activeElement === document.querySelector('[data-nav="menu"]'),
+    aria: document.getElementById('topbar-menu').getAttribute('aria-expanded'),
+    focusBack: document.activeElement === document.getElementById('topbar-menu'),
   }));
   ok(c.closed && !c.inert && c.aria === 'false', `[${theme}] Escape закрывает drawer и снимает inert/aria`, JSON.stringify(c));
   ok(c.focusBack, `[${theme}] фокус возвращается на кнопку «Меню»`);
 }
 // Тап по scrim закрывает drawer
-await page.evaluate(() => document.querySelector('[data-nav="menu"]').click());
+await page.evaluate(() => document.getElementById('topbar-menu').click());
 await settled(() => document.body.classList.contains('nav-open'));
 await page.mouse.click(370, 400);
 await settled(() => !document.body.classList.contains('nav-open'));
 ok(await page.evaluate(() => !document.body.classList.contains('nav-open')), 'тап по затемнению закрывает drawer');
 // Выбор пункта закрывает drawer
-await page.evaluate(() => document.querySelector('[data-nav="menu"]').click());
+await page.evaluate(() => document.getElementById('topbar-menu').click());
 await settled(() => document.body.classList.contains('nav-open'));
 await page.evaluate(() => [...document.querySelectorAll('#nsh-nav-groups .navlink')].find(n => n.textContent.trim() === 'Здоровье').click());
 await page.waitForTimeout(200);
@@ -446,8 +458,9 @@ const afterReload = await page.evaluate(() => ({
   labels: [...document.querySelectorAll('#nsh-tabbar .nsh-tab')].map(b => b.textContent.trim()),
   hash: location.hash, open: document.body.classList.contains('nav-open'),
 }));
-ok(!afterReload.labels.includes('Ещё') && afterReload.labels.includes('Меню'),
-  'после перезагрузки таб-бар: ' + afterReload.labels.join(' · '));
+ok(!afterReload.labels.includes('Ещё') && !afterReload.labels.includes('Меню') &&
+  afterReload.labels.includes('Астрология'),
+  'после перезагрузки нижний остров: ' + afterReload.labels.join(' · '));
 ok(afterReload.hash === '#/menu' && afterReload.open, 'старая ссылка #/more открывает drawer и переписывает hash в #/menu',
   JSON.stringify(afterReload));
 
@@ -483,7 +496,7 @@ console.log('\n── § 13. Достижимость: ни одна убран�
 // никаких прямых вызовов скрытых роутов как единственного доказательства.
 const openMenu = async () => {
   await page.evaluate(() => { document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')); closeNav(); });
-  await page.evaluate(() => document.querySelector('[data-nav="menu"]').click());
+  await page.evaluate(() => document.getElementById('topbar-menu').click());
   await settled(() => document.body.classList.contains('nav-open'));
 };
 const clickNav = async label => {
@@ -505,11 +518,17 @@ const clickText = async (sel, text) => page.evaluate(([s, t]) => {
 const ovOpen = id => page.evaluate(i => { const e = document.getElementById(i); return !!e && e.classList.contains('on'); }, id);
 const pgOn = () => page.evaluate(() => (document.querySelector('.pg.on') || {}).id);
 
-// 1. Дневник → новая запись (через меню, затем Action Island)
+// 1. Дневник → новая запись (через меню, затем контекстный dock)
 await clickNav('Дневник');
 ok(await pgOn() === 'pg-map', 'меню → Дневник открывает дневник');
-await clickText('#x2-island .x2-act', 'Запись');
-ok(await ovOpen('ov-add'), 'Дневник → остров «Запись» открывает существующую форму инсайта');
+const dockClick = label => page.evaluate(l => {
+  window.__ARCH_CONTEXT_DOCK__.update();
+  const d = document.getElementById('nsh-context-dock');
+  const b = d && !d.hidden && [...d.querySelectorAll('button')].find(x => x.getAttribute('aria-label') === l);
+  if (!b) return false; b.click(); return true;
+}, label);
+ok(await dockClick('Новый инсайт') && await ovOpen('ov-add'),
+  'Дневник → dock «Новый инсайт» открывает существующую форму инсайта');
 
 // 2. Сны — через поднавигацию Дневника (2 действия от меню)
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
@@ -517,8 +536,8 @@ const dreamHit = await clickText('#subnav .snpill', 'Сны');
 await page.waitForTimeout(120);
 const dreamsOn = await page.evaluate(() => getComputedStyle(document.getElementById('ms-dreams')).display !== 'none');
 ok(dreamHit && dreamsOn, 'Дневник → Сны достижимы за 2 действия от меню');
-ok(await clickText('#x2-island .x2-act', 'Записать сон') && await ovOpen('ov-drm'),
-  'на снах остров даёт «Записать сон» — форма та же');
+ok(await dockClick('Записать сон') && await ovOpen('ov-drm'),
+  'на снах dock даёт «Записать сон» — форма та же');
 
 // 3. Психология и цели
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
@@ -548,8 +567,8 @@ ok(ovwHit && await pgOn() === 'pg-sys', 'Главная → «Обзор нед�
 // 7. Здоровье: измерение и отчёт врачу
 await clickNav('Здоровье');
 ok(await pgOn() === 'pg-health', 'меню → Здоровье');
-ok(await clickText('#x2-island .x2-act', 'Измерение') && await ovOpen('ov-measure'),
-  'Здоровье → остров «Измерение» открывает существующую форму');
+ok(await dockClick('Измерение') && await ovOpen('ov-measure'),
+  'Здоровье → dock «Измерение» открывает существующую форму');
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
 const docHit = await clickText('#pg-health button', 'Отчёт врачу');
 await page.waitForTimeout(200);
@@ -664,7 +683,7 @@ ok(fit.visible === fit.total, `все ${fit.total} пунктов видны б�
 ok(fit.scroll <= 24, `шторка не требует прокрутки (запас ${fit.scroll}px)`, JSON.stringify(fit));
 
 
-console.log('\n── § 16. Action Island не закрывает собой контент ──');
+console.log('\n── § 16. контекстный dock не закрывает собой контент ──');
 await page.goto(FILE);
 await page.waitForSelector('#nsh-tabbar', { state: 'attached' });
 await page.evaluate(() => { const s = document.getElementById('splash'); if (s) s.style.display = 'none'; });
@@ -678,20 +697,26 @@ for (const [name, go, wantIsland] of [
   ['Настройки', "goTo('settings')", false],
 ]) {
   await page.evaluate(g => (new Function(g))(), go);
-  await page.waitForTimeout(180);
+  await settled(() => {
+    const v = getComputedStyle(document.querySelector('.content')).paddingBottom;
+    if (window.__padPrev === v) return true;
+    window.__padPrev = v; return false;
+  }, 3000);
   const r = await page.evaluate(() => {
-    const el = document.getElementById('x2-island');
-    const shown = getComputedStyle(el).display !== 'none';
+    document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
+    window.__ARCH_CONTEXT_DOCK__.update();
+    const el = document.getElementById('nsh-context-dock');
+    const shown = !!el && !el.hidden;
     const pad = parseInt(getComputedStyle(document.querySelector('.content')).paddingBottom, 10);
-    const acts = [...el.querySelectorAll('.x2-act')].map(b => b.textContent.trim());
-    return { shown, pad, acts, cls: document.body.classList.contains('has-island') };
+    const acts = shown ? [...el.querySelectorAll('button')].map(b => b.getAttribute('aria-label')) : [];
+    return { shown, pad, acts, cls: document.body.classList.contains('nsh-context-on') };
   });
-  ok(r.shown === wantIsland, `${name}: остров ${wantIsland ? 'показан' : 'скрыт'} — как и должно быть`, JSON.stringify(r));
+  ok(r.shown === wantIsland, `${name}: бар действий ${wantIsland ? 'показан' : 'скрыт'} — как и должно быть`, JSON.stringify(r));
   // Место под плавающий остров зарезервировано ровно тогда, когда он есть.
-  ok(r.shown ? (r.cls && r.pad >= 120) : (!r.cls && r.pad <= 80),
-    `${name}: запас под остров ${r.shown ? 'зарезервирован' : 'не занимает место зря'} (${r.pad}px)`, JSON.stringify(r));
+  ok(r.shown ? (r.cls && r.pad >= 140) : (!r.cls && r.pad <= 90),
+    `${name}: запас под бар ${r.shown ? 'зарезервирован' : 'не занимает место зря'} (${r.pad}px)`, JSON.stringify(r));
   if (r.shown) ok(r.acts.length >= 1 && r.acts.length <= 3,
-    `${name}: остров — 1–3 действия (${r.acts.join(' · ')})`, JSON.stringify(r.acts));
+    `${name}: бар — 1–3 действия (${r.acts.join(' · ')})`, JSON.stringify(r.acts));
 }
 // Остров — действия, а не навигация: ни одно название не совпадает с пунктом меню.
 const islandNav = await page.evaluate(() => {
@@ -699,7 +724,7 @@ const islandNav = await page.evaluate(() => {
   const seen = [];
   ["goTo('map');msub('overview')", "goTo('map');msub('dreams')", "goTo('health')", "goTo('vit')"]
     .forEach(g => { (new Function(g))();
-      [...document.querySelectorAll('#x2-island .x2-act')].forEach(b => seen.push(b.textContent.trim())); });
+      [...document.querySelectorAll('.nsh-context-dock .nsh-context-action')].forEach(b => seen.push(b.textContent.trim())); });
   return seen.filter(a => menu.includes(a));
 });
 ok(islandNav.length === 0, 'остров содержит только действия, не дубли пунктов меню', islandNav.join(', '));

@@ -3138,13 +3138,16 @@ const nsh = await page.evaluate(() => {
   navGo('diary');    r.diary = document.getElementById('pg-map').classList.contains('on');
   navGo('psy');      r.psy = document.getElementById('pg-map').classList.contains('on') &&
                               getComputedStyle(document.getElementById('ms-psychology')).display !== 'none';
+  navGo('astro');    r.astro = document.getElementById('pg-astro').classList.contains('on');
   navGo('today');    r.today = document.getElementById('pg-home').classList.contains('on');
   r.todayActive = document.querySelector('.nsh-tab[data-nav="today"]').classList.contains('on');
   // Experience 2.0: свалки «Ещё» больше нет — «Меню» открывает полноценный
   // drawer (тот же sidebar со всеми разделами, сгруппированно).
   navGo('menu');     r.more = document.body.classList.contains('nav-open');
   r.moreRows = document.querySelectorAll('#nsh-nav-groups .navlink').length;
-  r.moreActive = document.querySelector('.nsh-tab[data-nav="menu"]').classList.contains('on');
+  r.moreActive = document.getElementById('topbar-menu').getAttribute('aria-expanded') === 'true';
+  r.noMenuTab = !document.querySelector('.nsh-tab[data-nav="menu"]');
+  r.astroTab = !!document.querySelector('.nsh-tab[data-nav="astro"]');
   closeNav();
   // Полный лаунчер «Записать» (1.2): все типы записи; «Запись сферы» не падает без сфер.
   openCapture();     r.capture = document.getElementById('ov-capture').classList.contains('on');
@@ -3176,9 +3179,11 @@ const nsh = await page.evaluate(() => {
 ok(nsh.freshProfileOn && nsh.freshTabbarVisible, 'rollout 1.4: без сохранённого значения (свежий профиль) — новая навигация ON по умолчанию');
 ok(nsh.onClass && nsh.tabs === 4 && nsh.hasFab, 'nav shell ON: body.navshell, 4 вкладки + FAB');
 ok(nsh.addLabel === 'Записать' && nsh.offLabel === 'Новый инсайт', 'nav shell: ＋ = «Записать» при ON, «Новый инсайт» при OFF');
-ok(nsh.diary && nsh.psy && nsh.today, 'nav shell: вкладки ведут на существующие разделы (Дневник/Психология/Главная)', JSON.stringify([nsh.diary, nsh.psy, nsh.today]));
+ok(nsh.diary && nsh.psy && nsh.astro && nsh.today, 'nav shell: вкладки ведут на существующие разделы (Дневник/Психология/Астрология/Главная)', JSON.stringify([nsh.diary, nsh.psy, nsh.astro, nsh.today]));
 ok(nsh.todayActive && nsh.more && nsh.moreActive && nsh.moreRows === 8,
-  'nav shell 1.1: «Меню» — компактная шторка из 8 крупных пространств, вкладка подсвечена', String(nsh.moreRows));
+  'nav shell 1.1: «Меню» из шапки открывает компактную шторку из 8 пространств, aria-expanded=true', String(nsh.moreRows));
+ok(nsh.noMenuTab && nsh.astroTab,
+  'nav shell 1.1: в нижнем острове нет «Меню», зато есть «Астрология»', JSON.stringify([nsh.noMenuTab, nsh.astroTab]));
 ok(nsh.capture && nsh.capBtns >= 9 && nsh.plusCapture, 'nav shell 1.2: полный лаунчер «Записать» (все типы записи)');
 ok(nsh.sphereSafe, 'nav shell 1.2: «Запись сферы» безопасна без сфер (без исключений)');
 ok(nsh.hashDiary && nsh.hashOverview, 'nav shell 1.5: раздел сериализуется в hash (#/diary, #/overview)', JSON.stringify([nsh.hashDiary, nsh.hashOverview]));
