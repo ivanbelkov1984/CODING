@@ -29,6 +29,7 @@ let pass = 0, fail = 0;
 const errors = [];
 // Дождаться устоявшегося состояния вместо фиксированной паузы. Молча выходит
 // по таймауту — судит всегда сам assert, а не наличие/отсутствие ожидания.
+const clearOv2 = () => page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
 const settled = async (fn, ms = 3000) => {
   try { await page.waitForFunction(fn, null, { timeout: ms, polling: 40 }); return true; }
   catch (e) { return false; }
@@ -728,6 +729,131 @@ const islandNav = await page.evaluate(() => {
   return seen.filter(a => menu.includes(a));
 });
 ok(islandNav.length === 0, 'остров содержит только действия, не дубли пунктов меню', islandNav.join(', '));
+
+
+console.log('\n── § 17. UX cleanup: нет переполнений, дублей и жаргона ──');
+await page.goto(FILE);
+await page.waitForSelector('#nsh-tabbar', { state: 'attached' });
+await page.evaluate(() => { const s = document.getElementById('splash'); if (s) s.style.display = 'none'; });
+await page.waitForTimeout(700);
+await clearOv2();
+
+// 17.1 Ни один экран не уезжает вправо на 390px.
+for (const [name, go] of [
+  ['Главная', "goTo('home')"], ['Дневник', "goTo('map');msub('overview')"],
+  ['Психология', "goTo('map');msub('psychology')"], ['Здоровье', "goTo('health')"],
+  ['Астрология', "goTo('astro')"], ['Закономерности', "goTo('map');msub('patterns')"],
+  ['Сферы', "goTo('vit')"], ['Обзор', "goTo('sys')"], ['Настройки', "goTo('settings')"],
+]) {
+  await page.evaluate(g => (new Function(g))(), go);
+  await page.waitForTimeout(220);
+  const o = await page.evaluate(() => {
+    const vis = el => { const s = getComputedStyle(el), b = el.getBoundingClientRect();
+      return s.display !== 'none' && s.visibility !== 'hidden' && b.width > 0 && b.height > 0; };
+    const chain = el => { for (let n = el; n && n !== document.body; n = n.parentElement) if (!vis(n)) return false; return true; };
+    const bad = [];
+    const inScroller = el => {
+      for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+        const ox = getComputedStyle(n).overflowX;
+        if (ox === 'auto' || ox === 'scroll') return true;
+      }
+      return false;
+    };
+    document.querySelector('.pg.on').querySelectorAll('*').forEach(el => {
+      if (!chain(el) || inScroller(el)) return;
+      const b = el.getBoundingClientRect();
+      if (b.width === 0) return;
+      if (b.right > innerWidth + 1) bad.push(`${el.tagName}.${String(el.className).slice(0, 18)}→${Math.round(b.right)}`);
+      else if (el.scrollWidth > el.clientWidth + 2 && getComputedStyle(el).overflowX === 'visible')
+        bad.push(`OVF ${el.tagName}.${String(el.className).slice(0, 18)}`);
+    });
+    return { bad: [...new Set(bad)].slice(0, 4), doc: document.documentElement.scrollWidth - innerWidth };
+  });
+  ok(o.bad.length === 0 && o.doc <= 0, `${name}: нет горизонтального переполнения на 390px`, o.bad.join(' | '));
+}
+
+// 17.2 Островок: 70% ширины, стабилен на всех вкладках, ничего не обрезано.
+const barGeo = [];
+for (const go of ["goTo('home')", "goTo('map');msub('overview')", "goTo('map');msub('psychology')", "goTo('astro')"]) {
+  await page.evaluate(g => (new Function(g))(), go);
+  await page.waitForTimeout(200);
+  barGeo.push(await page.evaluate(() => {
+    const b = document.getElementById('nsh-tabbar').getBoundingClientRect();
+    const clipped = [...document.querySelectorAll('#nsh-tabbar .nsh-tab')]
+      .some(t => t.scrollWidth > t.clientWidth + 2);
+    return { w: Math.round(b.width), pct: Math.round(b.width / innerWidth * 100), x: Math.round(b.x), clipped };
+  }));
+}
+ok(barGeo.every(g => g.pct === barGeo[0].pct && g.w === barGeo[0].w),
+  `островок не «дышит» при переключении вкладок (${barGeo.map(g => g.w).join('/')}px)`, JSON.stringify(barGeo));
+ok(barGeo[0].pct === 70, `островок занимает 70% ширины (${barGeo[0].pct}%)`, JSON.stringify(barGeo[0]));
+ok(barGeo.every(g => !g.clipped), 'ни одна вкладка островка не обрезана');
+
+// 17.3 «Зачем?» больше не самостоятельная глобальная сущность.
+const why = await page.evaluate(async () => {
+  const seen = [];
+  const scan = l => document.querySelectorAll('body *').forEach(el => {
+    if (el.closest('script,style,template')) return;
+    const own = [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ');
+    if (own.includes('«Зачем?»')) seen.push(l + ': ' + own.trim().slice(0, 50));
+  });
+  ['home', 'map', 'health', 'astro', 'sys', 'settings'].forEach(t => { goTo(t); scan(t); });
+  document.querySelectorAll('.ov').forEach(o => { o.classList.add('on'); scan('ov:' + o.id); o.classList.remove('on'); });
+  goTo('home');
+  // Разбор при этом остался достижим и пишет туда же.
+  const before = (DB.whys || []).length;
+  openOv('ov-why');
+  const formOpen = !!document.querySelector('#ov-why.on');
+  const title = (document.querySelector('#ov-why .sh-title') || {}).textContent || '';
+  document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
+  return { seen: [...new Set(seen)], formOpen, title, coll: Array.isArray(DB.whys), before };
+});
+ok(why.seen.length === 0, '«Зачем?» как отдельная сущность не показывается нигде', why.seen.join(', '));
+ok(why.formOpen && /Разбор ситуации/.test(why.title),
+  'разбор ситуации остался рабочим и называется по-человечески', why.title);
+ok(why.coll, 'коллекция разборов не тронута — переименование только в подписях');
+
+// 17.4 Главная: без декоративного приветствия и без дубля быстрых действий.
+await page.evaluate(() => goTo('home'));
+await page.waitForTimeout(250);
+const home = await page.evaluate(() => {
+  const pg = document.getElementById('pg-home');
+  const secs = [...pg.querySelectorAll('.sec-lbl')].filter(s => s.offsetParent !== null).map(s => s.textContent.trim());
+  return { greeting: !!document.getElementById('h-hl'), tiles: pg.querySelectorAll('.qarow .qabtn').length,
+    secs, hasDate: !!document.getElementById('h-date') };
+});
+ok(!home.greeting, 'декоративного приветствия на Главной нет');
+ok(home.tiles === 0, 'сетка из пяти быстрых плиток убрана — их даёт ＋', String(home.tiles));
+ok(home.hasDate, 'дата осталась: она даёт контекст, а не украшение');
+ok(home.secs.length <= 5, `Главная не перегружена секциями (${home.secs.length}): ${home.secs.join(' · ')}`);
+
+// 17.5 Первый слой без профессионального жаргона.
+const jarg = await page.evaluate(() => {
+  const TERMS = ['КПТ', 'CBT', 'DBT', 'Схема-терапия', 'Психообразование', 'Мотивационное интервью',
+    'Follow-up', 'эпизод', 'Эпизод', 'доказательност', 'Семейство метода', 'naturalistic',
+    'claimClass', 'provenance', 'sourceId', 'insufficient'];
+  const found = new Set();
+  const scan = () => document.querySelectorAll('body *').forEach(el => {
+    if (el.closest('script,style,template')) return;
+    const own = [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ');
+    TERMS.forEach(t => { if (own.includes(t)) found.add(t); });
+  });
+  ['home', 'map', 'health', 'astro', 'vit', 'sys', 'settings'].forEach(t => { goTo(t); scan(); });
+  ['overview', 'insights', 'dreams', 'psychology', 'patterns', 'spiritual', 'evolution'].forEach(s => { goTo('map'); msub(s); scan(); });
+  document.querySelectorAll('.ov').forEach(o => { o.classList.add('on'); scan(); o.classList.remove('on'); });
+  goTo('home');
+  return [...found];
+});
+ok(jarg.length === 0, 'на первом слое нет профессионального жаргона', jarg.join(', '));
+
+// 17.6 Подходы названы по-человечески, идентификаторы не тронуты.
+const fam = await page.evaluate(() => ({
+  ru: Object.values(PSY_FAMILY_RU), ids: PSY_METHOD_FAMILIES.slice(),
+}));
+ok(fam.ids.includes('CBT') && fam.ids.includes('ACT'),
+  'идентификаторы подходов сохранены — canonical-данные не переименованы', fam.ids.join(','));
+ok(!fam.ru.some(v => /КПТ|CBT|DBT|Схема-терапия/.test(v)),
+  'подписи подходов человеческие: ' + fam.ru.slice(0, 4).join(' · '), fam.ru.join(' · '));
 
 await browser.close();
 console.log(`\nEXPERIENCE 2.0 SHELL: ${pass} passed, ${fail} failed`);

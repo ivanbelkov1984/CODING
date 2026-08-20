@@ -111,8 +111,8 @@ const MUTANTS = [
   {
     id: 'evidence-review-date-removed',
     what: 'у evidence-элемента исчезают reviewedAt/evidenceVersion',
-    find: "      limitations: 'групповая доказательность не гарантирует индивидуальный эффект',\n      note: 'внешняя доказательность, не персональный результат',\n      reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },",
-    replace: "      limitations: 'групповая доказательность не гарантирует индивидуальный эффект',\n      note: 'внешняя доказательность, не персональный результат' }] },",
+    find: "      limitations: 'то, что помогает многим, не обязательно поможет именно тебе',\n      note: 'это общие данные, а не твой личный результат',\n      reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },",
+    replace: "      limitations: 'то, что помогает многим, не обязательно поможет именно тебе',\n      note: 'это общие данные, а не твой личный результат' }] },",
     expectFail: 'соответствует схеме',
   },
   {
