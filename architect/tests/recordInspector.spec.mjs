@@ -1086,6 +1086,61 @@ ok(errors.length === 0, `JS-ошибок нет за весь прогон (${er
   ok(/TEST-RI-/.test(src), 'все фикстуры несут синтетический префикс TEST-RI-*');
 }
 
+
+// ── СПИСОК ПОКАЗЫВАЕТ ЭФФЕКТИВНОЕ ЗНАЧЕНИЕ, А НЕ СЫРОЕ ──────────────
+// Контракт показа инспектора — «оригинал ⊕ активные коррекции»
+// (recDetEffective). Список строился из сырых DB[coll]: человек, исправивший
+// значение, видел в списке прежнее и не мог отличить исправленную запись от
+// нетронутой, пока не откроет карточку.
+{
+  console.log('\n── Список: эффективное значение и состояние исправлений ──');
+  const r = await page.evaluate(async () => {
+    DB.measures = [
+      { id: 'TEST-RI-EFF-1', kType: 'measurement', name: 'TEST-RI вес', value: '70', unit: 'кг',
+        verif: 'user_confirmed', createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION },
+      { id: 'TEST-RI-EFF-2', kType: 'measurement', name: 'TEST-RI пульс', value: '60', unit: '',
+        verif: 'user_confirmed', createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION },
+    ];
+    DB.corrections = [];
+    const res = addCorrection('measures', 'TEST-RI-EFF-1', { value: '71' }, 'TEST-RI причина');
+    openRecords();
+    const sel = document.getElementById('rec-coll');
+    sel.value = 'measures'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise(x => setTimeout(x, 120));
+    const txt = document.getElementById('records-list').textContent || '';
+    // Строка исправленной записи и строка нетронутой — раздельно.
+    const rows = [...document.querySelectorAll('#records-list .si-row')].map(n => n.textContent);
+    const fixed = rows.find(t => /TEST-RI вес/.test(t)) || '';
+    const plain = rows.find(t => /TEST-RI пульс/.test(t)) || '';
+    return { corrOk: !!(res && res.ok), showsEffective: /71/.test(fixed), showsStale: /\b70\b/.test(fixed),
+      markedFixed: /исправлено/.test(fixed), plainUnmarked: !/исправлено/.test(plain),
+      opensRight: /TEST-RI-EFF-1/.test(document.getElementById('records-list').innerHTML), txt: txt.slice(0, 160) };
+  });
+  ok(r.corrOk, 'фикстура: исправление создано');
+  ok(r.showsEffective && !r.showsStale,
+    'список показывает исправленное значение (71), а не прежнее (70)', JSON.stringify(r));
+  ok(r.markedFixed && r.plainUnmarked,
+    'исправленная запись помечена в списке, нетронутая — нет', JSON.stringify(r));
+  ok(r.opensRight, 'идентичность строки не пострадала: id по-прежнему передаётся в recOpen');
+
+  // Конфликт исправлений виден прямо в списке, а не только внутри карточки.
+  const c = await page.evaluate(async () => {
+    DB.corrections = [
+      { id: 'c1', kType: 'correction', coll: 'measures', targetId: 'TEST-RI-EFF-2', patch: { value: '61' },
+        reason: 'TEST-RI a', supersedesCorrectionId: null, origin: 'user', createdAt: nowISO(), sv: SCHEMA_VERSION },
+      { id: 'c2', kType: 'correction', coll: 'measures', targetId: 'TEST-RI-EFF-2', patch: { value: '62' },
+        reason: 'TEST-RI b', supersedesCorrectionId: null, origin: 'user', createdAt: nowISO(), sv: SCHEMA_VERSION },
+    ];
+    rRecords();
+    await new Promise(x => setTimeout(x, 80));
+    const row = [...document.querySelectorAll('#records-list .si-row')].map(n => n.textContent)
+      .find(t => /TEST-RI пульс/.test(t)) || '';
+    return { conflictShown: /конфликт/.test(row), notSilentlyPicked: !/61|62/.test(row), row: row.slice(0, 120) };
+  });
+  ok(c.conflictShown, 'конфликт исправлений виден в списке', JSON.stringify(c));
+  ok(c.notSilentlyPicked, 'при конфликте список не выбирает молча одно из значений', JSON.stringify(c));
+}
+
 await browser.close();
 console.log(`\nИНСПЕКТОР ЗАПИСИ: ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

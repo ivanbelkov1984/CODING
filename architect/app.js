@@ -3165,11 +3165,16 @@ function rRecords() {
     return;
   }
   const cfg = REC_COLLS[coll]; if (!cfg) { out.innerHTML = ''; return; }
-  const list = [...(DB[coll] || [])].sort((a, b) => _ru(b) - _ru(a));
+  const list = [...(projAll(coll) || [])].sort((a, b) => _ru(b) - _ru(a));
   // Строка — настоящая кнопка открытия записи. Удаление остаётся рядом, но
   // перестаёт быть единственным и главным действием.
   out.innerHTML = list.length ? list.slice(0, 300).map(r =>
-    `<div class="si-row"><button type="button" class="si-body" style="text-align:left;background:none;border:0;padding:.55rem 0;min-height:44px;width:100%;color:inherit;font:inherit;cursor:pointer" onclick="recOpen('${coll}',${recArg(r.id)})"><div class="si-text">${esc(cfg.sum(r) || 'запись')}</div><div class="si-text" style="font-size:.7rem;color:var(--t4)">Открыть запись</div></button>${delBtn(`recDel('${coll}',${recArg(r.id)})`)}</div>`).join('')
+    (() => {
+      const mark = (r._corrConflicts || []).length ? '<span style="color:var(--red,#E5484D)"> · конфликт исправлений</span>'
+        : (r._corrInvalid || []).length ? '<span style="color:var(--red,#E5484D)"> · история исправлений повреждена</span>'
+        : r._corrected ? '<span style="color:var(--t3)"> · исправлено</span>' : '';
+      return `<div class="si-row"><button type="button" class="si-body" style="text-align:left;background:none;border:0;padding:.55rem 0;min-height:44px;width:100%;color:inherit;font:inherit;cursor:pointer" onclick="recOpen('${coll}',${recArg(r.id)})"><div class="si-text">${esc(cfg.sum(r) || 'запись')}${mark}</div><div class="si-text" style="font-size:.7rem;color:var(--t4)">Открыть запись</div></button>${delBtn(`recDel('${coll}',${recArg(r.id)})`)}</div>`;
+    })()).join('')
     + (list.length > 300 ? `<div class="si-text" style="color:var(--t3);padding:.4rem 0">Показаны последние 300 из ${list.length}.</div>` : '')
     : '<div class="bk-empty" style="padding:.6rem 0">Записей этого типа нет.</div>';
 }

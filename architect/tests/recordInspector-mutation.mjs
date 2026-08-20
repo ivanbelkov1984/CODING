@@ -19,6 +19,24 @@ const src = await readFile(DIST, 'utf8');
 
 const MUTANTS = [
   {
+    // Найденный в PR B дефект: список инспектора строился из СЫРЫХ записей,
+    // хотя контракт показа — «оригинал ⊕ активные коррекции».
+    id: 'list-shows-raw-not-effective',
+    what: 'список инспектора снова показывает сырые записи вместо эффективных',
+    find: "  const list = [...(projAll(coll) || [])].sort((a, b) => _ru(b) - _ru(a));",
+    replace: "  const list = [...(DB[coll] || [])].sort((a, b) => _ru(b) - _ru(a));",
+    expectFail: 'список показывает исправленное значение (71), а не прежнее (70)',
+  },
+  {
+    // Состояние записи перестаёт быть видно: исправленная и нетронутая
+    // выглядят одинаково, конфликт не показывается.
+    id: 'list-correction-marks-removed',
+    what: 'пометки «исправлено» и «конфликт» убраны из списка',
+    find: "      const mark = (r._corrConflicts || []).length ?",
+    replace: "      const mark = ''; const _unused = (r._corrConflicts || []).length ?",
+    expectFail: 'конфликт исправлений виден в списке',
+  },
+  {
     // ТОТ САМЫЙ продакшн-дефект MAIN 1a859f47: строковый id обрывает
     // inline-обработчик, и строка списка перестаёт открываться.
     id: 'string-id-breaks-handler',
