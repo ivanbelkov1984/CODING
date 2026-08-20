@@ -1380,7 +1380,6 @@ function goTo(tab, el) {
   if (tab==='astro') asub('menu');
   if (tab==='settings') { rAbout(); rProfileRow(); checkApiStatus(); rPushStatus(); const kc=$('keys-cnt'); if (kc) kc.textContent = KEY_SERVICES.filter(s=>getAiKeyFor(s.p)).length + ' из ' + KEY_SERVICES.length; }
   if (document.body.classList.contains('navshell')) { nshHighlight(tab); nshWriteHash(tab); }
-  try { x2Island(); } catch (e) {}
 }
 function msub(tab, el) {
   document.querySelectorAll('[id^="ms-"]').forEach(t => t.style.display='none');
@@ -1412,7 +1411,6 @@ function msub(tab, el) {
   if (tab==='psychology') rPsyWorkspace();   // Wave 7 (issue #162)
   _x2Sub = tab;
   if (document.body.classList.contains('navshell') && typeof nshHighlight === 'function') nshHighlight('map');
-  try { x2Island(); } catch (e) {}
 }
 
 // ─── ОВЕРЛЕИ ────────────────────────────────────────────────────
@@ -1768,36 +1766,10 @@ function rWholeLife() {
   icons();
 }
 
-// ═══ EXPERIENCE 2.0: ACTION ISLAND — действия текущего экрана ════════
-// Не навигация: 1–3 главных действия контекста. Регистр по странице и
-// подвкладке Дневника; пусто → остров скрыт (у экрана свои CTA).
-const X2_ISLAND = {
-  'map/overview':   [['plus', 'Запись', "openOv('ov-add')"], ['milestone', 'Событие', "openOv('ov-evo-add')"]],
-  'map/insights':   [['plus', 'Запись', "openOv('ov-add')"], ['milestone', 'Событие', "openOv('ov-evo-add')"]],
-  'map/dreams':     [['moon', 'Записать сон', "openOv('ov-drm')"]],
-  'map/psychology': [['activity', 'Момент', "openOv('ov-moment')"], ['help-circle', 'Разобрать «Зачем?»', "openOv('ov-why')"]],
-  'map/patterns':   [['plus', 'Паттерн', "openOv('ov-pat-add')"]],
-  'map/spiritual':  [['plus', 'Практика', "openOv('ov-spi-add')"]],
-  'map/evolution':  [['milestone', 'Веха', "openOv('ov-evo-add')"]],
-  'vit':            [['layers', 'Отметить сферу', 'captureSphere()']],
-  'health':         [['ruler', 'Измерение', "openOv('ov-measure')"], ['thermometer', 'Симптом', "openOv('ov-symptom')"]],
-};
+// Активная подвкладка Дневника — нужна подсветке нижнего острова
+// (Дневник ↔ Психология). Контекстные действия экрана даёт существующий
+// context-action-dock (context-action-dock.js), второго бара нет.
 let _x2Sub = 'overview';
-function x2Island() {
-  const el = $('x2-island'); if (!el) return;
-  const hide = () => { el.innerHTML = ''; el.style.display = 'none'; document.body.classList.remove('has-island'); };
-  if (!document.body.classList.contains('navshell')) { hide(); return; }
-  const pg = document.querySelector('.pg.on');
-  const tab = pg ? pg.id.replace('pg-', '') : 'home';
-  const key = tab === 'map' ? 'map/' + _x2Sub : tab;
-  const acts = X2_ISLAND[key] || [];
-  if (!acts.length) { hide(); return; }
-  el.style.display = '';
-  document.body.classList.add('has-island');
-  el.innerHTML = acts.slice(0, 3).map(([ico, label, act]) =>
-    `<button type="button" class="x2-act" onclick="${act}"><i data-lucide="${ico}"></i><span>${label}</span></button>`).join('');
-  icons();
-}
 
 function rHome() {
   const now = new Date();
@@ -12261,14 +12233,14 @@ function navShellEnabled() {
   } catch (e) { return true; }
 }
 // Вкладки shell → существующие id (goTo). «Ещё» открывает drawer со всеми разделами.
-const NSH_MAP = { today: 'home', diary: 'map' };
+const NSH_MAP = { today: 'home', diary: 'map', astro: 'astro' };
 function navGo(dest) {
   // Experience 2.0: свалки «Ещё» нет. Кнопка «Меню» (и старый hash #/more)
   // открывают полноценный drawer со всеми разделами — тот же sidebar.
   if (dest === 'more' || dest === 'menu') {
     // Открытие идёт через openNav(): один контракт (inert фона, фокус внутрь,
     // aria-expanded на реальном opener) для бургера, вкладки «Меню» и hash.
-    openNav(document.querySelector('[data-nav="menu"]') || $('burger'));
+    openNav($('topbar-menu') || $('burger'));
     nshHighlight('menu'); nshPushHash('#/menu');
     return;
   }
@@ -12277,11 +12249,14 @@ function navGo(dest) {
   if (tab) goTo(tab);
 }
 // Обратный маппinг: подсветить активную вкладку по текущему разделу.
-// Разделы вне 4 вкладок (Сферы/Здоровье/Астро/Настройки) относятся к «Меню».
+// Пять слотов острова: Сегодня / Дневник / + / Психология / Астрология.
+// Разделы вне их (Здоровье, Сферы, Обзор, Настройки) не подсвечивают ничего:
+// это честнее, чем подсвечивать вкладку, которой в баре больше нет.
 function nshHighlight(tab) {
   const dest = tab === 'home' ? 'today'
     : tab === 'map' ? (_x2Sub === 'psychology' ? 'psy' : 'diary')
-    : 'menu';
+    : tab === 'astro' ? 'astro'
+    : '';
   document.querySelectorAll('.nsh-tab').forEach(b => {
     const on = b.dataset.nav === dest;
     b.classList.toggle('on', on);
@@ -12465,7 +12440,7 @@ let _navOpener = null;
 function navIsDrawer() { return window.innerWidth <= 900 && !(document.body.classList.contains('navshell') && window.innerWidth >= 768); }
 function navSetOpener(el) {
   _navOpener = el || null;
-  document.querySelectorAll('#burger,[data-nav="menu"]').forEach(b =>
+  document.querySelectorAll('#burger,#topbar-menu').forEach(b =>
     b.setAttribute('aria-expanded', document.body.classList.contains('nav-open') ? 'true' : 'false'));
 }
 const NAV_INERT_SKIP = el =>

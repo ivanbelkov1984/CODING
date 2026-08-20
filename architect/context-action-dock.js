@@ -18,6 +18,12 @@
     'map:dreams': [
       { id: 'dream', label: 'Записать сон', icon: 'moon', primary: true, run: () => openOv('ov-drm') },
     ],
+    // Психологическое пространство: перенесено из упразднённого Action Island
+    // (PR #185) в единственный бар контекстных действий. Обработчики те же.
+    'map:psychology': [
+      { id: 'moment', label: 'Момент', icon: 'activity', primary: true, run: () => openOv('ov-moment') },
+      { id: 'why', label: 'Разбор «Зачем?»', icon: 'help-circle', run: () => openOv('ov-why') },
+    ],
     'map:patterns': [
       { id: 'pattern', label: 'Новый паттерн', icon: 'git-branch', primary: true, run: () => openOv('ov-pat-add') },
     ],
