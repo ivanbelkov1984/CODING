@@ -23,12 +23,12 @@ They MUST NOT be copied into this public repository. When Google Drive write acc
 2. Backfill the relevant private Google Drive psychology documents, preserving epistemic levels (user-reported fact / interpretation / external-world claim).
 3. Regenerate or verify a deterministic `architect-external-work-v2` feed with stable `sourceId` values and provenance.
 4. Store the feed in the private Drive integration area.
-5. Use Drive Sync Hub / External Work Bridge in Architect Life: read → normalize → validate → preview → explicit owner confirmation → commit → ledger/checkpoint.
+5. Use Drive Sync Hub / External Work Bridge in Architect Life: read → normalize → validate → preview → explicit owner confirmation → atomic commit → ledger/checkpoint.
 6. Reconcile Drive ↔ Architect and record the successful checkpoint in the private Drive integration reports.
 
 ## Important architecture facts
 
-- Google Drive remains the private canonical archive for psychological material.
+- Google Drive is the private source/archive for psychological backfill and external-work feeds. The Architect application's canonical committed state remains local-first in the active profile; Drive content reaches it only through the validated preview/confirmation/atomic-commit pipeline with ledger/checkpoint.
 - This public GitHub repository must contain technical contracts only, never the user's private psychological text.
 - The Architect app does not ingest arbitrary diary Docs directly. It ingests deterministic `architect-external-work-*` feeds through the External Work Bridge / Drive Sync Hub.
 - Drive Sync Hub is explicit-action, preview-and-confirm by design; no silent direct Drive → DB write.
