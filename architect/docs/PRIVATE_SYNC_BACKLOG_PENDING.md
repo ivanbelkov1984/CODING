@@ -1,6 +1,6 @@
 # PRIVATE SYNC BACKLOG — PENDING
 
-Status date: 2026-08-23
+Status date: 2026-08-28
 
 This file intentionally contains **no private psychological content**.
 
@@ -17,11 +17,11 @@ Because of that, private psychological updates from 2026-08-15 onward were not s
 
 A private `architect-external-work-v2` package and a human-readable backlog were prepared in the originating ChatGPT session for the period 2026-08-15 through 2026-08-19.
 
-Additional private psychological/life events were reported in the same project conversation on 2026-08-23 and must also be recovered from the project conversation/context during backfill. Their content is intentionally not reproduced here.
+Additional private psychological/life events were reported in the same project conversation on 2026-08-23 and again through 2026-08-28 and must also be recovered from the project conversation/context during backfill. Their content is intentionally not reproduced here.
 
 They MUST NOT be copied into this public repository. When Google Drive write access is restored, the next authorized chat should:
 
-1. Recover the private backlog from the prior ChatGPT project conversation/context, covering **2026-08-15 through at least 2026-08-23**.
+1. Recover the private backlog from the prior ChatGPT project conversation/context, covering **2026-08-15 through at least 2026-08-28**.
 2. Backfill the relevant private Google Drive psychology/life documents, preserving epistemic levels (user-reported fact / interpretation / external-world claim).
 3. Regenerate or verify deterministic `architect-external-work-v2` feed(s) with stable `sourceId` values and provenance for the full missing window.
 4. Store the feed(s) in the private Drive integration area.
@@ -38,7 +38,7 @@ They MUST NOT be copied into this public repository. When Google Drive write acc
 ## Handoff marker
 
 Pending private backfill window starts: **2026-08-15**.
-Current known missing window extends through: **2026-08-23**.
+Current known missing window extends through: **2026-08-28**.
 
 Do not mark this backlog resolved until both conditions are proven:
 - the private Google Drive documents contain the missing period; and
