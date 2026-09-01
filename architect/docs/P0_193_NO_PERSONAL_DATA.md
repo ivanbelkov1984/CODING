@@ -1,0 +1,1 @@
+P0 #193 hotfix contains only provider/schema compatibility code and synthetic/static regression checks. No personal diary content, UUID from the production screenshot, credentials, tokens or private psychological data are included.
