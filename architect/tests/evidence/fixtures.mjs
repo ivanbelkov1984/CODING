@@ -297,7 +297,7 @@ export async function seedPopulated(page, { longText = false } = {}) {
 
     try { if (typeof persist === 'function') persist(); } catch (_) {}
     try { rHome(); } catch (_) {}
-  }, LONG_RU);
+  }, longText ? LONG_RU : '');
 
   await setupAstro(page);
   await page.evaluate(() => { try { goTo('home'); } catch (_) {} });

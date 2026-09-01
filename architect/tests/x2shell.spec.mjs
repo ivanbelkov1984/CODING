@@ -588,10 +588,10 @@ await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.cla
 await clickNav('Астрология');
 ok(await pgOn() === 'pg-astro', 'меню → Астрология');
 await clickNav('Дневник');
-const patternHit = await clickText('#subnav .snpill', 'Закономерности');
+const patternHit = await clickText('#subnav .snpill', 'Повторы');
 await page.waitForTimeout(120);
 const patOn = await page.evaluate(() => getComputedStyle(document.getElementById('ms-patterns')).display !== 'none');
-ok(patternHit && patOn, 'Дневник → Закономерности открывают существующий Pattern Engine');
+ok(patternHit && patOn, 'Дневник → Повторы открывают существующий раздел закономерностей');
 
 // 9. Поиск — из шапки, а не из меню
 const searchHit = await page.evaluate(() => {
