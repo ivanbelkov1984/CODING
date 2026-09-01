@@ -13331,7 +13331,7 @@ async function psyMarkBatch(todo) {
       symptom: { anyOf: [{ type: 'string' }, { type: 'null' }] }, func: { anyOf: [{ type: 'string' }, { type: 'null' }] }, gain: { anyOf: [{ type: 'string' }, { type: 'null' }] },
       ...psyEnumProps(),
       emotion: { anyOf: [{ type: 'string' }, { type: 'null' }] }, game: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-      conf: { type: 'integer', minimum: 0, maximum: 100 },
+      conf: { type: 'integer' },
       themes: { type: 'array', items: { type: 'string' }, maxItems: 3 },
     } } } } };
   const vocab = [...new Set((DB.insights || []).flatMap(i => (i.psy && i.psy.themes) || []))].slice(0, 40);
@@ -13340,8 +13340,11 @@ async function psyMarkBatch(todo) {
     '\n\nРазметь каждую по методу «Зачем?». Кратко, по-русски, без пересказа.';
   const text = await callClaude({ system: PSY_SYSTEM, user, maxTokens: 1400, schema, task: 'psy' });
   const out = JSON.parse(text);
+  const psyItems = Array.isArray(out.items) ? out.items : [];
+  if (psyItems.some(m => !m || !Number.isInteger(m.id) || !Number.isInteger(m.conf) || m.conf < 0 || m.conf > 100))
+    throw new Error('Некорректная разметка психоконтура: confidence должен быть целым числом 0–100');
   let n = 0;
-  (out.items || []).forEach(m => {
+  psyItems.forEach(m => {
     const i = DB.insights.find(x => x.id === m.id);
     if (!i) return;
     i.psy = { symptom: m.symptom, func: m.func, gain: m.gain, need: psyNeedFromAI(m.need), ego: psyEgoFromAI(m.ego), emotion: m.emotion, game: m.game, conf: m.conf, at: nowISO(),

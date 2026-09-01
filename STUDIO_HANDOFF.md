@@ -354,3 +354,9 @@ backend-URL + переход схем на anyOf вместо type:['string','nu
 Новые localStorage-ключи: `arch5_rec_<profile>` (ключ восстановления).
 Формат серверного блока теперь v2 (envelope) — если будете трогать
 синк/шифрование, читайте SECURITY_MODEL.md и decryptPayload (v1+v2).
+
+
+### 2026-09-01 14:00 UTC · сессия: CODING · P0 #193 — совместимость Anthropic structured-output schema
+Коммиты: этот hotfix-коммит.
+Состояние: production-ошибка психоконтура `Claude 400: integer minimum/maximum are not supported` исправлена на уровне provider transport schema; числовая граница confidence 0..100 сохранена как детерминированная application validation. Тот же класс исправлен в backend triage. Sync не менялся: AI-ошибка остаётся отдельной от уже успешного GET/PUT/sync. Добавлен regression guard в `npm test`.
+Дальше: после зелёного CI/deploy на MAIN подтвердить на owner-device, что психоконтур больше не получает Claude 400; consumer-подписка Claude для этого API-вызова не требуется.

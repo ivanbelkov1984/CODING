@@ -42,7 +42,7 @@ const schema = { type:'object', additionalProperties:false, required:['items'], 
     id:{type:'integer'},
     type:{type:'string', enum:['gratitude','suggestion','bug','ux_complaint','irrelevant']},
     sentiment:{type:'string', enum:['pos','neu','neg','critical']},
-    confidence:{type:'integer', minimum:0, maximum:100},
+    confidence:{type:'integer'},
     module:{type:'string', enum:['today','spheres','mind','results','sync','ai','pwa','feedback','other']},
     summary:{type:'string'},
     pattern_id:{anyOf:[{type:'integer'},{type:'null'}]}
@@ -64,6 +64,11 @@ const resp = await fetch('https://api.anthropic.com/v1/messages', {
 const data = await resp.json();
 if (!resp.ok) { console.error('Claude API:', (data.error && data.error.message) || resp.status); process.exit(1); }
 const out = JSON.parse(data.content.filter(b => b.type==='text').map(b => b.text).join(''));
+if (!out || !Array.isArray(out.items) || out.items.some(m => !m || !Number.isInteger(m.confidence) || m.confidence < 0 || m.confidence > 100)) {
+  console.error('Claude API: invalid structured triage output (confidence must be integer 0..100)');
+  await pool.end();
+  process.exit(1);
+}
 
 for (const m of out.items) {
   let pid = m.pattern_id || null;
