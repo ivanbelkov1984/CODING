@@ -60,6 +60,9 @@ export const ROUTES = [
   { id: 'capture-sphere-log', label: 'Отметка сферы', category: 'Быстрый ввод', nav: { call: 'openSphereLog', sphereIdx: 0 }, states: ['populated'] },
   { id: 'capture-craving', label: 'Тяга / срыв', category: 'Быстрый ввод', nav: { overlay: 'ov-craving' }, states: ['populated'] },
 
+  // ── Психология ──
+  { id: 'psychology', label: 'Психология — рабочее пространство', category: 'Психология', nav: { tab: 'map', msub: 'psychology' }, states: ['empty', 'populated', 'longtext'], key: true },
+
   // ── Дневник ──
   { id: 'mind-insights', label: 'Дневник — Записи', category: 'Дневник', nav: { tab: 'map', msub: 'insights' }, states: ['empty', 'populated', 'longtext'], key: true },
   { id: 'mind-graph', label: 'Дневник — Связи', category: 'Дневник', nav: { tab: 'map', msub: 'graph' }, states: ['populated'] },

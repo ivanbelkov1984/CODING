@@ -1,6 +1,6 @@
 # Архитектор — Route Inventory (Этап 0)
 
-Полная карта маршрутов и оверлеев текущего MAIN. Источник правды — `architect/tests/evidence/routes.mjs`; этот файл — его человекочитаемый снимок. Всего маршрутов: **46** (ключевых, снимаемых по всей матрице устройств×тем: **14**).
+Полная карта маршрутов и оверлеев текущего интерфейса. Источник правды — `architect/tests/evidence/routes.mjs`; этот файл — его человекочитаемый снимок. Всего маршрутов: **47** (ключевых, снимаемых по всей матрице устройств×тем: **15**).
 
 Легенда состояний: `empty` — пусто, `populated` — заполнено синтетикой, `longtext` — длинный текст. ★ — ключевой экран.
 
@@ -31,17 +31,23 @@
 | Отметка сферы | `capture-sphere-log` | openSphereLog(DB.spheres[0].id) | populated |
 | Тяга / срыв | `capture-craving` | openOv(`ov-craving`) | populated |
 
-## Дневник/Разум
+## Психология
 
 | Экран | id | Навигация | Состояния |
 | --- | --- | --- | --- |
-| ★ Разум — Инсайты/знания | `mind-insights` | goTo(`map`) → msub(`insights`) | empty, populated, longtext |
-| Разум — Граф связей | `mind-graph` | goTo(`map`) → msub(`graph`) | populated |
-| Разум — Книга/главы | `mind-book` | goTo(`map`) → msub(`book`) | populated |
-| Разум — Паттерны | `mind-patterns` | goTo(`map`) → msub(`patterns`) | populated |
-| Разум — Сны | `mind-dreams` | goTo(`map`) → msub(`dreams`) | populated, longtext |
-| Разум — Практики/сознание | `mind-spiritual` | goTo(`map`) → msub(`spiritual`) | populated |
-| Разум — Эволюция | `mind-evolution` | goTo(`map`) → msub(`evolution`) | populated |
+| ★ Психология — рабочее пространство | `psychology` | goTo(`map`) → msub(`psychology`) | empty, populated, longtext |
+
+## Дневник
+
+| Экран | id | Навигация | Состояния |
+| --- | --- | --- | --- |
+| ★ Дневник — Записи | `mind-insights` | goTo(`map`) → msub(`insights`) | empty, populated, longtext |
+| Дневник — Связи | `mind-graph` | goTo(`map`) → msub(`graph`) | populated |
+| Дневник — Книга | `mind-book` | goTo(`map`) → msub(`book`) | populated |
+| Дневник — Закономерности | `mind-patterns` | goTo(`map`) → msub(`patterns`) | populated |
+| Дневник — Сны | `mind-dreams` | goTo(`map`) → msub(`dreams`) | populated, longtext |
+| Дневник — Практики и смыслы | `mind-spiritual` | goTo(`map`) → msub(`spiritual`) | populated |
+| Дневник — Мой путь | `mind-evolution` | goTo(`map`) → msub(`evolution`) | populated |
 
 ## Сферы
 

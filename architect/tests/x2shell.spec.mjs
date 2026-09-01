@@ -889,7 +889,9 @@ const healthUi = await page.evaluate(() => {
   const root = document.getElementById('health-out');
   const groups = [...root.querySelectorAll(':scope > details.health-group')];
   return {
-    title: (root.querySelector(':scope > .domain-head .domain-title') || {}).textContent,
+    title: (document.getElementById('ptitle') || {}).textContent,
+    repeatedTitle: root.querySelectorAll(':scope > .domain-head .domain-title').length,
+    intro: (root.querySelector(':scope > .domain-head .domain-subtitle') || {}).textContent,
     attention: [...root.querySelectorAll(':scope > .sec-lbl')].map(x => x.textContent.trim()),
     names: groups.map(g => (g.querySelector(':scope > summary') || {}).textContent.trim()),
     closed: groups.every(g => !g.open),
@@ -897,10 +899,31 @@ const healthUi = await page.evaluate(() => {
       .every(id => document.querySelectorAll('#' + id).length === 1),
   };
 });
-ok(healthUi.title === 'Здоровье' && healthUi.attention.includes('Что требует внимания'),
+ok(healthUi.title === 'Здоровье' && healthUi.repeatedTitle === 0 && /План на сегодня/.test(healthUi.intro) && healthUi.attention.includes('Что требует внимания'),
   'Здоровье сразу объясняет раздел и показывает только важное сейчас', JSON.stringify(healthUi));
 ok(healthUi.names.length === 4 && healthUi.closed && healthUi.uniqueTargets,
   'детали Здоровья собраны в четыре свёрнутые области без дублей render-target', JSON.stringify(healthUi));
+
+// 17.6a Психология: один ясный фокус и понятные задачи вместо методологического журнала.
+const psyUi = await page.evaluate(() => {
+  goTo('map'); msub('psychology');
+  const root = document.getElementById('psy-ws');
+  const summaries = [...root.querySelectorAll(':scope > details > summary')].map(x => x.textContent.trim());
+  return {
+    title: (document.getElementById('ptitle') || {}).textContent,
+    repeatedTitle: root.querySelectorAll(':scope > .domain-head .domain-title').length,
+    intro: (root.querySelector(':scope > .domain-head .domain-subtitle') || {}).textContent,
+    focus: (root.querySelector(':scope > .psy-now .domain-title') || {}).textContent,
+    primary: [...root.querySelectorAll(':scope > .psy-now button')].map(x => x.textContent.trim()),
+    summaries,
+    advancedClosed: !root.querySelector(':scope > details.psy-advanced').open,
+  };
+});
+ok(psyUi.title === 'Психология' && psyUi.repeatedTitle === 0 && /Понять, что происходит/.test(psyUi.intro) && psyUi.focus,
+  'Психология имеет один заголовок в шапке и один содержательный фокус', JSON.stringify(psyUi));
+ok(psyUi.primary.includes('Разобрать ситуацию') && psyUi.primary.includes('Записать, что произошло') &&
+  psyUi.summaries.some(x => /Что со мной происходит/.test(x)) && psyUi.summaries.some(x => /Мои цели/.test(x)) && psyUi.advancedClosed,
+  'первый слой Психологии говорит задачами, а дополнительные инструменты свёрнуты', JSON.stringify(psyUi));
 
 // 17.7 Шапка: поиск, добавление и одно глобальное меню; Настройки не дублируются.
 const topbar = await page.evaluate(() => ({
@@ -920,13 +943,15 @@ const astroUi = await page.evaluate(() => {
     .filter(b => b.offsetParent !== null).map(b => b.childNodes[1] ? b.textContent.trim() : b.textContent.trim());
   const advanced = root.querySelector('.astro-more');
   return {
-    title: (root.querySelector('.domain-title') || {}).textContent,
+    title: (document.getElementById('ptitle') || {}).textContent,
+    repeatedTitle: root.querySelectorAll(':scope > .domain-head .domain-title').length,
+    intro: (root.querySelector(':scope > .domain-head .domain-subtitle') || {}).textContent,
     visible,
     advancedClosed: !!advanced && !advanced.open,
     advancedCount: advanced ? advanced.querySelectorAll('.astro-card').length : 0,
   };
 });
-ok(astroUi.title === 'Астрология' && astroUi.visible.some(t => /Моя карта/.test(t)) &&
+ok(astroUi.title === 'Астрология' && astroUi.repeatedTitle === 0 && /Символический взгляд/.test(astroUi.intro) && astroUi.visible.some(t => /Моя карта/.test(t)) &&
   astroUi.visible.some(t => /^Сейчас/.test(t)) && astroUi.visible.some(t => /Данные рождения/.test(t)),
   'Астрология на первом слое говорит задачами, а не набором терминов', JSON.stringify(astroUi.visible));
 ok(astroUi.advancedClosed && astroUi.advancedCount === 5,

@@ -1532,6 +1532,7 @@ body.navshell .nsh-tab:focus-visible,body.navshell .nsh-fab:focus-visible,
 .domain-head{padding:var(--s4) 0 var(--s2)}
 .domain-title{font-size:clamp(1.35rem,5.5vw,1.75rem);font-weight:680;line-height:1.15;letter-spacing:-.025em;color:var(--t1);overflow-wrap:anywhere}
 .domain-subtitle{margin-top:.4rem;max-width:62ch;font-size:var(--tx3);line-height:1.5;color:var(--t3);overflow-wrap:anywhere}
+.domain-head>.domain-subtitle:first-child{margin-top:0}
 .domain-lead{margin-bottom:var(--s3)}
 .domain-kicker{font-size:var(--tx1,.6875rem);font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:.35rem}
 .domain-next{margin-top:.55rem;color:var(--t3)}

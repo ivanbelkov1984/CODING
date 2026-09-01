@@ -8957,7 +8957,7 @@ function organizeHealthView(root) {
 
   const head = document.createElement('div');
   head.className = 'domain-head mx';
-  head.innerHTML = `<div class="domain-title">Здоровье</div>
+  head.innerHTML = `
     <div class="domain-subtitle">План на сегодня, наблюдения за телом и документы для врача — без диагнозов и скрытых оценок.</div>`;
   root.appendChild(head);
   attention.forEach(n => root.appendChild(n));
@@ -14164,7 +14164,6 @@ function rPsyWorkspace() {
   </details>`;
 
   el.innerHTML = `<div class="domain-head mx">
-      <div class="domain-title">Психология</div>
       <div class="domain-subtitle">Понять, что происходит, заметить повторения и выбрать следующий шаг. Это самонаблюдение, не диагностика и не замена специалисту.</div>
     </div>
     ${now}${psyRenderHelpsMe()}${mbRenderCards('Тело и контекст')}${map}${goalsBlock}${epsBlock}${obsBlock}${revBlock}${advanced}`;
