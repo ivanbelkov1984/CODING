@@ -292,16 +292,18 @@ ok(await page.evaluate(() => !!document.querySelector('#h-vector .vec-card')), '
 ok(await page.evaluate(() => /запис/.test(document.querySelector('#h-vector .vec-sub').textContent)), 'вектор показывает движение за неделю');
 await page.evaluate(() => rcClose());
 
-// ── Аудит главного экрана: заголовок-приветствие вместо сломанной фразы,
-// свёрнутые вторичные блоки, без дублирующего тоста поверх шапки ──
+// ── Аудит главного экрана: без декоративного приветствия и без дубля
+// быстрых действий (их даёт ＋), свёрнутые вторичные блоки ──
 const hero = await page.evaluate(() => {
-  DB.vit.ci = false;                                  // check-in не сделан — раньше здесь была «Система check-in не выполнен»
-  rHState();
-  const txt = document.getElementById('h-hl').textContent;
-  return { txt, hasEm: !!document.querySelector('#h-hl em') };
+  DB.vit.ci = false;
+  goTo('home');
+  return { greeting: !!document.getElementById('h-hl'),
+    tiles: document.querySelectorAll('#pg-home .qarow .qabtn').length,
+    date: (document.getElementById('h-date') || {}).textContent || '' };
 });
-ok(!/Систем/.test(hero.txt), `заголовок больше не «Система …» — грамматически связный текст («${hero.txt}»)`);
-ok(/Добр(ое|ый|ой) (утро|день|вечер|ночи)/.test(hero.txt) && hero.hasEm, 'заголовок — приветствие по времени суток с акцентным словом');
+ok(!hero.greeting, 'декоративного приветствия на Главной нет');
+ok(hero.tiles === 0, 'сетки из пяти быстрых плиток нет — их заменяет ＋', String(hero.tiles));
+ok(hero.date.length > 0, `дата на Главной осталась («${hero.date}»)`);
 const more = await page.evaluate(() => {
   const el = document.getElementById('h-more'), btn = document.getElementById('h-more-btn');
   const closedByDefault = !el.classList.contains('on');
@@ -1124,12 +1126,12 @@ const why = await page.evaluate(() => {
     open: document.getElementById('ov-why').classList.contains('on'),
     count: list.length, symptom: last.symptom, need: last.need, action: last.action,
     kType: last.kType, verif: last.verif,
-    homeShown: /Разборы «Зачем\?»/.test(homeTxt) && /тянет проверять/.test(homeTxt),
+    homeShown: /Разборы ситуаций/.test(homeTxt) && /тянет проверять/.test(homeTxt),
   };
 });
 ok(why.count >= 1 && why.symptom === 'тянет проверять телефон' && why.action === 'сделать паузу 5 минут', 'Метод «Зачем?»: разбор сохранён (цепочка симптом→…→действие)');
 ok(why.kType === 'process_reflection' && why.verif === 'user_confirmed', 'Метод «Зачем?»: «паспорт данных» (process_reflection / user_confirmed)');
-ok(!why.open && why.homeShown, 'Метод «Зачем?»: лист закрывается, разбор виден на «Сегодня»');
+ok(!why.open && why.homeShown, 'Разбор ситуации: лист закрывается, разбор виден на «Сегодня»');
 await page.evaluate(() => { goTo('home'); });
 
 // ── Динамика «Моментов» (спарклайн за 2 недели) ──
@@ -1221,9 +1223,9 @@ const hist = await page.evaluate(() => {
   openOv('ov-history');
   const txt = document.getElementById('history-list').textContent || '';
   const rows = document.querySelectorAll('#history-list .srow').length;
-  return { open: document.getElementById('ov-history').classList.contains('on'), rows, hasMoment: /момент/.test(txt), hasWhy: /«Зачем\?»/.test(txt) && /исторический симптом/.test(txt) };
+  return { open: document.getElementById('ov-history').classList.contains('on'), rows, hasMoment: /момент/.test(txt), hasWhy: /разбор/i.test(txt) && /исторический симптом/.test(txt) };
 });
-ok(hist.open && hist.rows >= 2 && hist.hasMoment && hist.hasWhy, 'История состояний: моменты и разборы «Зачем?» в одном списке');
+ok(hist.open && hist.rows >= 2 && hist.hasMoment && hist.hasWhy, 'История состояний: моменты и разборы ситуаций в одном списке');
 await page.evaluate(() => { closeOv('ov-history'); goTo('home'); });
 
 // ── «За неделю» сводка (детерминированная, без ИИ) ──

@@ -168,8 +168,8 @@ console.log('\n── Wave 8: Adaptive Psychology Engine ──');
   ok(ev0.identifier === 'NG222' && /NG222/.test(ev0.ref) && ev0.publisher === 'NICE' && ev0.year === 2022,
     'behavioral_activation ссылается на NICE NG222 (2022) с полным публикационным идентификатором');
   ok(!JSON.stringify(reg.items).includes('CG90'), 'отозванной CG90 в production-реестре нет');
-  ok(/групповая доказательность/.test(ev0.limitations),
-    'ограничение «групповая доказательность ≠ индивидуальная гарантия» сохранено');
+  ok(/помогает многим.*не обязательно поможет именно тебе/i.test(ev0.limitations),
+    'ограничение «общие данные ≠ личная гарантия» сохранено', ev0.limitations);
 
   // UI: внешний слой раскрывает источник/версию/дату и отделён от личного.
   await reset();
@@ -674,7 +674,7 @@ console.log('\n── Wave 8: Adaptive Psychology Engine ──');
   const helps = await page.evaluate(() => {
     const el = document.getElementById('psy-helps-me');
     return { ext: el.innerHTML.includes('Внешняя база'), mine: el.innerHTML.includes('Мои данные'),
-      why: el.innerHTML.includes('вклад эпизодов'), pct: /\d+\s?%/.test(el.textContent) };
+      why: /вклад случаев|вклад эпизодов/.test(el.innerHTML), pct: /\d+\s?%/.test(el.textContent) };
   });
   ok(helps.ext && helps.mine && helps.why && !helps.pct,
     '«Что помогает мне»: внешний слой и личный слой раздельно, вклад раскрыт, никакой «эффективности N%»');

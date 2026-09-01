@@ -221,39 +221,14 @@
 <section class="pg on" id="pg-home">
   <div class="h-hero">
     <div class="h-date" id="h-date"></div>
-    <div class="h-hl" id="h-hl">Доброе <em>утро</em></div>
     <div id="h-streak-wrap"></div>
   </div>
   <div id="h-nudge"></div>
-  <div class="sec-lbl">Действия</div>
-  <div class="qarow">
-    <button class="qabtn" onclick="openOv('ov-ci')" aria-label="Check-in">
-      <div class="qa-ic" style="background:var(--green-l)"><svg style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg></div>
-      <span class="qa-lbl">Check-in</span>
-    </button>
-    <button class="qabtn" onclick="openOv('ov-moment')" aria-label="Момент">
-      <div class="qa-ic" style="background:rgba(245,184,75,.16)"><svg style="color:#F5B84B" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
-      <span class="qa-lbl">Момент</span>
-    </button>
-    <button class="qabtn" onclick="openOv('ov-add')" aria-label="Инсайт">
-      <div class="qa-ic" style="background:var(--blue-l)"><svg style="color:var(--blue-t)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
-      <span class="qa-lbl">Инсайт</span>
-    </button>
-    <button class="qabtn" onclick="openOv('ov-drm')" aria-label="Сон">
-      <div class="qa-ic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></div>
-      <span class="qa-lbl">Сон</span>
-    </button>
-    <button class="qabtn" onclick="doSync()" aria-label="Синхронизировать">
-      <div class="qa-ic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></div>
-      <span class="qa-lbl">Синк</span>
-    </button>
-  </div>
   <div id="x2-life"></div>
   <div id="pat-suggest-home"></div>
   <div id="h-med-reminder"></div>
   <div id="h-moments"></div>
   <div id="h-moment-trend"></div>
-  <button class="btn btn-s btn-sm btn-full" style="margin:0 var(--s4) .5rem;width:auto" onclick="openOv('ov-why')"><i data-lucide="help-circle"></i>Метод «Зачем?» — разобрать состояние</button>
   <div id="h-whys"></div>
   <button class="btn btn-s btn-sm btn-full" style="margin:0 var(--s4) .5rem;width:auto" onclick="openOv('ov-history')"><i data-lucide="history"></i>История состояний</button>
 
@@ -989,16 +964,16 @@
 <div class="ov" id="ov-why" onclick="if(event.target===this)closeOv('ov-why')">
   <div class="sheet">
     <div class="sh-pull"></div>
-    <div class="sh-title">Метод «Зачем?»</div>
-    <div class="be-note" style="margin:0 1rem .5rem">Это твой разбор, не диагноз. Заполни сколько получится — по шагам от симптома к действию.</div>
+    <div class="sh-title">Разбор ситуации</div>
+    <div class="be-note" style="margin:0 1rem .5rem">Это твой разбор, не диагноз. Заполни сколько получится — шаг за шагом, от того, что происходит, к тому, что делать дальше.</div>
     <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.75rem">
-      <div><div class="f-lbl">Симптом — что происходит?</div><textarea class="field" id="why-symptom" rows="2"></textarea></div>
-      <div><div class="f-lbl">Функция — зачем это тебе?</div><textarea class="field" id="why-function" rows="2"></textarea></div>
-      <div><div class="f-lbl">Вторичная выгода — что получаешь?</div><textarea class="field" id="why-gain" rows="2"></textarea></div>
-      <div><div class="f-lbl">Потребность — какая настоящая нужда?</div><textarea class="field" id="why-need" rows="2"></textarea></div>
-      <div><div class="f-lbl">Цена — чего это стоит?</div><textarea class="field" id="why-cost" rows="2"></textarea></div>
-      <div><div class="f-lbl">Альтернатива — как ещё закрыть нужду?</div><textarea class="field" id="why-alternative" rows="2"></textarea></div>
-      <div><div class="f-lbl">Действие — что выбираешь сейчас?</div><textarea class="field" id="why-action" rows="2"></textarea></div>
+      <div><div class="f-lbl">Что происходит</div><textarea class="field" id="why-symptom" rows="2"></textarea></div>
+      <div><div class="f-lbl">Зачем я это делаю</div><textarea class="field" id="why-function" rows="2"></textarea></div>
+      <div><div class="f-lbl">Что мне это даёт</div><textarea class="field" id="why-gain" rows="2"></textarea></div>
+      <div><div class="f-lbl">Какая настоящая нужда за этим</div><textarea class="field" id="why-need" rows="2"></textarea></div>
+      <div><div class="f-lbl">Чего это стоит</div><textarea class="field" id="why-cost" rows="2"></textarea></div>
+      <div><div class="f-lbl">Как ещё можно закрыть эту нужду</div><textarea class="field" id="why-alternative" rows="2"></textarea></div>
+      <div><div class="f-lbl">Что делаю дальше</div><textarea class="field" id="why-action" rows="2"></textarea></div>
       <button class="btn btn-p btn-full" onclick="saveWhy()"><i data-lucide="check"></i>Сохранить разбор</button>
     </div>
   </div>
@@ -1272,7 +1247,7 @@
 <div class="ov" id="ov-why-det" onclick="if(event.target===this)closeOv('ov-why-det')">
   <div class="sheet">
     <div class="sh-pull"></div>
-    <div class="sh-title">Разбор «Зачем?»</div>
+    <div class="sh-title">Разбор ситуации</div>
     <div class="be-note" id="why-det-date" style="margin:0 1rem .5rem;color:var(--t3)"></div>
     <div id="why-det-body" style="padding:0 1rem 1rem"></div>
     <div id="why-ai-out" style="padding:0 1rem 1rem"></div>
@@ -1568,7 +1543,7 @@
     <div class="sh-pull"></div>
     <div class="sh-title">AI-подсказка · согласие</div>
     <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.5rem">
-      <div class="be-note">AI-подсказка отправляет провайдеру ТОЛЬКО текст выбранного разбора «Зачем?» (поля, которые ты сам заполнил) — без остальных записей дневника. Результат — гипотеза с источниками и ограничениями, она не сохраняется, пока ты явно не подтвердишь. Согласие можно отозвать здесь в любой момент.</div>
+      <div class="be-note">AI-подсказка отправляет провайдеру ТОЛЬКО текст выбранного разбора ситуации (поля, которые ты сам заполнил) — без остальных записей дневника. Результат — гипотеза с источниками и ограничениями, она не сохраняется, пока ты явно не подтвердишь. Согласие можно отозвать здесь в любой момент.</div>
       <div class="tog-row" style="border-bottom:none"><span class="tog-lbl">Разрешить AI-подсказку по психологическим данным</span><div class="tog" id="psy-aic-on" onclick="this.classList.toggle('on')" role="switch"></div></div>
       <button class="btn btn-p btn-full" onclick="savePsyAiConsent()"><i data-lucide="check"></i>Сохранить выбор</button>
     </div>
@@ -1901,7 +1876,7 @@
       <div id="gpt-actions" style="display:none">
         <button class="btn btn-p btn-full" onclick="gptRunImport()"><i data-lucide="download"></i>Импортировать выбранные</button>
         <div id="gpt-result"></div>
-        <button class="btn btn-s btn-full" style="margin-top:var(--s2)" onclick="gptAbsorb()"><i data-lucide="brain"></i>Освоить архив (метод «Зачем?»)</button>
+        <button class="btn btn-s btn-full" style="margin-top:var(--s2)" onclick="gptAbsorb()"><i data-lucide="brain"></i>Освоить архив разборов</button>
         <div id="gpt-absorb" style="font-size:var(--tx2);color:var(--t3);margin-top:var(--s2)"></div>
       </div>
       <div id="gpt-summary"></div>
@@ -2126,7 +2101,7 @@
     <div class="sec-lbl" style="padding-left:var(--s4)">Мысль и смысл</div>
     <div class="nsh-cap-grid">
       <button class="nsh-cap" onclick="capGo('ov-add')"><span class="nsh-cap-ic" style="background:var(--blue-l);color:var(--blue-t)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span><span class="nsh-cap-t">Мысль / Инсайт</span><span class="nsh-cap-d">Знание, идея</span></button>
-      <button class="nsh-cap" onclick="capGo('ov-why')"><span class="nsh-cap-ic" style="background:var(--teal-l);color:var(--teal)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12" y2="17"/></svg></span><span class="nsh-cap-t">«Зачем?»</span><span class="nsh-cap-d">Разбор состояния</span></button>
+      <button class="nsh-cap" onclick="capGo('ov-why')"><span class="nsh-cap-ic" style="background:var(--teal-l);color:var(--teal)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12" y2="17"/></svg></span><span class="nsh-cap-t">Разбор ситуации</span><span class="nsh-cap-d">Что происходит и зачем</span></button>
       <button class="nsh-cap" onclick="capGo('ov-drm')"><span class="nsh-cap-ic" style="background:var(--purple-l);color:var(--purple)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span><span class="nsh-cap-t">Сон</span><span class="nsh-cap-d">Запись сна</span></button>
     </div>
     <div class="sec-lbl" style="padding-left:var(--s4)">Тело</div>
