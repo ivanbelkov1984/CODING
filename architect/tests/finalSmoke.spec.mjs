@@ -208,7 +208,7 @@ ok(astro.instantBad === null && astro.instantOk,
 step('15: закономерности');
 await clearOv();
 await viaMenu('Дневник');
-await clickText('#subnav .snpill', 'Закономерности');
+await page.click('#subnav .snpill[data-sub="patterns"]');
 await page.waitForTimeout(140);
 const pat = await page.evaluate(() => {
   const box = document.getElementById('ms-patterns');
