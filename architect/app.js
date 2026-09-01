@@ -1357,7 +1357,12 @@ function updateDomainLabel() {
 
 // ─── НАВИГАЦИЯ ───────────────────────────────────────────────────
 const TITLES = {home:'Сегодня', insights:'Записи', book:CFG.domainLabel||'Книга', vit:'Сферы', sys:'Итоги', map:'Дневник', health:'Здоровье', astro:'Астрология', settings:'Настройки'};
+function resetContentScroll() {
+  const content = document.querySelector('.content');
+  if (content) content.scrollTop = 0;
+}
 function goTo(tab, el) {
+  resetContentScroll();
   document.querySelectorAll('.pg').forEach(p => p.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
   const pg = $('pg-'+tab);
@@ -1382,6 +1387,7 @@ function goTo(tab, el) {
   if (document.body.classList.contains('navshell')) { nshHighlight(tab); nshWriteHash(tab); }
 }
 function msub(tab, el) {
+  resetContentScroll();
   document.querySelectorAll('[id^="ms-"]').forEach(t => t.style.display='none');
   // Психология технически живёт в старом контейнере pg-map, но не является
   // подразделом Дневника. Его локальная строка «Обзор / Записи / Сны / Повторы»

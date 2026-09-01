@@ -906,11 +906,15 @@ ok(healthUi.names.length === 4 && healthUi.closed && healthUi.uniqueTargets,
 
 // 17.6a Психология: один ясный фокус и понятные задачи вместо методологического журнала.
 const psyUi = await page.evaluate(() => {
-  goTo('map'); msub('psychology');
+  goTo('map');
+  const content = document.querySelector('.content');
+  content.scrollTop = Math.min(200, Math.max(0, content.scrollHeight - content.clientHeight));
+  msub('psychology');
   const root = document.getElementById('psy-ws');
   const summaries = [...root.querySelectorAll(':scope > details > summary')].map(x => x.textContent.trim());
   return {
     title: (document.getElementById('ptitle') || {}).textContent,
+    scrollTop: content.scrollTop,
     diaryNavHidden: getComputedStyle(document.getElementById('subnav')).display === 'none',
     repeatedTitle: root.querySelectorAll(':scope > .domain-head .domain-title').length,
     intro: (root.querySelector(':scope > .domain-head .domain-subtitle') || {}).textContent,
@@ -920,8 +924,8 @@ const psyUi = await page.evaluate(() => {
     advancedClosed: !root.querySelector(':scope > details.psy-advanced').open,
   };
 });
-ok(psyUi.title === 'Психология' && psyUi.diaryNavHidden && psyUi.repeatedTitle === 0 && /Понять, что происходит/.test(psyUi.intro) && psyUi.focus,
-  'Психология имеет свой контекст без строки разделов Дневника и повторного заголовка', JSON.stringify(psyUi));
+ok(psyUi.title === 'Психология' && psyUi.scrollTop === 0 && psyUi.diaryNavHidden && psyUi.repeatedTitle === 0 && /Понять, что происходит/.test(psyUi.intro) && psyUi.focus,
+  'Психология открывается сверху, без строки разделов Дневника и повторного заголовка', JSON.stringify(psyUi));
 ok(psyUi.primary.includes('Разобрать ситуацию') && psyUi.primary.includes('Записать, что произошло') &&
   psyUi.summaries.some(x => /Что со мной происходит/.test(x)) && psyUi.summaries.some(x => /Мои цели/.test(x)) && psyUi.advancedClosed,
   'первый слой Психологии говорит задачами, а дополнительные инструменты свёрнуты', JSON.stringify(psyUi));
