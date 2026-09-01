@@ -69,7 +69,7 @@ for (const t of ['home', 'vit', 'map', 'sys']) {
 await page.evaluate(() => goTo('map'));
 {
   const entries = await page.evaluate(() => [...document.querySelectorAll('#subnav .snpill')].map(x => x.textContent.trim()));
-  ok(JSON.stringify(entries) === JSON.stringify(['Обзор', 'Записи', 'Сны', 'Закономерности']),
+  ok(JSON.stringify(entries) === JSON.stringify(['Обзор', 'Записи', 'Сны', 'Повторы']),
     `постоянная навигация Дневника собрана: ${entries.join(' / ')}`);
 }
 for (const s of ['insights', 'graph', 'book', 'patterns', 'dreams', 'spiritual', 'evolution']) {
@@ -309,11 +309,11 @@ const more = await page.evaluate(() => {
   toggleHomeMore();
   const openedNow = el.classList.contains('on') && /Скрыть/.test(btn.textContent);
   toggleHomeMore();
-  const closedAgain = !el.classList.contains('on') && /Показать больше/.test(btn.textContent);
+  const closedAgain = !el.classList.contains('on') && /Подробнее о дне/.test(btn.textContent);
   return { closedByDefault, hasContent, openedNow, closedAgain };
 });
 ok(more.closedByDefault && more.hasContent, 'вторичные блоки главного экрана свёрнуты по умолчанию, но отрендерены внутри');
-ok(more.openedNow && more.closedAgain, '«Показать больше» разворачивает и сворачивает обратно, текст кнопки меняется');
+ok(more.openedNow && more.closedAgain, '«Подробнее о дне» разворачивает и сворачивает обратно, текст кнопки меняется');
 const noToast = await page.evaluate(async () => {
   const calls = []; const orig = window.toast; window.toast = (m, t) => calls.push(m);
   // на время паузы гасим авто-синк (иначе фоновый таймер, взведённый более
@@ -1322,13 +1322,13 @@ const medsT = await page.evaluate(() => {
     intakeSaved: intake.kType === 'medication_intake' && intake.medId === plan.id && intake.status === 'taken',
     persisted: (db.meds || []).length === 1 && (db.medIntakes || []).length === 1,
     separate: plan.kType !== intake.kType,
-    ui: /Лекарства и витамины/.test(healthTxt) && /Витамин D/.test(healthTxt) && /сегодня: 1/.test(healthTxt),
+    ui: /Лекарства и план дня/.test(healthTxt) && /Витамин D/.test(healthTxt) && /сегодня: 1/.test(healthTxt),
     disclaimer: /не медицинская рекомендация/i.test(healthTxt),
   };
 });
 ok(medsT.planSaved && medsT.intakeSaved && medsT.persisted, 'здоровье: план (medication_plan) и факт (medication_intake) сохраняются раздельно');
 ok(medsT.separate && medsT.disclaimer, 'здоровье: план ≠ факт (разные классы) + дисклеймер «не рекомендация» виден');
-ok(medsT.ui, 'здоровье: секция «Лекарства и витамины» рендерится (имя + счётчик «сегодня: 1»)');
+ok(medsT.ui, 'здоровье: группа «Лекарства и план дня» рендерится (имя + счётчик «сегодня: 1»)');
 await page.evaluate(() => { DB.meds = []; DB.medIntakes = []; goTo('home'); });
 
 // ── Health Organizer: симптомы + измерения ──
@@ -1352,11 +1352,11 @@ const bodyT = await page.evaluate(() => {
     symOk: s.kType === 'symptom_observation' && s.severity === 6 && s.privacyClass === 'sensitive',
     meaOk: m.kType === 'measurement' && m.value === '120/80',
     persisted: (db.symptoms || []).length === 1 && (db.measures || []).length === 1,
-    ui: /Дневник тела/.test(txt) && /головная боль/.test(txt) && /120\/80/.test(txt),
+    ui: /Симптомы и показатели/.test(txt) && /головная боль/.test(txt) && /120\/80/.test(txt),
   };
 });
 ok(bodyT.symOk && bodyT.meaOk && bodyT.persisted, 'здоровье: симптом (observation) и измерение (measurement) сохраняются с паспортом');
-ok(bodyT.ui, 'здоровье: «Дневник тела» рендерит симптомы и измерения');
+ok(bodyT.ui, 'здоровье: «Симптомы и показатели» рендерит симптомы и измерения');
 await page.evaluate(() => { DB.symptoms = []; DB.measures = []; goTo('home'); });
 
 // ── Health Organizer: «Отчёт врачу» ──
@@ -3180,8 +3180,8 @@ ok(nsh.freshProfileOn && nsh.freshTabbarVisible, 'rollout 1.4: без сохра
 ok(nsh.onClass && nsh.tabs === 4 && nsh.hasFab, 'nav shell ON: body.navshell, 4 вкладки + FAB');
 ok(nsh.addLabel === 'Записать' && nsh.offLabel === 'Новый инсайт', 'nav shell: ＋ = «Записать» при ON, «Новый инсайт» при OFF');
 ok(nsh.diary && nsh.psy && nsh.astro && nsh.today, 'nav shell: вкладки ведут на существующие разделы (Дневник/Психология/Астрология/Главная)', JSON.stringify([nsh.diary, nsh.psy, nsh.astro, nsh.today]));
-ok(nsh.todayActive && nsh.more && nsh.moreActive && nsh.moreRows === 8,
-  'nav shell 1.1: «Меню» из шапки открывает компактную шторку из 8 пространств, aria-expanded=true', String(nsh.moreRows));
+ok(nsh.todayActive && nsh.more && nsh.moreActive && nsh.moreRows === 7,
+  'nav shell 1.1: «Меню» из шапки открывает компактную шторку из 7 пространств, aria-expanded=true', String(nsh.moreRows));
 ok(nsh.noMenuTab && nsh.astroTab,
   'nav shell 1.1: в нижнем острове нет «Меню», зато есть «Астрология»', JSON.stringify([nsh.noMenuTab, nsh.astroTab]));
 ok(nsh.capture && nsh.capBtns >= 9 && nsh.plusCapture, 'nav shell 1.2: полный лаунчер «Записать» (все типы записи)');
@@ -3252,11 +3252,11 @@ for (const [w, h, kind] of vps) {
     const groups = document.querySelectorAll('#nsh-nav-groups .nsh-grp-lbl').length;
     const grpBtns = document.querySelectorAll('#nsh-nav-groups .navlink').length;
     if (kind2 === 'phone') return { ok: barVisible && pad >= 64, barVisible, pad };
-    return { ok: !barVisible && sideVisible && groups === 5 && grpBtns === 8, barVisible, sideVisible, groups, grpBtns };
+    return { ok: !barVisible && sideVisible && groups === 5 && grpBtns === 7, barVisible, sideVisible, groups, grpBtns };
   }, kind));
 }
 ok(vpRes[0].ok && vpRes[1].ok && vpRes[2].ok, 'shell v2: iPhone SE/std/Pro Max — таб-бар виден, контент не перекрыт (padding ≥64)');
-ok(vpRes[3].ok, 'shell v2: iPad portrait — постоянный сгруппированный sidebar (5 групп, 8 пространств), таб-бар скрыт', JSON.stringify(vpRes[3]));
+ok(vpRes[3].ok, 'shell v2: iPad portrait — постоянный сгруппированный sidebar (5 групп, 7 пространств), таб-бар скрыт', JSON.stringify(vpRes[3]));
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(100);
 
@@ -3280,7 +3280,7 @@ const a11y = await page.evaluate(() => {
 });
 ok(a11y.allButtons && a11y.named && a11y.focusRule && a11y.current, `shell v2 a11y: ${a11y.n} элементов — настоящие button с именами, focus-visible, aria-current`);
 
-// Маршрутная полнота: все 46 маршрутов достижимы при включённом shell.
+// Маршрутная полнота: все 47 маршрутов достижимы при включённом shell.
 const routesData = ROUTES.map(r2 => ({ id: r2.id, nav: r2.nav }));
 const reach = await page.evaluate(async (routes) => {
   const failed = [];
@@ -3303,7 +3303,7 @@ const reach = await page.evaluate(async (routes) => {
   goTo('home');
   return { total: routes.length, failed };
 }, routesData);
-ok(reach.failed.length === 0 && reach.total === 46, `shell v2: маршрутная полнота — ${reach.total - reach.failed.length}/${reach.total} достижимы${reach.failed.length ? ' (провалены: ' + reach.failed.join(', ') + ')' : ''}`);
+ok(reach.failed.length === 0 && reach.total === 47, `shell v2: маршрутная полнота — ${reach.total - reach.failed.length}/${reach.total} достижимы${reach.failed.length ? ' (провалены: ' + reach.failed.join(', ') + ')' : ''}`);
 
 // Перезагрузка при ON: hash восстанавливает раздел (реальный reload).
 await page.evaluate(() => { location.hash = '#/overview'; });
