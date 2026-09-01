@@ -181,7 +181,7 @@ console.log('\n── Wave 8: Adaptive Psychology Engine ──');
     el.open = true;
     const t = el.textContent;
     return { ng: t.includes('NG222'), pub: t.includes('NICE, 2022'),
-      rev: /пересмотрено \d{4}-\d{2}-\d{2}/.test(t), ver: /· v\d+/.test(t),
+      rev: /проверено \d{4}-\d{2}-\d{2}/.test(t), ver: /· версия \d+/.test(t),
       separate: t.includes('Что известно в целом') && t.includes('Мой опыт'), pct: /\d+\s?%/.test(t) };
   });
   ok(extUi.ng && extUi.pub && extUi.rev && extUi.ver,
