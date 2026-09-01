@@ -9,7 +9,6 @@ permissions:
 
 jobs:
   patch:
-    if: ${{ github.event.head_commit.message != 'P0: make Anthropic structured schemas provider-compatible (#193)' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +31,9 @@ jobs:
           app = app_path.read_text(encoding='utf-8')
           old_schema = "conf: { type: 'integer', minimum: 0, maximum: 100 },"
           new_schema = "conf: { type: 'integer' },"
+          if old_schema not in app:
+              print('P0-193: psych schema already provider-compatible; no source patch needed.')
+              raise SystemExit(0)
           if app.count(old_schema) != 1:
               raise SystemExit(f'P0-193 guard: expected exactly 1 psych confidence schema, found {app.count(old_schema)}')
           app = app.replace(old_schema, new_schema, 1)
@@ -58,22 +60,23 @@ jobs:
           triage_path.write_text(triage, encoding='utf-8')
 
           test_path = Path('architect/tests/p0-193-anthropic-schema.spec.mjs')
-          test_path.write_text("""import fs from 'node:fs';\nimport assert from 'node:assert/strict';\n\nconst app = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');\nconst triage = fs.readFileSync(new URL('../backend/triage.mjs', import.meta.url), 'utf8');\n\nassert.ok(!app.includes(\"conf: { type: 'integer', minimum: 0, maximum: 100 }\"), 'psych contour: Anthropic transport schema must not carry integer bounds');\nassert.match(app, /Number\\.isInteger\\(m\\.conf\\).*m\\.conf < 0 \\|\\| m\\.conf > 100/s, 'psych contour: domain confidence validation 0..100 must remain');\nassert.ok(!triage.includes(\"confidence:{type:'integer', minimum:0, maximum:100}\"), 'triage: Anthropic transport schema must not carry integer bounds');\nassert.match(triage, /Number\\.isInteger\\(m\\.confidence\\).*m\\.confidence < 0 \\|\\| m\\.confidence > 100/s, 'triage: domain confidence validation 0..100 must remain');\n\n// Guard the two direct Anthropic structured-output call sites known in MAIN.\nfor (const [name, source] of [['app', app], ['triage', triage]]) {\n  const directIntegerBounds = /type:\\s*['\"]integer['\"][^}\\n]*(?:minimum|maximum)/g;\n  assert.equal((source.match(directIntegerBounds) || []).length, 0, `${name}: unsupported integer bounds must not reach Anthropic structured-output schemas`);\n}\n\nconsole.log('P0-193 Anthropic schema regression: 6/6');\n""", encoding='utf-8')
+          test_path.write_text("""import fs from 'node:fs';\nimport assert from 'node:assert/strict';\n\nconst app = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');\nconst triage = fs.readFileSync(new URL('../backend/triage.mjs', import.meta.url), 'utf8');\n\nassert.ok(!app.includes(\"conf: { type: 'integer', minimum: 0, maximum: 100 }\"), 'psych contour: Anthropic transport schema must not carry integer bounds');\nassert.match(app, /Number\\.isInteger\\(m\\.conf\\).*m\\.conf < 0 \\|\\| m\\.conf > 100/s, 'psych contour: domain confidence validation 0..100 must remain');\nassert.ok(!triage.includes(\"confidence:{type:'integer', minimum:0, maximum:100}\"), 'triage: Anthropic transport schema must not carry integer bounds');\nassert.match(triage, /Number\\.isInteger\\(m\\.confidence\\).*m\\.confidence < 0 \\|\\| m\\.confidence > 100/s, 'triage: domain confidence validation 0..100 must remain');\n\nfor (const [name, source] of [['app', app], ['triage', triage]]) {\n  const directIntegerBounds = /type:\\s*['\"]integer['\"][^}\\n]*(?:minimum|maximum)/g;\n  assert.equal((source.match(directIntegerBounds) || []).length, 0, `${name}: unsupported integer bounds must not reach Anthropic structured-output schemas`);\n}\n\nconsole.log('P0-193 Anthropic schema regression: 6/6');\n""", encoding='utf-8')
 
           pkg_path = Path('architect/package.json')
           pkg = pkg_path.read_text(encoding='utf-8')
           needle = '"test": "node build.mjs --combined dist/app.html && '
           replacement = '"test": "node build.mjs --combined dist/app.html && node tests/p0-193-anthropic-schema.spec.mjs && '
-          if pkg.count(needle) != 1:
-              raise SystemExit(f'P0-193 guard: expected package test prefix once, found {pkg.count(needle)}')
-          pkg = pkg.replace(needle, replacement, 1)
-          pkg_path.write_text(pkg, encoding='utf-8')
+          if replacement not in pkg:
+              if pkg.count(needle) != 1:
+                  raise SystemExit(f'P0-193 guard: expected package test prefix once, found {pkg.count(needle)}')
+              pkg = pkg.replace(needle, replacement, 1)
+              pkg_path.write_text(pkg, encoding='utf-8')
 
           handoff = Path('STUDIO_HANDOFF.md')
           marker = 'P0 #193 — совместимость Anthropic structured-output schema'
           text = handoff.read_text(encoding='utf-8')
           if marker not in text:
-              text += """\n\n### 2026-09-01 13:50 UTC · сессия: CODING · P0 #193 — совместимость Anthropic structured-output schema\nКоммиты: этот hotfix-коммит.\nСостояние: production-ошибка психоконтура `Claude 400: integer minimum/maximum are not supported` исправлена на уровне provider transport schema; числовая граница confidence 0..100 сохранена как детерминированная application validation. Тот же класс исправлен в backend triage. Sync не менялся: AI-ошибка остаётся отдельной от уже успешного GET/PUT/sync. Добавлен regression guard в `npm test`.\nДальше: после зелёного CI/deploy на MAIN подтвердить на owner-device, что психоконтур больше не получает Claude 400; consumer-подписка Claude для этого API-вызова не требуется.\n"""
+              text += """\n\n### 2026-09-01 14:00 UTC · сессия: CODING · P0 #193 — совместимость Anthropic structured-output schema\nКоммиты: этот hotfix-коммит.\nСостояние: production-ошибка психоконтура `Claude 400: integer minimum/maximum are not supported` исправлена на уровне provider transport schema; числовая граница confidence 0..100 сохранена как детерминированная application validation. Тот же класс исправлен в backend triage. Sync не менялся: AI-ошибка остаётся отдельной от уже успешного GET/PUT/sync. Добавлен regression guard в `npm test`.\nДальше: после зелёного CI/deploy на MAIN подтвердить на owner-device, что психоконтур больше не получает Claude 400; consumer-подписка Claude для этого API-вызова не требуется.\n"""
               handoff.write_text(text, encoding='utf-8')
           PY
 
