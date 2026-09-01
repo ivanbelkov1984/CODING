@@ -1383,6 +1383,15 @@ function goTo(tab, el) {
 }
 function msub(tab, el) {
   document.querySelectorAll('[id^="ms-"]').forEach(t => t.style.display='none');
+  // Психология технически живёт в старом контейнере pg-map, но не является
+  // подразделом Дневника. Его локальная строка «Обзор / Записи / Сны / Повторы»
+  // здесь только путала контекст, поэтому показываем её лишь внутри Дневника.
+  const diaryNav = $('subnav');
+  if (diaryNav) {
+    diaryNav.style.display = tab === 'psychology' ? 'none' : '';
+    if (tab === 'psychology') diaryNav.setAttribute('aria-hidden', 'true');
+    else diaryNav.removeAttribute('aria-hidden');
+  }
   document.querySelectorAll('#subnav .snpill').forEach(p => {
     p.classList.remove('on');
     p.removeAttribute('aria-current');

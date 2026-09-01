@@ -911,6 +911,7 @@ const psyUi = await page.evaluate(() => {
   const summaries = [...root.querySelectorAll(':scope > details > summary')].map(x => x.textContent.trim());
   return {
     title: (document.getElementById('ptitle') || {}).textContent,
+    diaryNavHidden: getComputedStyle(document.getElementById('subnav')).display === 'none',
     repeatedTitle: root.querySelectorAll(':scope > .domain-head .domain-title').length,
     intro: (root.querySelector(':scope > .domain-head .domain-subtitle') || {}).textContent,
     focus: (root.querySelector(':scope > .psy-now .domain-title') || {}).textContent,
@@ -919,8 +920,8 @@ const psyUi = await page.evaluate(() => {
     advancedClosed: !root.querySelector(':scope > details.psy-advanced').open,
   };
 });
-ok(psyUi.title === 'Психология' && psyUi.repeatedTitle === 0 && /Понять, что происходит/.test(psyUi.intro) && psyUi.focus,
-  'Психология имеет один заголовок в шапке и один содержательный фокус', JSON.stringify(psyUi));
+ok(psyUi.title === 'Психология' && psyUi.diaryNavHidden && psyUi.repeatedTitle === 0 && /Понять, что происходит/.test(psyUi.intro) && psyUi.focus,
+  'Психология имеет свой контекст без строки разделов Дневника и повторного заголовка', JSON.stringify(psyUi));
 ok(psyUi.primary.includes('Разобрать ситуацию') && psyUi.primary.includes('Записать, что произошло') &&
   psyUi.summaries.some(x => /Что со мной происходит/.test(x)) && psyUi.summaries.some(x => /Мои цели/.test(x)) && psyUi.advancedClosed,
   'первый слой Психологии говорит задачами, а дополнительные инструменты свёрнуты', JSON.stringify(psyUi));
