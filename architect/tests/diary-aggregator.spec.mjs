@@ -112,7 +112,7 @@ const loops4 = await page.evaluate(() => {
   DB.oq = [];
   DB.whys = [{ id: 9001, day: '2026-01-05', action: 'Сделать паузу', actionDone: false, symptom: 'усталость' }];
   goTo('map');
-  r.openWhyShown = document.getElementById('diary-loops').innerHTML.includes('«Зачем?»');
+  r.openWhyShown = /разбор/i.test(document.getElementById('diary-loops').innerHTML);
   r.noOqMentionInLoops = !document.getElementById('diary-loops').innerHTML.includes('Открытый вопрос');
   DB.whys = [{ id: 9002, day: '2026-01-05', action: 'Сделать паузу', actionDone: true, symptom: 'усталость' }];
   goTo('map');
@@ -126,7 +126,7 @@ const loops4 = await page.evaluate(() => {
 });
 ok(loops4.empty, 'open loops: 0 whys — секция пуста (не декоративная карточка)');
 ok(loops4.oqAloneNoSection, 'open loops: непустые DB.oq сами по себе НЕ создают секцию (это вопросы рефлексии, не незавершённые петли)');
-ok(loops4.openWhyShown && loops4.noOqMentionInLoops, 'open loops: незавершённый разбор «Зачем?» показан, DB.oq landing не упоминает');
+ok(loops4.openWhyShown && loops4.noOqMentionInLoops, 'open loops: незавершённый разбор ситуации показан, DB.oq landing не упоминает');
 ok(loops4.doneWhyHidden && loops4.doneWhyHiddenEvenWithOq, 'open loops: завершённый (actionDone=true) разбор «Зачем?» НЕ показывается, даже если DB.oq непуст');
 
 // 5) Моменты и check-ins читаются без изменения исходных объектов.
@@ -198,7 +198,7 @@ const dock8 = await page.evaluate(() => {
   const dock = document.getElementById('nsh-context-dock');
   return [...dock.querySelectorAll('button')].map(b => b.getAttribute('aria-label'));
 });
-ok(JSON.stringify(dock8) === JSON.stringify(['Новый инсайт', 'Записать сон', 'Разбор «Зачем?»']),
+ok(JSON.stringify(dock8) === JSON.stringify(['Новый инсайт', 'Записать сон', 'Разбор ситуации']),
   `dock landing: ровно три действия в заявленном порядке (${JSON.stringify(dock8)})`);
 
 async function clickDockAction(p, label) {
@@ -218,8 +218,8 @@ await clickDockAction(page, 'Записать сон');
 ok(await page.evaluate(() => document.getElementById('ov-drm').classList.contains('on')), 'dock landing: «Записать сон» открывает ov-drm');
 await page.evaluate(() => closeOv('ov-drm'));
 await page.evaluate(() => goTo('map'));
-await clickDockAction(page, 'Разбор «Зачем?»');
-ok(await page.evaluate(() => document.getElementById('ov-why').classList.contains('on')), 'dock landing: «Разбор «Зачем?»» открывает ov-why');
+await clickDockAction(page, 'Разбор ситуации');
+ok(await page.evaluate(() => document.getElementById('ov-why').classList.contains('on')), 'dock landing: «Разбор ситуации» открывает ov-why');
 await page.evaluate(() => closeOv('ov-why'));
 
 // 9) Открытый overlay скрывает dock, после закрытия он восстанавливается.

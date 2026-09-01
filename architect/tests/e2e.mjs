@@ -65,21 +65,19 @@ for (const t of ['home', 'vit', 'map', 'sys']) {
   await page.evaluate(x => goTo(x), t);
   ok(await page.locator('#pg-' + t + '.on').count() === 1, `вкладка ${t} открывается`);
 }
-// Разум subnav (3 смысловые группы, программный msub подсвечивает пилюлю)
+// Дневник: четыре частых входа без конкурирующего второго меню.
 await page.evaluate(() => goTo('map'));
-// Wave 7 (issue #162) добавил четвёртую группу «Психология» — first-class
-// подраздел внутри существующего контура, без глобального redesign навигации.
-// Проверяем ИМЕНА групп, а не голое число: снимок структуры так осмысленнее.
 {
-  const groups = await page.evaluate(() => [...document.querySelectorAll('#subnav .sn-glbl')].map(x => x.textContent.trim()));
-  ok(JSON.stringify(groups) === JSON.stringify(['Записи', 'Связи', 'Психология', 'Развитие']),
-    `подменю «Разума» сгруппировано: ${groups.join(' / ')}`);
+  const entries = await page.evaluate(() => [...document.querySelectorAll('#subnav .snpill')].map(x => x.textContent.trim()));
+  ok(JSON.stringify(entries) === JSON.stringify(['Обзор', 'Записи', 'Сны', 'Закономерности']),
+    `постоянная навигация Дневника собрана: ${entries.join(' / ')}`);
 }
 for (const s of ['insights', 'graph', 'book', 'patterns', 'dreams', 'spiritual', 'evolution']) {
   await page.evaluate(x => msub(x), s);
-  ok(await page.locator('#ms-' + s).isVisible(), `подраздел «Разум» → ${s}`);
+  ok(await page.locator('#ms-' + s).isVisible(), `подраздел «Дневник» → ${s}`);
 }
-ok(await page.evaluate(() => document.querySelector('#subnav .snpill[data-sub="evolution"]').classList.contains('on')), 'активная пилюля подсвечена и при программном переходе');
+await page.evaluate(() => msub('patterns'));
+ok(await page.evaluate(() => document.querySelector('#subnav .snpill[data-sub="patterns"]').classList.contains('on')), 'активная частая вкладка подсвечена и при программном переходе');
 // Сферы на вкладке vit
 await page.evaluate(() => goTo('vit'));
 ok(await page.locator('#pg-vit #spheres-list .sph-card').count() === 2, 'вкладка «Сферы» показывает карточки сфер');
@@ -209,7 +207,7 @@ const pick = await page.evaluate(() => {
 });
 ok(pick.rows === 7 && /Sonnet 5/.test(pick.selBefore), `пикер: 7 моделей трёх провайдеров, выбран Sonnet (${pick.selBefore})`);
 ok(/GPT-4o mini/.test(pick.selAfter) && /GPT-4o mini/.test(pick.chip), 'пикер: смена модели работает, чип в чате обновился');
-ok(await page.evaluate(() => { goTo('map'); msub('chats'); return document.querySelectorAll('#chats-list .chat-row').length >= 1; }), 'история диалогов: Разум → Записи → Диалоги');
+ok(await page.evaluate(() => { goTo('map'); msub('chats'); return document.querySelectorAll('#chats-list .chat-row').length >= 1; }), 'история диалогов: Дневник → Диалоги');
 await page.evaluate(() => goTo('home'));
 
 // ── Мультипровайдер: GPT и Gemini через ту же абстракцию ──
@@ -292,16 +290,18 @@ ok(await page.evaluate(() => !!document.querySelector('#h-vector .vec-card')), '
 ok(await page.evaluate(() => /запис/.test(document.querySelector('#h-vector .vec-sub').textContent)), 'вектор показывает движение за неделю');
 await page.evaluate(() => rcClose());
 
-// ── Аудит главного экрана: заголовок-приветствие вместо сломанной фразы,
-// свёрнутые вторичные блоки, без дублирующего тоста поверх шапки ──
+// ── Аудит главного экрана: без декоративного приветствия и без дубля
+// быстрых действий (их даёт ＋), свёрнутые вторичные блоки ──
 const hero = await page.evaluate(() => {
-  DB.vit.ci = false;                                  // check-in не сделан — раньше здесь была «Система check-in не выполнен»
-  rHState();
-  const txt = document.getElementById('h-hl').textContent;
-  return { txt, hasEm: !!document.querySelector('#h-hl em') };
+  DB.vit.ci = false;
+  goTo('home');
+  return { greeting: !!document.getElementById('h-hl'),
+    tiles: document.querySelectorAll('#pg-home .qarow .qabtn').length,
+    date: (document.getElementById('h-date') || {}).textContent || '' };
 });
-ok(!/Систем/.test(hero.txt), `заголовок больше не «Система …» — грамматически связный текст («${hero.txt}»)`);
-ok(/Добр(ое|ый|ой) (утро|день|вечер|ночи)/.test(hero.txt) && hero.hasEm, 'заголовок — приветствие по времени суток с акцентным словом');
+ok(!hero.greeting, 'декоративного приветствия на Главной нет');
+ok(hero.tiles === 0, 'сетки из пяти быстрых плиток нет — их заменяет ＋', String(hero.tiles));
+ok(hero.date.length > 0, `дата на Главной осталась («${hero.date}»)`);
 const more = await page.evaluate(() => {
   const el = document.getElementById('h-more'), btn = document.getElementById('h-more-btn');
   const closedByDefault = !el.classList.contains('on');
@@ -792,7 +792,7 @@ const riskCard = await page.evaluate(() => {
   goTo('health');
   return { withRisk, noRisk };
 });
-ok(/Риск сейчас/.test(riskCard.withRisk) && /Сейчас риск/.test(riskCard.withRisk) && /стресс/.test(riskCard.withRisk), '«Риск сейчас» объясняет конкретные причины (стресс/сон), а не просто «высокий риск»');
+ok(/Что требует внимания/.test(riskCard.withRisk) && /Вероятность тяги сейчас/.test(riskCard.withRisk) && /стресс/.test(riskCard.withRisk), '«Что требует внимания» объясняет конкретные причины тяги (стресс/сон), а не просто «высокий риск»');
 ok(/Спокойно\. По твоим данным/.test(riskCard.noRisk), 'без факторов риска — спокойная, не пугающая формулировка');
 
 const bonus = await page.evaluate(() => {
@@ -993,7 +993,7 @@ const gen = await page.evaluate(async () => {
   closeOv('ov-crisis');
   return { outNormal, hasCravingBtn, outHallucinated, crisisFromFlag, crisisFromOutput };
 });
-ok(/переждём волну|Сёрфинг по тяге/.test(gen.outNormal) && gen.hasCravingBtn, 'генератор: бережное сообщение + метод из базы + мостик «записать как тягу» (JITAI)');
+ok(/переждём волну|Переждать волну тяги/.test(gen.outNormal) && gen.hasCravingBtn, 'генератор: бережное сообщение + метод из базы + мостик «записать как тягу» (JITAI)');
 ok(!/выдуманный/.test(gen.outHallucinated), 'grounding: метод не из нашей базы не подставляется — ИИ не навязывает выдуманную технику');
 ok(gen.crisisFromFlag, 'safety: флаг crisis от ИИ отменяет генерацию и открывает кризисный протокол');
 ok(gen.crisisFromOutput, 'safety: crisisScreen на самом ответе ИИ (второй слой) тоже уводит в кризисный протокол');
@@ -1124,12 +1124,12 @@ const why = await page.evaluate(() => {
     open: document.getElementById('ov-why').classList.contains('on'),
     count: list.length, symptom: last.symptom, need: last.need, action: last.action,
     kType: last.kType, verif: last.verif,
-    homeShown: /Разборы «Зачем\?»/.test(homeTxt) && /тянет проверять/.test(homeTxt),
+    homeShown: /Разборы ситуаций/.test(homeTxt) && /тянет проверять/.test(homeTxt),
   };
 });
 ok(why.count >= 1 && why.symptom === 'тянет проверять телефон' && why.action === 'сделать паузу 5 минут', 'Метод «Зачем?»: разбор сохранён (цепочка симптом→…→действие)');
 ok(why.kType === 'process_reflection' && why.verif === 'user_confirmed', 'Метод «Зачем?»: «паспорт данных» (process_reflection / user_confirmed)');
-ok(!why.open && why.homeShown, 'Метод «Зачем?»: лист закрывается, разбор виден на «Сегодня»');
+ok(!why.open && why.homeShown, 'Разбор ситуации: лист закрывается, разбор виден на «Сегодня»');
 await page.evaluate(() => { goTo('home'); });
 
 // ── Динамика «Моментов» (спарклайн за 2 недели) ──
@@ -1221,9 +1221,9 @@ const hist = await page.evaluate(() => {
   openOv('ov-history');
   const txt = document.getElementById('history-list').textContent || '';
   const rows = document.querySelectorAll('#history-list .srow').length;
-  return { open: document.getElementById('ov-history').classList.contains('on'), rows, hasMoment: /момент/.test(txt), hasWhy: /«Зачем\?»/.test(txt) && /исторический симптом/.test(txt) };
+  return { open: document.getElementById('ov-history').classList.contains('on'), rows, hasMoment: /момент/.test(txt), hasWhy: /разбор/i.test(txt) && /исторический симптом/.test(txt) };
 });
-ok(hist.open && hist.rows >= 2 && hist.hasMoment && hist.hasWhy, 'История состояний: моменты и разборы «Зачем?» в одном списке');
+ok(hist.open && hist.rows >= 2 && hist.hasMoment && hist.hasWhy, 'История состояний: моменты и разборы ситуаций в одном списке');
 await page.evaluate(() => { closeOv('ov-history'); goTo('home'); });
 
 // ── «За неделю» сводка (детерминированная, без ИИ) ──

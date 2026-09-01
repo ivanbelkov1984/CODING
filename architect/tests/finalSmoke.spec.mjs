@@ -67,15 +67,14 @@ const clickText = (sel, text) => page.evaluate(([s, t]) => {
   if (!n) return false; n.click(); return true;
 }, [sel, text]);
 
-// ── 1–8: каждое основное пространство открывается из компактного меню ──
-step('1–8: все восемь пространств открываются из меню');
+// ── 1–7: каждое основное пространство открывается из компактного меню ──
+step('1–7: все семь пространств открываются из меню');
 for (const [label, check] of [
-  ['Главная', () => pgOn().then(p => p === 'pg-home')],
+  ['Сегодня', () => pgOn().then(p => p === 'pg-home')],
   ['Дневник', () => pgOn().then(p => p === 'pg-map')],
   ['Психология', () => page.evaluate(() => getComputedStyle(document.getElementById('ms-psychology')).display !== 'none')],
   ['Здоровье', () => pgOn().then(p => p === 'pg-health')],
   ['Астрология', () => pgOn().then(p => p === 'pg-astro')],
-  ['Закономерности', () => page.evaluate(() => getComputedStyle(document.getElementById('ms-patterns')).display !== 'none')],
   ['Источники', () => ovOn('ov-ext-import')],
   ['Настройки', () => pgOn().then(p => p === 'pg-settings')],
 ]) {
@@ -174,7 +173,7 @@ ok(dream.formOpen && dream.grew, 'сон: форма открыта из ост�
 step('13: психология');
 await clearOv();
 await viaMenu('Психология');
-await dockClick('Момент');
+await dockClick('Состояние');
 const psy = await page.evaluate(async () => {
   const on = !!document.querySelector('#ov-moment.on');
   const n = document.getElementById('mo-note'); if (n) n.value = 'TEST-SMK момент';
@@ -205,10 +204,12 @@ ok(!astro.badDay && !astro.badTime && astro.goodDay && astro.goodTime,
 ok(astro.instantBad === null && astro.instantOk,
   'астрология: несуществующий момент отвергается, реальный собирается', JSON.stringify(astro));
 
-// ── 15: закономерности — подписи человеческие, причинность не заявляется ──
+// ── 15: закономерности внутри Дневника — подписи человеческие, причинность не заявляется ──
 step('15: закономерности');
 await clearOv();
-await viaMenu('Закономерности');
+await viaMenu('Дневник');
+await clickText('#subnav .snpill', 'Закономерности');
+await page.waitForTimeout(140);
 const pat = await page.evaluate(() => {
   const box = document.getElementById('ms-patterns');
   const txt = (box || {}).textContent || '';

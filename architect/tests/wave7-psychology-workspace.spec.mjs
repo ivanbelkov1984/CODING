@@ -664,20 +664,17 @@ const V2_BASE = {
   await reset();
   const nav = await page.evaluate(() => {
     const pill = document.querySelector('#subnav .snpill[data-sub="psychology"]');
-    // Experience 2.0: хаб «Ещё» упразднён — прямой вход живёт в sidebar/drawer.
-    const moreRow = [...document.querySelectorAll('#nsh-nav-groups .navlink')].find(r => /Психология/.test(r.textContent));
+    const directRow = [...document.querySelectorAll('#nsh-nav-groups .navlink')].find(r => /Психология/.test(r.textContent));
     openPsyWorkspace();
     return {
-      pill: !!pill, pillText: pill && pill.textContent.trim(),
-      pillIsButton: pill && pill.tagName === 'BUTTON',
-      moreEntry: !!moreRow,
+      duplicatePill: !!pill,
+      directEntry: !!directRow,
       sectionVisible: document.getElementById('ms-psychology').style.display === 'block',
       onDiaryPage: document.getElementById('pg-map').classList.contains('on'),
     };
   });
-  ok(nav.pill && /Психология/.test(nav.pillText || ''), 'в подразделах Дневника есть видимый вход «Психология»');
-  ok(nav.pillIsButton, 'вход — настоящий <button> (клавиатура/скринридер)');
-  ok(nav.moreEntry, 'прямой вход есть и в глобальной навигации (sidebar/drawer)');
+  ok(!nav.duplicatePill, '«Психология» не дублируется в постоянной навигации Дневника');
+  ok(nav.directEntry, 'прямой вход «Психология» есть в глобальной навигации');
   ok(nav.sectionVisible && nav.onDiaryPage, 'раздел открывается внутри существующего контура Дневника');
 }
 
@@ -695,17 +692,17 @@ const V2_BASE = {
       now: /Сейчас/.test(el.textContent),
       focus: /Синтетический фокус/.test(el.textContent),
       goal: /Синтетическая цель/.test(el.textContent),
-      map: /Текущая карта/.test(el.textContent),
+      map: /Что со мной происходит/.test(el.textContent),
       tried: /Что я пробовал/.test(el.textContent),
-      obs: /Наблюдения/.test(el.textContent),
-      review: /Review/.test(el.textContent),
+      obs: /Что я замечал/.test(el.textContent),
+      review: /Итоги и изменения/.test(el.textContent),
       disclaimer: /не диагностика/.test(el.textContent),
       noCausal: !/доказанно вызвал|доказано вызвал/i.test(el.textContent),
-      causalNote: /без вывода о причинности|не доказывает эффективность/i.test(el.textContent),
+      causalNote: /без вывода о причинности|не доказывает эффективность|Один случай ещё не показывает/i.test(el.textContent),
     };
   });
   ok(t.now && t.focus && t.goal, 'блок «Сейчас» показывает фокус и активные цели');
-  ok(t.map && t.tried && t.obs && t.review, 'на landing есть карта, интервенции, наблюдения и review');
+  ok(t.map && t.tried && t.obs && t.review, 'на первом экране есть рабочая картина, опыт, наблюдения и итоги');
   ok(t.disclaimer, 'явная граница: это не диагностика');
   ok(t.noCausal && t.causalNote, 'нет формулировок о доказанной причинности; ограничение проговорено');
 }

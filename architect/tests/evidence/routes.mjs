@@ -9,7 +9,7 @@
 //  и выполнить в браузере, и выгрузить в инвентарь. Поля nav (в порядке
 //  применения):
 //    tab      — goTo('<tab>')
-//    msub     — msub('<sub>')            (подменю «Разума»)
+//    msub     — msub('<sub>')            (разделы Дневника)
 //    asub     — asub('<sub>')            (подменю астрологии)
 //    open     — вызвать функцию открытия без аргументов, напр. 'openRecords'
 //    overlay  — openOv('<ov-id>')
@@ -60,14 +60,14 @@ export const ROUTES = [
   { id: 'capture-sphere-log', label: 'Отметка сферы', category: 'Быстрый ввод', nav: { call: 'openSphereLog', sphereIdx: 0 }, states: ['populated'] },
   { id: 'capture-craving', label: 'Тяга / срыв', category: 'Быстрый ввод', nav: { overlay: 'ov-craving' }, states: ['populated'] },
 
-  // ── Дневник / Разум ──
-  { id: 'mind-insights', label: 'Разум — Инсайты/знания', category: 'Дневник/Разум', nav: { tab: 'map', msub: 'insights' }, states: ['empty', 'populated', 'longtext'], key: true },
-  { id: 'mind-graph', label: 'Разум — Граф связей', category: 'Дневник/Разум', nav: { tab: 'map', msub: 'graph' }, states: ['populated'] },
-  { id: 'mind-book', label: 'Разум — Книга/главы', category: 'Дневник/Разум', nav: { tab: 'map', msub: 'book' }, states: ['populated'] },
-  { id: 'mind-patterns', label: 'Разум — Паттерны', category: 'Дневник/Разум', nav: { tab: 'map', msub: 'patterns' }, states: ['populated'] },
-  { id: 'mind-dreams', label: 'Разум — Сны', category: 'Дневник/Разум', nav: { tab: 'map', msub: 'dreams' }, states: ['populated', 'longtext'] },
-  { id: 'mind-spiritual', label: 'Разум — Практики/сознание', category: 'Дневник/Разум', nav: { tab: 'map', msub: 'spiritual' }, states: ['populated'] },
-  { id: 'mind-evolution', label: 'Разум — Эволюция', category: 'Дневник/Разум', nav: { tab: 'map', msub: 'evolution' }, states: ['populated'] },
+  // ── Дневник ──
+  { id: 'mind-insights', label: 'Дневник — Записи', category: 'Дневник', nav: { tab: 'map', msub: 'insights' }, states: ['empty', 'populated', 'longtext'], key: true },
+  { id: 'mind-graph', label: 'Дневник — Связи', category: 'Дневник', nav: { tab: 'map', msub: 'graph' }, states: ['populated'] },
+  { id: 'mind-book', label: 'Дневник — Книга', category: 'Дневник', nav: { tab: 'map', msub: 'book' }, states: ['populated'] },
+  { id: 'mind-patterns', label: 'Дневник — Закономерности', category: 'Дневник', nav: { tab: 'map', msub: 'patterns' }, states: ['populated'] },
+  { id: 'mind-dreams', label: 'Дневник — Сны', category: 'Дневник', nav: { tab: 'map', msub: 'dreams' }, states: ['populated', 'longtext'] },
+  { id: 'mind-spiritual', label: 'Дневник — Практики и смыслы', category: 'Дневник', nav: { tab: 'map', msub: 'spiritual' }, states: ['populated'] },
+  { id: 'mind-evolution', label: 'Дневник — Мой путь', category: 'Дневник', nav: { tab: 'map', msub: 'evolution' }, states: ['populated'] },
 
   // ── Сферы ──
   { id: 'spheres', label: 'Сферы', category: 'Сферы', nav: { tab: 'vit' }, states: ['empty', 'populated'], key: true },

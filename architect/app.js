@@ -109,7 +109,7 @@ const DEFAULT_DB = {
   spiritual: [],
   checkins: [],
   moments: [],        // Momentary State: быстрый двухосевой ввод «здесь и сейчас» (valence×activation)
-  whys: [],           // метод «Зачем?»: симптом→функция→выгода→потребность→цена→альтернатива→действие
+  whys: [],           // разбор ситуации: симптом→функция→выгода→потребность→цена→альтернатива→действие
   corrections: [],    // Evidence Kernel: append-only исправления записей (оригинал неизменен)
   meds: [],           // Health Organizer: ПЛАН приёма лекарств/витаминов (задан пользователем)
   medIntakes: [],     // Health Organizer: ФАКТ приёма (отдельный класс — план ≠ факт)
@@ -130,7 +130,7 @@ const DEFAULT_DB = {
   astroRectify: null, // Ректификация: анкета событий + последний результат (sensitive, только локально)
   spheres: [],        // пользовательские сферы жизни (тип трекера у каждой)
   sphereLogs: [],     // дневные записи по сферам: {sphereId, date, value, note}
-  // Wave 1 (issue #148): доказательная цепочка Момент→«Зачем?»→Инсайт→Паттерн.
+  // Wave 1 (issue #148): доказательная цепочка Момент→разбор ситуации→Инсайт→Паттерн.
   // Долговечные ссылки между уже существующими записями — см. PSY_LINK_RELATIONS/
   // createPsyLink/validatePsyLink. Оригиналы записей не мутируются и не переписываются.
   psyLinks: [],
@@ -154,7 +154,7 @@ const DEFAULT_DB = {
   psyObservations: [],          // наблюдения/EMA, которых нет в canonical записях
   psyReviews: [],               // периодический evidence-linked разбор
   // Wave 8 (issue #163): адаптивный движок. Персональный «профиль метода»
-  // здесь НЕ хранится — он derived и пересчитывается из реальных эпизодов.
+  // здесь НЕ хранится — он derived и пересчитывается из реальных случаев.
   psyAdaptivePlans: [],         // JITAI-планы: 6 компонентов + safety gate
   psyExperiments: [],           // N-of-1: только по условиям допуска, versioned history
   // Скаляр настроек движка: burden EMA-подсказок и жёсткие исключения методов
@@ -1356,7 +1356,7 @@ function updateDomainLabel() {
 }
 
 // ─── НАВИГАЦИЯ ───────────────────────────────────────────────────
-const TITLES = {home:'Сегодня', insights:'Инсайты', book:CFG.domainLabel||'Книга', vit:'Сферы', sys:'Итоги', map:'Разум', health:'Здоровье', astro:'Астрология', settings:'Настройки'};
+const TITLES = {home:'Сегодня', insights:'Записи', book:CFG.domainLabel||'Книга', vit:'Сферы', sys:'Итоги', map:'Дневник', health:'Здоровье', astro:'Астрология', settings:'Настройки'};
 function goTo(tab, el) {
   document.querySelectorAll('.pg').forEach(p => p.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
@@ -1383,21 +1383,31 @@ function goTo(tab, el) {
 }
 function msub(tab, el) {
   document.querySelectorAll('[id^="ms-"]').forEach(t => t.style.display='none');
-  document.querySelectorAll('#subnav .snpill').forEach(p => p.classList.remove('on'));
+  document.querySelectorAll('#subnav .snpill').forEach(p => {
+    p.classList.remove('on');
+    p.removeAttribute('aria-current');
+  });
   const t = $('ms-'+tab);
   if (t) t.style.display = 'block';
   if (!el) el = document.querySelector(`#subnav .snpill[data-sub="${tab}"]`);  // программный переход тоже подсвечивает
-  if (el) el.classList.add('on');
-  // Experience 2.0: пункты sidebar с data-sub (Сны/Психология/Закономерности/
-  // Дневник) подсвечиваются по активной подвкладке, а не только по странице.
-  const OWN_SUB = ['psychology', 'patterns'];
+  if (el) {
+    el.classList.add('on');
+    el.setAttribute('aria-current', 'page');
+  }
+  // Психология переиспользует старый контейнер pg-map, но для человека это
+  // самостоятельное пространство. В шапке показываем пользовательский
+  // контекст, не внутреннее имя общего route-контейнера.
+  if (document.body.classList.contains('navshell') && $('ptitle')) {
+    $('ptitle').textContent = tab === 'psychology' ? 'Психология' : 'Дневник';
+  }
+  // Experience 2.0: Психология — самостоятельное пространство меню. Остальные
+  // подвкладки (включая Закономерности) остаются внутри Дневника, поэтому на
+  // них подсвечивается родитель «Дневник» и человек не теряет контекст.
+  const OWN_SUB = ['psychology'];
   document.querySelectorAll('#nsh-nav-groups .navlink[data-tab="map"]').forEach(n => {
     const sub = n.dataset.sub || 'overview';
     n.classList.toggle('on', sub === tab || (sub === 'overview' && !OWN_SUB.includes(tab)));
   });
-  // Активное состояние landing доступно не только через CSS-класс (issue #141/#142).
-  const ovPill = document.querySelector('#subnav .snpill[data-sub="overview"]');
-  if (ovPill) { if (tab === 'overview') ovPill.setAttribute('aria-current', 'page'); else ovPill.removeAttribute('aria-current'); }
   hpt();
   if (tab==='evolution') rEvoList($('evo-more'));
   if (tab==='insights')  rIns();
@@ -1545,7 +1555,7 @@ function runSearch(q) {
         <div class="ins-body">
           <div class="ins-meta"><span class="tag ${TC[r.item.tag]||'tg-personal'}">${TL[r.item.tag]||r.item.tag}</span><span class="ins-date">${r.item.date}</span></div>
           <div class="ins-title">${highlight(r.item.title, q)}</div>
-          <div class="ins-text">${highlight(r.item.body.slice(0,100), q)}</div>
+          ${insPreview(r.item) ? `<div class="ins-text">${highlight(insPreview(r.item).slice(0, 100), q)}</div>` : ''}
         </div></div>`;
     }
     if (r.type==='dream') {
@@ -1688,8 +1698,8 @@ function rWholeLife() {
   });
   const pendingImports = (DB.externalConnections || []).filter(c => c && c.status === 'preview_ready').length;
   const unfinished = goals.length + exps.length + conflicts + pendingImports;
-  const uSub = [goals.length && `${goals.length} цел.`, exps.length && `${exps.length} эксп.`,
-    conflicts && `${conflicts} конфликт.`, pendingImports && `${pendingImports} импорт`]
+  const uSub = [goals.length && `целей: ${goals.length}`, exps.length && `личных проверок: ${exps.length}`,
+    conflicts && `исправлений: ${conflicts}`, pendingImports && `импортов: ${pendingImports}`]
     .filter(Boolean).join(' · ');
   rows.push(unfinished
     ? x2Row('circle-dot', 'Незавершённое', String(unfinished), esc(uSub), conflicts ? 'openRecords()' : "goTo('map');msub('psychology')")
@@ -1706,9 +1716,9 @@ function rWholeLife() {
   const forms = P('psyFormulations').filter(f => f && f.status === 'active');
   const obs = P('psyObservations').sort((a, b) => (Date.parse(b.timestamp || b.createdAt) || 0) - (Date.parse(a.timestamp || a.createdAt) || 0))[0];
   rows.push((forms.length || obs)
-    ? x2Row('brain', 'Психология', forms.length ? `${forms.length} форм.` : dstr(obs && (obs.timestamp || obs.createdAt)),
-        obs ? 'последнее наблюдение ' + dstr(obs.timestamp || obs.createdAt) : 'активная формулировка', "goTo('map');msub('psychology')")
-    : x2Row('brain', 'Психология', '—', 'Начни с наблюдения', "goTo('map');msub('psychology')"));
+    ? x2Row('brain', 'Психология', forms.length ? String(forms.length) : dstr(obs && (obs.timestamp || obs.createdAt)),
+        obs ? 'последнее наблюдение ' + dstr(obs.timestamp || obs.createdAt) : 'есть текущая тема работы', "goTo('map');msub('psychology')")
+    : x2Row('brain', 'Психология', '—', 'Разбери ситуацию или отметь состояние', "goTo('map');msub('psychology')"));
 
   // Сны — последний сон.
   const drm = P('dreams')[0];
@@ -1733,7 +1743,7 @@ function rWholeLife() {
   const lastImp = (DB.externalWorkSessions || []).slice(-1)[0];
   rows.push(conns.length
     ? x2Row('download', 'Источники', String(conns.length), lastImp ? 'последний импорт ' + dstr(lastImp.at || lastImp.createdAt) : 'импортов ещё не было', 'openExtImport()')
-    : x2Row('download', 'Источники', '—', 'Подключи внешний источник', 'openExtImport()'));
+    : x2Row('download', 'Источники', '—', 'Добавь файл или данные из другого сервиса', 'openExtImport()'));
 
   // Сферы — переехали из глобального меню: трекер живёт внутри «Жизни сейчас».
   const sph = P('spheres');
@@ -1744,7 +1754,7 @@ function rWholeLife() {
 
   // Обзор недели — переехал из глобального меню: это аналитика Главной,
   // а не второй home. Deep link #/overview продолжает работать.
-  rows.push(x2Row('bar-chart-3', 'Обзор недели', '→', 'Динамика, дайджест, карта жизни', "goTo('sys')"));
+  rows.push(x2Row('bar-chart-3', 'Обзор недели', '→', 'Динамика, краткий итог и связи', "goTo('sys')"));
 
   // Иерархия вместо десяти одинаковых карточек: сначала то, что требует
   // внимания, затем сама жизнь, затем понимание и данные.
@@ -1776,7 +1786,7 @@ function rHome() {
   const D2 = ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
   const M  = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
   $('h-date').textContent = `${D2[now.getDay()]}, ${now.getDate()} ${M[now.getMonth()]} ${now.getFullYear()}`;
-  rHState(); rStreak(); detectPatterns();
+  rStreak(); detectPatterns();
   rNudge();
   try { rWholeLife(); } catch (e) {}
   rStateHero(); rVector(); rAmbient('home-ambient'); rSmartInsights('home-smart'); rHeatmap('home-heatmap', 90); rGraph('home-graph', 190, true);
@@ -1920,16 +1930,16 @@ const REG_TECHNIQUES = [
   { id: 'sigh', title: 'Физиологический вздох', frame: 'быстрый сброс напряжения телом',
     for: ['стресс', 'напряж', 'взвинч', 'зл', 'раздраж'],
     steps: ['Два вдоха носом подряд (второй — короткий добор сверху)', 'Долгий медленный выдох ртом', 'Повтори 3–5 раз — тело выходит из «боевого» режима за минуту'] },
-  { id: 'urgesurf', title: 'Сёрфинг по тяге', frame: 'ACT — пережить пик, не борясь силой воли',
+  { id: 'urgesurf', title: 'Переждать волну тяги', frame: 'пережить пик, не борясь с собой силой воли',
     for: ['тяг', 'тянет', 'срыв', 'сорв', 'сладк', 'сигарет', 'кур', 'импульс', 'съест', 'торт', 'заед'],
     steps: ['Замечай тягу как волну, а не как приказ', 'Она растёт, достигает пика и спадает за 5–10 минут', 'Наблюдай ощущение в теле — не борись и не корми его', 'Дай волне пройти: ты не обязан на неё отвечать'] },
-  { id: 'defusion', title: 'Когнитивное расцепление', frame: 'ACT — отделить себя от навязчивой мысли',
+  { id: 'defusion', title: 'Отойти от навязчивой мысли', frame: 'заметить мысль и не принимать её за приказ',
     for: ['навязчив', 'румин', 'мысл', 'самокрит', 'прокруч', 'думаю об'],
     steps: ['Поймай мысль дословно: «…»', 'Скажи про себя: «У меня есть мысль, что …»', 'Потом: «Я замечаю, что у меня есть мысль, что …»', 'Мысль — событие в уме, а не факт и не приказ'] },
-  { id: 'decatastroph', title: 'Декатастрофизация', frame: 'CBT — вернуть реализм при тревоге о будущем',
+  { id: 'decatastroph', title: 'Проверить тревожный прогноз', frame: 'вернуть реалистичный взгляд при тревоге о будущем',
     for: ['катастроф', 'страх', 'будущ', 'бессонниц', 'не усн', 'заснуть', 'встреч'],
     steps: ['Какой самый худший сценарий?', 'А какой самый реалистичный?', 'Если случится плохое — как ты справишься?', 'Что бы ты сказал другу в этой ситуации?'] },
-  { id: 'behavact', title: 'Поведенческая активация', frame: 'CBT — действие раньше настроения',
+  { id: 'behavact', title: 'Начать с маленького действия', frame: 'сделать посильный шаг, не дожидаясь идеального настроения',
     for: ['упадок', 'апати', 'нет сил', 'подавл', 'лень', 'бессил', 'ничего не хоч'],
     steps: ['Выбери одно крошечное действие на 5 минут', 'Не жди мотивацию — она приходит в процессе, не до него', 'Сделай и отметь, как чуть сдвинулось состояние'] },
   { id: 'selfcompassion', title: 'Пауза самосострадания', frame: 'при стыде, вине, самокритике',
@@ -1938,15 +1948,15 @@ const REG_TECHNIQUES = [
   { id: 'box', title: 'Дыхание по квадрату', frame: 'сфокусировать и успокоить перед сложным',
     for: ['стресс', 'трев', 'взвинч', 'перед', 'волну'],
     steps: ['Вдох на 4 счёта', 'Задержка на 4', 'Выдох на 4', 'Задержка на 4 — и снова, 4 круга'] },
-  { id: 'opposite', title: 'Противоположное действие', frame: 'DBT — не идти на поводу у импульса эмоции',
+  { id: 'opposite', title: 'Противоположное действие', frame: 'не идти автоматически на поводу у сильного импульса',
     for: ['зл', 'избега', 'страх', 'импульс', 'обид'],
     steps: ['Назови эмоцию и что она толкает сделать', 'Если это действие не полезно — сделай мягко противоположное', 'Злость → спокойный тон; страх → маленький шаг навстречу'] },
-  { id: 'tipp', title: 'Резкое охлаждение (TIPP)', frame: 'DBT — сбить сильный аффект через тело',
+  { id: 'tipp', title: 'Снизить накал через тело', frame: 'когда эмоция захлёстывает и сначала нужно успокоить тело',
     for: ['паник', 'сильн', 'аффект', 'захлёст', 'накрыв', 'трясёт'],
     steps: ['Холодная вода на лицо или холод к запястьям, 30–60 сек', 'Или быстрая физнагрузка пару минут', 'Тело гасит пик возбуждения — ум проясняется'] },
-  { id: 'name', title: 'Назвать эмоцию', frame: 'аффект-лейблинг снижает накал',
+  { id: 'name', title: 'Назвать эмоцию', frame: 'когда трудно понять, что именно сейчас чувствуешь',
     for: ['захлёст', 'смятен', 'не понимаю что чувств', 'непонятно', 'трев'],
-    steps: ['Назови эмоцию одним словом', 'Где она в теле? Какого она «размера»?', 'Само называние снижает силу эмоции — это доказанный эффект'] },
+    steps: ['Назови эмоцию одним словом', 'Где она в теле? Какого она «размера»?', 'Проверь, стало ли немного легче после того, как ты её назвал(а)'] },
   { id: 'connect', title: 'Шаг к человеку', frame: 'при одиночестве — корневом триггере тяги',
     for: ['одиночеств', 'один', 'пуст', 'изоляц', 'никто', 'брошен'],
     steps: ['Напиши или позвони одному человеку — даже коротко', 'Или выйди туда, где есть люди, на 10 минут', 'Одиночество усиливает тягу — живой контакт сбивает её'] },
@@ -2152,20 +2162,10 @@ function rStateHero() {
       <div class="cbar-t"><div class="cbar-f" style="width:${c.score}%;background:${moodColorScore(c.score)}"></div></div></div>`;
   }).join('');
 }
-// Заголовок героя — приветствие по времени суток, а не статус check-in
-// (раньше «Система «+статус давало сломанные фразы вроде «Система пусто» —
-// статус и так виден на карточке состояния ниже, дублировать не нужно).
-function rHState() {
-  const el = $('h-hl'); if (!el) return;
-  const h = new Date().getHours();
-  const [pre, em] = h < 5 ? ['Доброй', 'ночи'] : h < 12 ? ['Доброе', 'утро'] : h < 18 ? ['Добрый', 'день'] : ['Добрый', 'вечер'];
-  const name = String(CFG.userName || '').trim();
-  el.innerHTML = `${esc(pre)} <em>${esc(em)}</em>${name ? ', ' + esc(name) : ''}`;
-}
 function toggleHomeMore() {
   const el = $('h-more'), btn = $('h-more-btn'); if (!el || !btn) return;
   const open = el.classList.toggle('on');
-  btn.textContent = open ? 'Скрыть подробности ↑' : 'Показать больше ↓';
+  btn.textContent = open ? 'Скрыть подробности ↑' : 'Подробнее о дне ↓';
   if (typeof hpt === 'function') hpt();
 }
 function rHIns() {
@@ -2194,7 +2194,7 @@ function iRow(ins) {
       <div class="ins-body">
         <div class="ins-meta"><span class="tag ${TC[ins.tag]||'tg-personal'}">${TL[ins.tag]||ins.tag}</span><span class="pips">${pips(ins.w||1)}</span><span class="ins-date">${esc(ins.date || dispDate(ins) || '')}</span></div>
         <div class="ins-title">${esc(ins.title)}</div>
-        <div class="ins-text">${esc(ins.body)}</div>
+        ${insPreview(ins) ? `<div class="ins-text">${esc(insPreview(ins))}</div>` : ''}
       </div>
       <div class="ins-actions" onclick="event.stopPropagation()">
         <button class="ins-act-btn" onclick="openEdit(${ins.id})" aria-label="Редактировать">
@@ -2358,6 +2358,16 @@ async function toggleRec(btn) {
 }
 // Заголовок из текста: если запись начинается с вопроса-промпта, заголовок —
 // суть ответа, а не вопрос (иначе все записи из рефлексии называются одинаково).
+// Превью записи: пустое, если текст ничего не добавляет к заголовку —
+// заголовок делается из первых слов текста, и у коротких записей строка
+// дублировалась дословно.
+function insPreview(ins) {
+  const t = String((ins && ins.title) || '').trim();
+  const b = String((ins && ins.body) || '').trim();
+  if (!b || b === t) return '';
+  const rest = b.startsWith(t) ? b.slice(t.length).replace(/^[\s.,;:—–-]+/, '') : b;
+  return rest.trim();
+}
 function titleFrom(tx) {
   const lines = String(tx || '').split('\n').map(s => s.trim()).filter(Boolean);
   const t = (lines.length > 1 && /\?$/.test(lines[0]))
@@ -2378,7 +2388,7 @@ function saveIns() {
   });
   STATE.addMedia = []; const am = $('add-media'); if (am) am.innerHTML = '';
   $('add-tx').value=''; $('add-src').value='';
-  // Wave 1 (issue #148): если инсайт создавался из детали разбора «Зачем?» —
+  // Wave 1 (issue #148): если инсайт создавался из детали разбора ситуации —
   // создаём долговечную ссылку why_to_insight. Текст уже был отредактирован/
   // подтверждён пользователем в этой самой форме — никакого автосохранения.
   const whyId = STATE.pendingInsightFromWhy;
@@ -2389,7 +2399,7 @@ function saveIns() {
   reactToInsight(DB.insights[0]);          // живой отклик вместо молчания
   try { rVector(); } catch (e) {}
 }
-// Открыть форму «Новый инсайт» из детали разбора «Зачем?»: превью-текст
+// Открыть форму «Новый инсайт» из детали разбора ситуации: превью-текст
 // собран из полей разбора, полностью редактируемый — пользователь должен
 // явно подтвердить (нажать «Сохранить инсайт»), никакого автосохранения.
 function startWhyToInsight(whyId) {
@@ -2463,7 +2473,7 @@ function undoDelete() {
 const REC_COLLS = {
   checkins:   { ru: 'Чек-ины',            sum: r => `${r.date || r.day || ''} · сон ${r.sl ?? '—'} · ясность ${r.cl ?? '—'} · стресс ${r.st ?? '—'}` },
   moments:    { ru: 'Моменты',            sum: r => `${r.day || ''} · приятность ${Math.round(r.valence)} · энергия ${Math.round(r.activation)}${r.emo ? ' · ' + r.emo : ''}` },
-  whys:       { ru: 'Разборы «Зачем?»',   sum: r => `${r.day || ''} · ${r.symptom || r.need || 'разбор'}` },
+  whys:       { ru: 'Разборы ситуаций',   sum: r => `${r.day || ''} · ${r.symptom || r.need || 'разбор'}` },
   cravings:   { ru: 'Тяга (импульсы)',    sum: r => `${r.day || ''} · сила ${r.intensity ?? '—'} · ${r.outcome === 'held' ? 'пережил' : 'уступил'}` },
   meds:       { ru: 'План приёма',        sum: r => r.name || 'позиция плана' },
   medIntakes: { ru: 'Факты приёма',       sum: r => { const m = (DB.meds || []).find(x => x && x.id === r.medId); return `${(r.at || r.createdAt || '').slice(0, 10)} · ${m ? m.name : 'препарат'}`; } },
@@ -2481,14 +2491,14 @@ const REC_COLLS = {
   astroCharts:{ ru: 'Расчёты натальной карты', sum: r => `${(r.createdAt || '').slice(0, 10)} · расчёт карты` },
   externalWorkSessions: { ru: 'Импорт внешней работы (журнал)', sum: r => `${(r.importedAt || '').slice(0, 10)} · ${r.sourceLabel || r.source || 'сессия'} · записей: ${(r.recordRefs || []).length}` },
   // Wave 7 (issue #162): психологический workspace — управляемые записи.
-  psyFormulations: { ru: 'Формулировки случая', sum: r => `${r.focus || 'формулировка'} · ${PSY_STATUS_RU[r.status] || r.status}` },
+  psyFormulations: { ru: 'Рабочие картины', sum: r => `${r.focus || 'рабочая картина'} · ${PSY_STATUS_RU[r.status] || r.status}` },
   psyGoals: { ru: 'Психологические цели', sum: r => `${r.label || 'цель'} · ${PSY_GOAL_STATUS_RU[r.status] || r.status}` },
-  psyInterventionEpisodes: { ru: 'Применения метода', sum: r => `${(r.dateTime || '').slice(0, 10)} · ${r.methodFamily || '—'} · ${PSY_OUTCOME_RU[r.outcomeClass] || r.outcomeClass || 'без исхода'}` },
-  psyObservations: { ru: 'Наблюдения / EMA', sum: r => `${(r.timestamp || '').slice(0, 10)} · ${r.metricId || 'метрика'} · ${r.valueNumber != null ? r.valueNumber + (r.unit ? ' ' + r.unit : '') : (r.valueText || 'без значения')}` },
-  psyReviews: { ru: 'Психологические review', sum: r => `${(r.periodStart || '').slice(0, 10)}–${(r.periodEnd || '').slice(0, 10)} · ${PSY_DECISION_RU[r.decision] || r.decision || '—'}` },
+  psyInterventionEpisodes: { ru: 'Что я пробовал', sum: r => `${(r.dateTime || '').slice(0, 10)} · ${PSY_FAMILY_RU[r.methodFamily] || 'свой способ'} · ${PSY_OUTCOME_RU[r.outcomeClass] || r.outcomeClass || 'без результата'}` },
+  psyObservations: { ru: 'Психологические наблюдения', sum: r => `${(r.timestamp || '').slice(0, 10)} · ${r.metricId || 'наблюдение'} · ${r.valueNumber != null ? r.valueNumber + (r.unit ? ' ' + r.unit : '') : (r.valueText || 'без значения')}` },
+  psyReviews: { ru: 'Итоги по психологии', sum: r => `${(r.periodStart || '').slice(0, 10)}–${(r.periodEnd || '').slice(0, 10)} · ${PSY_DECISION_RU[r.decision] || r.decision || '—'}` },
   // Wave 8 (issue #163): адаптивный движок — управляемые записи.
-  psyAdaptivePlans: { ru: 'Адаптивные планы (JITAI)', sum: r => `${r.proximalOutcome || 'план'}${r.enabled ? '' : ' (выключен)'}` },
-  psyExperiments: { ru: 'Личные эксперименты (N-of-1)', sum: r => `${(r.createdAt || '').slice(0, 10)} · ${r.question || 'эксперимент'} · ${PSY_EXP_STATUS_RU[r.status] || r.status || '—'}` },
+  psyAdaptivePlans: { ru: 'Планы на трудный момент', sum: r => `${r.proximalOutcome || 'план'}${r.enabled ? '' : ' (выключен)'}` },
+  psyExperiments: { ru: 'Личные проверки', sum: r => `${(r.createdAt || '').slice(0, 10)} · ${r.question || 'проверка'} · ${PSY_EXP_STATUS_RU[r.status] || r.status || '—'}` },
   // Final A: подключения внешних источников (bridge) — управляемые записи.
   externalConnections: { ru: 'Внешние источники', sum: r => `${r.label || 'источник'} · ${EXT_SOURCE_STATUS_RU[r.status] || r.status || '—'}` },
   astroPartners: { ru: 'Партнёры (синастрия)', sum: r => r.label || 'партнёр' },
@@ -2543,7 +2553,7 @@ const REC_VIEW = {
   healthDocuments: [REC_FIELD('title', 'Заголовок'), REC_FIELD('documentDate', 'Дата документа'), REC_FIELD('kind', 'Вид'), REC_FIELD('provider', 'Кем выдан'), REC_FIELD('note', 'Заметка', { long: true })],
   checkins: [REC_FIELD('date', 'Дата'), REC_FIELD('sl', 'Сон, часов'), REC_FIELD('sq', 'Качество сна'), REC_FIELD('cl', 'Ясность'), REC_FIELD('st', 'Стресс'), REC_FIELD('mv', 'Движение'), REC_FIELD('emo', 'Эмоция'), REC_FIELD('note', 'Заметка', { long: true })],
   moments: [REC_FIELD('day', 'День'), REC_FIELD('valence', 'Приятность'), REC_FIELD('activation', 'Энергия'), REC_FIELD('emo', 'Эмоция'), REC_FIELD('note', 'Заметка', { long: true })],
-  whys: [REC_FIELD('day', 'День'), REC_FIELD('symptom', 'Симптом — что происходит', { long: true }), REC_FIELD('function', 'Функция — зачем это тебе', { long: true }), REC_FIELD('gain', 'Вторичная выгода', { long: true }), REC_FIELD('need', 'Потребность', { long: true }), REC_FIELD('cost', 'Цена', { long: true }), REC_FIELD('alternative', 'Альтернатива', { long: true }), REC_FIELD('action', 'Действие', { long: true })],
+  whys: [REC_FIELD('day', 'День'), REC_FIELD('symptom', 'Что происходило', { long: true }), REC_FIELD('function', 'От чего это защищало', { long: true }), REC_FIELD('gain', 'Что это давало', { long: true }), REC_FIELD('need', 'Что было нужно', { long: true }), REC_FIELD('cost', 'Какова цена', { long: true }), REC_FIELD('alternative', 'Как можно иначе', { long: true }), REC_FIELD('action', 'Мой следующий шаг', { long: true })],
   cravings: [REC_FIELD('day', 'День'), REC_FIELD('kind', 'Что тянуло'), REC_FIELD('intensity', 'Сила'), REC_FIELD('outcome', 'Исход', { fmt: v => (v === 'held' ? 'пережил' : v === 'gave_in' ? 'уступил' : v) }), REC_FIELD('trigger', 'Триггер', { long: true })],
   symptoms: [REC_FIELD('day', 'День'), REC_FIELD('name', 'Симптом'), REC_FIELD('severity', 'Выраженность'), REC_FIELD('note', 'Заметка', { long: true })],
   measures: [REC_FIELD('day', 'День'), REC_FIELD('name', 'Показатель'), REC_FIELD('value', 'Значение'), REC_FIELD('unit', 'Единица')],
@@ -2553,8 +2563,8 @@ const REC_VIEW = {
   sphereLogs: [REC_FIELD('date', 'Дата'), REC_FIELD('sphereId', 'Сфера', { fmt: v => { const sp = (DB.spheres || []).find(x => x && x.id === v); return sp ? sp.name : String(v ?? '—'); } }), REC_FIELD('value', 'Значение'), REC_FIELD('note', 'Заметка', { long: true })],
   psyFormulations: [REC_FIELD('focus', 'Фокус'), REC_FIELD('status', 'Статус', { fmt: v => PSY_STATUS_RU[v] || v }), REC_FIELD('formulation', 'Формулировка', { long: true }), REC_FIELD('hypotheses', 'Гипотезы', { fmt: v => (Array.isArray(v) ? v : []).map(h => `— ${h && h.text ? h.text : ''}${h && h.confidenceLabel ? ' (уверенность: ' + h.confidenceLabel + ')' : ''}`).filter(s => s !== '— ').join('\n') }), REC_FIELD('maintainingFactors', 'Что поддерживает'), REC_FIELD('protectiveFactors', 'Что защищает'), REC_FIELD('supersedesId', 'Заменяет версию')],
   psyGoals: [REC_FIELD('label', 'Цель'), REC_FIELD('status', 'Статус', { fmt: v => PSY_GOAL_STATUS_RU[v] || v }), REC_FIELD('targetMechanism', 'Механизм-мишень'), REC_FIELD('proximalOutcome', 'Ближний результат'), REC_FIELD('distalOutcome', 'Дальний результат'), REC_FIELD('startedAt', 'Начата'), REC_FIELD('reviewAt', 'Пересмотр')],
-  psyInterventionEpisodes: [REC_FIELD('dateTime', 'Когда'), REC_FIELD('targetProblem', 'Проблема-мишень'), REC_FIELD('targetMechanism', 'Механизм-мишень'), REC_FIELD('methodFamily', 'Семейство метода'), REC_FIELD('methodId', 'Метод'), REC_FIELD('interventionSummary', 'Что делали', { long: true }), REC_FIELD('rationale', 'Обоснование', { long: true }), REC_FIELD('adherence', 'Выполнение', { fmt: v => PSY_ADHERENCE_RU[v] || v }), REC_FIELD('outcomeClass', 'Исход', { fmt: v => PSY_OUTCOME_RU[v] || v }), REC_FIELD('acceptability', 'Переносимость', { fmt: v => PSY_ACCEPT_RU[v] || v }), REC_FIELD('fidelityNote', 'Как именно применяли', { long: true }), REC_FIELD('adverseEffects', 'Нежелательные эффекты', { long: true }), REC_FIELD('confounders', 'Что могло повлиять', { long: true })],
-  psyObservations: [REC_FIELD('timestamp', 'Когда'), REC_FIELD('metricId', 'Метрика'), REC_FIELD('valueNumber', 'Значение'), REC_FIELD('unit', 'Единица'), REC_FIELD('valueText', 'Значение (текст)', { long: true }), REC_FIELD('episode', 'Эпизод', { fmt: v => (v && typeof v === 'object' ? [['event', 'Событие'], ['firstThought', 'Первая мысль'], ['body', 'Тело'], ['emotion', 'Эмоция'], ['impulse', 'Импульс'], ['action', 'Действие'], ['result', 'Результат']].filter(([k]) => v[k]).map(([k, l]) => `${l}: ${v[k]}`).join('\n') : '') }), REC_FIELD('contextTag', 'Контекст'), REC_FIELD('entryMode', 'Способ записи'), REC_FIELD('source', 'Кто записал'), REC_FIELD('naturalistic', 'В естественных условиях', { fmt: v => (v ? 'да' : 'нет') })],
+  psyInterventionEpisodes: [REC_FIELD('dateTime', 'Когда'), REC_FIELD('targetProblem', 'Проблема-мишень'), REC_FIELD('targetMechanism', 'Механизм-мишень'), REC_FIELD('methodFamily', 'Подход'), REC_FIELD('methodId', 'Метод'), REC_FIELD('interventionSummary', 'Что делали', { long: true }), REC_FIELD('rationale', 'Обоснование', { long: true }), REC_FIELD('adherence', 'Выполнение', { fmt: v => PSY_ADHERENCE_RU[v] || v }), REC_FIELD('outcomeClass', 'Исход', { fmt: v => PSY_OUTCOME_RU[v] || v }), REC_FIELD('acceptability', 'Переносимость', { fmt: v => PSY_ACCEPT_RU[v] || v }), REC_FIELD('fidelityNote', 'Как именно применяли', { long: true }), REC_FIELD('adverseEffects', 'Нежелательные эффекты', { long: true }), REC_FIELD('confounders', 'Что могло повлиять', { long: true })],
+  psyObservations: [REC_FIELD('timestamp', 'Когда'), REC_FIELD('metricId', 'Метрика'), REC_FIELD('valueNumber', 'Значение'), REC_FIELD('unit', 'Единица'), REC_FIELD('valueText', 'Значение (текст)', { long: true }), REC_FIELD('episode', 'Случай', { fmt: v => (v && typeof v === 'object' ? [['event', 'Событие'], ['firstThought', 'Первая мысль'], ['body', 'Тело'], ['emotion', 'Эмоция'], ['impulse', 'Импульс'], ['action', 'Действие'], ['result', 'Результат']].filter(([k]) => v[k]).map(([k, l]) => `${l}: ${v[k]}`).join('\n') : '') }), REC_FIELD('contextTag', 'Контекст'), REC_FIELD('entryMode', 'Способ записи'), REC_FIELD('source', 'Кто записал'), REC_FIELD('naturalistic', 'В обычной жизни', { fmt: v => (v ? 'да' : 'нет') })],
   psyReviews: [REC_FIELD('periodStart', 'Период с'), REC_FIELD('periodEnd', 'Период по'), REC_FIELD('decision', 'Решение', { fmt: v => PSY_DECISION_RU[v] || v }), REC_FIELD('methodsAppliedSummary', 'Какие методы применялись', { long: true }), REC_FIELD('adherenceSummary', 'Как выполнялось', { long: true }), REC_FIELD('outcomeSummary', 'Что получилось', { long: true }), REC_FIELD('acceptabilitySummary', 'Как переносилось', { long: true }), REC_FIELD('adverseEffectsSummary', 'Нежелательные эффекты', { long: true }), REC_FIELD('confoundersSummary', 'Что могло повлиять', { long: true }), REC_FIELD('hypothesesStrengthened', 'Гипотезы подтвердились'), REC_FIELD('hypothesesWeakened', 'Гипотезы ослабли'), REC_FIELD('limitations', 'Ограничения', { long: true })],
   psyAdaptivePlans: [REC_FIELD('proximalOutcome', 'Ближний результат'), REC_FIELD('distalOutcome', 'Дальний результат'), REC_FIELD('decisionPoints', 'Точки принятия решения'), REC_FIELD('interventionOptions', 'Возможные приёмы'), REC_FIELD('enabled', 'Включён', { fmt: v => (v ? 'да' : 'нет') })],
   psyExperiments: [REC_FIELD('question', 'Вопрос'), REC_FIELD('status', 'Статус', { fmt: v => PSY_EXP_STATUS_RU[v] || v }), REC_FIELD('designType', 'Дизайн'), REC_FIELD('methodId', 'Метод'), REC_FIELD('conditions', 'Условия'), REC_FIELD('resultSummary', 'Итог', { long: true }), REC_FIELD('limitations', 'Ограничения')],
@@ -2573,7 +2583,7 @@ const REC_EDIT = {
   evolution: { cls: 'A', fields: ['text'] },
   patterns: { cls: 'A', fields: ['type', 'text'] },
   bots: { cls: 'A', fields: ['title'] },
-  // «Зачем?» — собственная трактовка эпизода. Формулировки правятся, день эпизода — нет.
+  // разбор ситуации — собственная трактовка случая. Формулировки правятся, день случая — нет.
   whys: { cls: 'A', fields: ['symptom', 'function', 'gain', 'need', 'cost', 'alternative', 'action'] },
   relationshipContexts: { cls: 'A', fields: ['label', 'roleOrRelation', 'note'] },
   spheres: { cls: 'A', fields: ['name'] },
@@ -2873,8 +2883,8 @@ function recRenderDetail() {
     return `<div class="psy-fld"><div class="f-lbl">${esc(f.l)}${mark}</div><div class="si-text" style="white-space:pre-wrap;line-height:1.55">${esc(t)}</div></div>`;
   }).filter(Boolean).join('') || '<div class="bk-empty">У записи нет заполненных полей.</div>';
   const prov = ext ? `<div class="psy-fld"><div class="f-lbl">Происхождение</div><div class="si-text" style="line-height:1.55">Импортировано из внешнего источника${ext.sourceLabel ? ' · ' + esc(ext.sourceLabel) : ''}.${
-      (ext.claimClasses || []).length ? '<br>Класс утверждения: ' + esc((ext.claimClasses || []).join(', ')) : ''}${
-      ext.textOrigin ? '<br>Происхождение текста: ' + esc(ext.textOrigin) : ''}${
+      (ext.claimClasses || []).length ? '<br>Тип материала: ' + esc((ext.claimClasses || []).map(extClaimLabel).join(', ')) : ''}${
+      ext.textOrigin ? '<br>Чьи это слова: ' + esc(extTextOriginLabel(ext.textOrigin)) : ''}${
       (ext.sourceRefs || []).length > 1 ? '<br>Ссылок на исходные объекты: ' + (ext.sourceRefs || []).length : ''}${
       (ext.revisions || []).length ? '<br>Версий из источника: ' + (ext.revisions || []).length : ''}${
       (ext.localResolutions || []).length ? '<br>Есть решение «оставить мою версию»' : ''}</div></div>`
@@ -3446,12 +3456,12 @@ function showDet(id) {
   if (out.length)  html += `<div class="det-rel"><b>Ссылается на</b> ${out.map(l => `<span class="wl" onclick="openLink(decodeURIComponent('${encodeURIComponent(l)}'))">${esc(l)}</span>`).join(' · ')}</div>`;
   if (back.length) html += `<div class="det-rel"><b>Упоминается в</b> ${back.map(x => `<span class="wl" onclick="showDet(${x.id})">${esc(x.title)}</span>`).join(' · ')}</div>`;
   if (!html) html = `<div class="det-hint">Пересечений с другими записями пока нет — они появятся сами, когда темы начнут повторяться.</div>`;
-  // Психологический разбор по методу «Зачем?» (если ИИ уже разметил)
+  // Психологический разбор по методу разбор ситуации (если ИИ уже разметил)
   if (ins.psy && (ins.psy.func || ins.psy.need)) {
     const p = ins.psy;
     const row = (k, v) => v ? `<div class="psy-row"><span>${k}</span><div>${esc(v)}</div></div>` : '';
     const rel = psyRelated(ins, 3);
-    html += `<div class="psy-box"><div class="psy-box-t">Разбор по методу «Зачем?»</div>
+    html += `<div class="psy-box"><div class="psy-box-t">Разбор ситуации</div>
       ${row('Симптом', p.symptom)}${row('Функция', p.func)}${row('Вторичная выгода', p.gain)}
       ${row('Потребность', p.need)}${row('Состояние Я', p.ego)}${row('Эмоция', p.emotion)}${row('Игра', p.game)}
       ${rel.length ? `<div class="psy-row"><span>Та же потребность</span><div>${rel.map(r => `<span class="wl" onclick="showDet(${r.id})">${esc(r.title.slice(0, 34))}</span>`).join(' · ')}</div></div>` : ''}
@@ -3465,7 +3475,7 @@ function showDet(id) {
   icons();
 }
 // Wave 1 (issue #148): доказательная цепочка на стороне Инсайта — откуда
-// возник (разбор «Зачем?», если есть), пикер «связать/создать Паттерн»,
+// возник (разбор ситуации, если есть), пикер «связать/создать Паттерн»,
 // контекст отношений. Отдельный контейнер от det-links (авто-связи по теме).
 function rInsightPsyLinks(ins) {
   const el = $('det-psylinks'); if (!el) return;
@@ -3473,7 +3483,7 @@ function rInsightPsyLinks(ins) {
   const fromWhy = psyLinksTo('insights', ins.id, 'why_to_insight')[0];
   if (fromWhy) {
     const w = projAll('whys').find(x => x && x.id === fromWhy.fromId);
-    if (w) html += `<button type="button" class="srow" style="padding-left:0" onclick="closeOv('ov-det');openWhy(${w.id})"><span class="sl2">← «Зачем?»</span><span class="sv2">${esc((w.symptom || w.need || w.action || 'Разбор').slice(0, 60))}</span></button>`;
+    if (w) html += `<button type="button" class="srow" style="padding-left:0" onclick="closeOv('ov-det');openWhy(${w.id})"><span class="sl2">← разбор ситуации</span><span class="sv2">${esc((w.symptom || w.need || w.action || 'Разбор').slice(0, 60))}</span></button>`;
   }
   const toPattern = psyLinksFrom('insights', ins.id, 'insight_to_pattern')[0];
   if (toPattern) {
@@ -3790,7 +3800,7 @@ function saveCI() {
   const existing = DB.checkins.findIndex(c=>c.date===v.date);   // raw intentionally: путь записи чек-ина
   const ci = {...v, id: existing>=0 ? DB.checkins[existing].id : Date.now()};
   if (existing>=0) DB.checkins[existing] = ci; else DB.checkins.push(ci);
-  closeOv('ov-ci'); persist(); rVit(); rCompass(); rHState(); rStreak();
+  closeOv('ov-ci'); persist(); rVit(); rCompass(); rStreak();
   // Содержательное — в карточку отклика (не в мимолётный тост, П2 брифа)
   hptMed(); toast('Check-in сохранён', 'ok');
   reactToCheckin((v.cl + v.mv + (10-v.st)) / 3);
@@ -4152,14 +4162,14 @@ function openMoment(id) {
     // «только моменты с жёстко зашитыми приятностью/энергией».
     const rawMom = (DB.moments || []).find(x => x && x.id === id);   // raw intentionally: ОРИГИНАЛ для истории
     if (rawMom) html += recCorrHistoryHtml('moments', rawMom);
-    // Wave 1 (issue #148): разборы «Зачем?», уже возникшие из этого Момента.
+    // Wave 1 (issue #148): разборы ситуаций, уже возникшие из этого Момента.
     html += '<div class="side-div"></div>';
     const whys = psyLinksFrom('moments', id, 'moment_to_why');
     whys.forEach(l => {
       const w = projAll('whys').find(x => x && x.id === l.toId);
-      if (w) html += `<button type="button" class="srow" style="padding-left:0" onclick="closeOv('ov-moment-det');openWhy(${w.id})"><span class="sl2">→ «Зачем?»</span><span class="sv2">${esc((w.symptom || w.need || w.action || 'Разбор').slice(0, 60))}</span></button>`;
+      if (w) html += `<button type="button" class="srow" style="padding-left:0" onclick="closeOv('ov-moment-det');openWhy(${w.id})"><span class="sl2">→ разбор ситуации</span><span class="sv2">${esc((w.symptom || w.need || w.action || 'Разбор').slice(0, 60))}</span></button>`;
     });
-    html += `<div style="margin-top:.5rem"><button type="button" class="btn btn-s btn-sm" onclick="openWhyFromMoment(${id})"><i data-lucide="help-circle"></i>Разобрать через «Зачем?»</button></div>`;
+    html += `<div style="margin-top:.5rem"><button type="button" class="btn btn-s btn-sm" onclick="openWhyFromMoment(${id})"><i data-lucide="help-circle"></i>Разобрать через разбор ситуации</button></div>`;
     html += relContextPickerHTML('moments', id);
     body.innerHTML = html;
   }
@@ -4229,7 +4239,39 @@ function rHomeMoments() {
 // диагноз и не вывод ИИ. Несёт «паспорт данных» (kType/verif/life). В этой
 // версии — без ИИ (заполняешь сам); AI-помощь появится после validator-framework.
 const WHY_FIELDS = ['symptom','function','gain','need','cost','alternative','action'];
-function resetWhyForm() { WHY_FIELDS.forEach(k => { const el = $('why-' + k); if (el) el.value = ''; }); }
+let _whyStep = 0;
+function renderWhyStep(focusField) {
+  const panels = [...document.querySelectorAll('#why-wizard [data-why-step]')];
+  const last = Math.max(0, panels.length - 1);
+  _whyStep = Math.max(0, Math.min(last, _whyStep));
+  panels.forEach((panel, i) => {
+    const on = i === _whyStep;
+    panel.hidden = !on;
+    panel.classList.toggle('on', on);
+    panel.setAttribute('aria-hidden', on ? 'false' : 'true');
+  });
+  const count = $('why-step-count'); if (count) count.textContent = `Шаг ${_whyStep + 1} из ${panels.length || WHY_FIELDS.length}`;
+  const bar = $('why-progress-bar'); if (bar) bar.style.width = `${((_whyStep + 1) / (panels.length || WHY_FIELDS.length)) * 100}%`;
+  const back = $('why-back'); if (back) back.disabled = _whyStep === 0;
+  const next = $('why-next'); if (next) next.hidden = _whyStep === last;
+  const save = $('why-save'); if (save) save.hidden = _whyStep !== last;
+  if (focusField) {
+    const field = panels[_whyStep] && panels[_whyStep].querySelector('textarea,input');
+    if (field && field.focus) { try { field.focus({ preventScroll: true }); } catch (e) { field.focus(); } }
+  }
+}
+function whyNext() { _whyStep += 1; renderWhyStep(true); hpt(); }
+function whyPrev() { _whyStep -= 1; renderWhyStep(true); hpt(); }
+function whyStepKey(e) {
+  if (!e || e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault();
+  if (_whyStep < WHY_FIELDS.length - 1) whyNext(); else saveWhy();
+}
+function resetWhyForm() {
+  WHY_FIELDS.forEach(k => { const el = $('why-' + k); if (el) el.value = ''; });
+  _whyStep = 0;
+  renderWhyStep(false);
+}
 function saveWhy() {
   const rec = { id: Date.now(), kType: 'process_reflection', verif: 'user_confirmed', life: 'current',
     createdAt: nowISO(), day: todayKey(), sv: SCHEMA_VERSION, _u: Date.now() };
@@ -4239,7 +4281,7 @@ function saveWhy() {
   if (!Array.isArray(DB.whys)) DB.whys = [];
   DB.whys.push(rec);
   // Wave 1 (issue #148): если разбор открыт из Момента через «Разобрать через
-  // «Зачем?»» — создаём долговечную ссылку moment_to_why. Само содержимое
+  // разбор ситуации» — создаём долговечную ссылку moment_to_why. Само содержимое
   // Момента (valence/activation) в разбор не переносится — только то, что
   // пользователь написал руками в полях формы выше.
   const momentId = STATE.pendingWhyFromMoment;
@@ -4249,8 +4291,8 @@ function saveWhy() {
   try { rWhys(); } catch (e) {}
   hptMed(); toast(momentId != null ? 'Разбор сохранён и связан с моментом' : 'Разбор сохранён', 'ok');
 }
-// Открыть форму «Зачем?» из детали Момента: переносит ТОЛЬКО введённый
-// пользователем контекст (заметку/эмоцию) в поле «Симптом» как черновик —
+// Открыть «Разбор ситуации» из детали Момента: переносит ТОЛЬКО введённый
+// пользователем контекст (заметку/эмоцию) в первый шаг как черновик —
 // valence/activation НЕ переносятся и не превращаются в диагноз. Пользователь
 // может стереть/переписать текст перед сохранением.
 function openWhyFromMoment(momentId) {
@@ -4268,7 +4310,7 @@ function rWhys() {
   const el = $('h-whys'); if (!el) return;
   const list = projAll('whys').slice(-3).reverse();
   if (!list.length) { el.innerHTML = ''; return; }
-  el.innerHTML = '<div class="sec-lbl">Разборы «Зачем?»</div><div class="card mx mb">' +
+  el.innerHTML = '<div class="sec-lbl">Разборы ситуаций</div><div class="card mx mb">' +
     list.map(w => {
       const d = (w.day || '').slice(5);
       const head = esc(w.symptom || w.need || w.action || 'Разбор');
@@ -4277,8 +4319,14 @@ function rWhys() {
       return `<div class="si-row tap" style="cursor:pointer" onclick="openWhy(${w.id})"><div class="si-body"><div class="si-text"><b>${d}</b> ${mk}— ${head}</div>${act}</div></div>`;
     }).join('') + '</div>';
 }
-// Просмотр сохранённого разбора «Зачем?» (полная цепочка) + удаление.
-const WHY_LABELS = { symptom:'Симптом', function:'Функция', gain:'Вторичная выгода', need:'Потребность', cost:'Цена', alternative:'Альтернатива', action:'Действие' };
+// Просмотр сохранённого разбора ситуации (полная цепочка) + удаление.
+// Canonical-ключи не меняются; человеку показываются те же вопросы, которые
+// он видел в пошаговом вводе, без методологического словаря.
+const WHY_LABELS = {
+  symptom:'Что происходило', function:'От чего это защищало',
+  gain:'Что это давало', need:'Что было нужно', cost:'Какова цена',
+  alternative:'Как можно иначе', action:'Мой следующий шаг',
+};
 function openWhy(id) {
   const w = projAll('whys').find(x => x && x.id === id); if (!w) return;
   STATE.whyDetId = id;
@@ -4322,7 +4370,7 @@ function openWhy(id) {
   openOv('ov-why-det');
   icons();
 }
-// «За неделю»: детерминированная сводка (без ИИ) по моментам и разборам «Зачем?»
+// «За неделю»: детерминированная сводка (без ИИ) по моментам и разборам разбор ситуации
 // за 7 дней — понимание с одного взгляда. Только чтение накопленных записей.
 function rWeekSummary() {
   const el = $('h-week'); if (!el) return;
@@ -4334,10 +4382,10 @@ function rWeekSummary() {
   const done = wh.filter(w => w.actionDone === true).length;
   const parts = [];
   if (mo.length) parts.push(`${mo.length} ${pl(mo.length, 'запись', 'записи', 'записей')} состояния (приятность ${avg(mo, 'valence')}%, энергия ${avg(mo, 'activation')}%)`);
-  if (wh.length) parts.push(`${wh.length} ${pl(wh.length, 'разбор', 'разбора', 'разборов')} «Зачем?»` + (done ? `, из них выполнено ${done}` : ''));
+  if (wh.length) parts.push(`${wh.length} ${pl(wh.length, 'разбор', 'разбора', 'разборов')} ситуаций` + (done ? `, из них выполнено ${done}` : ''));
   el.innerHTML = '<div class="sec-lbl">За неделю</div><div class="card mx mb" style="padding:.85rem 1rem"><div class="si-text">' + parts.join('. ') + '.</div></div>';
 }
-// История состояний: моменты + разборы «Зачем?» одним хронологическим списком.
+// История состояний: моменты + разборы ситуаций одним хронологическим списком.
 // Только чтение накопленных записей (долговременная память), каждая — в деталь.
 function rHistory() {
   const el = $('history-list'); if (!el) return;
@@ -4345,7 +4393,7 @@ function rHistory() {
   projAll('moments').forEach(m => { if (m && m.id) items.push({ t: 'moment', at: Date.parse(m.createdAt) || 0, rec: m }); });
   projAll('whys').forEach(w => { if (w && w.id) items.push({ t: 'why', at: Date.parse(w.createdAt) || 0, rec: w }); });
   items.sort((a, b) => b.at - a.at);
-  if (!items.length) { el.innerHTML = '<div class="bk-empty" style="padding:1rem">Здесь появятся твои моменты и разборы «Зачем?».</div>'; return; }
+  if (!items.length) { el.innerHTML = '<div class="bk-empty" style="padding:1rem">Здесь появятся твои моменты и разборы ситуаций.</div>'; return; }
   el.innerHTML = items.slice(0, 200).map(it => {
     const day = (it.rec.day || '').slice(5);
     if (it.t === 'moment') {
@@ -4354,10 +4402,10 @@ function rHistory() {
     }
     const done = it.rec.actionDone === true ? '<span style="color:var(--green)">✓</span> ' : '';
     const head = esc(it.rec.symptom || it.rec.need || it.rec.action || 'разбор');
-    return `<div class="srow tap" style="cursor:pointer" onclick="closeOv('ov-history');openWhy(${it.rec.id})"><div class="bk-info"><span class="sl2">${day} · «Зачем?»</span><span class="sv2">${done}${head}</span></div></div>`;
+    return `<div class="srow tap" style="cursor:pointer" onclick="closeOv('ov-history');openWhy(${it.rec.id})"><div class="bk-info"><span class="sl2">${day} · разбор ситуации</span><span class="sv2">${done}${head}</span></div></div>`;
   }).join('');
 }
-// Отметка выполнения выбранного действия из разбора «Зачем?» (проверка результата).
+// Отметка выполнения выбранного действия из разбора ситуации (проверка результата).
 function markWhyAction(done) {
   const id = STATE.whyDetId;
   const w = (DB.whys || []).find(x => x && x.id === id); if (!w) return;   // raw intentionally: писатель коррекции
@@ -4399,7 +4447,7 @@ function deleteWhyDet() {
 }
 
 // ═══ WAVE 1 (issue #148): доказательная цепочка ═══════════════════
-// Момент → «Зачем?» → Инсайт → Паттерн → Действие → Выполнение.
+// Момент → Разбор → Инсайт → Паттерн → Действие → Выполнение.
 // psyLinks — единая generic-коллекция долговечных ссылок между уже
 // существующими записями (не переписывает и не мутирует исходные записи).
 // Ссылки profile-local, id-merge через IDCOLS (sync/tombstone/backup —
@@ -4415,8 +4463,8 @@ const PSY_LINK_RELATIONS = ['moment_to_why', 'why_to_insight', 'insight_to_patte
 // detail-экрана, поэтому UI-привязка для них пока не реализована (см. отчёт).
 const RELATIONSHIP_LINKABLE_COLLS = ['moments', 'whys', 'insights', 'patterns'];
 const PSY_LINK_RELATION_LABELS = {
-  moment_to_why: 'Момент → «Зачем?»', why_to_insight: '«Зачем?» → Инсайт',
-  insight_to_pattern: 'Инсайт → Паттерн', record_to_relationship: 'Запись → контекст отношений',
+  moment_to_why: 'Момент → разбор', why_to_insight: 'Разбор → инсайт',
+  insight_to_pattern: 'Инсайт → закономерность', record_to_relationship: 'Запись → контекст отношений',
 };
 // Wave 6 (issue #160): необязательный параметр `db` — чтобы ОДИН И ТОТ ЖЕ
 // production-валидатор работал и на живом DB, и на транзакционном кандидате
@@ -4491,7 +4539,7 @@ function psyLinksFrom(coll, id, relation) {
   return (DB.psyLinks || []).filter(l => l && l.fromColl === coll && l.fromId === id && (!relation || l.relation === relation) && collExists(l.toColl, l.toId));
 }
 // Связи В запись (по relation, опционально) — обратный поиск (напр. «из какого
-// Момента возник этот разбор «Зачем?»).
+// Момента возник этот разбор ситуации).
 function psyLinksTo(coll, id, relation) {
   return (DB.psyLinks || []).filter(l => l && l.toColl === coll && l.toId === id && (!relation || l.relation === relation) && collExists(l.fromColl, l.fromId));
 }
@@ -4615,7 +4663,7 @@ function togglePsyActionDone(id, done) {
 function rPsyActions() {
   const el = $('psy-actions'); if (!el) return;
   const all = projAll('whys').filter(w => w && w.action && String(w.action).trim());
-  if (!all.length) { el.innerHTML = `<div class="sec-lbl">Незавершённые действия</div><div class="si-text" style="color:var(--t3);padding:.4rem 0 .8rem">Заполни поле «Действие» в разборе «Зачем?» — оно появится здесь.</div>`; return; }
+  if (!all.length) { el.innerHTML = `<div class="sec-lbl">Незавершённые действия</div><div class="si-text" style="color:var(--t3);padding:.4rem 0 .8rem">Заполни поле «Действие» в разборе разбор ситуации — оно появится здесь.</div>`; return; }
   const open = all.filter(w => w.actionDone !== true);
   const done = all.filter(w => w.actionDone === true);
   const list = (_psyShowDoneActions ? all : open).slice().sort((a, b) => _ru(b) - _ru(a));
@@ -4624,7 +4672,7 @@ function rPsyActions() {
     const chainHtml = chain.length ? `<div class="si-text" style="color:var(--t3);font-size:.85em;margin-top:.15rem">${chain.map(esc).join(' → ')}</div>` : '';
     const mk = w.actionDone === true;
     return `<div class="si-row">
-        <button type="button" class="si-body" style="background:none;border:0;padding:0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:44px;display:flex;flex-direction:column;justify-content:center" onclick="openWhy(${w.id})" aria-label="Открыть разбор «Зачем?»: ${esc(w.action)}"><div class="si-text">${mk ? '<span style="color:var(--green)">✓</span> ' : ''}${esc(w.action)}</div>${chainHtml}</button>
+        <button type="button" class="si-body" style="background:none;border:0;padding:0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:44px;display:flex;flex-direction:column;justify-content:center" onclick="openWhy(${w.id})" aria-label="Открыть разбор ситуации: ${esc(w.action)}"><div class="si-text">${mk ? '<span style="color:var(--green)">✓</span> ' : ''}${esc(w.action)}</div>${chainHtml}</button>
         <button type="button" class="btn btn-s btn-xs" style="flex:none;min-width:44px;min-height:44px" onclick="event.stopPropagation();togglePsyActionDone(${w.id},${mk ? 'false' : 'true'})">${mk ? 'Отменить' : 'Готово'}</button>
       </div>`;
   }).join('') : `<div class="si-text" style="color:var(--t3);padding:.4rem 0">Всё выполнено — новых незавершённых действий нет.</div>`;
@@ -4633,7 +4681,7 @@ function rPsyActions() {
     ${done.length ? `<div class="mx mb"><button type="button" class="btn btn-s btn-sm" onclick="togglePsyShowDone()">${_psyShowDoneActions ? 'Скрыть выполненные' : 'Показать выполненные'}</button></div>` : ''}`;
 }
 // Повторяющиеся триггеры: группировка ТОЛЬКО по введённому пользователем полю
-// «Симптом» разбора «Зачем?» — нормализация только для сравнения (регистр/
+// «Симптом» разбора ситуации — нормализация только для сравнения (регистр/
 // пробелы), исходная формулировка показывается как есть. Минимум наблюдений
 // до вывода о повторении (issue #148: «не объявлять один случай паттерном»).
 // Каждая группа раскрывает исходные записи по тапу.
@@ -4674,7 +4722,7 @@ function rPsyWorkflow() {
 }
 
 // ─── AI-ПОМОЩЬ «ЗАЧЕМ?» → ИНСАЙТ (Wave 1, необязательно) ──────────
-// Основной контур (Момент→«Зачем?»→Инсайт→Паттерн→Действие) работает
+// Основной контур (Момент→разбор ситуации→Инсайт→Паттерн→Действие) работает
 // полностью БЕЗ ИИ — эта секция добавляет один опциональный AI-помощник по
 // явному нажатию, со своим согласием, кризисным гейтом и честным отказом,
 // если провайдер не поддерживает безопасный структурированный вывод. Никаких
@@ -4713,7 +4761,7 @@ function openPsyAiConsent() {
   const el = $('psy-aic-on'); if (el) el.classList.toggle('on', !!c.on);
   openOv('ov-psy-ai-consent');
 }
-// AI-подсказка по разбору «Зачем?»: отправляет ТОЛЬКО поля этого разбора
+// AI-подсказка по разбору разбор ситуации: отправляет ТОЛЬКО поля этого разбора
 // (не весь дневник), просит структурированный {hypothesis, sources,
 // limitations}, ничего не сохраняет и не связывает до явного подтверждения
 // пользователем (acceptPsyAiSuggestion). Fail-closed для провайдеров без
@@ -4735,7 +4783,7 @@ async function aiSuggestInsightFromWhy(whyId) {
   try {
     const text = await callClaude({
       task: 'other', maxTokens: 500,
-      system: 'Ты помогаешь превратить разбор «Зачем?» в черновик инсайта. СТРОГО: используй только переданный текст разбора, ничего не выдумывай — ни мотивы, ни диагнозы, ни проценты, ни степень уверенности. В sources перечисли конкретные поля разбора (по дате/id), на которые опираешься. Если текста недостаточно для содержательной гипотезы — честно напиши это в limitations, не додумывай.',
+      system: 'Ты помогаешь превратить разбор ситуации в черновик инсайта. СТРОГО: используй только переданный текст разбора, ничего не выдумывай — ни мотивы, ни диагнозы, ни проценты, ни степень уверенности. В sources перечисли конкретные поля разбора (по дате/id), на которые опираешься. Если текста недостаточно для содержательной гипотезы — честно напиши это в limitations, не додумывай.',
       user: JSON.stringify({ whyId: w.id, day: w.day, fields: Object.fromEntries(WHY_FIELDS.map(k => [k, w[k] || null])) }),
       schema,
     });
@@ -4743,7 +4791,7 @@ async function aiSuggestInsightFromWhy(whyId) {
     STATE._psyAiSuggestion = { whyId, hypothesis: parsed.hypothesis || '', sources: parsed.sources || [], limitations: parsed.limitations || '' };
     if (out) out.innerHTML = `<div class="psy-box"><div class="psy-box-t">AI-гипотеза</div>
       <div class="si-text">${esc(parsed.hypothesis || '')}</div>
-      <div class="psy-row"><span>Источники</span><div>${(parsed.sources || []).map(esc).join(', ') || ('разбор «Зачем?» от ' + esc(w.day || ''))}</div></div>
+      <div class="psy-row"><span>Источники</span><div>${(parsed.sources || []).map(esc).join(', ') || ('разбор ситуации от ' + esc(w.day || ''))}</div></div>
       <div class="psy-row"><span>Ограничения</span><div>${esc(parsed.limitations || '')}</div></div>
       <div style="margin-top:.5rem"><button type="button" class="btn btn-p btn-sm" onclick="acceptPsyAiSuggestion()">Использовать как черновик</button></div>
     </div>`;
@@ -4770,7 +4818,7 @@ function acceptPsyAiSuggestion() {
 // ═══ ДНЕВНИК: агрегатор-landing (issue #141; только при arch_nav_v2=ON) ═══
 // Аддитивный read-only слой поверх уже существующих коллекций/экранов —
 // ничего не считает заново, не создаёт новых полей и не хранится отдельно.
-// «Открытые петли»: ТОЛЬКО разбор «Зачем?» с непустым action и
+// «Открытые петли»: ТОЛЬКО разбор ситуации с непустым action и
 // actionDone !== true (то же поле, что и в openWhy/markWhyAction) — это
 // единственная сущность с однозначным незавершённым статусом. DB.oq — это
 // вопросы для рефлексии (reflectOn(i) открывает НОВЫЙ инсайт с этим
@@ -4788,7 +4836,7 @@ function rDiaryLoops() {
   const whyRows = whys.slice(0, 5).map(w => {
     const d = esc((w.day || '').slice(5));
     const head = esc(w.symptom || w.need || w.action || 'Разбор');
-    return `<button type="button" class="srow" onclick="openWhy(${w.id})"><span class="sic" style="background:var(--teal-l)"><i data-lucide="help-circle" style="color:var(--teal)"></i></span><span class="sl2">«Зачем?» · ${d}</span><span class="sv2">${head}</span></button>`;
+    return `<button type="button" class="srow" onclick="openWhy(${w.id})"><span class="sic" style="background:var(--teal-l)"><i data-lucide="help-circle" style="color:var(--teal)"></i></span><span class="sl2">разбор ситуации · ${d}</span><span class="sv2">${head}</span></button>`;
   }).join('');
   el.innerHTML = `<div class="sec-lbl">Открытые петли</div><div class="more-list mx mb">${whyRows}</div>`;
 }
@@ -5151,7 +5199,7 @@ function planForTrigger(trig) {
 function planForTriggerIdx(i) {
   const row = (STATE.healthTopTrig || [])[i]; if (row) planForTrigger(row[0]);
 }
-// Живой отклик на тягу: без осуждения при срыве (метод «Зачем?» —
+// Живой отклик на тягу: без осуждения при срыве (разбор ситуации —
 // честные данные, не провал), с паттерном при накоплении истории.
 // Награда за «устоял» — переменная (variable-ratio), не гарантированная
 // галочка каждый раз: непредсказуемость сама по себе поддерживает
@@ -8755,7 +8803,7 @@ function rHealth() {
   const lvl = risk.score >= 0.5 ? 'высокий' : risk.score >= 0.3 ? 'повышенный' : 'спокойный';
   let html = `<div class="sec-lbl">Риск сейчас</div>
     <div class="card mx mb" style="padding:1rem">${risk.factors.length
-      ? `<div class="si-text" style="margin-bottom:.6rem;font-weight:600">Сейчас риск ${lvl}${risk.score >= 0.3 ? ' — стоит опереться заранее' : ''}.</div>`
+      ? `<div class="si-text" style="margin-bottom:.6rem;font-weight:600">Вероятность тяги сейчас: ${lvl}${risk.score >= 0.3 ? ' — лучше подготовить поддержку заранее' : ''}.</div>`
         + risk.factors.map(f => `<div class="si-row"><div class="si-dot neg"></div><div class="si-body"><div class="si-text">${esc(f.why)}</div></div></div>`).join('')
       : `<div class="ai-sp-empty">✓ Спокойно. По твоим данным сейчас ничего тревожного.</div>`}</div>`;
   html += `<div class="sec-lbl">Прогресс</div>`;
@@ -8778,7 +8826,7 @@ function rHealth() {
   // Wave 9 (issue #164): derived-совпадения контекста и тела. Не диагноз.
   html += mbRenderCards('Совпадения с контекстом');
   html += `<div id="health-lab"></div><div id="health-docs"></div><div id="health-timeline"></div>`;
-  html += `<div class="sec-lbl">Опора</div>
+  html += `<div class="sec-lbl">Что поможет сейчас</div>
     <div class="mx mb"><button class="btn btn-p btn-full" onclick="openCraving()"><i data-lucide="zap"></i>У меня тяга сейчас</button></div>
     <div class="mx mb"><button class="btn btn-s btn-full" onclick="openTech('')"><i data-lucide="life-buoy"></i>Приёмы под состояние</button></div>`;
   if (crav.length) {
@@ -8800,7 +8848,7 @@ function rHealth() {
       if (aloneRate - peopleRate >= 15)
         loneRow = `<div class="si-row"><div class="si-body"><div class="si-text">Один(на) срывы чаще: ${aloneRate}% против ${peopleRate}% с людьми</div></div></div>`;
     }
-    html += `<div class="sec-lbl">Триггеры</div>
+    html += `<div class="sec-lbl">Что запускает тягу</div>
     <div class="card mx mb" style="padding:1rem">
       <div class="kgrid" style="margin:0 0 .75rem">
         <div class="kc"><span class="kn">${crav.length}</span><span class="kl">Всего</span></div>
@@ -8842,13 +8890,83 @@ function rHealth() {
       <div class="srow" onclick="toggleEnvFlag('noCigsHome')" role="button"><span class="sl2">Дома нет сигарет</span><span class="sv2">${env.noCigsHome ? '✓' : '—'}</span></div>
       <div class="srow" onclick="toggleEnvFlag('ritual')" role="button"><span class="sl2">Вечерний ритуал заменён</span><span class="sv2">${env.ritual ? '✓' : '—'}</span></div>
     </div>`;
-  html += `<div class="sec-lbl">Разбор</div>
-    <div class="mx mb"><button class="btn btn-s btn-full" onclick="goTo('map');msub('graph');STATE.mapView='psy';rMap()">Функция, вторичная выгода, потребность →</button></div>`;
+  html += `<div class="sec-lbl">Связи</div>
+    <div class="mx mb"><button class="btn btn-s btn-full" onclick="goTo('map');msub('graph');STATE.mapView='psy';rMap()">Посмотреть связи состояния и привычек →</button></div>`;
   html += `<div class="sec-lbl">Витамины и добавки</div>
     <div class="mx" style="margin-bottom:5rem"><button class="btn btn-s btn-full" onclick="addHealthSphere('Витамины','💊')">+ Отслеживать приём</button></div>`;
   el.innerHTML = html;
   rHealthToday(); rLabList(); rHealthDocs(); rHealthTimeline();
+  organizeHealthView(el);
   icons();
+}
+
+// Поверх существующих health-renderers собираем спокойный пользовательский
+// экран. Ни одна запись, кнопка или writer не меняются: прямые секции лишь
+// группируются в четыре понятные области, а подробная аналитика свёрнута.
+function organizeHealthView(root) {
+  if (!root) return;
+  const direct = () => [...root.children];
+  const takeSection = label => {
+    const start = direct().find(n => n.classList && n.classList.contains('sec-lbl') && n.textContent.trim() === label);
+    if (!start) return [];
+    const out = [];
+    for (let n = start; n; ) {
+      const next = n.nextElementSibling;
+      if (n !== start && n.classList && n.classList.contains('sec-lbl')) break;
+      out.push(n); n = next;
+    }
+    out.forEach(n => n.remove());
+    return out;
+  };
+  const detach = node => { if (node) node.remove(); return node; };
+  const group = (title, hint, nodes) => {
+    const d = document.createElement('details');
+    d.className = 'card mx health-group';
+    d.innerHTML = `<summary>${esc(title)}</summary><div class="health-group-hint">${esc(hint)}</div><div class="health-group-body"></div>`;
+    const body = d.querySelector('.health-group-body');
+    nodes.flat().filter(Boolean).forEach(n => body.appendChild(n));
+    return d;
+  };
+
+  // Динамические render-targets сначала вынимаются из старой линейной ленты,
+  // чтобы их можно было обновлять прежними rHealth*() без изменения id.
+  const today = detach(root.querySelector(':scope > #health-today'));
+  const lab = detach(root.querySelector(':scope > #health-lab'));
+  const docs = detach(root.querySelector(':scope > #health-docs'));
+  const timeline = detach(root.querySelector(':scope > #health-timeline'));
+  const mindBody = direct().filter(n => n.classList && n.classList.contains('mb-block'));
+  mindBody.forEach(n => n.remove());
+
+  const attention = takeSection('Риск сейчас');
+  if (attention[0]) attention[0].textContent = 'Что требует внимания';
+  const progress = takeSection('Прогресс');
+  const medicines = takeSection('Лекарства и витамины');
+  const body = takeSection('Дневник тела');
+  // Название группы уже выполняет роль заголовка; внутренний первый ярлык
+  // здесь был бы буквальным дублем. Остальные подзаголовки сохраняются.
+  if (medicines[0] && medicines[0].classList.contains('sec-lbl')) medicines.shift();
+  if (body[0] && body[0].classList.contains('sec-lbl')) body.shift();
+  const support = takeSection('Что поможет сейчас');
+  const triggers = takeSection('Что запускает тягу');
+  const influence = takeSection('Что влияет на состояние');
+  const mental = takeSection('Психическое состояние');
+  const environment = takeSection('Среда');
+  const analysis = takeSection('Связи');
+  const supplements = takeSection('Витамины и добавки');
+  const leftovers = direct(); leftovers.forEach(n => n.remove());
+
+  const head = document.createElement('div');
+  head.className = 'domain-head mx';
+  head.innerHTML = `<div class="domain-title">Здоровье</div>
+    <div class="domain-subtitle">План на сегодня, наблюдения за телом и документы для врача — без диагнозов и скрытых оценок.</div>`;
+  root.appendChild(head);
+  attention.forEach(n => root.appendChild(n));
+  if (today) root.appendChild(today);
+  root.appendChild(group('Лекарства и план дня', 'Что запланировано и что уже принято.', medicines));
+  root.appendChild(group('Симптомы и показатели', 'Самонаблюдения, измерения и совпадения с контекстом.', [body, mindBody]));
+  root.appendChild(group('Анализы, документы и врач', 'Результаты, файлы, отчёт и единая хронология.', [lab, docs, timeline]));
+  root.appendChild(group('Привычки и восстановление', 'Тяга, триггеры, среда и то, что влияет на состояние.',
+    [progress, support, triggers, influence, mental, environment, analysis, supplements, leftovers]));
 }
 
 // ─── СОН ─────────────────────────────────────────────────────────
@@ -9913,7 +10031,7 @@ function synthesisStats(events) {
 
 // ── 5. Insight Generator (шаблоны, НЕ генеративный ИИ) ────────────
 const TAG_TYPE_LABELS = {
-  emo: 'эмоция', valence: 'приятность момента', activation: 'энергия момента', symptom: 'разбор «Зачем?»',
+  emo: 'эмоция', valence: 'приятность момента', activation: 'энергия момента', symptom: 'разбор ситуации',
   need: 'потребность', insight: 'тема инсайтов', pattern: 'паттерн', dream: 'сон', med: 'приём препарата',
   measure: 'измерение', craving: 'тяга', trigger: 'триггер тяги', lab: 'лабораторный показатель',
   doc: 'документ здоровья', context: 'контекст отношений', person: 'контекст отношений', sphere: 'сфера',
@@ -10072,7 +10190,7 @@ function restoreDismissedCorrelations() {
 // кнопки открывают именно их, без персистирования (только в памяти,
 // пересчитывается на каждый рендер).
 const SYN_COLL_LABELS = {
-  moments: 'Момент', whys: '«Зачем?»', insights: 'Инсайт', patterns: 'Паттерн', evolution: 'Эволюция',
+  moments: 'Момент', whys: 'Разбор', insights: 'Инсайт', patterns: 'Паттерн', evolution: 'Эволюция',
   dreams: 'Сон', medIntakes: 'Приём препарата', symptoms: 'Симптом', measures: 'Измерение', cravings: 'Тяга',
   labObservations: 'Лабораторный результат', healthDocuments: 'Документ здоровья',
   relationshipContexts: 'Контекст отношений', sphereLogs: 'Запись сферы',
@@ -10311,7 +10429,7 @@ function synSphereBlockHtml(pairs) {
 }
 function synRelationshipBlockHtml(pairs) {
   let html = `<div class="sec-lbl">Граф отношений</div><div class="card mx mb">`;
-  html += pairs.length ? pairs.slice(0, 8).map(pairRowHtml).join('') : `<div style="padding:1rem" class="ai-sp-empty">Контексты отношений пока не привязаны к записям, или совпадений не найдено — привязывай контекст в деталях Момента/«Зачем?»/Инсайта.</div>`;
+  html += pairs.length ? pairs.slice(0, 8).map(pairRowHtml).join('') : `<div style="padding:1rem" class="ai-sp-empty">Контексты отношений пока не привязаны к записям, или совпадений не найдено — привязывай контекст в деталях Момента, разбора или Инсайта.</div>`;
   html += `</div>`;
   return html;
 }
@@ -10945,7 +11063,7 @@ function handleImport(input) {
 //  Всё локально: архив разбирается в браузере и НИКУДА не уходит.
 //  Путь: экспорт (Settings → Data controls → Export data) → файл сюда →
 //  выбор чатов → записи с настоящими датами → освоение психоконтуром
-//  (метод «Зачем?») → архив питает смысловую карту, паттерны, переклички.
+//  (разбор ситуации) → архив питает смысловую карту, паттерны, переклички.
 // ═════════════════════════════════════════════════════════════════
 let _gpt = { convs: [], sel: new Set(), done: null };
 // Минимальный zip-ридер (central directory + DecompressionStream) — без
@@ -11045,7 +11163,7 @@ function rGptList() {
       <div class="gpt-m">${c.t ? new Date(c.t).toLocaleDateString('ru') : ''} · ${c.msgs.length} ${pl(c.msgs.length, 'сообщение', 'сообщения', 'сообщений')}</div></div></label>`).join('');
   const res = $('gpt-result');
   if (res) res.innerHTML = _gpt.done
-    ? `<div class="key-d" style="margin-top:var(--s2)">✓ Импортировано ${_gpt.done.nIns} ${pl(_gpt.done.nIns, 'запись', 'записи', 'записей')}${_gpt.done.nDrm ? ` (снов: ${_gpt.done.nDrm})` : ''}${_gpt.done.nDup ? `, пропущено дублей: ${_gpt.done.nDup}` : ''}. ${getAiKey() ? 'Теперь нажми «Освоить архив» — ИИ разметит записи по методу «Зачем?».' : 'Добавь AI-ключ («Ключи сервисов») — и ИИ осознанно освоит архив по методу «Зачем?».'}</div>`
+    ? `<div class="key-d" style="margin-top:var(--s2)">✓ Импортировано ${_gpt.done.nIns} ${pl(_gpt.done.nIns, 'запись', 'записи', 'записей')}${_gpt.done.nDrm ? ` (снов: ${_gpt.done.nDrm})` : ''}${_gpt.done.nDup ? `, пропущено дублей: ${_gpt.done.nDup}` : ''}. ${getAiKey() ? 'Теперь нажми «Освоить архив» — ИИ разметит записи по методу разбор ситуации.' : 'Добавь AI-ключ («Ключи сервисов») — и ИИ осознанно освоит архив по методу разбор ситуации.'}</div>`
     : '';
   gptSummary();
 }
@@ -11638,7 +11756,7 @@ function setAiKeyFor(p, k) { try { const s = aiKeySlot(p); k ? localStorage.setI
 // по разным меню.
 const KEY_SERVICES = [
   { p: 'anthropic', name: 'Anthropic · Claude', ic: '✳', ph: 'sk-ant-…', url: 'console.anthropic.com → API Keys',
-    gives: 'Основной ИИ: живые отклики, диалог вглубь, психоконтур «Зачем?», смысловая карта, обзор недели. Рекомендуем.' },
+    gives: 'Основной ИИ: живые отклики, диалог вглубь, психоконтур разбор ситуации, смысловая карта, обзор недели. Рекомендуем.' },
   { p: 'openai', name: 'OpenAI · GPT', ic: '❋', ph: 'sk-…', url: 'platform.openai.com/api-keys',
     gives: 'Модели GPT-4o в диалоге вглубь и как основной провайдер (Настройки → Конфигурация).' },
   { p: 'gemini', name: 'Google · Gemini', ic: '✦', ph: 'AIza…', url: 'aistudio.google.com/apikey',
@@ -11703,7 +11821,7 @@ const AI_PROVIDER_MODELS = {
   openai: { light: 'gpt-4o-mini', deep: 'gpt-4o' },
   gemini: { light: 'gemini-2.0-flash', deep: 'gemini-2.5-pro' },
 };
-const AI_TASKS = { react: 'Отклик наставника', deeper: 'Вопрос вглубь', prompts: 'Вопросы рефлексии', digest: 'Обзор недели', map: 'Живая карта', analysis: 'Разбор записи', chat: 'Диалог вглубь', psy: 'Психоконтур («Зачем?»)', other: 'Прочее' };
+const AI_TASKS = { react: 'Отклик наставника', deeper: 'Вопрос вглубь', prompts: 'Вопросы рефлексии', digest: 'Обзор недели', map: 'Живая карта', analysis: 'Разбор записи', chat: 'Диалог вглубь', psy: 'Психоконтур (разбор ситуации)', other: 'Прочее' };
 const AI_TASK_CLASS = { react: 'light', deeper: 'light', prompts: 'light', psy: 'light' };   // остальные — deep
 function aiModelFor(task) {
   const cls = AI_TASK_CLASS[task] || 'deep';
@@ -11783,7 +11901,7 @@ async function goDeeper() {
   const prev = btn.innerHTML; btn.innerHTML = 'Думаю…'; btn.disabled = true;
   try {
     const q = await callClaude({
-      system: 'Ты — вдумчивый дневник-коуч в духе CBT/ACT. По записи пользователя задай ОДИН короткий открытый вопрос (до 15 слов), который помогает копнуть глубже к корню чувства или паттерна. Только вопрос, без преамбулы, по-русски.',
+      system: 'Ты — вдумчивый дневник-коуч в духе когнитивно-поведенческого подхода. По записи пользователя задай ОДИН короткий открытый вопрос (до 15 слов), который помогает копнуть глубже к корню чувства или паттерна. Только вопрос, без преамбулы, по-русски.',
       user: draft, maxTokens: 120, task: 'deeper',
     });
     const clean = String(q).trim().replace(/^["«]|["»]$/g, '');
@@ -12378,7 +12496,7 @@ function applyNavShell() {
 // item[0] — вкладка для подсветки, item[4] — msub-подвкладка Дневника.
 const NSH_SIDEBAR_GROUPS = [
   ['Жизнь', [
-    ['home', 'sun', 'Главная', "goTo('home')"],
+    ['home', 'sun', 'Сегодня', "goTo('home')"],
     ['map', 'book-open', 'Дневник', "goTo('map');msub('overview')", 'overview'],
   ]],
   ['Работа с собой', [
@@ -12387,7 +12505,6 @@ const NSH_SIDEBAR_GROUPS = [
   ]],
   ['Анализ', [
     ['astro', 'sparkles', 'Астрология', "goTo('astro')"],
-    ['map', 'git-branch', 'Закономерности', "goTo('map');msub('patterns')", 'patterns'],
   ]],
   ['Данные', [
     [null, 'download', 'Источники', 'openExtImport()'],
@@ -12779,7 +12896,7 @@ function rVector() {
 // баннер «Обновить» и карточка «Что нового» после обновления — чтобы
 // изменения были ВИДНЫ, а не молчали.
 const APP_CHANGES = [
-  '📥 Импорт из ChatGPT: многолетний дневник из чатов — в систему, с настоящими датами и освоением по методу «Зачем?»',
+  '📥 Импорт из ChatGPT: многолетний дневник из чатов — в систему, с настоящими датами и освоением по методу разбор ситуации',
   '🧠 Карта теперь строится из СМЫСЛОВ: ИИ осознанно определяет, о чём каждая запись, — не из повторяемых слов',
   '🔮 Сонник: сны толкуются отдельным режимом — Юнг (Тень), гештальт, наука + твой контекст жизни',
   '🔑 «Ключи сервисов» в Настройках: все подключения и ключи в одном меню',
@@ -12862,15 +12979,15 @@ setTimeout(() => { try { maybeWhatsNew(); } catch (e) {} }, 2500);
 // Диалог сохраняется в DB.chats (синк/бэкап как у всех коллекций),
 // а «Завершить» сжимает его в инсайт — вывод попадает в граф, паттерны
 // и будущие переклички. Ничего не проходит бесследно.
-// Диалог ведётся по методу «Зачем?» владельца (его научно-методический
-// труд): симптом → серия «Зачем?» → функция → вторичная выгода → цена →
+// Диалог ведётся по методу разбор ситуации владельца (его научно-методический
+// труд): симптом → серия Разбор → функция → вторичная выгода → цена →
 // альтернативный способ закрыть потребность → закрепление выбора.
-const CHAT_SYSTEM = 'Ты — наставник дневника «Архитектор». Работаешь строго по методу «Зачем?» (интеграция: логотерапия Франкла, транзактный анализ Бёрна, теория привязанности Боулби, эмоциональная регуляция Гоулмана). Алгоритм диалога: 1) зафиксируй симптом словами человека; 2) последовательно спрашивай «Зачем?» — по ОДНОЙ итерации за ход, всего 3–5, двигаясь от жалобы к ФУНКЦИИ переживания (вопрос «зачем», не «почему»: не причина в прошлом, а функция сейчас); 3) когда функция видна — назови её и вторичную выгоду (payoff, Бёрн); 4) мягко покажи цену симптома; 5) спроси, каким другим способом можно удовлетворить ту же глубинную потребность; 6) помоги закрепить новый выбор. Замечай состояния Я (Ребёнок/Родитель/Взрослый) и психологические игры — называй их бережно. За один ход: короткое отражение (1–3 предложения) + ОДИН вопрос. Без советов, пока не попросят. Тепло, без осуждения, по-русски, на «ты».';
+const CHAT_SYSTEM = 'Ты — наставник дневника «Архитектор». Работаешь строго по методу «Зачем?» (интеграция: логотерапия Франкла, транзактный анализ Бёрна, теория привязанности Боулби, эмоциональная регуляция Гоулмана). Алгоритм диалога: 1) зафиксируй симптом словами человека; 2) последовательно спрашивай «зачем?» — по ОДНОЙ итерации за ход, всего 3–5, двигаясь от жалобы к ФУНКЦИИ переживания (вопрос «зачем», не «почему»: не причина в прошлом, а функция сейчас); 3) когда функция видна — назови её и вторичную выгоду (payoff, Бёрн); 4) мягко покажи цену симптома; 5) спроси, каким другим способом можно удовлетворить ту же глубинную потребность; 6) помоги закрепить новый выбор. Замечай состояния Я (Ребёнок/Родитель/Взрослый) и психологические игры — называй их бережно. За один ход: короткое отражение (1–3 предложения) + ОДИН вопрос. Без советов, пока не попросят. Тепло, без осуждения, по-русски, на «ты».';
 // Сонник — ОТДЕЛЬНЫЙ режим диалога: сон не «раскручивают методом „Зачем?"»,
 // его толкуют. Синтез признанных подходов + жизненный контекст из дневника —
 // приложение знает дела, проблемы и потребности сновидца, и сон читается
 // на их фоне, а не в вакууме.
-const DREAM_SYSTEM = 'Ты — толкователь снов дневника «Архитектор». Работаешь как синтез признанных подходов: аналитическая психология Юнга (сон компенсирует сознательную установку; образы — части психики: Тень — вытесненное и отвергаемое, Анима/Анимус, Персона, Самость; амплификация образов), гештальт-подход Перлза (каждый элемент сна — часть самого сновидца; можно предложить «сказать от лица» образа), научный слой (Холл/Домхофф: сны продолжают дневные заботы — гипотеза непрерывности; Ревонсуо: репетиция угроз; консолидация эмоциональной памяти). НЕ сонник-предсказание, НЕ эзотерика, НЕ метод «Зачем?» — это другой режим. Алгоритм: 1) прими сон; уточни максимум 1–2 детали: самый яркий образ и чувство в момент пробуждения; 2) выдели ключевые образы, отдельно замечай возможные фигуры Тени (пугающее, отвратительное, «это не я»); 3) ОБЯЗАТЕЛЬНО связывай образы с жизненным контекстом сновидца (дан ниже) — сны продолжают дневную жизнь; 4) предложи 2–3 гипотезы толкования, называя подход каждой (Юнг / гештальт / непрерывность), и спроси, какая отзывается; 5) заверши интеграцией: что сон приглашает признать или сделать — один маленький шаг. За один ход: короткое отражение + один вопрос ИЛИ гипотезы. Тепло, по-русски, на «ты».';
+const DREAM_SYSTEM = 'Ты — толкователь снов дневника «Архитектор». Работаешь как синтез признанных подходов: аналитическая психология Юнга (сон компенсирует сознательную установку; образы — части психики: Тень — вытесненное и отвергаемое, Анима/Анимус, Персона, Самость; амплификация образов), гештальт-подход Перлза (каждый элемент сна — часть самого сновидца; можно предложить «сказать от лица» образа), научный слой (Холл/Домхофф: сны продолжают дневные заботы — гипотеза непрерывности; Ревонсуо: репетиция угроз; консолидация эмоциональной памяти). НЕ сонник-предсказание, НЕ эзотерика, НЕ разбор ситуации — это другой режим. Алгоритм: 1) прими сон; уточни максимум 1–2 детали: самый яркий образ и чувство в момент пробуждения; 2) выдели ключевые образы, отдельно замечай возможные фигуры Тени (пугающее, отвратительное, «это не я»); 3) ОБЯЗАТЕЛЬНО связывай образы с жизненным контекстом сновидца (дан ниже) — сны продолжают дневную жизнь; 4) предложи 2–3 гипотезы толкования, называя подход каждой (Юнг / гештальт / непрерывность), и спроси, какая отзывается; 5) заверши интеграцией: что сон приглашает признать или сделать — один маленький шаг. За один ход: короткое отражение + один вопрос ИЛИ гипотезы. Тепло, по-русски, на «ты».';
 // Жизненный контекст для толкования: свежие записи (не сны), глубинные
 // потребности из психоконтура, состояние, паттерны — то, что сон «продолжает».
 function dreamLifeContext() {
@@ -12882,7 +12999,7 @@ function dreamLifeContext() {
   const aW = checkinAvg(projAll('checkins').filter(c => c.date > dayAgo(7)));
   const pats = (DB.patterns || []).slice(0, 4).map(p => '— ' + p.text);
   let s = 'Свежие записи дневника:\n' + (ins.length ? ins.join('\n') : '— нет') + '\n';
-  if (topNeeds.length) s += 'Глубинные потребности по методу «Зачем?»: ' + topNeeds.join(', ') + '\n';
+  if (topNeeds.length) s += 'Глубинные потребности по методу разбор ситуации: ' + topNeeds.join(', ') + '\n';
   if (aW) s += `Состояние за 7 дней: ясность ${aW.cl.toFixed(1)}/10, стресс ${aW.st.toFixed(1)}/10, мотивация ${aW.mv.toFixed(1)}/10, сон ${aW.sl.toFixed(1)}ч\n`;
   if (pats.length) s += 'Замеченные паттерны:\n' + pats.join('\n');
   return s;
@@ -12941,7 +13058,7 @@ let _chatId = null, _chatBusy = false;
 function openChatFor(insId, seed) {
   const src = insId ? DB.insights.find(x => x.id === insId) : null;
   if (!seed && src) seed = src.body || src.title;
-  // сон уходит в режим толкования (Юнг/гештальт/наука), не в метод «Зачем?»
+  // сон уходит в режим толкования (Юнг/гештальт/наука), не в разбор ситуации
   const isDream = !!(src && (src.tag === 'dream' || src.src === 'Дневник снов'));
   let chat = insId ? (DB.chats || []).find(c => c.insightId === insId) : null;
   if (!chat) {
@@ -13001,7 +13118,7 @@ async function chatFinish() {
   try {
     const dialog = c.msgs.map(m => (m.r === 'u' ? 'Я: ' : 'Наставник: ') + m.t).join('\n');
     // Заключение — работа для СИЛЬНОЙ модели (deep-маршрут, opus): вывод
-    // сразу размечается по методу «Зачем?» и разносится по системе.
+    // сразу размечается по методу разбор ситуации и разносится по системе.
     const schema = { type: 'object', additionalProperties: false,
       required: ['text', 'symptom', 'func', 'gain', 'need', 'ego', 'emotion', 'game', 'state'],
       properties: {
@@ -13022,7 +13139,7 @@ async function chatFinish() {
     const out = await callClaude({
       system: (c.mode === 'dream'
         ? 'Сожми разбор сна. text: личный вывод от первого лица (2–4 предложения — что сон показал, какая часть меня в нём говорила, что признать или сделать). Плюс психологическая структура вывода: симптом (что сон подсветил), функция, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без эзотерики и воды.'
-        : 'Сожми диалог по методу «Зачем?». text: личный вывод от первого лица (2–4 предложения — что я понял, корень темы, один следующий шаг). Плюс структура метода: симптом, функция симптома, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без воды.')
+        : 'Сожми диалог по методу разбор ситуации. text: личный вывод от первого лица (2–4 предложения — что я понял, корень темы, один следующий шаг). Плюс структура метода: симптом, функция симптома, вторичная выгода, глубинная потребность, состояние Я, эмоция, игра (null, если не видно). По-русски, без воды.')
         + ' Поля need/ego — строго кодом: need = safety(безопасность)/acceptance(принятие)/significance(значимость)/autonomy(автономия)/meaning(смысл)/closeness(близость)/control(контроль)/calm(покой)/novelty(новизна); ego = child(Ребёнок)/parent(Родитель)/adult(Взрослый). Если не видно — ставь \'none\' (не null). Плюс state — коротко оцени по диалогу: mood (low/mid/high — общий тон настроения), stress (low/mid/high — уровень напряжения), lonely (true, если тема одиночества/изоляции звучит).',
       user: dialog, maxTokens: 500, task: 'analysis', schema,
     });
@@ -13107,7 +13224,7 @@ function semThemeGraph() {
     const p = e.themes.filter(w => idx.has(w));
     for (let i = 0; i < p.length; i++) for (let j = i + 1; j < p.length; j++) bump(p[i], p[j], 2);
   });
-  // связь 2: темы разных записей с одной глубинной потребностью (метод «Зачем?»)
+  // связь 2: темы разных записей с одной глубинной потребностью (разбор ситуации)
   const byNeed = {};
   entries.forEach(e => { if (e.need) e.themes.forEach(t => { if (idx.has(t)) (byNeed[e.need] = byNeed[e.need] || new Set()).add(t); }); });
   Object.values(byNeed).forEach(set => {
@@ -13205,10 +13322,10 @@ function rMap() {
   const semOn = (DB.insights || []).some(i => i.psy && i.psy.themes && i.psy.themes.length);
   if (hint) hint.textContent = v === 'themes'
     ? (semOn
-      ? 'Карта строится из СМЫСЛОВ: ИИ осознанно определяет, о чём каждая запись по сути, а связи — темы одной записи или одной глубинной потребности (метод «Зачем?»).'
+      ? 'Карта строится из СМЫСЛОВ: ИИ осознанно определяет, о чём каждая запись по сути, а связи — темы одной записи или одной глубинной потребности (разбор ситуации).'
       : 'Пока карта строится по повторяющимся словам. ' + (getAiKey() ? 'ИИ уже размечает записи по смыслу в фоне — скоро карта станет смысловой.' : 'Добавь AI-ключ в Настройках — и карта станет смысловой: ИИ определит, о чём каждая запись по сути.'))
     : v === 'psy'
-      ? 'ИИ осознанно размечает записи по методу «Зачем?»: функция симптома, вторичная выгода, глубинная потребность, состояние Я, игры. Связи — по психологии, не по словам.'
+      ? 'ИИ осознанно размечает записи по методу разбор ситуации: функция симптома, вторичная выгода, глубинная потребность, состояние Я, игры. Связи — по психологии, не по словам.'
       : 'Связи находятся сами — по общим темам твоих записей. Крупные узлы упоминаются чаще. Тапни узел — фокус на его окружении.';
   const ti = $('theme-insights');
   if (v === 'themes') rThemeMap('graph-canvas');
@@ -13286,7 +13403,7 @@ function rThemeMap(elId) {
   }
 }
 
-// ═══ ПСИХОЛОГИЧЕСКИЙ КОНТУР — метод «Зачем?» владельца ═══════════
+// ═══ ПСИХОЛОГИЧЕСКИЙ КОНТУР — разбор ситуации владельца ═══════════
 // Основа: научно-методический труд владельца (интеграция логотерапии
 // Франкла, транзактного анализа Бёрна, теории привязанности Боулби,
 // эмоциональной регуляции Гоулмана). ИИ ОСОЗНАННО размечает каждую
@@ -13337,7 +13454,7 @@ async function psyMarkBatch(todo) {
   const vocab = [...new Set((DB.insights || []).flatMap(i => (i.psy && i.psy.themes) || []))].slice(0, 40);
   const user = 'Записи дневника (id, текст):\n' + JSON.stringify(todo.map(i => ({ id: i.id, text: (i.title + '. ' + (i.body || '')).slice(0, 600) }))) +
     (vocab.length ? '\n\nСловарь уже существующих тем (переиспользуй дословно, если подходит): ' + vocab.join(', ') : '') +
-    '\n\nРазметь каждую по методу «Зачем?». Кратко, по-русски, без пересказа.';
+    '\n\nРазметь каждую по методу разбор ситуации. Кратко, по-русски, без пересказа.';
   const text = await callClaude({ system: PSY_SYSTEM, user, maxTokens: 1400, schema, task: 'psy' });
   const out = JSON.parse(text);
   const psyItems = Array.isArray(out.items) ? out.items : [];
@@ -13383,7 +13500,7 @@ function rPsyView(elId) {
   const ti = $('theme-insights'); if (ti) ti.innerHTML = '';
   const marked = (DB.insights || []).filter(i => i.psy);
   if (!marked.length) {
-    el.innerHTML = `<div class="empty"><div class="em-t">Психика ещё не размечена</div><div class="em-d">${getAiKey() ? 'ИИ размечает записи по методу «Зачем?» в фоне — загляни через пару минут' : 'Добавь AI-ключ в Настройках — ИИ начнёт осознанно размечать записи по методу «Зачем?»: функция, выгода, потребность, состояние Я'}</div></div>`;
+    el.innerHTML = `<div class="empty"><div class="em-t">Психика ещё не размечена</div><div class="em-d">${getAiKey() ? 'ИИ размечает записи по методу разбор ситуации в фоне — загляни через пару минут' : 'Добавь AI-ключ в Настройках — ИИ начнёт осознанно размечать записи по методу разбор ситуации: функция, выгода, потребность, состояние Я'}</div></div>`;
     return;
   }
   // потребности
@@ -13444,6 +13561,7 @@ const PSY_OUTCOME_CLASSES = Object.freeze([
   'not_helpful', 'poorly_tolerated', 'counterproductive', 'unsafe_or_out_of_scope',
 ]);
 const PSY_ENTRY_MODES     = Object.freeze(['scheduled', 'event_based', 'session', 'imported']);
+const PSY_ENTRY_MODE_RU   = { scheduled: 'по напоминанию', event_based: 'после ситуации', session: 'после разговора', imported: 'из источника' };
 // Источник наблюдения. `ai` намеренно ОТСУТСТВУЕТ: ИИ не создаёт измерений.
 const PSY_OBS_SOURCES     = Object.freeze(['user', 'deterministic']);
 const PSY_DECISIONS       = Object.freeze(['continue', 'modify', 'stop', 'escalate_to_professional']);
@@ -13459,14 +13577,14 @@ const PSY_ADHERENCE_RU = { done: 'выполнено', partial: 'частичн�
 const PSY_ACCEPT_RU = { helpful: 'полезно', neutral: 'нейтрально', irritating: 'раздражало', burdensome: 'тяжело', unknown: 'неизвестно' };
 const PSY_DECISION_RU = { continue: 'продолжать', modify: 'скорректировать', stop: 'прекратить', escalate_to_professional: 'к специалисту' };
 const PSY_FAMILY_RU = {
-  CBT: 'КПТ', ACT: 'ACT', DBT_SKILL: 'DBT-навык', SCHEMA: 'Схема-терапия',
-  CFT: 'CFT (сострадание)', MI: 'Мотивационное интервью', BEHAVIORAL: 'Поведенческий',
-  PSYCHOEDUCATION: 'Психообразование', OTHER: 'Другое',
+  CBT: 'Работа с мыслями', ACT: 'Принятие и действие', DBT_SKILL: 'Навык саморегуляции',
+  SCHEMA: 'Глубинные убеждения', CFT: 'Сочувствие к себе', MI: 'Работа с мотивацией',
+  BEHAVIORAL: 'Через действия', PSYCHOEDUCATION: 'Как это устроено', OTHER: 'Другое',
 };
 
 // ── Method Registry: «что известно вообще», отдельно от «что было у меня» ──
 // Детерминированный versioned справочник. Персональные результаты сюда НЕ
-// попадают: рейтинг метода по личным эпизодам — это Волна 8, и смешивать
+// попадают: рейтинг метода по личным случаям — это Волна 8, и смешивать
 // внешнюю доказательность с личным опытом в одно число запрещено.
 // v2 (Wave 8, issue #163): внешняя доказательность расширена по контракту
 // issue #163 + owner review 5238287152. КАЖДЫЙ элемент evidenceMetadata несёт
@@ -13488,7 +13606,7 @@ const PSY_FAMILY_RU = {
 const PSY_METHOD_REGISTRY_VERSION = 'psy-method-registry-v2';
 const PSY_EVIDENCE_REVIEWED_AT = '2026-08-10';
 const PSY_METHOD_REGISTRY = Object.freeze([
-  { methodId: 'behavioral_activation', name: 'Поведенческая активация', family: 'BEHAVIORAL',
+  { methodId: 'behavioral_activation', name: 'Начать с маленького действия', family: 'BEHAVIORAL',
     mechanismTargets: ['избегание', 'снижение активности', 'ангедония'],
     intendedUse: ['сниженное настроение', 'уход от активности'],
     cautions: ['при выраженном истощении начинать с очень малых шагов'],
@@ -13499,8 +13617,8 @@ const PSY_METHOD_REGISTRY = Object.freeze([
       publisher: 'NICE', identifier: 'NG222', year: 2022,
       population: 'взрослые с депрессией (клинические выборки)',
       target: 'депрессия: снижение активности и избегание',
-      limitations: 'групповая доказательность не гарантирует индивидуальный эффект',
-      note: 'внешняя доказательность, не персональный результат',
+      limitations: 'то, что помогает многим, не обязательно поможет именно тебе',
+      note: 'это общие данные, а не твой личный результат',
       reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },
   { methodId: 'cognitive_restructuring', name: 'Работа с автоматическими мыслями', family: 'CBT',
     mechanismTargets: ['катастрофизация', 'чтение мыслей', 'долженствование'],
@@ -13510,12 +13628,12 @@ const PSY_METHOD_REGISTRY = Object.freeze([
     evidenceMetadata: [{ kind: 'textbook',
       ref: 'J. S. Beck — Cognitive Behavior Therapy: Basics and Beyond (3rd ed.)',
       publisher: 'Guilford Press', identifier: null, year: 2020,
-      population: 'амбулаторные взрослые в КПТ-протоколах',
+      population: 'взрослые в программах работы с мыслями',
       target: 'искажённые автоматические интерпретации',
       limitations: 'методологический источник, не персональная гарантия',
       note: 'методологический источник',
       reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },
-  { methodId: 'values_clarification', name: 'Прояснение ценностей', family: 'ACT',
+  { methodId: 'values_clarification', name: 'Понять, что для меня важно', family: 'ACT',
     mechanismTargets: ['слияние с мыслями', 'потеря направления'],
     intendedUse: ['выбор действия при неопределённости'],
     cautions: ['не превращать в моральную оценку себя'],
@@ -13543,7 +13661,7 @@ const PSY_METHOD_REGISTRY = Object.freeze([
       reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },
   { methodId: 'self_compassion_break', name: 'Пауза самосострадания', family: 'CFT',
     mechanismTargets: ['самокритика', 'стыд'],
-    intendedUse: ['эпизод резкой самокритики'],
+    intendedUse: ['случай резкой самокритики'],
     cautions: ['у части людей вызывает сопротивление/тревогу — это не «неудача», а сигнал темпа'],
     riskClass: 'low_reversible', amberSafe: true,
     evidenceMetadata: [{ kind: 'textbook',
@@ -13554,7 +13672,7 @@ const PSY_METHOD_REGISTRY = Object.freeze([
       limitations: 'возможное усиление дистресса на старте (backdraft)',
       note: 'методологический источник',
       reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },
-  { methodId: 'boundary_script', name: 'Подготовленная формулировка границы', family: 'BEHAVIORAL',
+  { methodId: 'boundary_script', name: 'Подготовить спокойную фразу о границе', family: 'BEHAVIORAL',
     mechanismTargets: ['уступчивость', 'отложенная граница'],
     intendedUse: ['повторяющееся нарушение границы'],
     cautions: ['при риске насилия сначала безопасность, а не разговор'],
@@ -13567,7 +13685,7 @@ const PSY_METHOD_REGISTRY = Object.freeze([
       limitations: 'не для ситуаций с риском насилия; публикационного источника нет',
       note: 'общая методология',
       reviewedAt: PSY_EVIDENCE_REVIEWED_AT, evidenceVersion: 2 }] },
-  { methodId: 'psychoeducation_cycle', name: 'Объяснение цикла', family: 'PSYCHOEDUCATION',
+  { methodId: 'psychoeducation_cycle', name: 'Понять повторяющийся цикл', family: 'PSYCHOEDUCATION',
     mechanismTargets: ['непонимание механизма', 'самообвинение'],
     intendedUse: ['первое знакомство с паттерном'],
     cautions: ['знание механизма само по себе не меняет поведение'],
@@ -13754,7 +13872,7 @@ const PSY_BUILDERS = {
       });
       return Object.keys(out).length ? out : null;
     })() : null;
-    if (!hasNum && !valueText && !episode) errors.push('observation: нужно значение — число, текст или заполненный эпизод (пустое наблюдение не сохраняется)');
+    if (!hasNum && !valueText && !episode) errors.push('observation: нужно значение — число, текст или заполненный случай (пустое наблюдение не сохраняется)');
     const source = psyEnum(input.source, PSY_OBS_SOURCES, 'user');
     // Явный запрет: ИИ не порождает измерения. Числовое значение из
     // ai-источника отклоняется fail-closed.
@@ -13918,7 +14036,7 @@ function psyFormulationHistory(id) {
 }
 
 // ── Psychology Workspace UI ─────────────────────────────────────────
-// Прямой вход из «Ещё» и из подраздела Дневника.
+// Прямой вход из глобального меню, нижнего острова и подраздела Дневника.
 function openPsyWorkspace() { goTo('map'); msub('psychology'); }
 // Человеческая подпись источника — только provenance, без личного текста.
 function psyProvLine(rec) {
@@ -13929,8 +14047,8 @@ function psyProvLine(rec) {
   if (e.sourceChatId) parts.push('чат ' + e.sourceChatId);
   if (e.sourceId) parts.push('ID ' + e.sourceId);
   if (e.sourceDate) parts.push(e.sourceDate);
-  const cls = (e.claimClasses || [e.claimClass]).filter(Boolean).join(', ');
-  return `внешний импорт (${esc(e.format || '')}) · ${esc(parts.join(' · '))}${cls ? ' · классы: ' + esc(cls) : ''}`;
+  const cls = (e.claimClasses || [e.claimClass]).filter(Boolean).map(extClaimLabel).join(', ');
+  return `внешний импорт · ${esc(parts.join(' · '))}${cls ? ' · тип материала: ' + esc(cls) : ''}`;
 }
 function psyRefLine(refs) {
   const list = (refs || []).slice(0, 8);
@@ -13948,48 +14066,50 @@ function rPsyWorkspace() {
   const revs = (DB.psyReviews || []).slice().sort((a, b) => String(b.periodEnd).localeCompare(String(a.periodEnd)));
   const nextReview = allGoals.map(g => g.reviewAt).filter(Boolean).sort()[0] || null;
 
-  // 1. «Сейчас» — над чем работаю, цели, следующий шаг.
-  const now = `<div class="card mx psy-now">
-    <div class="sec-lbl" style="padding:0 0 .35rem">Сейчас</div>
-    ${F ? `<div class="psy-focus">${esc(F.focus)}</div>
-           <div class="si-text" style="color:var(--t3)">Формулировка · ${esc(PSY_STATUS_RU[F.status] || F.status)}</div>`
-        : `<div class="ai-sp-empty">Формулировки пока нет. Она нужна, чтобы работа не превратилась в набор разрозненных техник.</div>`}
+  // 1. Первый слой: один понятный фокус и действия, которые человек может
+  // сделать сейчас. Профессиональный журнал остаётся ниже, в раскрытии.
+  const now = `<div class="card mx psy-now domain-lead">
+    <div class="domain-kicker">Сейчас</div>
+    <div class="domain-title">${F ? esc(F.focus) : 'Что хочется понять или изменить?'}</div>
+    <div class="domain-subtitle">${F
+      ? 'Текущая тема работы. Её можно уточнять по мере новых наблюдений.'
+      : 'Начни с конкретной ситуации — приложение проведёт по одному вопросу за шаг.'}</div>
     ${goals.length ? `<div class="psy-goals-inline">${goals.map(g => `<span class="psy-chip">${esc(g.label)}</span>`).join('')}</div>` : ''}
-    <div class="si-text" style="margin-top:.4rem;color:var(--t3)">${nextReview ? 'Следующий review: ' + esc(String(nextReview).slice(0, 10)) : 'Дата review не назначена'}</div>
+    ${nextReview ? `<div class="si-text domain-next">К этой теме стоит вернуться ${esc(String(nextReview).slice(0, 10))}</div>` : ''}
     <div class="psy-actions">
-      <button type="button" class="btn btn-s btn-sm" onclick="openPsyForm('psyEma')">Наблюдать эпизод</button>
-      <button type="button" class="btn btn-s btn-sm" onclick="openPsyObservation()">Замер</button>
-      <button type="button" class="btn btn-s btn-sm" onclick="openPsyIntervention()">Записать метод</button>
-      <button type="button" class="btn btn-s btn-sm" onclick="openPsyReview()">Review</button>
+      <button type="button" class="btn btn-p btn-sm psy-why-inline" onclick="openOv('ov-why')"><i data-lucide="route"></i>Разобрать ситуацию</button>
+      <button type="button" class="btn btn-s btn-sm" onclick="openPsyForm('psyEma')">Записать, что произошло</button>
+      <button type="button" class="btn btn-s btn-sm" onclick="openPsyIntervention()">Отметить, что помогло</button>
     </div>
   </div>`;
 
-  // 2. Текущая карта + история версий (прогрессивное раскрытие).
+  // 2. Текущая рабочая картина + история версий.
   const hist = F ? psyFormulationHistory(F.id).slice(1) : [];
-  const map = `<details class="card mx psy-det"><summary>Текущая карта${F ? '' : ' — пусто'}</summary>
+  const map = `<details class="card mx psy-det"><summary>Что со мной происходит${F ? '' : ' — пока пусто'}</summary>
     ${F ? `<div class="si-text" style="white-space:pre-wrap">${esc(F.formulation)}</div>
-      ${F.hypotheses.length ? `<div class="sec-lbl" style="padding-left:0">Рабочие гипотезы</div>` +
+      ${F.hypotheses.length ? `<div class="sec-lbl" style="padding-left:0">Что стоит проверить</div>` +
         F.hypotheses.map(h => `<div class="psy-hyp"><b>${esc(h.text)}</b><br>
-          <span style="color:var(--t4);font-size:.72rem">${esc(h.claimClass)}${h.confidenceLabel ? ' · ' + esc(h.confidenceLabel) : ''} · позиция: ${esc(h.userStance)}</span><br>
-          <span style="font-size:.72rem">${psyRefLine(h.sourceRefs)}</span></div>`).join('') : ''}
+          <span style="color:var(--t4);font-size:.72rem">Рабочая версия, не установленный факт.</span></div>`).join('') : ''}
       ${F.protectiveFactors.length ? `<div class="sec-lbl" style="padding-left:0">Опоры</div>${F.protectiveFactors.map(x => `<div class="si-text">• ${esc(x)}</div>`).join('')}` : ''}
-      ${F.maintainingFactors.length ? `<div class="sec-lbl" style="padding-left:0">Что поддерживает проблему (гипотезы)</div>${F.maintainingFactors.map(x => `<div class="si-text">• ${esc(x)}</div>`).join('')}` : ''}
-      <div class="sec-lbl" style="padding-left:0">Источники</div><div class="si-text">${psyRefLine(F.sourceRefs)}</div>
-      <div class="si-text" style="color:var(--t4);font-size:.72rem;margin-top:.3rem">${psyProvLine(F)}</div>
-      ${hist.length ? `<div class="sec-lbl" style="padding-left:0">Предыдущие версии (${hist.length})</div>` +
-        hist.map(h => `<div class="psy-hist">${esc(String(h.createdAt).slice(0, 10))} · ${esc(h.focus)} · ${esc(PSY_STATUS_RU[h.status] || h.status)}</div>`).join('') : ''}`
-      : '<div class="ai-sp-empty">Добавь первую формулировку — она версионируется, старые версии не теряются.</div>'}
-    <div style="margin-top:.6rem"><button type="button" class="btn btn-s btn-sm" onclick="openPsyFormulation()">${F ? 'Новая версия формулировки' : 'Создать формулировку'}</button></div>
+      ${F.maintainingFactors.length ? `<div class="sec-lbl" style="padding-left:0">Что может поддерживать трудность</div>${F.maintainingFactors.map(x => `<div class="si-text">• ${esc(x)}</div>`).join('')}` : ''}
+      <details class="psy-explain"><summary>История и основания</summary>
+        <div class="si-text">${psyRefLine(F.sourceRefs)}</div>
+        <div class="si-text" style="color:var(--t4);font-size:.72rem;margin-top:.3rem">${psyProvLine(F)}</div>
+        ${hist.length ? `<div class="sec-lbl" style="padding-left:0">Предыдущие версии (${hist.length})</div>` +
+          hist.map(h => `<div class="psy-hist">${esc(String(h.createdAt).slice(0, 10))} · ${esc(h.focus)} · ${esc(PSY_STATUS_RU[h.status] || h.status)}</div>`).join('') : ''}
+      </details>`
+      : '<div class="ai-sp-empty">Здесь появится короткая рабочая картина: что повторяется, что помогает и что ещё нужно проверить.</div>'}
+    <div style="margin-top:.6rem"><button type="button" class="btn btn-s btn-sm" onclick="openPsyFormulation()">${F ? 'Уточнить картину' : 'Создать рабочую картину'}</button></div>
   </details>`;
 
   // 3. Цели.
-  const goalsBlock = `<details class="card mx psy-det"><summary>Цели (${allGoals.length})</summary>
+  const goalsBlock = `<details class="card mx psy-det" data-psy-goals><summary>Мои цели (${allGoals.length})</summary>
     ${allGoals.length ? allGoals.map(g => `<div class="psy-item">
       <b>${esc(g.label)}</b> · ${esc(PSY_GOAL_STATUS_RU[g.status] || g.status)}<br>
-      <span class="si-text">Ближайшая цель: ${esc(g.proximalOutcome)}</span>
+      <span class="si-text">Ближайший заметный результат: ${esc(g.proximalOutcome)}</span>
       ${g.distalOutcome ? `<br><span class="si-text" style="color:var(--t3)">Долгосрочно: ${esc(g.distalOutcome)}</span>` : ''}
-      ${g.reviewAt ? `<br><span style="font-size:.72rem;color:var(--t4)">review: ${esc(String(g.reviewAt).slice(0, 10))}</span>` : ''}
-      <br><span style="font-size:.72rem">${psyRefLine(g.sourceRefs)}</span>
+      ${g.reviewAt ? `<br><span style="font-size:.72rem;color:var(--t4)">Вернуться к цели: ${esc(String(g.reviewAt).slice(0, 10))}</span>` : ''}
+      ${(g.sourceRefs || []).length ? `<details class="psy-explain"><summary>Основания</summary><span style="font-size:.72rem">${psyRefLine(g.sourceRefs)}</span></details>` : ''}
     </div>`).join('') : '<div class="ai-sp-empty">Целей пока нет.</div>'}
     <div style="margin-top:.6rem"><button type="button" class="btn btn-s btn-sm" onclick="openPsyGoal()">Добавить цель</button></div>
   </details>`;
@@ -13999,45 +14119,55 @@ function rPsyWorkspace() {
     ${eps.length ? eps.slice(0, 30).map(e => {
       const m = psyMethod(e.methodId);
       return `<div class="psy-item">
-        <b>${esc(m ? m.name : (e.methodId || 'метод'))}</b> · ${esc(PSY_FAMILY_RU[e.methodFamily] || e.methodFamily)} · ${esc(String(e.dateTime).slice(0, 10))}<br>
+        <b>${esc(m ? m.name : (e.methodId || 'Свой способ'))}</b> · ${esc(String(e.dateTime).slice(0, 10))}<br>
         <span class="si-text">${esc(e.interventionSummary)}</span><br>
-        <span style="font-size:.72rem;color:var(--t3)">выполнение: ${esc(PSY_ADHERENCE_RU[e.adherence] || e.adherence)} · переносимость: ${esc(PSY_ACCEPT_RU[e.acceptability] || e.acceptability)} · исход: ${esc(PSY_OUTCOME_RU[e.outcomeClass] || e.outcomeClass)}</span>
+        <span style="font-size:.72rem;color:var(--t3)">Как получилось: ${esc(PSY_ADHERENCE_RU[e.adherence] || e.adherence)} · как ощущалось: ${esc(PSY_ACCEPT_RU[e.acceptability] || e.acceptability)} · результат: ${esc(PSY_OUTCOME_RU[e.outcomeClass] || e.outcomeClass)}</span>
         ${e.adverseEffects.length ? `<div class="psy-adv">Нежелательные эффекты: ${esc(e.adverseEffects.join('; '))}</div>` : ''}
-        ${e.confounders.length ? `<div style="font-size:.72rem;color:var(--t4)">Смешивающие факторы: ${esc(e.confounders.join('; '))}</div>` : ''}
-        <div style="font-size:.72rem">${psyRefLine(e.sourceRefs)}</div>
-        <div style="font-size:.72rem;color:var(--t4)">${psyProvLine(e)}</div>
-        <button type="button" class="btn btn-s btn-sm psy-del" onclick="psyUiDelete(${_psyDelTargets.push({ coll: 'psyInterventionEpisodes', id: e.id }) - 1})">Удалить (профиль пересчитается)</button>
+        <details class="psy-explain"><summary>Подробнее</summary>
+          ${e.confounders.length ? `<div style="font-size:.72rem;color:var(--t4)">Что ещё могло повлиять: ${esc(e.confounders.join('; '))}</div>` : ''}
+          <div style="font-size:.72rem">${psyRefLine(e.sourceRefs)}</div>
+          <div style="font-size:.72rem;color:var(--t4)">${psyProvLine(e)}</div>
+        </details>
+        <button type="button" class="btn btn-s btn-sm psy-del" onclick="psyUiDelete(${_psyDelTargets.push({ coll: 'psyInterventionEpisodes', id: e.id }) - 1})">Удалить запись</button>
       </div>`;
     }).join('') : '<div class="ai-sp-empty">Пока нет записанных применений метода.</div>'}
-    <div class="be-note" style="margin-top:.5rem">Один эпизод не доказывает эффективность метода. Здесь фиксируется, что было сделано и что наблюдалось после — без вывода о причинности.</div>
+    <div class="be-note" style="margin-top:.5rem">Один случай ещё не показывает, что способ работает всегда. Здесь отдельно сохраняются действие и то, что было после.</div>
   </details>`;
 
-  // 5. Наблюдения / EMA.
-  const obsBlock = `<details class="card mx psy-det"><summary>Наблюдения (${obs.length})</summary>
+  // 5. Наблюдения: события читаются как история, а не как набор кодов.
+  const episodeLabels = { event:'Что произошло', firstThought:'Первая мысль', body:'В теле', emotion:'Эмоция', impulse:'Хотелось', action:'Что сделал', result:'Что получилось' };
+  const obsBlock = `<details class="card mx psy-det"><summary>Что я замечал (${obs.length})</summary>
     ${obs.length ? obs.slice(0, 40).map(o => `<div class="psy-item">
-      <b>${esc(o.metricId)}</b> · ${esc(String(o.timestamp).slice(0, 16).replace('T', ' '))}<br>
-      <span class="si-text">${o.valueNumber != null ? esc(String(o.valueNumber)) + (o.unit ? ' ' + esc(o.unit) : '') : esc(o.valueText || '')}</span>
-      ${o.naturalistic ? '<span class="psy-nat">естественное изменение (техника не применялась)</span>' : ''}
-      ${o.episode ? `<div class="si-text" style="font-size:.75rem;color:var(--t3)">${['event', 'firstThought', 'body', 'emotion', 'impulse', 'action', 'result'].filter(k => o.episode[k]).map(k => esc(o.episode[k])).join(' → ')}</div>` : ''}
-      <br><span style="font-size:.72rem;color:var(--t4)">режим: ${esc(o.entryMode)} · источник: ${esc(o.source)}</span>
-      <button type="button" class="btn btn-s btn-sm psy-del" onclick="psyUiDelete(${_psyDelTargets.push({ coll: 'psyObservations', id: o.id }) - 1})">Удалить</button>
+      <b>${esc(o.episode ? 'Ситуация' : (o.metricId || 'Наблюдение'))}</b> · ${esc(String(o.timestamp).slice(0, 16).replace('T', ' '))}<br>
+      ${o.valueNumber != null || o.valueText ? `<span class="si-text">${o.valueNumber != null ? esc(String(o.valueNumber)) + (o.unit ? ' ' + esc(o.unit) : '') : esc(o.valueText || '')}</span>` : ''}
+      ${o.naturalistic ? '<span class="psy-nat">изменилось само, без практики</span>' : ''}
+      ${o.episode ? `<div class="psy-story">${Object.keys(episodeLabels).filter(k => o.episode[k]).map(k => `<div><span>${episodeLabels[k]}</span>${esc(o.episode[k])}</div>`).join('')}</div>` : ''}
+      <button type="button" class="btn btn-s btn-sm psy-del" onclick="psyUiDelete(${_psyDelTargets.push({ coll: 'psyObservations', id: o.id }) - 1})">Удалить запись</button>
     </div>`).join('') : '<div class="ai-sp-empty">Наблюдений пока нет.</div>'}
-    <div class="be-note" style="margin-top:.5rem">Отсутствие замера — это отсутствие данных, а не ноль. Числа вводит только человек или детерминированный подсчёт.</div>
+    <div style="margin-top:.6rem"><button type="button" class="btn btn-s btn-sm" onclick="openPsyObservation()">Добавить наблюдение</button></div>
   </details>`;
 
-  // 6. Review.
-  const revBlock = `<details class="card mx psy-det"><summary>Review (${revs.length})</summary>
+  // 6. Периодические итоги.
+  const revBlock = `<details class="card mx psy-det"><summary>Итоги и изменения (${revs.length})</summary>
     ${revs.length ? revs.slice(0, 20).map(r => `<div class="psy-item">
       <b>${esc(String(r.periodStart).slice(0, 10))} — ${esc(String(r.periodEnd).slice(0, 10))}</b> · решение: ${esc(PSY_DECISION_RU[r.decision] || r.decision)}<br>
       <span class="si-text">${esc(r.outcomeSummary)}</span><br>
-      <span style="font-size:.72rem;color:var(--t4)">эпизодов: ${r.interventionEpisodeRefs.length} · наблюдений: ${r.observationRefs.length} · целей: ${r.goalRefs.length}</span>
-      ${r.limitations.length ? `<div style="font-size:.72rem;color:var(--t4)">Ограничения: ${esc(r.limitations.join('; '))}</div>` : ''}
+      <span style="font-size:.72rem;color:var(--t4)">Учтено: способов ${r.interventionEpisodeRefs.length} · наблюдений ${r.observationRefs.length} · целей ${r.goalRefs.length}</span>
+      ${r.limitations.length ? `<details class="psy-explain"><summary>Что ограничивает вывод</summary><div style="font-size:.72rem;color:var(--t4)">${esc(r.limitations.join('; '))}</div></details>` : ''}
     </div>`).join('') : '<div class="ai-sp-empty">Разборов пока нет.</div>'}
+    <div style="margin-top:.6rem"><button type="button" class="btn btn-s btn-sm" onclick="openPsyReview()">Подвести итог</button></div>
   </details>`;
 
-  el.innerHTML = `<div class="sec-lbl">Психология</div>
-    <div class="be-note mx">Рабочее пространство самонаблюдения. Это не диагностика и не замена специалисту.</div>
-    ${psyRenderPromptAndSettings()}${now}${psyRenderAdaptiveNow()}${psyRenderHelpsMe()}${mbRenderCards('Тело и контекст')}${map}${goalsBlock}${epsBlock}${obsBlock}${revBlock}${psyRenderExperiments()}`;
+  const advanced = `<details class="card mx psy-det psy-advanced"><summary>Дополнительные инструменты</summary>
+    <div class="be-note">Настройки коротких вопросов, автоматический подбор шага и личные эксперименты. Для обычного разбора они не нужны.</div>
+    <div class="psy-advanced-body">${psyRenderPromptAndSettings()}${psyRenderAdaptiveNow()}${psyRenderExperiments()}</div>
+  </details>`;
+
+  el.innerHTML = `<div class="domain-head mx">
+      <div class="domain-title">Психология</div>
+      <div class="domain-subtitle">Понять, что происходит, заметить повторения и выбрать следующий шаг. Это самонаблюдение, не диагностика и не замена специалисту.</div>
+    </div>
+    ${now}${psyRenderHelpsMe()}${mbRenderCards('Тело и контекст')}${map}${goalsBlock}${epsBlock}${obsBlock}${revBlock}${advanced}`;
   try { if (window.lucide) window.lucide.createIcons(); } catch (e) {}
 }
 
@@ -14045,56 +14175,56 @@ function rPsyWorkspace() {
 // Поля описываются данными, а не пятью почти одинаковыми разметками, и
 // сохраняются ОДНИМ путём psySaveRecord() — тем же, что использует импортер.
 const PSY_FORM_SPECS = {
-  psyFormulation: { title: 'Формулировка случая', fields: [
-    { k: 'focus', l: 'Над чем работаем', t: 'text', req: true },
-    { k: 'formulation', l: 'Рабочее описание (не диагноз)', t: 'area', req: true },
-    { k: '_hypothesis', l: 'Рабочая гипотеза (необязательно)', t: 'area' },
-    { k: '_protective', l: 'Опоры — по строке', t: 'area' },
-    { k: '_maintaining', l: 'Что поддерживает проблему — по строке', t: 'area' },
+  psyFormulation: { title: 'Рабочая картина', fields: [
+    { k: 'focus', l: 'Что сейчас важно', t: 'text', req: true },
+    { k: 'formulation', l: 'Как я понимаю ситуацию сейчас', t: 'area', req: true },
+    { k: '_hypothesis', l: 'Что стоит проверить (не факт)', t: 'area' },
+    { k: '_protective', l: 'На что я могу опереться — по строке', t: 'area' },
+    { k: '_maintaining', l: 'Что может поддерживать трудность — по строке', t: 'area' },
     { k: 'status', l: 'Статус', t: 'sel', opts: [['active', 'активная'], ['draft', 'черновик']] },
   ] },
-  psyGoal: { title: 'Рабочая цель', fields: [
+  psyGoal: { title: 'Моя цель', fields: [
     { k: 'label', l: 'Цель', t: 'text', req: true },
-    { k: 'proximalOutcome', l: 'Ближайший наблюдаемый результат', t: 'area', req: true },
+    { k: 'proximalOutcome', l: 'Как я пойму, что стало лучше', t: 'area', req: true },
     { k: 'distalOutcome', l: 'Долгосрочный результат', t: 'area' },
-    { k: 'targetMechanism', l: 'На какой механизм направлена', t: 'text' },
-    { k: 'reviewAt', l: 'Дата review', t: 'date' },
+    { k: 'targetMechanism', l: 'Что именно хочу изменить', t: 'text' },
+    { k: 'reviewAt', l: 'Когда вернуться к цели', t: 'date' },
     { k: 'status', l: 'Статус', t: 'sel', opts: PSY_GOAL_STATUSES.map(s => [s, PSY_GOAL_STATUS_RU[s]]) },
   ] },
-  psyInterventionEpisode: { title: 'Применение метода', fields: [
-    { k: 'methodId', l: 'Метод', t: 'sel', opts: [['', '— свой метод —']].concat(PSY_METHOD_REGISTRY.map(m => [m.methodId, m.name])) },
-    { k: 'methodFamily', l: 'Семейство метода', t: 'sel', opts: PSY_METHOD_FAMILIES.map(f => [f, PSY_FAMILY_RU[f]]) },
-    { k: 'targetProblem', l: 'На что направлено', t: 'text' },
-    { k: 'interventionSummary', l: 'Что именно было сделано', t: 'area', req: true },
-    { k: 'rationale', l: 'Почему это применялось', t: 'area' },
-    { k: 'adherence', l: 'Выполнение', t: 'sel', opts: PSY_ADHERENCE.map(a => [a, PSY_ADHERENCE_RU[a]]) },
-    { k: 'acceptability', l: 'Переносимость', t: 'sel', opts: PSY_ACCEPTABILITY.map(a => [a, PSY_ACCEPT_RU[a]]) },
-    { k: 'outcomeClass', l: 'Исход (без вывода о причинности)', t: 'sel', opts: PSY_OUTCOME_CLASSES.map(o => [o, PSY_OUTCOME_RU[o]]) },
-    { k: '_adverse', l: 'Нежелательные эффекты — по строке', t: 'area' },
+  psyInterventionEpisode: { title: 'Что я попробовал', fields: [
+    { k: 'methodId', l: 'Способ', t: 'sel', opts: [['', '— свой способ —']].concat(PSY_METHOD_REGISTRY.map(m => [m.methodId, m.name])) },
+    { k: 'methodFamily', l: 'Подход', t: 'sel', opts: PSY_METHOD_FAMILIES.map(f => [f, PSY_FAMILY_RU[f]]) },
+    { k: 'targetProblem', l: 'С чем хотел справиться', t: 'text' },
+    { k: 'interventionSummary', l: 'Что именно сделал', t: 'area', req: true },
+    { k: 'rationale', l: 'Почему выбрал этот способ', t: 'area' },
+    { k: 'adherence', l: 'Удалось ли выполнить', t: 'sel', opts: PSY_ADHERENCE.map(a => [a, PSY_ADHERENCE_RU[a]]) },
+    { k: 'acceptability', l: 'Как это ощущалось', t: 'sel', opts: PSY_ACCEPTABILITY.map(a => [a, PSY_ACCEPT_RU[a]]) },
+    { k: 'outcomeClass', l: 'Что было после', t: 'sel', opts: PSY_OUTCOME_CLASSES.map(o => [o, PSY_OUTCOME_RU[o]]) },
+    { k: '_adverse', l: 'Что было неприятно или ухудшилось — по строке', t: 'area' },
     { k: '_confounders', l: 'Что ещё могло повлиять — по строке', t: 'area' },
   ] },
   psyObservation: { title: 'Наблюдение', fields: [
-    { k: 'metricId', l: 'Что наблюдаем (метрика)', t: 'text', req: true },
-    { k: 'valueNumber', l: 'Числовое значение (если измерялось)', t: 'num' },
+    { k: 'metricId', l: 'Что хочу отслеживать', t: 'text', req: true },
+    { k: 'valueNumber', l: 'Значение числом (если подходит)', t: 'num' },
     { k: 'unit', l: 'Единица', t: 'text' },
     { k: 'valueText', l: 'Или описание словами', t: 'area' },
     { k: 'contextTag', l: 'Контекст', t: 'text' },
-    { k: 'entryMode', l: 'Режим записи', t: 'sel', opts: PSY_ENTRY_MODES.filter(m => m !== 'imported').map(m => [m, m]) },
+    { k: 'entryMode', l: 'Когда записано', t: 'sel', opts: PSY_ENTRY_MODES.filter(m => m !== 'imported').map(m => [m, PSY_ENTRY_MODE_RU[m]]) },
     { k: 'naturalistic', l: 'Изменение произошло само, техника не применялась', t: 'chk' },
   ] },
-  psyReview: { title: 'Review периода', fields: [
+  psyReview: { title: 'Итог за период', fields: [
     { k: 'periodStart', l: 'Начало периода', t: 'date', req: true },
     { k: 'periodEnd', l: 'Конец периода', t: 'date', req: true },
     { k: 'outcomeSummary', l: 'Что изменилось / не изменилось', t: 'area', req: true },
-    { k: 'methodsAppliedSummary', l: 'Какие методы реально применялись', t: 'area' },
+    { k: 'methodsAppliedSummary', l: 'Что я действительно пробовал', t: 'area' },
     { k: 'decision', l: 'Решение', t: 'sel', opts: PSY_DECISIONS.map(d => [d, PSY_DECISION_RU[d]]) },
-    { k: '_limitations', l: 'Ограничения вывода — по строке', t: 'area' },
+    { k: '_limitations', l: 'Почему вывод может быть неточным — по строке', t: 'area' },
   ] },
   // ── Wave 8 (issue #163) ───────────────────────────────────────────
   // Low-friction EMA: цепочка «что произошло → мысль → тело → эмоция →
   // импульс → действие → результат». ВСЕ поля опциональны — достаточно
   // одного. Сохраняется как обычное psyObservation (saveAs), вторых схем нет.
-  psyEma: { title: 'Наблюдать эпизод (EMA)', saveAs: 'psyObservation', fields: [
+  psyEma: { title: 'Что произошло', saveAs: 'psyObservation', fields: [
     { k: '_event', l: 'Что произошло', t: 'area' },
     { k: '_firstThought', l: 'Первая мысль / смысл', t: 'text' },
     { k: '_body', l: 'Тело', t: 'text' },
@@ -14104,36 +14234,36 @@ const PSY_FORM_SPECS = {
     { k: '_result', l: 'Результат', t: 'text' },
     { k: 'valueNumber', l: 'Интенсивность 0–10 (если хочется оценить)', t: 'num' },
     { k: 'contextTag', l: 'Контекст', t: 'text' },
-    { k: 'naturalistic', l: 'Изменение произошло само, техника не применялась', t: 'chk' },
+    { k: 'naturalistic', l: 'Состояние изменилось само, я ничего специально не делал(а)', t: 'chk' },
   ] },
-  psyAdaptivePlan: { title: 'Адаптивный план (JITAI)', fields: [
+  psyAdaptivePlan: { title: 'План на трудный момент', fields: [
     { k: 'goalId', l: 'К какой цели относится', t: 'sel', req: true,
       opts: () => (DB.psyGoals || []).filter(g => g && g.status === 'active').map(g => [g.id, g.label]) },
-    { k: 'proximalOutcome', l: 'Ближайший измеримый результат (пусто = из цели)', t: 'text' },
-    { k: '_decisionPoint', l: 'Когда принимается решение (точка решения)', t: 'text', req: true },
-    { k: '_ruleTrigger', l: 'Правило: тип триггера (пусто = любой)', t: 'text' },
-    { k: '_ruleMechanism', l: 'Правило: механизм (пусто = любой)', t: 'text' },
-    { k: '_ruleArousalMin', l: 'Правило: возбуждение от (0–10, пусто = без порога)', t: 'num' },
-    { k: '_ruleArousalMax', l: 'Правило: возбуждение до (0–10, пусто = без порога)', t: 'num' },
-    { k: '_ruleMethod', l: 'Тогда предложить', t: 'sel',
-      opts: () => PSY_METHOD_REGISTRY.map(m => [m.methodId, m.name]).concat([['NO_INTERVENTION', 'Ничего не предлагать (NO_INTERVENTION)']]) },
+    { k: 'proximalOutcome', l: 'Какой ближайший результат нужен', t: 'text' },
+    { k: '_decisionPoint', l: 'Когда план должен сработать', t: 'text', req: true },
+    { k: '_ruleTrigger', l: 'Если произошло', t: 'text' },
+    { k: '_ruleMechanism', l: 'Если повторяется', t: 'text' },
+    { k: '_ruleArousalMin', l: 'Если напряжение от (0–10)', t: 'num' },
+    { k: '_ruleArousalMax', l: 'Если напряжение до (0–10)', t: 'num' },
+    { k: '_ruleMethod', l: 'Что предложить', t: 'sel',
+      opts: () => PSY_METHOD_REGISTRY.map(m => [m.methodId, m.name]).concat([['NO_INTERVENTION', 'Ничего не предлагать']]) },
   ] },
-  psyExperiment: { title: 'Персональный эксперимент (N-of-1)', fields: [
-    { k: 'question', l: 'Простой вопрос эксперимента', t: 'text', req: true },
-    { k: 'methodId', l: 'Метод (только обратимые low-risk)', t: 'sel',
+  psyExperiment: { title: 'Проверить способ на себе', fields: [
+    { k: 'question', l: 'Что я хочу проверить', t: 'text', req: true },
+    { k: 'methodId', l: 'Безопасный обратимый способ', t: 'sel',
       opts: () => PSY_METHOD_REGISTRY.filter(m => m.riskClass === 'low_reversible').map(m => [m.methodId, m.name]) },
-    { k: '_metric', l: 'Что измеряем (метрика)', t: 'text', req: true },
-    { k: 'designType', l: 'Дизайн', t: 'sel', opts: () => PSY_EXP_DESIGNS.map(d => [d, PSY_EXP_DESIGN_RU[d]]) },
+    { k: '_metric', l: 'Что буду отслеживать', t: 'text', req: true },
+    { k: 'designType', l: 'Как сравнивать', t: 'sel', opts: () => PSY_EXP_DESIGNS.map(d => [d, PSY_EXP_DESIGN_RU[d]]) },
     { k: '_conditions', l: 'Условия сравнения — по строке', t: 'area' },
-    { k: '_baselinePoints', l: 'Запланировано baseline-замеров', t: 'num', req: true },
+    { k: '_baselinePoints', l: 'Сколько начальных наблюдений', t: 'num', req: true },
     { k: '_baselineWhy', l: 'Почему этого достаточно', t: 'area', req: true },
-    { k: 'washoutPlan', l: 'Washout / перенос эффекта между условиями', t: 'area' },
-    { k: '_stopRules', l: 'Stop-правила — по строке', t: 'area', req: true },
-    { k: 'fidelityPlan', l: 'Как фиксируется точность выполнения (fidelity)', t: 'area', req: true },
-    { k: 'measurementSchedule', l: 'График измерений', t: 'text', req: true },
-    { k: '_seed', l: 'Seed рандомизации (для рандомизированных дизайнов)', t: 'num' },
-    { k: '_cycles', l: 'Число циклов рандомизации (≥2)', t: 'num' },
-    { k: '_safetyOk', l: 'Подтверждаю: я сейчас в порядке (safety green)', t: 'chk' },
+    { k: 'washoutPlan', l: 'Нужна ли пауза между условиями', t: 'area' },
+    { k: '_stopRules', l: 'Когда обязательно остановиться — по строке', t: 'area', req: true },
+    { k: 'fidelityPlan', l: 'Как отмечать, что способ выполнен полностью', t: 'area', req: true },
+    { k: 'measurementSchedule', l: 'Когда делать наблюдения', t: 'text', req: true },
+    { k: '_seed', l: 'Начальное число для случайного порядка', t: 'num' },
+    { k: '_cycles', l: 'Сколько раз чередовать условия (не меньше 2)', t: 'num' },
+    { k: '_safetyOk', l: 'Подтверждаю: я сейчас в устойчивом состоянии', t: 'chk' },
     { k: '_consent', l: 'Я понимаю ограничения и даю согласие на эксперимент', t: 'chk' },
   ] },
 };
@@ -14215,7 +14345,7 @@ function psyFormSubmit() {
 
   // ── Wave 8 (issue #163) ──────────────────────────────────────────
   if (type === 'psyEma') {
-    // Цепочка эпизода — структура, а не «извлечённые ИИ числа».
+    // Цепочка случая — структура, а не «извлечённые ИИ числа».
     input.episode = {
       event: val('_event'), firstThought: val('_firstThought'), body: val('_body'),
       emotion: val('_emotion'), impulse: val('_impulse'), action: val('_action'), result: val('_result'),
@@ -14276,8 +14406,8 @@ function psyFormSubmit() {
 //
 //  Персональный «профиль метода» — ЧИСТАЯ derived-функция от реальных
 //  psyInterventionEpisodes/psyObservations/psyReviews текущего профиля.
-//  Он не хранится и не редактируется: удаление/правка эпизода меняет
-//  профиль детерминированно при следующем чтении. Внешняя доказательность
+//  Он не хранится и не редактируется: удаление/правка случая меняет
+//  профиль детерминированно при следующем чтении. Что известно в целом
 //  (Method Registry) и персональные данные — два слоя, никогда не одно число.
 //
 //  Движок решений детерминированный и объяснимый: safety gate →
@@ -14296,7 +14426,7 @@ const PSY_EXP_DESIGN_RU = {
   observational: 'наблюдательный (без causal-вывода)', AB: 'A→B (без репликации)',
   ABA: 'A–B–A', ABAB: 'A–B–A–B', alternating: 'чередование условий', randomized_crossover: 'рандомизированный кроссовер',
 };
-// Позитивный/негативный сигнал исхода эпизода (для derived-профиля).
+// Позитивный/негативный сигнал исхода случая (для derived-профиля).
 // «promising» — слабый позитив: одного яркого раза мало (addendum 5230792191 §3).
 const PSY_POSITIVE_OUTCOMES = Object.freeze(['promising', 'helpful_in_context', 'probably_helpful']);
 const PSY_STRONG_POSITIVE_OUTCOMES = Object.freeze(['helpful_in_context', 'probably_helpful']);
@@ -14315,7 +14445,7 @@ const PSY_TAILORING_VARS = Object.freeze([
 
 // ── Derived personal method profile ────────────────────────────────
 // psyMethodProfiles(db) — чистая функция: одинаковый DB → одинаковый результат.
-// Контекст = targetMechanism эпизода: один метод может помогать при руминации
+// Контекст = targetMechanism случая: один метод может помогать при руминации
 // и плохо переноситься в другом контексте (context dependence обязательна).
 // Naturalistic-наблюдения сюда НЕ попадают: изменение без интервенции не
 // приписывается методу (addendum 5230889736 §1).
@@ -14334,8 +14464,8 @@ function psyProfileStatus(st) {
 }
 function psyMethodProfiles(dbArg) {
   const db = dbArg || DB;
-  // Ключ профиля: конкретный methodId, а для эпизодов БЕЗ methodId (свой
-  // метод / только семейство) — `family:<FAMILY>`. Реальный эпизод не должен
+  // Ключ профиля: конкретный methodId, а для случаев БЕЗ methodId (свой
+  // метод / только семейство) — `family:<FAMILY>`. Реальный случай не должен
   // исчезать из «Что помогает мне» только потому, что метода нет в реестре
   // (real-data acceptance: второй фактический intervention отражается
   // отдельно). Ключи не пересекаются: id реестра не начинаются с «family:».
@@ -14785,7 +14915,7 @@ function psyExpAnalysis(exp, dbArg) {
 }
 
 // ── Удаление психологической записи (детерминированный пересчёт) ────
-// Профиль derived — после удаления эпизода он пересчитывается сам при
+// Профиль derived — после удаления случая он пересчитывается сам при
 // следующем чтении. Транзакционно: сбой persist() возвращает и запись,
 // и надгробие.
 const PSY_DELETABLE_COLLS = Object.freeze([
@@ -14844,7 +14974,7 @@ function psySaveEmaSettings(enabled, maxPerDay) {
     _u: Date.now(),
   };
   if (!persist()) { DB.psyAdaptiveSettings = before; toast('Не удалось сохранить', 'err'); return; }
-  toast('Настройки EMA сохранены', 'ok'); rPsyWorkspace();
+  toast('Настройки коротких вопросов сохранены', 'ok'); rPsyWorkspace();
 }
 
 // ── Wave 8 UI ───────────────────────────────────────────────────────
@@ -14866,14 +14996,14 @@ function psyUiDecide() {
   const res = psyAdaptiveDecide(plan, { ..._psyCtx }, DB);
   const ex = res.explain || {};
   const safety = ex.safety || { level: '—', reasons: [] };
-  const explainHtml = `<details class="psy-explain"><summary>Почему система решила так</summary>
-    <div class="si-text" style="font-size:.75rem">Входы: триггер=«${esc(ex.inputs.triggerType || '—')}», механизм=«${esc(ex.inputs.mechanism || '—')}», возбуждение=${ex.inputs.arousal == null ? 'не измерено' : esc(String(ex.inputs.arousal))}, готовность=${esc(String(ex.receptivity || '—'))}</div>
-    <div class="si-text" style="font-size:.75rem">Safety: <b>${esc(safety.level)}</b> — ${esc((safety.reasons || []).join('; '))}</div>
+  const explainHtml = `<details class="psy-explain"><summary>Как выбран этот шаг</summary>
+    <div class="si-text" style="font-size:.75rem">Учтено: ситуация «${esc(ex.inputs.triggerType || '—')}», повторение «${esc(ex.inputs.mechanism || '—')}», напряжение ${ex.inputs.arousal == null ? 'не указано' : esc(String(ex.inputs.arousal))}, готовность ${esc(String(ex.receptivity || '—'))}</div>
+    <div class="si-text" style="font-size:.75rem">Проверка безопасности: <b>${esc(safety.level)}</b> — ${esc((safety.reasons || []).join('; '))}</div>
     ${(ex.rulesTrace || []).map(t => `<div class="si-text" style="font-size:.72rem">• правило «${esc(t.ruleId || '')}»: ${t.matched ? 'совпало' : 'не совпало'} — ${esc(t.why || '')}</div>`).join('')}
-    ${(ex.exclusions || []).length ? `<div class="si-text" style="font-size:.72rem;color:var(--t3)">Исключения: ${ex.exclusions.map(x => esc(x.methodId + ' (' + x.source + ')')).join(', ')}</div>` : ''}
+    ${(ex.exclusions || []).length ? `<div class="si-text" style="font-size:.72rem;color:var(--t3)">Не предложено: ${ex.exclusions.map(x => esc(x.methodId + ' (' + x.source + ')')).join(', ')}</div>` : ''}
   </details>`;
   if (res.decision === 'safety_stop') {
-    out.innerHTML = `<div class="psy-adv" role="alert">Адаптивный движок остановлен: ${esc(res.reason)}</div>
+    out.innerHTML = `<div class="psy-adv" role="alert">Автоматический подбор остановлен: ${esc(res.reason)}</div>
       <div style="margin-top:.4rem"><button type="button" class="btn btn-s btn-sm" onclick="showCrisisSafetyPanel()">Кризисная поддержка</button></div>${explainHtml}`;
     return;
   }
@@ -14884,8 +15014,8 @@ function psyUiDecide() {
   const m = psyMethod(res.methodId);
   const pe = res.personalEvidence || {};
   const peLine = pe.insufficient
-    ? 'Личных данных в этом контексте недостаточно (insufficient personal evidence) — предложение опирается на внешнюю доказательность.'
-    : `Личный опыт в этом контексте: ${PSY_OUTCOME_RU[pe.status] || pe.status} · эпизодов: ${(pe.contributingEpisodeIds || []).length}`;
+    ? 'Твоих данных в этой ситуации пока мало — предложение опирается на то, что известно в целом.'
+    : `Личный опыт в этом контексте: ${PSY_OUTCOME_RU[pe.status] || pe.status} · случаев: ${(pe.contributingEpisodeIds || []).length}`;
   out.innerHTML = `<div class="psy-offer">
       <div><b>${esc(m.name)}</b> <span style="color:var(--t3);font-size:.75rem">(${esc(PSY_FAMILY_RU[m.family] || m.family)})</span></div>
       <div class="si-text" style="font-size:.78rem">${esc(res.reason)}</div>
@@ -14941,11 +15071,11 @@ function psyExpDoneSubmit() {
 // дату пересмотра и версию элемента доказательности — без утверждений о
 // персональной эффективности.
 function psyExtEvidenceLine(m) {
-  if (!m) return 'Внешняя база: — (метода нет в реестре; только личные наблюдения)';
+  if (!m) return 'На чём основано: только мои наблюдения; общей справки для этого способа нет';
   const ev = m.evidenceMetadata[0] || {};
   const pub = [ev.publisher, ev.year].filter(Boolean).join(', ');
-  return `Внешняя база: ${esc(ev.kind || '—')} · ${esc(ev.ref || '—')}${pub ? ' (' + esc(pub) + ')' : ''}` +
-    ` · пересмотрено ${esc(ev.reviewedAt || '—')} · v${esc(String(ev.evidenceVersion || '—'))}` +
+  return `Что известно в целом: ${esc(ev.ref || '—')}${pub ? ' (' + esc(pub) + ')' : ''}` +
+    ` · проверено ${esc(ev.reviewedAt || '—')} · версия ${esc(String(ev.evidenceVersion || '—'))}` +
     (ev.limitations ? ' · ' + esc(ev.limitations) : '');
 }
 let _psyExclTargets = [];
@@ -14967,21 +15097,21 @@ function psyRenderHelpsMe() {
       ${p.contextDependence ? '<span class="psy-ctxdep">зависит от контекста</span>' : ''}
       ${p.insufficient ? '<span class="psy-ctxdep">данных недостаточно</span>' : ''}
       <div class="si-text" style="font-size:.75rem;color:var(--t3)">${psyExtEvidenceLine(m)}</div>
-      <div class="si-text" style="font-size:.78rem">Мои данные: применений ${p.nEpisodes}, выполнено полностью ${p.nCompleted}${p.lastReviewedAt ? ' · последний review: ' + esc(String(p.lastReviewedAt).slice(0, 10)) : ''}</div>
+      <div class="si-text" style="font-size:.78rem">Мой опыт: пробовал(а) ${p.nEpisodes}, полностью выполнил(а) ${p.nCompleted}${p.lastReviewedAt ? ' · последний итог: ' + esc(String(p.lastReviewedAt).slice(0, 10)) : ''}</div>
       ${p.contexts.map(c => `<div class="psy-ctx-row">
-        <span class="si-text" style="font-size:.75rem">контекст «${esc(c.contextKey)}»: ${esc(PSY_OUTCOME_RU[c.status] || c.status)}${c.adherenceIssue ? ' (проблема выполнения, не оценка метода)' : ''}
-        · исход оценивался в ${c.counts.evaluable} из ${c.counts.attempts}
-        · с замером после: ${c.counts.withProximal} · follow-up: ${c.counts.withFollowUp}</span>
-        ${c.adverseEffects.length ? `<div class="psy-adv">Нежелательные эффекты (сохраняются всегда): ${esc(c.adverseEffects.join('; '))}</div>` : ''}
-        <details class="psy-explain"><summary>Почему так — вклад эпизодов (${c.contributingEpisodeIds.length})</summary>
+        <span class="si-text" style="font-size:.75rem">В ситуации «${esc(c.contextKey)}»: ${esc(PSY_OUTCOME_RU[c.status] || c.status)}${c.adherenceIssue ? ' (пока трудно оценить: способ выполнялся не полностью)' : ''}
+        · результат удалось оценить в ${c.counts.evaluable} из ${c.counts.attempts}
+        · есть проверка сразу после: ${c.counts.withProximal} · есть поздняя проверка: ${c.counts.withFollowUp}</span>
+        ${c.adverseEffects.length ? `<div class="psy-adv">Что было неприятно или ухудшилось: ${esc(c.adverseEffects.join('; '))}</div>` : ''}
+        <details class="psy-explain"><summary>Из каких записей сделан вывод (${c.contributingEpisodeIds.length})</summary>
           <div class="si-text" style="font-size:.7rem;word-break:break-all">${c.contributingEpisodeIds.map(esc).join('<br>')}</div>
         </details>
       </div>`).join('')}
       ${m ? `<button type="button" class="btn btn-s btn-sm" onclick="psyUiToggleExclusion(${_psyExclTargets.push({ methodId: p.methodId }) - 1})">${isExcl ? 'Снова разрешить предлагать' : 'Не предлагать мне это снова'}</button>` : ''}
     </div>`;
-  }).join('') : '<div class="ai-sp-empty">Личных применений методов пока нет — профиль строится только из реальных эпизодов.</div>';
-  return `<details class="card mx psy-det" id="psy-helps-me"><summary>Что помогает мне (${profiles.length})</summary>
-    <div class="be-note" style="margin:.4rem 0">Внешняя доказательность и личный опыт показаны отдельно и никогда не складываются в одну «эффективность N%». Статус раскрывается до конкретных эпизодов.</div>
+  }).join('') : '<div class="ai-sp-empty">Пока нет записей о том, что ты пробовал(а) и что было после.</div>';
+  return `<details class="card mx psy-det" id="psy-helps-me"><summary>Что мне помогает (${profiles.length})</summary>
+    <div class="be-note" style="margin:.4rem 0">Общие рекомендации и твой личный опыт показаны отдельно. То, что помогает многим, не обязательно поможет тебе в каждой ситуации.</div>
     ${body}</details>`;
 }
 
@@ -14990,25 +15120,25 @@ function psyRenderAdaptiveNow() {
   const active = plans.filter(p => p && p.enabled);
   const sel = (id, key, opts, lbl) => `<label class="f-lbl" for="${id}">${lbl}</label>
     <select id="${id}" class="field" onchange="psyUiCtxSet('${key}', this.value)">${opts.map(o => `<option value="${esc(o[0])}">${esc(o[1])}</option>`).join('')}</select>`;
-  return `<details class="card mx psy-det" id="psy-adaptive-now"><summary>Сейчас: подобрать шаг (${active.length ? 'план активен' : 'плана нет'})</summary>
+  return `<details class="card mx psy-det" id="psy-adaptive-now"><summary>Подобрать следующий шаг (${active.length ? 'план включён' : 'плана нет'})</summary>
     ${active.length ? `
     <div class="psy-ctx-grid">
-      <div class="psy-fld"><label class="f-lbl" for="psy-ctx-trigger">Тип триггера</label>
+      <div class="psy-fld"><label class="f-lbl" for="psy-ctx-trigger">Что произошло</label>
         <input type="text" id="psy-ctx-trigger" class="field" onchange="psyUiCtxText('triggerType', this.value); psyUiDecide()"></div>
-      <div class="psy-fld"><label class="f-lbl" for="psy-ctx-mech">Механизм (из формулировки)</label>
+      <div class="psy-fld"><label class="f-lbl" for="psy-ctx-mech">Что обычно повторяется</label>
         <input type="text" id="psy-ctx-mech" class="field" onchange="psyUiCtxText('mechanism', this.value); psyUiDecide()"></div>
-      <div class="psy-fld">${sel('psy-ctx-arousal', 'arousal', [['', 'возбуждение: не измерено']].concat([...Array(11).keys()].map(i => [String(i), 'возбуждение: ' + i])), 'Возбуждение (0–10)')}</div>
-      <div class="psy-fld">${sel('psy-ctx-safety', 'selfReport', [['', 'состояние: не указано'], ['ok', 'я в порядке'], ['strained', 'на пределе'], ['crisis', 'кризис']], 'Состояние (safety)')}</div>
+      <div class="psy-fld">${sel('psy-ctx-arousal', 'arousal', [['', 'не указано']].concat([...Array(11).keys()].map(i => [String(i), String(i)])), 'Напряжение (0–10)')}</div>
+      <div class="psy-fld">${sel('psy-ctx-safety', 'selfReport', [['', 'не указано'], ['ok', 'я в порядке'], ['strained', 'на пределе'], ['crisis', 'кризис']], 'Как я сейчас')}</div>
       <div class="psy-fld">${sel('psy-ctx-recept', 'receptivity', [['', 'готовность: не указана'], ['yes', 'готов(а) применить технику'], ['no', 'не сейчас']], 'Готовность')}</div>
     </div>
-    <div id="psy-adaptive-decision" aria-live="polite"><div class="ai-sp-empty">Заполни контекст — решение пересчитается автоматически.</div></div>
-    <div class="be-note" style="margin-top:.5rem">NO_INTERVENTION — нормальный результат. Система не предлагает технику без готовности и при небезопасном состоянии.</div>`
-      : '<div class="ai-sp-empty">Создай адаптивный план: он связывает цель, точки решения и объяснимые правила выбора.</div>'}
+    <div id="psy-adaptive-decision" aria-live="polite"><div class="ai-sp-empty">Ответь на вопросы — предложение обновится автоматически.</div></div>
+    <div class="be-note" style="margin-top:.5rem">«Ничего не делать сейчас» — нормальный результат. Без готовности или в небезопасном состоянии практика не предлагается.</div>`
+      : '<div class="ai-sp-empty">Можно создать план: когда он должен сработать и какой безопасный шаг предложить.</div>'}
     ${plans.length ? plans.map(p => `<div class="psy-item" style="font-size:.78rem">
         <b>План:</b> ${esc(p.proximalOutcome)} · правил: ${p.decisionRules.length} · ${p.enabled ? 'включён' : 'выключен'}
         <div style="color:var(--t4);font-size:.72rem">Дистальная цель: ${esc(p.distalOutcome || '—')} · точки решения: ${esc(p.decisionPoints.join('; '))}</div>
       </div>`).join('') : ''}
-    <div style="margin-top:.5rem"><button type="button" class="btn btn-s btn-sm" onclick="openPsyForm('psyAdaptivePlan')">Создать план</button></div>
+    <div style="margin-top:.5rem"><button type="button" class="btn btn-s btn-sm" onclick="openPsyForm('psyAdaptivePlan')">Создать план на трудный момент</button></div>
   </details>`;
 }
 
@@ -15037,10 +15167,10 @@ function psyRenderExperiments() {
       <div class="psy-actions">${btns.join('')}</div>
     </div>`;
   }).join('');
-  return `<details class="card mx psy-det" id="psy-experiments"><summary>Персональный эксперимент — advanced (${exps.length})</summary>
-    <div class="be-note" style="margin:.4rem 0">Это НЕ клиническое исследование. Допуск только для обратимых low-risk методов при safety=green, с согласием, stop-правилами и планом измерений. Наблюдательный дизайн и одиночный «до→после» причинность не устанавливают.</div>
+  return `<details class="card mx psy-det" id="psy-experiments"><summary>Проверить способ на себе (${exps.length})</summary>
+    <div class="be-note" style="margin:.4rem 0">Это личное наблюдение, не клиническое исследование. Используй только безопасные обратимые способы, заранее определи условия остановки и не считай одно улучшение доказательством причины.</div>
     ${rows || '<div class="ai-sp-empty">Экспериментов нет. Обычный режим наблюдения — достаточный путь по умолчанию.</div>'}
-    <div style="margin-top:.5rem"><button type="button" class="btn btn-s btn-sm" onclick="openPsyForm('psyExperiment')">Создать эксперимент</button></div>
+    <div style="margin-top:.5rem"><button type="button" class="btn btn-s btn-sm" onclick="openPsyForm('psyExperiment')">Начать личную проверку</button></div>
   </details>`;
 }
 
@@ -15048,13 +15178,13 @@ function psyRenderPromptAndSettings() {
   const cfg = psyAdaptiveCfg();
   const burden = psyPromptBurden();
   const ps = psyPromptState();
-  const prompt = ps.show ? `<div class="card mx psy-prompt" role="region" aria-label="EMA-подсказка">
+  const prompt = ps.show ? `<div class="card mx psy-prompt" role="region" aria-label="Короткий вопрос о состоянии">
     <div class="si-text"><b>Короткая фиксация состояния?</b> Это добровольно — пропуск ничего не портит.</div>
     <div class="psy-actions">
       <button type="button" class="btn btn-p btn-sm" onclick="psyPromptAnswer()">Записать</button>
       <button type="button" class="btn btn-s btn-sm" onclick="psyPromptSkip()">Пропустить</button>
     </div></div>` : '';
-  const settings = `<details class="card mx psy-det" id="psy-ema-settings"><summary>EMA-подсказки: настройки</summary>
+  const settings = `<details class="card mx psy-det" id="psy-ema-settings"><summary>Короткие вопросы: настройки</summary>
     <div class="psy-fld psy-fld-chk"><input type="checkbox" id="psy-ema-on" ${cfg.promptsEnabled ? 'checked' : ''}>
       <label class="f-lbl" for="psy-ema-on">Показывать плановые подсказки (по умолчанию выключено)</label></div>
     <div class="psy-fld"><label class="f-lbl" for="psy-ema-max">Максимум подсказок в день</label>
@@ -15251,7 +15381,7 @@ function mindBodyAssociations(dbArg) {
         nEligibleEpisodes: nEligible,
         nCooccurrences: best.n,
         bestWindow: best.id,
-        recurrenceSummary: `${best.n} из ${nEligible} эпизодов (${best.ru})`,
+        recurrenceSummary: `${best.n} из ${nEligible} случаев (${best.ru})`,
         lagDirection,
         confounders,
         evidenceState,
@@ -15261,7 +15391,7 @@ function mindBodyAssociations(dbArg) {
           'чувствительность к выбору окна показана по всем окнам',
         ],
         // Только язык совпадения. Никаких «вызвано», «причина», «объясняется».
-        safeReflectionText: `В ${best.n} из ${nEligible} эпизодов с темой «${th.ru}» (${best.ru}) также отмечалось: «${key}». Это повторяющееся совпадение в ваших записях; причинность не установлена.`,
+        safeReflectionText: `В ${best.n} из ${nEligible} случаев с темой «${th.ru}» (${best.ru}) также отмечалось: «${key}». Это повторяющееся совпадение в ваших записях; причинность не установлена.`,
         engineVersion: MIND_BODY_ENGINE_VERSION,
       });
     });
@@ -16560,6 +16690,20 @@ const EXT_CLAIM_CLASSES = Object.freeze([
   'symbolic_interpretation', 'working_hypothesis', 'assistant_interpretation',
   'assistant_summary', 'external_source_claim', 'verification_result',
 ]);
+// Человеческие подписи для интерфейса. Канонические enum остаются прежними
+// и показываются только в «Технических сведениях».
+const EXT_CLAIM_RU = Object.freeze({
+  user_fact: 'факт, указанный пользователем',
+  user_experience: 'личный опыт',
+  practice_action: 'выполненное действие',
+  external_event: 'внешнее событие',
+  symbolic_interpretation: 'символическая трактовка',
+  working_hypothesis: 'версия для проверки',
+  assistant_interpretation: 'трактовка помощника',
+  assistant_summary: 'краткое резюме помощника',
+  external_source_claim: 'сведения из внешнего источника',
+  verification_result: 'результат проверки',
+});
 // Классы, семантически утверждающие ФАКТ (внешний или о действии
 // пользователя). Текст с origin «assistant_interpretation» не может нести ни
 // один из них — ни как primary claimClass, ни как слой claimClasses[].
@@ -16570,6 +16714,17 @@ const EXT_TEXT_ORIGINS = Object.freeze([
   'assistant_interpretation', 'working_hypothesis', 'external_source_claim',
   'verification_result',
 ]);
+const EXT_TEXT_ORIGIN_RU = Object.freeze({
+  user_words: 'слова пользователя',
+  structured_summary: 'структурированное резюме',
+  user_interpretation: 'трактовка пользователя',
+  assistant_interpretation: 'трактовка помощника',
+  working_hypothesis: 'версия для проверки',
+  external_source_claim: 'текст внешнего источника',
+  verification_result: 'результат проверки',
+});
+function extClaimLabel(v) { return EXT_CLAIM_RU[v] || 'материал без категории'; }
+function extTextOriginLabel(v) { return EXT_TEXT_ORIGIN_RU[v] || 'происхождение не указано'; }
 const EXT_SOURCE_KINDS = Object.freeze(['chatgpt', 'google_drive', 'claude', 'other']);
 // Роль ссылки на исходный объект: основная запись источника либо псевдоним
 // (тот же эпизод, адресованный из другого модуля — LIFE ↔ DREAM ↔ PARA).
@@ -16824,7 +16979,7 @@ function extValidatePackage(raw) {
       }
     }
 
-    // (3): один физический эпизод может быть адресован из нескольких модулей
+    // (3): один физический случай может быть адресован из нескольких модулей
     // (LIFE/DREAM/PARA). Ссылки описываются явно, а не угадываются по тексту.
     if (e.sourceRefs != null) {
       if (!Array.isArray(e.sourceRefs)) errors.push(`entities[${i}]: sourceRefs должен быть массивом`);
@@ -16954,7 +17109,7 @@ const EXT_ADAPTERS = {
       createdAt: ctx.createdAt, day: ctx.day, sv: SCHEMA_VERSION, _u: Date.now() };
     let filled = 0;
     WHY_FIELDS.forEach(k => { const v = extStr(d[k], 4000); rec[k] = v; if (v) filled++; });
-    if (!filled) return { reject: 'ни одно поле метода «Зачем?» не заполнено' };
+    if (!filled) return { reject: 'ни одно поле метода разбор ситуации не заполнено' };
     return { rec };
   },
   pattern(e, d, ctx) {
@@ -17444,11 +17599,11 @@ const EXT_STATUS_RU = {
 // Названия разделов приложения для сводки «что будет добавлено». Человек
 // думает разделами («Сны», «Практики»), а не именами коллекций.
 const EXT_COLL_RU = {
-  insights: 'Инсайты', dreams: 'Сны', spiritual: 'Духовный опыт', whys: '«Зачем?»',
+  insights: 'Инсайты', dreams: 'Сны', spiritual: 'Духовный опыт', whys: 'Разбор',
   patterns: 'Закономерности', moments: 'Моменты состояния', evolution: 'Эволюция',
   sphereLogs: 'Записи сфер', relationshipContexts: 'Контексты отношений',
-  psyFormulations: 'Формулировки', psyGoals: 'Цели работы',
-  psyInterventionEpisodes: 'Практики', psyObservations: 'Наблюдения', psyReviews: 'Обзоры',
+  psyFormulations: 'Рабочие картины', psyGoals: 'Цели',
+  psyInterventionEpisodes: 'Что я пробовал', psyObservations: 'Психологические наблюдения', psyReviews: 'Итоги психологии',
 };
 const extCollRu = c => EXT_COLL_RU[c] || c;
 // Индикатор шага. Меняет только подсветку: сам импорт по-прежнему применяется
@@ -17521,15 +17676,18 @@ async function extPreview() {
     return;
   }
   const rows = plan.items.map((i, n) => {
-    const meta = `<br><span style="color:var(--t4);font-size:.72rem">${esc(i.sourceId || '—')} · ${esc(i.date || 'без даты')} · ${esc(i.claimClass)} / ${esc(i.textOrigin)}</span>
-        <br><span style="color:var(--t4);font-size:.72rem">статус: ${esc(EXT_STATUS_RU[i.status] || i.status)}${i.reason ? ' — ' + esc(i.reason) : ''}</span>`;
+    const meta = `<div class="si-text" style="color:var(--t3);font-size:.75rem;margin-top:.18rem">Куда: ${esc(extCollRu(i.coll))} · ${esc(i.date || 'без даты')} · ${esc(extClaimLabel(i.claimClass))}</div>
+      <div class="si-text" style="color:var(--t3);font-size:.75rem">Статус: ${esc(EXT_STATUS_RU[i.status] || 'требует проверки')}</div>`;
+    const technical = `<details class="psy-explain"><summary>Технические сведения</summary>
+      <div class="si-text" style="font-size:.7rem;word-break:break-word">ID источника: ${esc(i.sourceId || '—')} · тип: ${esc(i.type || '—')} · текст: ${esc(extTextOriginLabel(i.textOrigin))}${i.reason ? '<br>' + esc(i.reason) : ''}</div>
+    </details>`;
     // Owner review (blocker 2): конфликт локальных правок решается ЯВНЫМ
     // выбором per-record — «оставить мою версию» или «заменить версией
     // источника». НИ ОДИН вариант не выбран по умолчанию; без выбора импорт
     // пакета отклоняется целиком.
     if (i.status === 'changed-conflict' || i.status === 'order-unknown') {
       return `<div class="si-row"><div class="si-body">
-        <span><b>${esc(i.type)}</b> → ${esc(i.coll)}<br><span class="si-text">${esc(i.title.slice(0, 90))}</span>${meta}</span>
+        <div><b>${esc(i.title.slice(0, 90))}</b>${meta}${technical}</div>
         <div role="radiogroup" aria-label="Решение по записи ${n + 1}" style="display:flex;gap:1rem;margin-top:.35rem;flex-wrap:wrap">
           <label style="display:flex;gap:.35rem;align-items:center"><input type="radio" name="ext-conf-${n}" onchange="extResolveConflict(${n},'keep')">Оставить мою версию</label>
           <label style="display:flex;gap:.35rem;align-items:center"><input type="radio" name="ext-conf-${n}" onchange="extResolveConflict(${n},'override')">${i.status === 'order-unknown' ? 'Заменить версией источника (порядок версий неизвестен)' : 'Заменить версией источника'}</label>
@@ -17541,8 +17699,8 @@ async function extPreview() {
     return `<div class="si-row"><div class="si-body">
       <label style="display:flex;gap:.5rem;align-items:flex-start">
         <input type="checkbox" ${selectable ? 'checked' : 'disabled'} onchange="extToggleItem(${n},this.checked)" aria-label="${i.status === 'new' ? 'Импортировать' : 'Обновить'} запись ${n + 1}">
-        <span><b>${esc(i.type)}</b> → ${esc(i.coll)}<br><span class="si-text">${esc(i.title.slice(0, 90))}</span>${meta}</span>
-      </label></div></div>`;
+        <span><b>${esc(i.title.slice(0, 90))}</b>${meta}</span>
+      </label>${technical}</div></div>`;
   }).join('');
   const linkRows = plan.links.map((l, n) => {
     const dis = l.status !== 'new';
@@ -17929,7 +18087,7 @@ function extApplyKeepLocalToRecord(rec, u) {
 // Ключ идентичности исходного объекта. Owner review 5230472460: коллекция в
 // ключ НЕ входит намеренно. Контракт объявляет `sourceId` единственной
 // идентичностью источника, поэтому и индекс обязан быть ГЛОБАЛЬНЫМ: иначе один
-// и тот же эпизод мог бы существовать и как `spiritual`, и как `insight`,
+// и тот же случай мог бы существовать и как `spiritual`, и как `insight`,
 // поздний псевдоним указывал бы сразу на две записи, а аналитика получила бы
 // двойную проекцию одного события. Параметр `coll` сохранён в сигнатуре ради
 // читаемости вызовов и как явная точка мутационной проверки.
@@ -18290,7 +18448,7 @@ async function extBuildPlan(rawText, shared) {
 
     // Owner review 5230472460, fail-closed: тот же исходный объект уже
     // спроецирован в ДРУГОЙ canonical type. Молча выбрать одну из проекций
-    // нельзя — это и есть двойная проекция эпизода. Вторая запись не
+    // нельзя — это и есть двойная проекция случая. Вторая запись не
     // создаётся, пакет помечается конфликтом и коммит отклоняется целиком.
     const cross = found.find(x => x.at.coll !== coll);
     if (cross) {
@@ -18306,7 +18464,7 @@ async function extBuildPlan(rawText, shared) {
     if (hit) {
       const existingId = hit.at.id;
       refToRec.set(prov.clientRef, { coll, id: existingId });
-      // Новые ссылки того же эпизода не выбрасываются: они дописываются к
+      // Новые ссылки того же случая не выбрасываются: они дописываются к
       // существующей записи, иначе provenance кросс-модульной связи теряется.
       const existingRec = (db[coll] || []).find(r => r && r.id === existingId);
       const known = existingRec ? extRecordSourceIds(existingRec) : [];

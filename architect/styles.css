@@ -1110,11 +1110,17 @@ body{display:flex;min-height:100dvh;overflow:hidden}
 .dg-new{animation:dgnew 1.3s var(--e) 2;border-radius:8px}
 @keyframes dgnew{0%,100%{background:transparent}50%{background:color-mix(in srgb,var(--accent) 12%,transparent)}}
 
-/* ── Подменю «Разума»: 3 смысловые группы, всё видно без скролла ── */
-.subnav{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s5);overflow:visible}
-.sn-grp{display:flex;flex-direction:column;gap:4px}
+/* ── Дневник: четыре частых входа без горизонтального скролла ── */
+.subnav{display:block;overflow:visible;min-width:0}
+.sn-grp{display:flex;flex-direction:column;gap:4px;min-width:0}
 .sn-glbl{font-size:var(--tx1,.6875rem);font-weight:510;color:var(--t4);text-transform:uppercase;letter-spacing:.06em;padding-left:2px}
-.sn-row{display:flex;gap:var(--s2)}
+.sn-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s2);min-width:0;padding-bottom:2px}
+.sn-row::-webkit-scrollbar{display:none}
+#subnav .snpill{min-width:0;min-height:44px;justify-content:center;padding:var(--s2);white-space:normal;text-align:center;line-height:1.15}
+#subnav .snpill svg{width:14px;height:14px;flex:0 0 auto}
+@media(max-width:420px){
+  #subnav .snpill{flex-direction:column;gap:4px;font-size:.66rem;padding:6px 3px}
+}
 
 /* ── Расходы AI: леджер «за что сколько снято» ─────────────────── */
 .ai-spend{background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:var(--s2) var(--s3)}
@@ -1322,12 +1328,19 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .astro-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--s3);padding:0 var(--s4)}
 .astro-card{display:flex;flex-direction:column;align-items:flex-start;gap:var(--s1);padding:var(--s4);background:var(--sf);border:1px solid var(--bd);border-radius:var(--r20);cursor:pointer;text-align:left;color:var(--t1);font-size:var(--tx4);font-weight:560;line-height:1.3;-webkit-tap-highlight-color:transparent;transition:transform var(--dur1,.15s) ease}
 .astro-card:active{transform:scale(.97)}
-.astro-card .ac-ico{font-size:1.3rem;line-height:1}
+.astro-card .ac-ico{width:22px;height:22px;font-size:1.3rem;line-height:1;color:var(--accent);flex:none}
 .astro-card .ac-sub{font-size:var(--tx2);color:var(--t3);font-weight:500}
 .astro-card.wide{grid-column:1/-1;flex-direction:row;align-items:center;gap:var(--s3)}
 .astro-card.wide .ac-sub{margin-left:auto;text-align:right}
 .astro-card.soon{opacity:.55;cursor:default}
 .astro-card .ac-badge{margin-left:auto;font-size:var(--tx2);color:var(--t3);border:1px solid var(--bd);border-radius:var(--rF);padding:.1rem .5rem;font-weight:500}
+.astro-more{margin-top:var(--s3);padding:0;overflow:hidden}
+.astro-more>summary{cursor:pointer;list-style:none;display:flex;align-items:center;min-height:54px;padding:var(--s4);font-size:var(--tx4);font-weight:610;color:var(--t1)}
+.astro-more>summary::-webkit-details-marker{display:none}
+.astro-more>summary::after{content:'▾';margin-left:auto;color:var(--t4)}
+.astro-more[open]>summary::after{content:'▴'}
+.astro-more>.domain-subtitle{padding:0 var(--s4) var(--s3)}
+.astro-more>.astro-grid{padding-bottom:var(--s4)}
 .as-back{display:inline-flex;align-items:center;gap:.3rem;margin:var(--s2) var(--s4);padding:.35rem 0;background:none;border:none;color:var(--accent);font-size:var(--tx3);font-weight:560;cursor:pointer}
 .astro-wheel-wrap{padding:0 var(--s4)}
 .astro-wheel-svg{width:100%;height:auto;display:block;margin:0 auto;max-width:420px}
@@ -1514,6 +1527,54 @@ body.navshell .nsh-tab:focus-visible,body.navshell .nsh-fab:focus-visible,
 .psy-ctxdep{display:inline-block;margin-left:.35rem;padding:.1rem .4rem;border-radius:6px;background:var(--orange-l,rgba(217,119,6,.12));color:var(--orange,#D97706);font-size:var(--tx1,.7rem)}
 .psy-exp-viz{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:.35rem}
 .psy-del{margin-top:.35rem}
+
+/* ── Понятный первый слой доменов ───────────────────────────────── */
+.domain-head{padding:var(--s4) 0 var(--s2)}
+.domain-title{font-size:clamp(1.35rem,5.5vw,1.75rem);font-weight:680;line-height:1.15;letter-spacing:-.025em;color:var(--t1);overflow-wrap:anywhere}
+.domain-subtitle{margin-top:.4rem;max-width:62ch;font-size:var(--tx3);line-height:1.5;color:var(--t3);overflow-wrap:anywhere}
+.domain-lead{margin-bottom:var(--s3)}
+.domain-kicker{font-size:var(--tx1,.6875rem);font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:.35rem}
+.domain-next{margin-top:.55rem;color:var(--t3)}
+.psy-story{display:grid;gap:.35rem;margin-top:.55rem;padding:.65rem;background:var(--bg2);border-radius:10px}
+.psy-story>div{display:grid;grid-template-columns:minmax(92px,.38fr) minmax(0,1fr);gap:.55rem;font-size:var(--tx2);line-height:1.45;overflow-wrap:anywhere}
+.psy-story>div>span{color:var(--t4)}
+.psy-advanced-body{padding:0 var(--s4) var(--s4)}
+.psy-advanced-body>.card,.psy-advanced-body>.mx{margin-left:0;margin-right:0}
+.psy-advanced-body>.card{background:var(--bg2)}
+
+/* ── Разбор ситуации: один вопрос за шаг ────────────────────────── */
+.why-wizard{padding:0 var(--s4) var(--s4);min-height:420px;display:flex;flex-direction:column}
+.why-wizard-meta{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);font-size:var(--tx2);color:var(--t3);margin-bottom:.55rem}
+.why-wizard-meta span:first-child{font-weight:620;color:var(--t2)}
+.why-progress{height:4px;background:var(--bd);border-radius:999px;overflow:hidden;margin-bottom:1.35rem}
+.why-progress>span{display:block;height:100%;width:14.285%;background:var(--accent);border-radius:inherit;transition:width var(--dur2) var(--e)}
+.why-step{flex:1;min-width:0}
+.why-step[hidden]{display:none!important}
+.why-question{display:block;font-size:clamp(1.25rem,5.2vw,1.55rem);font-weight:660;line-height:1.25;letter-spacing:-.02em;color:var(--t1);margin-bottom:.55rem;overflow-wrap:anywhere}
+.why-help{font-size:var(--tx3);line-height:1.5;color:var(--t3);margin-bottom:1rem;overflow-wrap:anywhere}
+.why-step textarea.field{min-height:150px;resize:none;font-size:var(--tx5);line-height:1.55}
+.why-wizard-actions{display:flex;justify-content:space-between;gap:var(--s3);margin-top:1rem;padding-top:var(--s3);border-top:1px solid var(--bd)}
+.why-wizard-actions .btn{min-height:48px;min-width:112px}
+.why-wizard-actions .btn:last-child{margin-left:auto}
+
+/* ── Здоровье: четыре смысловые группы вместо длинной ленты ────── */
+.health-group{padding:0;margin-bottom:var(--s3);overflow:hidden}
+.health-group>summary{cursor:pointer;list-style:none;min-height:56px;padding:var(--s4);display:flex;align-items:center;gap:var(--s2);font-size:var(--tx4);font-weight:610;color:var(--t1);overflow-wrap:anywhere}
+.health-group>summary::-webkit-details-marker{display:none}
+.health-group>summary::after{content:'▾';margin-left:auto;color:var(--t4);flex:none}
+.health-group[open]>summary::after{content:'▴'}
+.health-group-hint{padding:0 var(--s4) var(--s3);font-size:var(--tx2);line-height:1.45;color:var(--t3)}
+.health-group-body{padding-bottom:var(--s2)}
+.health-group-body>.mx{margin-left:var(--s3);margin-right:var(--s3)}
+.health-group-body>.sec-lbl{padding-left:var(--s4);padding-right:var(--s4)}
+.health-group-body .mb-block{margin-left:var(--s3);margin-right:var(--s3)}
+
+@media (max-width:767px){body.navshell .psy-why-inline{display:none}}
+@media (max-width:360px){
+  .psy-story>div{grid-template-columns:1fr;gap:.1rem}
+  .why-wizard-actions .btn{min-width:0;flex:1}
+  .astro-grid{grid-template-columns:1fr}
+}
 
 /* ── Brand v3 (owner-approved kit) ───────────────────────────────────
    Фирменные изображения НИКОГДА не обрезаются: только contain, пропорции

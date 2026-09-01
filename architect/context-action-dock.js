@@ -10,7 +10,7 @@
     'map:overview': [
       { id: 'landing-insight', label: 'Новый инсайт', icon: 'plus', primary: true, run: () => openOv('ov-add') },
       { id: 'landing-dream', label: 'Записать сон', icon: 'moon', run: () => openOv('ov-drm') },
-      { id: 'landing-why', label: 'Разбор «Зачем?»', icon: 'help-circle', run: () => openOv('ov-why') },
+      { id: 'landing-why', label: 'Разбор ситуации', icon: 'help-circle', run: () => openOv('ov-why') },
     ],
     'map:insights': [
       { id: 'insight', label: 'Новый инсайт', icon: 'plus', primary: true, run: () => openOv('ov-add') },
@@ -21,8 +21,8 @@
     // Психологическое пространство: перенесено из упразднённого Action Island
     // (PR #185) в единственный бар контекстных действий. Обработчики те же.
     'map:psychology': [
-      { id: 'moment', label: 'Момент', icon: 'activity', primary: true, run: () => openOv('ov-moment') },
-      { id: 'why', label: 'Разбор «Зачем?»', icon: 'help-circle', run: () => openOv('ov-why') },
+      { id: 'why', label: 'Разбор ситуации', icon: 'route', primary: true, run: () => openOv('ov-why') },
+      { id: 'moment', label: 'Состояние', icon: 'activity', run: () => openOv('ov-moment') },
     ],
     'map:patterns': [
       { id: 'pattern', label: 'Новый паттерн', icon: 'git-branch', primary: true, run: () => openOv('ov-pat-add') },

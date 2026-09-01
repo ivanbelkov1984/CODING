@@ -210,7 +210,6 @@
   <div class="top-acts">
     <button class="ib" onclick="openOv('ov-search')" aria-label="Поиск"><i data-lucide="search"></i></button>
     <button class="ib" id="topbar-add" onclick="capturePlus()" aria-label="Новый инсайт"><i data-lucide="plus"></i></button>
-    <button class="ib" onclick="goTo('settings')" aria-label="Настройки"><i data-lucide="settings"></i></button>
     <button class="ib" id="topbar-menu" onclick="navGo('menu')" aria-label="Меню — все разделы" aria-expanded="false"><i data-lucide="menu"></i></button>
   </div>
 </header>
@@ -221,57 +220,32 @@
 <section class="pg on" id="pg-home">
   <div class="h-hero">
     <div class="h-date" id="h-date"></div>
-    <div class="h-hl" id="h-hl">Доброе <em>утро</em></div>
-    <div id="h-streak-wrap"></div>
   </div>
   <div id="h-nudge"></div>
-  <div class="sec-lbl">Действия</div>
-  <div class="qarow">
-    <button class="qabtn" onclick="openOv('ov-ci')" aria-label="Check-in">
-      <div class="qa-ic" style="background:var(--green-l)"><svg style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg></div>
-      <span class="qa-lbl">Check-in</span>
-    </button>
-    <button class="qabtn" onclick="openOv('ov-moment')" aria-label="Момент">
-      <div class="qa-ic" style="background:rgba(245,184,75,.16)"><svg style="color:#F5B84B" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
-      <span class="qa-lbl">Момент</span>
-    </button>
-    <button class="qabtn" onclick="openOv('ov-add')" aria-label="Инсайт">
-      <div class="qa-ic" style="background:var(--blue-l)"><svg style="color:var(--blue-t)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
-      <span class="qa-lbl">Инсайт</span>
-    </button>
-    <button class="qabtn" onclick="openOv('ov-drm')" aria-label="Сон">
-      <div class="qa-ic" style="background:var(--purple-l)"><svg style="color:var(--purple)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></div>
-      <span class="qa-lbl">Сон</span>
-    </button>
-    <button class="qabtn" onclick="doSync()" aria-label="Синхронизировать">
-      <div class="qa-ic" style="background:var(--teal-l)"><svg style="color:var(--teal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></div>
-      <span class="qa-lbl">Синк</span>
-    </button>
-  </div>
-  <div id="x2-life"></div>
-  <div id="pat-suggest-home"></div>
   <div id="h-med-reminder"></div>
-  <div id="h-moments"></div>
-  <div id="h-moment-trend"></div>
-  <button class="btn btn-s btn-sm btn-full" style="margin:0 var(--s4) .5rem;width:auto" onclick="openOv('ov-why')"><i data-lucide="help-circle"></i>Метод «Зачем?» — разобрать состояние</button>
-  <div id="h-whys"></div>
-  <button class="btn btn-s btn-sm btn-full" style="margin:0 var(--s4) .5rem;width:auto" onclick="openOv('ov-history')"><i data-lucide="history"></i>История состояний</button>
-
-  <!-- ГЕРОЙ: состояние + радар + разбор -->
-  <div class="state-hero">
-    <div class="sh-top">
-      <div><div class="sh-lbl" id="sh-caption">Состояние сегодня</div><div class="sh-score" id="sh-score"></div></div>
-      <div class="sh-delta" id="sh-delta"></div>
-    </div>
-    <div class="compass-wrap"><svg id="compass" viewBox="0 0 280 280" style="width:100%;max-width:250px;display:block;margin:0 auto"></svg></div>
-    <div class="sh-contrib" id="sh-contrib"></div>
-  </div>
-
-  <button class="h-more-btn" id="h-more-btn" onclick="toggleHomeMore()">Показать больше ↓</button>
+  <div id="x2-life"></div>
+  <button class="h-more-btn" id="h-more-btn" onclick="toggleHomeMore()">Подробнее о дне ↓</button>
   <div class="h-more" id="h-more">
+    <div id="h-streak-wrap"></div>
+    <div id="pat-suggest-home"></div>
+    <div id="h-moments"></div>
+    <div id="h-moment-trend"></div>
+    <div id="h-whys"></div>
+    <button class="btn btn-s btn-sm btn-full" style="margin:0 var(--s4) .5rem;width:auto" onclick="openOv('ov-history')"><i data-lucide="history"></i>История состояний</button>
+
+    <!-- Подробная динамика состояния — по явному раскрытию, не первый экран. -->
+    <div class="state-hero">
+      <div class="sh-top">
+        <div><div class="sh-lbl" id="sh-caption">Состояние сегодня</div><div class="sh-score" id="sh-score"></div></div>
+        <div class="sh-delta" id="sh-delta"></div>
+      </div>
+      <div class="compass-wrap"><svg id="compass" viewBox="0 0 280 280" style="width:100%;max-width:250px;display:block;margin:0 auto"></svg></div>
+      <div class="sh-contrib" id="sh-contrib"></div>
+    </div>
+
     <div id="h-week"></div>
     <div id="h-onthisday"></div>
-  <div id="h-astro-daily"></div>
+    <div id="h-astro-daily"></div>
 
     <!-- ВЕКТОР НЕДЕЛИ: «куда я еду» одним взглядом -->
     <div id="h-vector"></div>
@@ -391,31 +365,38 @@
 
   <!-- Экран-меню -->
   <div class="asub" id="as-menu">
-    <div id="astro-hero"></div>
-    <div class="sec-lbl">Основное</div>
-    <div class="astro-grid">
-      <button class="astro-card" onclick="asub('natal')"><span class="ac-ico">🔵</span>Натальная карта<span class="ac-sub">колесо, планеты, дома</span></button>
-      <button class="astro-card" onclick="asub('transits')"><span class="ac-ico">🌙</span>Транзиты сегодня<span class="ac-sub">небо сейчас, аспекты</span></button>
-      <button class="astro-card" onclick="asub('prog')"><span class="ac-ico">📅</span>Прогрессии и дирекции<span class="ac-sub">вторичные, дуга, профекции</span></button>
-      <button class="astro-card" onclick="asub('ret')"><span class="ac-ico">🔄</span>Возвращения<span class="ac-sub">соляр и лунар</span></button>
+    <div class="domain-head mx">
+      <div class="domain-title">Астрология</div>
+      <div class="domain-subtitle">Символический взгляд на личные темы и жизненные периоды. Раздел необязательный и не влияет на здоровье или психологические выводы.</div>
     </div>
-    <div class="sec-lbl">Дополнительно</div>
+    <div id="astro-hero"></div>
+    <div class="sec-lbl">С чего начать</div>
     <div class="astro-grid">
-      <button class="astro-card" onclick="asub('points')"><span class="ac-ico">⭐</span>Астероиды и точки<span class="ac-sub">Хирон, Лилит, Вертекс…</span></button>
-      <button class="astro-card" onclick="asub('mid')"><span class="ac-ico">📐</span>Мидпоинты и гармоники<span class="ac-sub">уранская, Аддей</span></button>
-      <button class="astro-card wide" onclick="asub('jyo')"><span class="ac-ico">🕉</span>Ведическая карта (Джйотиш)<span class="ac-sub">сидерика, даши, панчанга</span></button>
-      <button class="astro-card wide" onclick="asub('parts')"><span class="ac-ico">🏛</span>Арабские точки и звёзды<span class="ac-sub">историческая техника</span></button>
+      <button class="astro-card" onclick="asub('natal')"><i class="ac-ico" data-lucide="circle-dot"></i>Моя карта<span class="ac-sub">сильные стороны и основные темы</span></button>
+      <button class="astro-card" onclick="asub('transits')"><i class="ac-ico" data-lucide="orbit"></i>Сейчас<span class="ac-sub">символический фон выбранного дня</span></button>
+      <button class="astro-card" onclick="asub('prog')"><i class="ac-ico" data-lucide="calendar-range"></i>Долгие периоды<span class="ac-sub">темы текущего возраста</span></button>
+      <button class="astro-card" onclick="asub('ret')"><i class="ac-ico" data-lucide="refresh-cw"></i>Год и месяц<span class="ac-sub">символические циклы периода</span></button>
     </div>
     <div class="sec-lbl">Совместимость</div>
     <div class="astro-grid">
-      <button class="astro-card wide" onclick="asub('syn')"><span class="ac-ico">💞</span>Синастрия (сравнить с другим)<span class="ac-sub">две карты, bi-wheel</span></button>
+      <button class="astro-card wide" onclick="asub('syn')"><i class="ac-ico" data-lucide="heart"></i>Сравнить с другим человеком<span class="ac-sub">две карты рядом</span></button>
     </div>
-    <div class="astro-grid" style="margin-top:.5rem">
-      <button class="astro-card wide" onclick="asub('rectify')"><span class="ac-ico">⏱</span>Уточнение времени рождения<span class="ac-sub">сужение диапазона по событиям жизни</span></button>
-      <button class="astro-card wide" onclick="asub('setup')"><span class="ac-ico">⚙️</span>Настройки расчёта<span class="ac-sub">данные рождения, система домов</span></button>
+    <div class="astro-grid" style="margin-top:var(--s3)">
+      <button class="astro-card wide" onclick="asub('setup')"><i class="ac-ico" data-lucide="user-round-cog"></i>Данные рождения<span class="ac-sub">проверить или изменить</span></button>
     </div>
+    <details class="card mx astro-more">
+      <summary>Дополнительные расчёты</summary>
+      <div class="domain-subtitle">Инструменты для тех, кто уже знаком с астрологическими терминами.</div>
+      <div class="astro-grid">
+        <button class="astro-card" onclick="asub('points')"><i class="ac-ico" data-lucide="star"></i>Астероиды и точки<span class="ac-sub">Хирон, Лилит, Вертекс</span></button>
+        <button class="astro-card" onclick="asub('mid')"><i class="ac-ico" data-lucide="split"></i>Мидпоинты и гармоники<span class="ac-sub">дополнительные связи карты</span></button>
+        <button class="astro-card wide" onclick="asub('jyo')"><i class="ac-ico" data-lucide="compass"></i>Ведическая карта (Джйотиш)<span class="ac-sub">отдельная традиция расчёта</span></button>
+        <button class="astro-card wide" onclick="asub('parts')"><i class="ac-ico" data-lucide="landmark"></i>Арабские точки и звёзды<span class="ac-sub">исторические техники</span></button>
+        <button class="astro-card wide" onclick="asub('rectify')"><i class="ac-ico" data-lucide="clock-3"></i>Уточнение времени рождения<span class="ac-sub">по событиям жизни</span></button>
+      </div>
+    </details>
     <div class="card mx" style="margin-top:.75rem"><div class="tog-row" style="border-bottom:none"><span class="tog-lbl">Карточка «Транзит дня» на «Сегодня»</span><div class="tog" id="astro-daily-tog" onclick="toggleAstroDaily()" role="switch"></div></div></div>
-    <div class="be-note mx" style="color:var(--t3);margin-top:.75rem">Символический, необязательный раздел. Расчёт локальный, данные рождения не покидают устройство. Не прогноз, не диагноз — не влияет на здоровье, психологию и риски.</div>
+    <div class="be-note mx" style="color:var(--t3);margin-top:.75rem">Расчёт выполняется на устройстве; данные рождения никуда не отправляются. Это символическая интерпретация, не прогноз и не диагноз.</div>
   </div>
 
   <!-- Экран «Натальная карта» -->
@@ -695,34 +676,15 @@
 
 <!-- ── КАРТА ───────────────────────────────────────────────────── -->
 <section class="pg" id="pg-map">
-  <!-- Подменю сгруппировано по смыслу (REFACTOR_BRIEF П3): всё видно
-       без горизонтального скролла, любой раздел — в один тап -->
-  <div class="subnav" id="subnav">
-    <div class="sn-grp"><span class="sn-glbl">Записи</span>
-      <div class="sn-row">
-        <button type="button" class="snpill" data-sub="overview" onclick="msub('overview',this)"><i data-lucide="layout-dashboard" style="width:13px;height:13px"></i>Обзор</button>
-        <div class="snpill on" data-sub="insights" onclick="msub('insights',this)"><i data-lucide="sparkles" style="width:13px;height:13px"></i>Инсайты</div>
-        <div class="snpill" data-sub="dreams" onclick="msub('dreams',this)"><i data-lucide="moon" style="width:13px;height:13px"></i>Сны</div>
-        <div class="snpill" data-sub="chats" onclick="msub('chats',this)"><i data-lucide="message-circle" style="width:13px;height:13px"></i>Диалоги</div>
-      </div></div>
-    <div class="sn-grp"><span class="sn-glbl">Связи</span>
-      <div class="sn-row">
-        <div class="snpill" data-sub="graph" onclick="msub('graph',this)"><i data-lucide="share-2" style="width:13px;height:13px"></i>Карта</div>
-        <div class="snpill" data-sub="patterns" onclick="msub('patterns',this)"><i data-lucide="git-branch" style="width:13px;height:13px"></i>Паттерны</div>
-      </div></div>
-    <!-- Wave 7 (issue #162): «Психология» — first-class subroute внутри
-         существующего контура Дневника. Глобальный redesign навигации в этой
-         волне намеренно НЕ выполняется (контракт §10). -->
-    <div class="sn-grp"><span class="sn-glbl">Психология</span>
-      <div class="sn-row">
-        <button type="button" class="snpill" data-sub="psychology" onclick="msub('psychology',this)"><i data-lucide="compass" style="width:13px;height:13px"></i>Психология</button>
-      </div></div>
-    <div class="sn-grp"><span class="sn-glbl">Развитие</span>
-      <div class="sn-row">
-        <div class="snpill" data-sub="book" onclick="msub('book',this)"><i data-lucide="book-open" style="width:13px;height:13px"></i>Книга</div>
-        <div class="snpill" data-sub="spiritual" onclick="msub('spiritual',this)"><i data-lucide="sparkles" style="width:13px;height:13px"></i>Духовное</div>
-        <div class="snpill" data-sub="evolution" onclick="msub('evolution',this)"><i data-lucide="trending-up" style="width:13px;height:13px"></i>Эволюция</div>
-      </div></div>
+  <!-- Постоянная строка содержит только частые задачи. Остальные рабочие
+       экраны доступны ниже из «Всех разделов» — маршруты и writers сохранены. -->
+  <div class="subnav" id="subnav" aria-label="Разделы дневника">
+    <div class="sn-row">
+      <button type="button" class="snpill" data-sub="overview" onclick="msub('overview',this)"><i data-lucide="layout-dashboard"></i>Обзор</button>
+      <button type="button" class="snpill on" data-sub="insights" onclick="msub('insights',this)"><i data-lucide="notebook-pen"></i>Записи</button>
+      <button type="button" class="snpill" data-sub="dreams" onclick="msub('dreams',this)"><i data-lucide="moon"></i>Сны</button>
+      <button type="button" class="snpill" data-sub="patterns" onclick="msub('patterns',this)"><i data-lucide="git-branch"></i>Закономерности</button>
+    </div>
   </div>
   <!-- ══ Дневник — агрегатор-landing (issue #141; canonical вход #/diary
        при arch_nav_v2=ON). Только маршрутизация в существующие экраны/msub,
@@ -733,14 +695,14 @@
     <div id="diary-recent"></div>
     <div class="sec-lbl">Все разделы Дневника</div>
     <div class="more-list mx mb">
-      <button type="button" class="srow" onclick="msub('insights')"><span class="sic" style="background:var(--blue-l)"><i data-lucide="sparkles" style="color:var(--blue-t)"></i></span><span class="sl2">Инсайты</span><span class="sv2">Мысли и наблюдения</span></button>
+      <button type="button" class="srow" onclick="msub('insights')"><span class="sic" style="background:var(--blue-l)"><i data-lucide="notebook-pen" style="color:var(--blue-t)"></i></span><span class="sl2">Записи</span><span class="sv2">Мысли и наблюдения</span></button>
       <button type="button" class="srow" onclick="msub('dreams')"><span class="sic" style="background:var(--purple-l)"><i data-lucide="moon" style="color:var(--purple)"></i></span><span class="sl2">Сны</span><span class="sv2">Дневник сновидений</span></button>
       <button type="button" class="srow" onclick="msub('chats')"><span class="sic" style="background:var(--teal-l)"><i data-lucide="message-circle" style="color:var(--teal)"></i></span><span class="sl2">Диалоги</span><span class="sv2">Разговоры с ИИ вглубь</span></button>
-      <button type="button" class="srow" onclick="msub('graph')"><span class="sic" style="background:var(--green-l)"><i data-lucide="share-2" style="color:var(--green)"></i></span><span class="sl2">Карта</span><span class="sv2">Связи и темы</span></button>
-      <button type="button" class="srow" onclick="msub('patterns')"><span class="sic" style="background:var(--gold-l)"><i data-lucide="git-branch" style="color:var(--gold)"></i></span><span class="sl2">Паттерны</span><span class="sv2">Повторяющееся</span></button>
+      <button type="button" class="srow" onclick="msub('graph')"><span class="sic" style="background:var(--green-l)"><i data-lucide="share-2" style="color:var(--green)"></i></span><span class="sl2">Связи</span><span class="sv2">Темы, которые встречаются вместе</span></button>
+      <button type="button" class="srow" onclick="msub('patterns')"><span class="sic" style="background:var(--gold-l)"><i data-lucide="git-branch" style="color:var(--gold)"></i></span><span class="sl2">Закономерности</span><span class="sv2">Что повторяется</span></button>
       <button type="button" class="srow" onclick="msub('book')"><span class="sic" style="background:var(--blue-l)"><i data-lucide="book-open" style="color:var(--blue-t)"></i></span><span class="sl2">Книга</span><span class="sv2">Главы</span></button>
-      <button type="button" class="srow" onclick="msub('spiritual')"><span class="sic" style="background:var(--purple-l)"><i data-lucide="sparkles" style="color:var(--purple)"></i></span><span class="sl2">Духовное</span><span class="sv2">Практика и путь</span></button>
-      <button type="button" class="srow" onclick="msub('evolution')"><span class="sic" style="background:var(--green-l)"><i data-lucide="trending-up" style="color:var(--green)"></i></span><span class="sl2">Эволюция</span><span class="sv2">Журнал развития</span></button>
+      <button type="button" class="srow" onclick="msub('spiritual')"><span class="sic" style="background:var(--purple-l)"><i data-lucide="sparkles" style="color:var(--purple)"></i></span><span class="sl2">Практики и смыслы</span><span class="sv2">Личные наблюдения</span></button>
+      <button type="button" class="srow" onclick="msub('evolution')"><span class="sic" style="background:var(--green-l)"><i data-lucide="trending-up" style="color:var(--green)"></i></span><span class="sl2">Мой путь</span><span class="sv2">Как я меняюсь со временем</span></button>
     </div>
     <div style="height:5rem"></div>
   </div>
@@ -989,17 +951,55 @@
 <div class="ov" id="ov-why" onclick="if(event.target===this)closeOv('ov-why')">
   <div class="sheet">
     <div class="sh-pull"></div>
-    <div class="sh-title">Метод «Зачем?»</div>
-    <div class="be-note" style="margin:0 1rem .5rem">Это твой разбор, не диагноз. Заполни сколько получится — по шагам от симптома к действию.</div>
-    <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.75rem">
-      <div><div class="f-lbl">Симптом — что происходит?</div><textarea class="field" id="why-symptom" rows="2"></textarea></div>
-      <div><div class="f-lbl">Функция — зачем это тебе?</div><textarea class="field" id="why-function" rows="2"></textarea></div>
-      <div><div class="f-lbl">Вторичная выгода — что получаешь?</div><textarea class="field" id="why-gain" rows="2"></textarea></div>
-      <div><div class="f-lbl">Потребность — какая настоящая нужда?</div><textarea class="field" id="why-need" rows="2"></textarea></div>
-      <div><div class="f-lbl">Цена — чего это стоит?</div><textarea class="field" id="why-cost" rows="2"></textarea></div>
-      <div><div class="f-lbl">Альтернатива — как ещё закрыть нужду?</div><textarea class="field" id="why-alternative" rows="2"></textarea></div>
-      <div><div class="f-lbl">Действие — что выбираешь сейчас?</div><textarea class="field" id="why-action" rows="2"></textarea></div>
-      <button class="btn btn-p btn-full" onclick="saveWhy()"><i data-lucide="check"></i>Сохранить разбор</button>
+    <div class="sh-title">Разбор ситуации</div>
+    <div class="why-wizard" id="why-wizard">
+      <div class="why-wizard-meta">
+        <span id="why-step-count" aria-live="polite">Шаг 1 из 7</span>
+        <span>Можно пропустить</span>
+      </div>
+      <div class="why-progress" aria-hidden="true"><span id="why-progress-bar"></span></div>
+
+      <div class="why-step on" data-why-step="0">
+        <label class="why-question" for="why-symptom">Что сейчас происходит?</label>
+        <div class="why-help">Опиши один конкретный момент своими словами: событие, чувство или повторяющееся действие.</div>
+        <textarea class="field" id="why-symptom" rows="5" placeholder="Например: снова откладываю важный разговор…" onkeydown="whyStepKey(event)"></textarea>
+      </div>
+      <div class="why-step" data-why-step="1" hidden>
+        <label class="why-question" for="why-function">От чего это меня защищает?</label>
+        <div class="why-help">Не ищи далёкую причину. Подумай, какую задачу это решает прямо сейчас.</div>
+        <textarea class="field" id="why-function" rows="5" placeholder="Например: помогает не столкнуться с отказом…" onkeydown="whyStepKey(event)"></textarea>
+      </div>
+      <div class="why-step" data-why-step="2" hidden>
+        <label class="why-question" for="why-gain">Что я получаю благодаря этому?</label>
+        <div class="why-help">Даже неудобная привычка может временно давать облегчение, контроль, внимание или паузу.</div>
+        <textarea class="field" id="why-gain" rows="5" placeholder="Например: на время становится спокойнее…" onkeydown="whyStepKey(event)"></textarea>
+      </div>
+      <div class="why-step" data-why-step="3" hidden>
+        <label class="why-question" for="why-need">Что мне на самом деле сейчас нужно?</label>
+        <div class="why-help">Назови потребность простыми словами: безопасность, близость, отдых, ясность, уважение, свобода.</div>
+        <textarea class="field" id="why-need" rows="5" placeholder="Например: мне нужна ясность и ощущение безопасности…" onkeydown="whyStepKey(event)"></textarea>
+      </div>
+      <div class="why-step" data-why-step="4" hidden>
+        <label class="why-question" for="why-cost">Какую цену я за это плачу?</label>
+        <div class="why-help">Что становится хуже, если продолжать так же: состояние, отношения, время, деньги или здоровье?</div>
+        <textarea class="field" id="why-cost" rows="5" placeholder="Например: разговор откладывается, а напряжение растёт…" onkeydown="whyStepKey(event)"></textarea>
+      </div>
+      <div class="why-step" data-why-step="5" hidden>
+        <label class="why-question" for="why-alternative">Как ещё можно позаботиться об этой потребности?</label>
+        <div class="why-help">Выбери безопасный и реалистичный способ, который не требует идеального состояния.</div>
+        <textarea class="field" id="why-alternative" rows="5" placeholder="Например: заранее записать одну спокойную фразу…" onkeydown="whyStepKey(event)"></textarea>
+      </div>
+      <div class="why-step" data-why-step="6" hidden>
+        <label class="why-question" for="why-action">Какой один маленький шаг я сделаю?</label>
+        <div class="why-help">Шаг должен быть конкретным и посильным — таким, который можно сделать сегодня.</div>
+        <textarea class="field" id="why-action" rows="5" placeholder="Например: написать сообщение до 18:00…" onkeydown="whyStepKey(event)"></textarea>
+      </div>
+
+      <div class="why-wizard-actions">
+        <button type="button" class="btn btn-s" id="why-back" onclick="whyPrev()" disabled><i data-lucide="chevron-left"></i>Назад</button>
+        <button type="button" class="btn btn-p" id="why-next" onclick="whyNext()">Дальше<i data-lucide="chevron-right"></i></button>
+        <button type="button" class="btn btn-p" id="why-save" onclick="saveWhy()" hidden><i data-lucide="check"></i>Сохранить</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1272,7 +1272,7 @@
 <div class="ov" id="ov-why-det" onclick="if(event.target===this)closeOv('ov-why-det')">
   <div class="sheet">
     <div class="sh-pull"></div>
-    <div class="sh-title">Разбор «Зачем?»</div>
+    <div class="sh-title">Разбор ситуации</div>
     <div class="be-note" id="why-det-date" style="margin:0 1rem .5rem;color:var(--t3)"></div>
     <div id="why-det-body" style="padding:0 1rem 1rem"></div>
     <div id="why-ai-out" style="padding:0 1rem 1rem"></div>
@@ -1568,7 +1568,7 @@
     <div class="sh-pull"></div>
     <div class="sh-title">AI-подсказка · согласие</div>
     <div style="padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.5rem">
-      <div class="be-note">AI-подсказка отправляет провайдеру ТОЛЬКО текст выбранного разбора «Зачем?» (поля, которые ты сам заполнил) — без остальных записей дневника. Результат — гипотеза с источниками и ограничениями, она не сохраняется, пока ты явно не подтвердишь. Согласие можно отозвать здесь в любой момент.</div>
+      <div class="be-note">AI-подсказка отправляет провайдеру ТОЛЬКО текст выбранного разбора ситуации (поля, которые ты сам заполнил) — без остальных записей дневника. Результат — гипотеза с источниками и ограничениями, она не сохраняется, пока ты явно не подтвердишь. Согласие можно отозвать здесь в любой момент.</div>
       <div class="tog-row" style="border-bottom:none"><span class="tog-lbl">Разрешить AI-подсказку по психологическим данным</span><div class="tog" id="psy-aic-on" onclick="this.classList.toggle('on')" role="switch"></div></div>
       <button class="btn btn-p btn-full" onclick="savePsyAiConsent()"><i data-lucide="check"></i>Сохранить выбор</button>
     </div>
@@ -1901,7 +1901,7 @@
       <div id="gpt-actions" style="display:none">
         <button class="btn btn-p btn-full" onclick="gptRunImport()"><i data-lucide="download"></i>Импортировать выбранные</button>
         <div id="gpt-result"></div>
-        <button class="btn btn-s btn-full" style="margin-top:var(--s2)" onclick="gptAbsorb()"><i data-lucide="brain"></i>Освоить архив (метод «Зачем?»)</button>
+        <button class="btn btn-s btn-full" style="margin-top:var(--s2)" onclick="gptAbsorb()"><i data-lucide="brain"></i>Освоить архив разборов</button>
         <div id="gpt-absorb" style="font-size:var(--tx2);color:var(--t3);margin-top:var(--s2)"></div>
       </div>
       <div id="gpt-summary"></div>
@@ -2126,7 +2126,7 @@
     <div class="sec-lbl" style="padding-left:var(--s4)">Мысль и смысл</div>
     <div class="nsh-cap-grid">
       <button class="nsh-cap" onclick="capGo('ov-add')"><span class="nsh-cap-ic" style="background:var(--blue-l);color:var(--blue-t)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span><span class="nsh-cap-t">Мысль / Инсайт</span><span class="nsh-cap-d">Знание, идея</span></button>
-      <button class="nsh-cap" onclick="capGo('ov-why')"><span class="nsh-cap-ic" style="background:var(--teal-l);color:var(--teal)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12" y2="17"/></svg></span><span class="nsh-cap-t">«Зачем?»</span><span class="nsh-cap-d">Разбор состояния</span></button>
+      <button class="nsh-cap" onclick="capGo('ov-why')"><span class="nsh-cap-ic" style="background:var(--teal-l);color:var(--teal)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12" y2="17"/></svg></span><span class="nsh-cap-t">Разбор ситуации</span><span class="nsh-cap-d">Что происходит и зачем</span></button>
       <button class="nsh-cap" onclick="capGo('ov-drm')"><span class="nsh-cap-ic" style="background:var(--purple-l);color:var(--purple)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span><span class="nsh-cap-t">Сон</span><span class="nsh-cap-d">Запись сна</span></button>
     </div>
     <div class="sec-lbl" style="padding-left:var(--s4)">Тело</div>

@@ -168,8 +168,8 @@ console.log('\n── Wave 8: Adaptive Psychology Engine ──');
   ok(ev0.identifier === 'NG222' && /NG222/.test(ev0.ref) && ev0.publisher === 'NICE' && ev0.year === 2022,
     'behavioral_activation ссылается на NICE NG222 (2022) с полным публикационным идентификатором');
   ok(!JSON.stringify(reg.items).includes('CG90'), 'отозванной CG90 в production-реестре нет');
-  ok(/групповая доказательность/.test(ev0.limitations),
-    'ограничение «групповая доказательность ≠ индивидуальная гарантия» сохранено');
+  ok(/помогает многим.*не обязательно поможет именно тебе/i.test(ev0.limitations),
+    'ограничение «общие данные ≠ личная гарантия» сохранено', ev0.limitations);
 
   // UI: внешний слой раскрывает источник/версию/дату и отделён от личного.
   await reset();
@@ -182,7 +182,7 @@ console.log('\n── Wave 8: Adaptive Psychology Engine ──');
     const t = el.textContent;
     return { ng: t.includes('NG222'), pub: t.includes('NICE, 2022'),
       rev: /пересмотрено \d{4}-\d{2}-\d{2}/.test(t), ver: /· v\d+/.test(t),
-      separate: t.includes('Внешняя база') && t.includes('Мои данные'), pct: /\d+\s?%/.test(t) };
+      separate: t.includes('Что известно в целом') && t.includes('Мой опыт'), pct: /\d+\s?%/.test(t) };
   });
   ok(extUi.ng && extUi.pub && extUi.rev && extUi.ver,
     'UI показывает идентификатор источника, издателя/год, дату пересмотра и версию evidence-элемента');
@@ -673,8 +673,8 @@ console.log('\n── Wave 8: Adaptive Psychology Engine ──');
   // «Что помогает мне» разделяет слои и раскрывает вклад.
   const helps = await page.evaluate(() => {
     const el = document.getElementById('psy-helps-me');
-    return { ext: el.innerHTML.includes('Внешняя база'), mine: el.innerHTML.includes('Мои данные'),
-      why: el.innerHTML.includes('вклад эпизодов'), pct: /\d+\s?%/.test(el.textContent) };
+    return { ext: el.innerHTML.includes('Что известно в целом'), mine: el.innerHTML.includes('Мой опыт'),
+      why: /результат удалось оценить/.test(el.innerHTML), pct: /\d+\s?%/.test(el.textContent) };
   });
   ok(helps.ext && helps.mine && helps.why && !helps.pct,
     '«Что помогает мне»: внешний слой и личный слой раздельно, вклад раскрыт, никакой «эффективности N%»');

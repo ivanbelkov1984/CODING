@@ -19,7 +19,7 @@ const MUTANTS = [
   {
     id: 'causal-wording-returns',
     what: 'текст ассоциации становится причинным («вызвано»)',
-    find: "        safeReflectionText: `В ${best.n} из ${nEligible} эпизодов с темой «${th.ru}» (${best.ru}) также отмечалось: «${key}». Это повторяющееся совпадение в ваших записях; причинность не установлена.`,",
+    find: "        safeReflectionText: `В ${best.n} из ${nEligible} случаев с темой «${th.ru}» (${best.ru}) также отмечалось: «${key}». Это повторяющееся совпадение в ваших записях; причинность не установлена.`,",
     replace: "        safeReflectionText: `Симптом «${key}» вызван темой «${th.ru}».`,",
     expectFail: 'язык совпадения, не причинности',
   },
