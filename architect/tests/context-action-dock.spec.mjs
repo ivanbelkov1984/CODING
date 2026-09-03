@@ -127,7 +127,7 @@ ok(true, 'Психология: вторичное действие сохран
 await closeOverlay(page, 'ov-moment');
 
 for (const [sub, label, overlay] of [
-  ['patterns', 'Новый паттерн', 'ov-pat-add'],
+  ['patterns', 'Новая закономерность', 'ov-pat-add'],
   ['spiritual', 'Новая запись', 'ov-spi-add'],
   ['evolution', 'Новая запись', 'ov-evo-add'],
 ]) {

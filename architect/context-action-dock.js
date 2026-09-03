@@ -25,7 +25,7 @@
       { id: 'moment', label: 'Состояние', icon: 'activity', run: () => openOv('ov-moment') },
     ],
     'map:patterns': [
-      { id: 'pattern', label: 'Новый паттерн', icon: 'git-branch', primary: true, run: () => openOv('ov-pat-add') },
+      { id: 'pattern', label: 'Новая закономерность', icon: 'git-branch', primary: true, run: () => openOv('ov-pat-add') },
     ],
     'map:spiritual': [
       { id: 'spiritual', label: 'Новая запись', icon: 'sparkles', primary: true, run: () => openOv('ov-spi-add') },

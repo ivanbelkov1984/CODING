@@ -1278,7 +1278,7 @@ function pips(w) {
 }
 
 // ─── TAG HELPERS ─────────────────────────────────────────────────
-const TL = {book:'Книга',bot:'Бот',personal:'Личное',project:'Проект',vitality:'Vitality',dream:'Сон',pattern:'Паттерн',spirit:'Духовное'};
+const TL = {book:'Книга',bot:'Диалог',personal:'Личное',project:'Проект',vitality:'Самочувствие',dream:'Сон',pattern:'Закономерность',spirit:'Практики и смыслы'};
 const TC = {book:'tg-book',bot:'tg-bot',personal:'tg-personal',project:'tg-project',vitality:'tg-vitality',dream:'tg-dream',pattern:'tg-pattern',spirit:'tg-spirit'};
 const SC = {book:'var(--c-book,#6B21A8)',bot:'var(--c-bot,#1056CC)',personal:'var(--c-personal,#92400E)',project:'var(--c-project,#B45309)',vitality:'var(--c-vitality,#1A7F3C)',dream:'var(--c-dream,#6B21A8)',pattern:'var(--c-pattern,#0E7490)',spirit:'var(--c-spirit,#92400E)'};
 
@@ -1676,7 +1676,7 @@ function detectPatterns() {
   </div>`;
 }
 function quickPat(tag) {
-  DB.patterns.push({id: Date.now(), type:'Поведенческий', text:`Паттерн из инсайтов «${TL[tag]||tag}»`, cnt:1});
+  DB.patterns.push({id: Date.now(), type:'Поведенческий', text:`Закономерность из наблюдений «${TL[tag]||tag}»`, cnt:1});
   persist(); rPats(); detectPatterns();
   toast('Закономерность сохранена — её можно уточнить в Карте', 'ok');
 }
@@ -2496,7 +2496,7 @@ const REC_COLLS = {
   measures:   { ru: 'Измерения',          sum: r => `${r.day || ''} · ${r.name || ''}: ${r.value ?? ''} ${r.unit || ''}` },
   insights:   { ru: 'Инсайты',            sum: r => r.title || (r.body || '').slice(0, 48) || 'инсайт' },
   dreams:     { ru: 'Сны',                sum: r => `${r.date || ''} · ${r.title || 'сон'}` },
-  patterns:   { ru: 'Паттерны',           sum: r => (r.text || '').slice(0, 48) },
+  patterns:   { ru: 'Закономерности',     sum: r => (r.text || '').slice(0, 48) },
   spiritual:  { ru: 'Духовное',           sum: r => `${r.date || ''} · ${r.type || ''}` },
   evolution:  { ru: 'Эволюция',           sum: r => `${r.dt || ''} · ${(r.text || '').slice(0, 44)}` },
   bots:       { ru: 'Задачи',             sum: r => `${r.done ? '✓ ' : ''}${r.title || ''}` },
@@ -3503,7 +3503,7 @@ function rInsightPsyLinks(ins) {
   const toPattern = psyLinksFrom('insights', ins.id, 'insight_to_pattern')[0];
   if (toPattern) {
     const p = (DB.patterns || []).find(x => x && x.id === toPattern.toId);
-    if (p) html += `<div class="srow" style="padding-left:0"><span class="sl2">→ Паттерн</span><span class="sv2">${esc((p.text || '').slice(0, 60))}</span><button type="button" class="btn btn-s btn-xs" style="flex:none" onclick="unlinkPsyLink('${esc(toPattern.id)}',()=>rInsightPsyLinks(DB.insights.find(x=>x&&x.id===${ins.id})))">Отвязать</button></div>`;
+    if (p) html += `<div class="srow" style="padding-left:0"><span class="sl2">→ Закономерность</span><span class="sv2">${esc((p.text || '').slice(0, 60))}</span><button type="button" class="btn btn-s btn-xs" style="flex:none" onclick="unlinkPsyLink('${esc(toPattern.id)}',()=>rInsightPsyLinks(DB.insights.find(x=>x&&x.id===${ins.id})))">Отвязать</button></div>`;
   } else {
     const existing = (DB.patterns || []).slice(0, 8);
     const picker = existing.length ? `<select class="field" id="det-pat-pick"><option value="">Выбери паттерн…</option>${existing.map(p => `<option value="${p.id}">${esc((p.text || '').slice(0, 50))}</option>`).join('')}</select>` : '';
@@ -4655,7 +4655,7 @@ function psyActionEvidenceChain(why) {
       const toPattern = psyLinksFrom('insights', ins.id, 'insight_to_pattern')[0];
       if (toPattern) {
         const p = (DB.patterns || []).find(x => x && x.id === toPattern.toId);
-        if (p) chain.push('Паттерн «' + (p.text || '').slice(0, 30) + '»');
+        if (p) chain.push('Закономерность «' + (p.text || '').slice(0, 30) + '»');
       }
     }
   }
@@ -9014,10 +9014,10 @@ function savePat() {
   STATE.pendingPatternFromInsight = null;
   if (insightId != null) createPsyLink({ fromColl: 'insights', fromId: insightId, toColl: 'patterns', toId: newId, relation: 'insight_to_pattern', source: 'user' });
   closeOv('ov-pat-add'); persist(); rPats();
-  hptMed(); toast(insightId != null ? 'Паттерн создан и связан с инсайтом' : 'Паттерн зафиксирован', 'ok');
+  hptMed(); toast(insightId != null ? 'Закономерность сохранена и связана с выводом' : 'Закономерность сохранена', 'ok');
 }
 function deletePat(id) {
-  delUndo('patterns', id, rPats, 'Паттерн удалён');
+  delUndo('patterns', id, rPats, 'Закономерность удалена');
 }
 
 // ─── ДУХОВНОЕ ────────────────────────────────────────────────────
@@ -10205,7 +10205,7 @@ function restoreDismissedCorrelations() {
 // кнопки открывают именно их, без персистирования (только в памяти,
 // пересчитывается на каждый рендер).
 const SYN_COLL_LABELS = {
-  moments: 'Момент', whys: 'Разбор', insights: 'Инсайт', patterns: 'Паттерн', evolution: 'Эволюция',
+  moments: 'Момент', whys: 'Разбор', insights: 'Инсайт', patterns: 'Закономерность', evolution: 'Событие жизни',
   dreams: 'Сон', medIntakes: 'Приём препарата', symptoms: 'Симптом', measures: 'Измерение', cravings: 'Тяга',
   labObservations: 'Лабораторный результат', healthDocuments: 'Документ здоровья',
   relationshipContexts: 'Контекст отношений', sphereLogs: 'Запись сферы',
@@ -12236,8 +12236,8 @@ const CMDS = {
     return `<div style="font-size:var(--tx2);font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);margin-bottom:1rem">━━ ДАЙДЖЕСТ ━━</div>
       <div style="font-size:var(--tx2);font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.375rem">Топ инсайты</div>
       ${top.map(i=>`<div style="font-size:var(--tx3);padding:4px 0;border-bottom:1px solid var(--bd)"><span class="tag ${TC[i.tag]||''}">${TL[i.tag]||i.tag}</span> ${esc(i.title.slice(0,60))}</div>`).join('')}
-      <div style="margin-top:.875rem;font-size:var(--tx2);font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.375rem">Паттерн недели</div>
-      <div style="font-size:var(--tx3);color:var(--t2)">${DB.patterns[0]?.text.slice(0,100)||'Паттернов нет'}</div>`;
+      <div style="margin-top:.875rem;font-size:var(--tx2);font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.375rem">Закономерность недели</div>
+      <div style="font-size:var(--tx3);color:var(--t2)">${DB.patterns[0]?.text.slice(0,100)||'Закономерностей пока нет'}</div>`;
   },
   '/ретро': () =>
     `<div style="font-size:var(--tx2);font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);margin-bottom:1rem">━━ РЕТРО ━━</div>
