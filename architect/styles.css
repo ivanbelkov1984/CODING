@@ -42,7 +42,7 @@
   --border-subtle:rgba(255,255,255,.08); --border-medium:rgba(255,255,255,.14); --border-strong:rgba(255,255,255,.20);
   --bd: var(--border-subtle); --bd2: var(--border-medium);
   /* текст, 4 уровня */
-  --t1:#f4f8ff; --t2:#c6d2e6; --t3:#8593ad; --t4:#7b89a3;
+  --t1:#f4f8ff; --t2:#c6d2e6; --t3:#94a4be; --t4:#8b99b3;
   /* акцент — Nebula: циан → фиолет → золото */
   --accent:#22D3EE; --accent-hover:#38BDF8; --accent-light:#67E8F9;
   --blue: var(--accent); --blue-t: var(--accent); --blue-btn: var(--accent);
@@ -396,7 +396,7 @@ textarea.field{resize:none;line-height:1.6;min-height:96px}
 .cmd-wrap{padding:var(--s3) var(--s4)}
 .cmd-bar{display:flex;align-items:center;gap:var(--s2);width:100%;min-width:0;overflow:hidden;background:var(--sf);border:1.5px solid var(--bd);border-radius:var(--r20);padding:0 var(--s3);height:46px;box-shadow:none;transition:border-color var(--dur2),box-shadow var(--dur2)}
 .cmd-bar:focus-within{border-color:var(--blue-btn);box-shadow:none}
-.cmd-in{flex:1;min-width:0;width:100%;font-size:var(--tx4);color:var(--t1);background:none;outline:none;padding:0}
+.cmd-in{flex:1;min-width:0;width:100%;min-height:44px;font-size:var(--tx4);color:var(--t1);background:none;outline:none;padding:0}
 .cmd-in::placeholder{color:var(--t4)}
 .cmd-go{width:44px;height:44px;border-radius:50%;background:var(--blue-btn);color:var(--btn-primary-text);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;transition:opacity var(--dur1)}
 .cmd-go:active{opacity:.75}
@@ -1318,7 +1318,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 /* ── Зашифрованная резервная копия (Slice 4) — в системе токенов ── */
 .be-sheet{max-height:92dvh;overflow-y:auto}
 .be-note{font-size:var(--tx2);color:var(--t3);line-height:1.5;margin-top:var(--s2)}
-.be-ack{display:flex;gap:var(--s2);align-items:flex-start;font-size:var(--tx2);color:var(--t2);line-height:1.45;cursor:pointer}
+.be-ack{display:flex;gap:var(--s2);align-items:flex-start;min-height:44px;font-size:var(--tx2);color:var(--t2);line-height:1.45;cursor:pointer}
 .be-ack input{margin-top:2px;flex-shrink:0;accent-color:var(--accent)}
 .be-status{font-size:var(--tx2);line-height:1.5;min-height:1.2em;margin-top:var(--s2)}
 .be-status.be-ok{color:var(--green)}
@@ -1624,6 +1624,7 @@ button:focus-visible,[role="button"]:focus-visible,[role="switch"]:focus-visible
 .ext-step{padding:.2rem .5rem;border-radius:999px;background:var(--bg2);color:var(--t2)}
 .ext-step.on{background:var(--teal-l);color:var(--teal)}
 .ext-step.done{color:var(--green)}
+#ext-file{display:block;width:100%;min-height:44px;padding:.55rem 0;color:var(--t2);cursor:pointer}
 .ext-sum{display:flex;justify-content:space-between;gap:var(--s3);
   padding:.3rem 0;border-bottom:1px solid var(--hair);font-variant-numeric:tabular-nums}
 .ext-sum:last-child{border-bottom:0}
