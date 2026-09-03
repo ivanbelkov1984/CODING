@@ -75,7 +75,7 @@ for (const [label, check] of [
   ['Психология', () => page.evaluate(() => getComputedStyle(document.getElementById('ms-psychology')).display !== 'none')],
   ['Здоровье', () => pgOn().then(p => p === 'pg-health')],
   ['Астрология', () => pgOn().then(p => p === 'pg-astro')],
-  ['Источники', () => ovOn('ov-ext-import')],
+  ['Подключить материалы', () => ovOn('ov-ext-import')],
   ['Настройки', () => pgOn().then(p => p === 'pg-settings')],
 ]) {
   const hit = await viaMenu(label);
@@ -222,7 +222,7 @@ ok(pat.open && pat.noJson, 'закономерности: экран откры�
 // ── 16: источники — статусы и checkpoint существуют ──
 step('16: источники');
 await clearOv();
-await viaMenu('Источники');
+await viaMenu('Подключить материалы');
 const src = await page.evaluate(() => ({
   open: !!document.querySelector('#ov-ext-import.on'),
   txt: (document.getElementById('ov-ext-import') || {}).textContent || '',

@@ -72,7 +72,7 @@ ok(menu.menuBtn && menu.ariaBefore === 'false', 'кнопка «Меню» — �
 ok(menu.open && menu.hash === '#/menu', 'меню открывает drawer, hash #/menu адресуем', JSON.stringify([menu.open, menu.hash]));
 ok(menu.closed && menu.hashAfterClose !== '#/menu', 'закрытие возвращает hash раздела', menu.hashAfterClose);
 const REQUIRED = ['Сегодня', 'Дневник', 'Психология', 'Здоровье',
-  'Астрология', 'Источники', 'Настройки'];
+  'Астрология', 'Подключить материалы', 'Настройки'];
 const missing = REQUIRED.filter(r => !menu.items.includes(r));
 ok(missing.length === 0, `все ${REQUIRED.length} крупных пространств доступны напрямую`, 'нет: ' + missing.join(', '));
 ok(menu.allButtons, 'каждый пункт — настоящий <button>');
@@ -104,7 +104,7 @@ const dest = await page.evaluate(async () => {
 const dead = dest.filter(([label, pg, ov]) => String(pg).startsWith('THROW') || (!pg && !ov));
 ok(dead.length === 0, `все ${dest.length} пунктов открывают страницу или экран`, JSON.stringify(dead));
 const byLabel = Object.fromEntries(dest.map(([l, pg, ov]) => [l, { pg, ov }]));
-ok(byLabel['Источники'] && byLabel['Источники'].ov === 'ov-ext-import', '«Источники» открывают экран импорта/моста', JSON.stringify(byLabel['Источники']));
+ok(byLabel['Подключить материалы'] && byLabel['Подключить материалы'].ov === 'ov-ext-import', '«Подключить материалы» открывает экран импорта/моста', JSON.stringify(byLabel['Подключить материалы']));
 ok(!byLabel['Поиск'] && !byLabel['Инспектор записей'],
   'Поиск и Инспектор — инструменты, а не пункты меню (их пути проверяются в §13)');
 // Под file:// ESM-модуль копий намеренно не грузится (null-origin CORS,
@@ -478,7 +478,7 @@ await page.waitForTimeout(700);
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
 
 const PRIMARY = ['Сегодня', 'Дневник', 'Психология', 'Здоровье', 'Астрология',
-  'Источники', 'Настройки'];
+  'Подключить материалы', 'Настройки'];
 const ia = await page.evaluate(() => ({
   items: [...document.querySelectorAll('#nsh-nav-groups .navlink')].map(n => n.textContent.trim()),
   groups: [...document.querySelectorAll('#nsh-nav-groups .nsh-grp-lbl')].map(g => g.textContent.trim()),
@@ -603,8 +603,8 @@ ok(searchHit && await ovOpen('ov-search'), 'Поиск всегда доступ
 
 // 10. Источники / Drive
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
-await clickNav('Источники');
-ok(await ovOpen('ov-ext-import'), 'меню → Источники открывают мост импорта (Drive/ChatGPT/файлы)');
+await clickNav('Подключить материалы');
+ok(await ovOpen('ov-ext-import'), 'меню → Подключить материалы открывает мост импорта (Drive/ChatGPT/файлы)');
 
 // 11. Настройки: Инспектор, Резервные копии, Профили, Обратная связь
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
@@ -989,6 +989,28 @@ ok(fam.ids.includes('CBT') && fam.ids.includes('ACT'),
   'идентификаторы подходов сохранены — canonical-данные не переименованы', fam.ids.join(','));
 ok(!fam.ru.some(v => /КПТ|CBT|DBT|Схема-терапия/.test(v)),
   'подписи подходов человеческие: ' + fam.ru.slice(0, 4).join(' · '), fam.ru.join(' · '));
+
+// 17.11 Настройки: повседневные действия отделены от служебных.
+const settingsUi = await page.evaluate(() => {
+  goTo('settings');
+  const root = document.getElementById('pg-settings');
+  const advanced = root.querySelector('.settings-advanced');
+  const mainText = [...root.querySelectorAll(':scope > .card:not(.settings-advanced) .srow')]
+    .map(x => x.textContent.replace(/\s+/g, ' ').trim());
+  const ids = ['sync-lbl', 'api-lbl', 'prof-current', 'thv', 'push-status', 'keys-cnt', 'cmd', 'cmd-ac', 'cmd-out', 'cmd-res'];
+  return {
+    mainText,
+    advancedClosed: !!advanced && !advanced.open,
+    advancedLabel: advanced && advanced.querySelector(':scope > summary').textContent.trim(),
+    uniqueIds: ids.every(id => document.querySelectorAll('#' + id).length === 1),
+    primaryButtons: root.querySelectorAll(':scope > .card:not(.settings-advanced) button.srow').length,
+  };
+});
+ok(settingsUi.mainText.some(x => /Мой профиль/.test(x)) && settingsUi.mainText.some(x => /Сохранить изменения в облаке/.test(x)) &&
+  settingsUi.advancedClosed && settingsUi.advancedLabel === 'Для опытных пользователей',
+  'Настройки показывают обычные задачи, служебные инструменты свёрнуты', JSON.stringify(settingsUi));
+ok(settingsUi.uniqueIds && settingsUi.primaryButtons >= 6,
+  'перестройка Настроек сохранила единственные render-target и нативные кнопки', JSON.stringify(settingsUi));
 
 await browser.close();
 console.log(`\nEXPERIENCE 2.0 SHELL: ${pass} passed, ${fail} failed`);

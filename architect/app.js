@@ -69,7 +69,7 @@ const daysAgoISO = n => new Date(Date.now()-n*864e5).toISOString();
 // ─── КОНФИГУРАЦИЯ ПО УМОЛЧАНИЮ ──────────────────────────────────
 const DEFAULT_CFG = {
   userName: '',
-  domainLabel: 'Книга',
+  domainLabel: 'Личный проект',
   apiUrl: '',
   spaceKey: '',
   lastSync: '',
@@ -1307,7 +1307,7 @@ function checkOnboard() {
 }
 function finishOnboard() {
   const name   = $('ob-name').value.trim();
-  const domain = $('ob-domain').value.trim() || 'Книга';
+  const domain = $('ob-domain').value.trim() || 'Личный проект';
   if (!name) { toast('Введи своё имя', 'warn'); return; }
   CFG.userName     = name;
   CFG.domainLabel  = domain;
@@ -1348,7 +1348,7 @@ function finishTour(doCheckin) {
   else toast('Готово — начинай отмечать день', 'ok');
 }
 function updateDomainLabel() {
-  const lbl = CFG.domainLabel || 'Книга';
+  const lbl = CFG.domainLabel || 'Личный проект';
   const el = $('tab-book-lbl');
   if (el) el.textContent = lbl;
   const bl = $('book-lbl');
@@ -1356,7 +1356,7 @@ function updateDomainLabel() {
 }
 
 // ─── НАВИГАЦИЯ ───────────────────────────────────────────────────
-const TITLES = {home:'Сегодня', insights:'Записи', book:CFG.domainLabel||'Книга', vit:'Сферы', sys:'Итоги', map:'Дневник', health:'Здоровье', astro:'Астрология', settings:'Настройки'};
+const TITLES = {home:'Сегодня', insights:'Записи', book:CFG.domainLabel||'Личный проект', vit:'Сферы', sys:'Итоги', map:'Дневник', health:'Здоровье', astro:'Астрология', settings:'Настройки'};
 function resetContentScroll() {
   const content = document.querySelector('.content');
   if (content) content.scrollTop = 0;
@@ -1669,16 +1669,16 @@ function detectPatterns() {
   el.innerHTML = `<div class="pat-suggest mx mb">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
     <div>
-      <div class="pat-suggest-t">Возможный паттерн</div>
-      <div class="pat-suggest-d">${cnt} инсайта «${TL[tag]||tag}» — рассмотри как паттерн</div>
-      <div class="pat-suggest-btn" onclick="quickPat('${tag}')">Зафиксировать паттерн →</div>
+      <div class="pat-suggest-t">Возможная закономерность</div>
+      <div class="pat-suggest-d">${cnt} похожих наблюдения «${TL[tag]||tag}» — проверь, повторяется ли это</div>
+      <div class="pat-suggest-btn" onclick="quickPat('${tag}')">Сохранить закономерность →</div>
     </div>
   </div>`;
 }
 function quickPat(tag) {
   DB.patterns.push({id: Date.now(), type:'Поведенческий', text:`Паттерн из инсайтов «${TL[tag]||tag}»`, cnt:1});
   persist(); rPats(); detectPatterns();
-  toast('Паттерн создан — уточни в разделе Карта', 'ok');
+  toast('Закономерность сохранена — её можно уточнить в Карте', 'ok');
 }
 
 // ─── ГЛАВНАЯ ─────────────────────────────────────────────────────
@@ -1751,14 +1751,14 @@ function rWholeLife() {
   const pats = P('patterns');
   rows.push(pats.length
     ? x2Row('git-branch', 'Закономерности', String(pats.length), esc(String((pats[0] || {}).text || '').slice(0, 44)) || 'сохранённые паттерны', "goTo('map');msub('patterns')")
-    : x2Row('git-branch', 'Закономерности', '—', 'Паттерны появятся из наблюдений', "goTo('map');msub('patterns')"));
+    : x2Row('git-branch', 'Закономерности', '—', 'Появятся, когда наблюдения начнут повторяться', "goTo('map');msub('patterns')"));
 
-  // Источники — подключения моста/Drive и последний импорт.
+  // Подключённые материалы — файлы/сервисы и последний импорт.
   const conns = DB.externalConnections || [];
   const lastImp = (DB.externalWorkSessions || []).slice(-1)[0];
   rows.push(conns.length
-    ? x2Row('download', 'Источники', String(conns.length), lastImp ? 'последний импорт ' + dstr(lastImp.at || lastImp.createdAt) : 'импортов ещё не было', 'openExtImport()')
-    : x2Row('download', 'Источники', '—', 'Добавь файл или данные из другого сервиса', 'openExtImport()'));
+    ? x2Row('download', 'Подключённые материалы', String(conns.length), lastImp ? 'последний импорт ' + dstr(lastImp.at || lastImp.createdAt) : 'импортов ещё не было', 'openExtImport()')
+    : x2Row('download', 'Подключённые материалы', '—', 'Добавь файл или данные из другого сервиса', 'openExtImport()'));
 
   // Сферы — переехали из глобального меню: трекер живёт внутри «Жизни сейчас».
   const sph = P('spheres');
@@ -1776,7 +1776,7 @@ function rWholeLife() {
   const GROUPS = [
     ['Требует внимания', ['Незавершённое', 'Цели']],
     ['Жизнь', ['Здоровье', 'Психология', 'Сны', 'Сферы', 'События жизни']],
-    ['Понимание и данные', ['Закономерности', 'Обзор недели', 'Источники']],
+    ['Понимание и данные', ['Закономерности', 'Обзор недели', 'Подключённые материалы']],
   ];
   const byTitle = {};
   rows.forEach(r => { const m = r.match(/class="x2-t">([^<]+)</); if (m) byTitle[m[1]] = r; });
@@ -4678,7 +4678,7 @@ function togglePsyActionDone(id, done) {
 function rPsyActions() {
   const el = $('psy-actions'); if (!el) return;
   const all = projAll('whys').filter(w => w && w.action && String(w.action).trim());
-  if (!all.length) { el.innerHTML = `<div class="sec-lbl">Незавершённые действия</div><div class="si-text" style="color:var(--t3);padding:.4rem 0 .8rem">Заполни поле «Действие» в разборе разбор ситуации — оно появится здесь.</div>`; return; }
+  if (!all.length) { el.innerHTML = `<div class="sec-lbl">Следующие действия</div><div class="si-text" style="color:var(--t3);padding:.4rem 0 .8rem">Заверши разбор ситуации конкретным шагом — он появится здесь.</div>`; return; }
   const open = all.filter(w => w.actionDone !== true);
   const done = all.filter(w => w.actionDone === true);
   const list = (_psyShowDoneActions ? all : open).slice().sort((a, b) => _ru(b) - _ru(a));
@@ -4691,7 +4691,7 @@ function rPsyActions() {
         <button type="button" class="btn btn-s btn-xs" style="flex:none;min-width:44px;min-height:44px" onclick="event.stopPropagation();togglePsyActionDone(${w.id},${mk ? 'false' : 'true'})">${mk ? 'Отменить' : 'Готово'}</button>
       </div>`;
   }).join('') : `<div class="si-text" style="color:var(--t3);padding:.4rem 0">Всё выполнено — новых незавершённых действий нет.</div>`;
-  el.innerHTML = `<div class="sec-lbl">Незавершённые действия${done.length ? ` <span style="font-weight:400;color:var(--t3)">· выполнено ${done.length}</span>` : ''}</div>
+  el.innerHTML = `<div class="sec-lbl">Следующие действия${done.length ? ` <span style="font-weight:400;color:var(--t3)">· выполнено ${done.length}</span>` : ''}</div>
     <div class="card mx mb">${rows}</div>
     ${done.length ? `<div class="mx mb"><button type="button" class="btn btn-s btn-sm" onclick="togglePsyShowDone()">${_psyShowDoneActions ? 'Скрыть выполненные' : 'Показать выполненные'}</button></div>` : ''}`;
 }
@@ -4709,7 +4709,7 @@ function rPsyTriggers() {
   whys.forEach(w => { const k = normTrigger(w.symptom); (groups[k] = groups[k] || []).push(w); });
   const repeated = Object.entries(groups).filter(([, l]) => l.length >= PSY_MIN_TRIGGER_SAMPLE).sort((a, b) => b[1].length - a[1].length).slice(0, 5);
   if (!repeated.length) { el.innerHTML = ''; return; }
-  el.innerHTML = '<div class="sec-lbl">Повторяющиеся триггеры</div>' + repeated.map(([, list]) => {
+  el.innerHTML = '<div class="sec-lbl">Что повторяется перед трудностью</div>' + repeated.map(([, list]) => {
     const label = list[0].symptom;
     const recs = list.slice(0, 6).map(w => `<span class="wl" onclick="openWhy(${w.id})">${esc((w.day || '').slice(5))}</span>`).join(' · ');
     return `<div class="card mx mb" style="padding:.7rem 1rem"><div class="si-text"><b>${esc(label)}</b> — встречалось ${list.length} раз</div><div class="si-text" style="margin-top:.3rem;font-size:.85em">${recs}</div></div>`;
@@ -4889,9 +4889,9 @@ function rDiaryState() {
 const DIARY_RECENT_GROUPS = [
   ['insights', 'Инсайты', 'sparkles'],
   ['dreams', 'Сны', 'moon'],
-  ['patterns', 'Паттерны', 'git-branch'],
-  ['spiritual', 'Духовное', 'sparkles'],
-  ['evolution', 'Эволюция', 'trending-up'],
+  ['patterns', 'Закономерности', 'git-branch'],
+  ['spiritual', 'Практики и смыслы', 'sparkles'],
+  ['evolution', 'События жизни', 'trending-up'],
 ];
 function rDiaryRecent() {
   const el = $('diary-recent'); if (!el) return;
@@ -9283,7 +9283,7 @@ function rPats() {
       <div class="pat-cnt">Замечен × ${p.cnt}</div>
       <button class="pat-del" onclick="deletePat(${p.id})" aria-label="Удалить"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:14px;height:14px;color:var(--t4)"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
     </div>`
-  ).join('') : `<div class="empty"><div class="em-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:26px;height:26px;color:var(--t3)"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div><div class="em-t">Паттернов нет</div><div class="em-d">Паттерн — одно и то же трижды</div></div>`;
+  ).join('') : `<div class="empty"><div class="em-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:26px;height:26px;color:var(--t3)"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div><div class="em-t">Закономерностей пока нет</div><div class="em-d">Они появятся, когда похожая ситуация повторится несколько раз</div></div>`;
 }
 function rDrms() {
   $('drm-list').innerHTML = DB.dreams.length ? DB.dreams.map(d =>
@@ -10929,7 +10929,7 @@ async function enrichDigestAutonomously(digId) {
 function rCfgForm() {
   const ni = $('cfg-name');   if(ni) ni.value = CFG.userName||'';
   const tci = $('cfg-trusted'); if(tci) tci.value = CFG.trustedContact||'';
-  const di = $('cfg-domain'); if(di) di.value = CFG.domainLabel||'Книга';
+  const di = $('cfg-domain'); if(di) di.value = CFG.domainLabel||'Личный проект';
   const ai = $('cfg-api');    if(ai) ai.value = CFG.apiUrl||'';
   const ki = $('cfg-space');  if(ki) ki.value = CFG.spaceKey||'';
   const dci = $('cfg-drive-client'); if (dci) dci.value = CFG.driveClientId || '';
@@ -12337,11 +12337,61 @@ function initAll() {
   snapshotDaily();          // авто-снимок дня (защита данных)
 }
 
+// Legacy renderers still create a small number of semantic-looking rows as
+// <div onclick>. Keep their canonical handlers, but make every such control
+// reachable and understandable to keyboard/VoiceOver users. Newly rendered
+// rows are upgraded by the observer as well as the initial document pass.
+const INTERACTIVE_SELECTOR = [
+  '.acct[onclick]', '.tog[onclick]', '.srow[onclick]', '.fpill[onclick]',
+  '.sph-card[onclick]', '.prof-row[onclick]', '.ins-row[onclick]',
+  '.ch-row[onclick]', '.drm[onclick]', '.pat[onclick]', '.spi[onclick]',
+  '.oqrow[onclick]', '.otd[onclick]', '.amb[onclick]', '.si-row.tap[onclick]',
+  '[data-rule][onclick]', '[data-rules][onclick]'
+].join(',');
+function accessibleNameFor(el) {
+  if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
+  if (el.classList.contains('tog')) {
+    const row = el.closest('.tog-row');
+    const label = row && row.querySelector('.tog-lbl');
+    return label ? label.textContent.trim() : 'Переключатель';
+  }
+  return (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Открыть';
+}
+function upgradeInteractive(root) {
+  const nodes = [];
+  if (root && root.matches && root.matches(INTERACTIVE_SELECTOR)) nodes.push(root);
+  if (root && root.querySelectorAll) nodes.push(...root.querySelectorAll(INTERACTIVE_SELECTOR));
+  nodes.forEach(el => {
+    if (el.tagName === 'BUTTON' || el.tagName === 'A' || el.dataset.a11yReady === '1') return;
+    el.dataset.a11yReady = '1';
+    if (!el.hasAttribute('role')) el.setAttribute('role', el.classList.contains('tog') ? 'switch' : 'button');
+    if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+    if (!el.hasAttribute('aria-label')) el.setAttribute('aria-label', accessibleNameFor(el));
+    if (el.getAttribute('role') === 'switch') el.setAttribute('aria-checked', el.classList.contains('on') ? 'true' : 'false');
+  });
+}
+function initInteractiveA11y() {
+  upgradeInteractive(document);
+  document.addEventListener('keydown', e => {
+    const el = e.target && e.target.closest && e.target.closest('[data-a11y-ready="1"]');
+    if (!el || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault(); el.click();
+  });
+  document.addEventListener('click', e => {
+    const el = e.target && e.target.closest && e.target.closest('[role="switch"]');
+    if (el) requestAnimationFrame(() => el.setAttribute('aria-checked', el.classList.contains('on') ? 'true' : 'false'));
+  }, true);
+  new MutationObserver(records => records.forEach(r => r.addedNodes.forEach(n => {
+    if (n.nodeType === 1) upgradeInteractive(n);
+  }))).observe(document.body, { childList: true, subtree: true });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   hydrate();
   checkOnboard();
   initSplash();
   initAll();
+  initInteractiveA11y();
 });
 
 
@@ -12521,8 +12571,8 @@ const NSH_SIDEBAR_GROUPS = [
   ['Анализ', [
     ['astro', 'sparkles', 'Астрология', "goTo('astro')"],
   ]],
-  ['Данные', [
-    [null, 'download', 'Источники', 'openExtImport()'],
+  ['Мои данные', [
+    [null, 'download', 'Подключить материалы', 'openExtImport()'],
   ]],
   ['Система', [
     ['settings', 'settings', 'Настройки', "goTo('settings')"],
