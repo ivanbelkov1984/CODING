@@ -261,7 +261,7 @@ ok(insp.showsMeasure && insp.showsEffective,
 await clearOv();
 const bak = await page.evaluate(async () => {
   const t = document.getElementById('toasts'); if (t) t.innerHTML = '';
-  const row = [...document.querySelectorAll('#pg-settings .srow')].find(r => /Зашифрованная резервная копия/.test(r.textContent));
+  const row = [...document.querySelectorAll('#pg-settings .srow')].find(r => /Защищённая копия/.test(r.textContent));
   if (!row) return { found: false };
   row.click();
   await new Promise(r => setTimeout(r, 300));

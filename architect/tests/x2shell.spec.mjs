@@ -612,18 +612,18 @@ await clickNav('Настройки');
 ok(await pgOn() === 'pg-settings', 'меню → Настройки');
 const inSettings = await page.evaluate(() => {
   const txt = document.getElementById('pg-settings').textContent;
-  return { rec: /Мои записи/.test(txt), bak: /Зашифрованная резервная копия/.test(txt),
-    prof: /Профиль/.test(txt), fb: /Обратная связь/.test(txt), src: /Импорт внешней работы/.test(txt) };
+  return { rec: /Все мои записи/.test(txt), bak: /Защищённая копия/.test(txt),
+    prof: /Мой профиль/.test(txt), fb: /Обратная связь/.test(txt), src: /Подключить внешние материалы/.test(txt) };
 });
 ok(inSettings.rec && inSettings.bak && inSettings.prof && inSettings.fb,
   'Настройки содержат Инспектор, Резервные копии, Профиль и Обратную связь', JSON.stringify(inSettings));
-ok(await clickText('#pg-settings .srow', 'Мои записи') && await ovOpen('ov-records'),
-  'Настройки → «Мои записи» открывают Инспектор записей');
+ok(await clickText('#pg-settings .srow', 'Все мои записи') && await ovOpen('ov-records'),
+  'Настройки → «Все мои записи» открывают Инспектор записей');
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
 ok(await clickText('#pg-settings .srow', 'Обратная связь') && await ovOpen('ov-feedback'),
   'Настройки → «Обратная связь» открывает форму');
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
-const bakHit = await clickText('#pg-settings .srow', 'Зашифрованная резервная копия');
+const bakHit = await clickText('#pg-settings .srow', 'Защищённая копия');
 await page.waitForTimeout(250);
 const bakState = await page.evaluate(() => ({
   open: !!document.querySelector('#ov-backup-enc.on'),

@@ -178,8 +178,8 @@ async function main() {
     await page.evaluate(() => { try { markStartupOk(); } catch (_) {} });
     // entry видима
     await page.evaluate(() => { ['ov-onboard', 'ov-tour', 'splash'].forEach(id => { const e = document.getElementById(id); if (e) { e.classList.remove('on'); e.style.display = 'none'; } }); goTo('settings'); });
-    const entryVisible = await page.locator('text=Зашифрованная резервная копия').first().isVisible();
-    ok(entryVisible, 'точка входа «Зашифрованная резервная копия» видима в настройках');
+    const entryVisible = await page.locator('text=Защищённая копия').first().isVisible();
+    ok(entryVisible, 'точка входа «Защищённая копия» видима в настройках');
     await openSheet(page);
     ok(await page.locator('#ov-backup-enc.on').count() === 1, 'sheet backup открывается');
     ok(await page.locator('#be-pw1').isVisible(), 'поля пароля доступны');
