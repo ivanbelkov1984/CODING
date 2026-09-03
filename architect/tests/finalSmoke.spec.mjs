@@ -238,7 +238,7 @@ step('17: резервные копии и Инспектор');
 await clearOv();
 await viaMenu('Настройки');
 const insp = await page.evaluate(async () => {
-  const row = [...document.querySelectorAll('#pg-settings .srow')].find(r => /Мои записи/.test(r.textContent));
+  const row = [...document.querySelectorAll('#pg-settings .srow')].find(r => /Все мои записи/.test(r.textContent));
   if (!row) return { found: false };
   row.click();
   await new Promise(r => setTimeout(r, 200));
