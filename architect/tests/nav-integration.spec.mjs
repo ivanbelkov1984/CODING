@@ -210,7 +210,7 @@ const dupCheck = await journey.evaluate(() => {
     const inlineVisible = inlineBtn && getComputedStyle(inlineBtn).display !== 'none';
     return { dockHasIt, inlineVisible };
   };
-  checks.push(['Паттерны', visibleDup(() => { goTo('map'); msub('patterns'); }, 'Новый паттерн', 'pat-add-btn')]);
+  checks.push(['Закономерности', visibleDup(() => { goTo('map'); msub('patterns'); }, 'Новая закономерность', 'pat-add-btn')]);
   checks.push(['Духовное', visibleDup(() => { goTo('map'); msub('spiritual'); }, 'Новая запись', 'spi-add-btn')]);
   checks.push(['Эволюция', visibleDup(() => { goTo('map'); msub('evolution'); }, 'Новая запись', 'evo-add-btn')]);
   checks.push(['Сферы', visibleDup(() => { goTo('vit'); }, 'Новая сфера', 'vit-new-sphere-btn')]);

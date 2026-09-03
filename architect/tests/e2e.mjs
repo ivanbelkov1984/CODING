@@ -65,21 +65,19 @@ for (const t of ['home', 'vit', 'map', 'sys']) {
   await page.evaluate(x => goTo(x), t);
   ok(await page.locator('#pg-' + t + '.on').count() === 1, `вкладка ${t} открывается`);
 }
-// Разум subnav (3 смысловые группы, программный msub подсвечивает пилюлю)
+// Дневник: четыре частых входа без конкурирующего второго меню.
 await page.evaluate(() => goTo('map'));
-// Wave 7 (issue #162) добавил четвёртую группу «Психология» — first-class
-// подраздел внутри существующего контура, без глобального redesign навигации.
-// Проверяем ИМЕНА групп, а не голое число: снимок структуры так осмысленнее.
 {
-  const groups = await page.evaluate(() => [...document.querySelectorAll('#subnav .sn-glbl')].map(x => x.textContent.trim()));
-  ok(JSON.stringify(groups) === JSON.stringify(['Записи', 'Связи', 'Психология', 'Развитие']),
-    `подменю «Разума» сгруппировано: ${groups.join(' / ')}`);
+  const entries = await page.evaluate(() => [...document.querySelectorAll('#subnav .snpill')].map(x => x.textContent.trim()));
+  ok(JSON.stringify(entries) === JSON.stringify(['Обзор', 'Записи', 'Сны', 'Повторы']),
+    `постоянная навигация Дневника собрана: ${entries.join(' / ')}`);
 }
 for (const s of ['insights', 'graph', 'book', 'patterns', 'dreams', 'spiritual', 'evolution']) {
   await page.evaluate(x => msub(x), s);
-  ok(await page.locator('#ms-' + s).isVisible(), `подраздел «Разум» → ${s}`);
+  ok(await page.locator('#ms-' + s).isVisible(), `подраздел «Дневник» → ${s}`);
 }
-ok(await page.evaluate(() => document.querySelector('#subnav .snpill[data-sub="evolution"]').classList.contains('on')), 'активная пилюля подсвечена и при программном переходе');
+await page.evaluate(() => msub('patterns'));
+ok(await page.evaluate(() => document.querySelector('#subnav .snpill[data-sub="patterns"]').classList.contains('on')), 'активная частая вкладка подсвечена и при программном переходе');
 // Сферы на вкладке vit
 await page.evaluate(() => goTo('vit'));
 ok(await page.locator('#pg-vit #spheres-list .sph-card').count() === 2, 'вкладка «Сферы» показывает карточки сфер');
@@ -209,7 +207,7 @@ const pick = await page.evaluate(() => {
 });
 ok(pick.rows === 7 && /Sonnet 5/.test(pick.selBefore), `пикер: 7 моделей трёх провайдеров, выбран Sonnet (${pick.selBefore})`);
 ok(/GPT-4o mini/.test(pick.selAfter) && /GPT-4o mini/.test(pick.chip), 'пикер: смена модели работает, чип в чате обновился');
-ok(await page.evaluate(() => { goTo('map'); msub('chats'); return document.querySelectorAll('#chats-list .chat-row').length >= 1; }), 'история диалогов: Разум → Записи → Диалоги');
+ok(await page.evaluate(() => { goTo('map'); msub('chats'); return document.querySelectorAll('#chats-list .chat-row').length >= 1; }), 'история диалогов: Дневник → Диалоги');
 await page.evaluate(() => goTo('home'));
 
 // ── Мультипровайдер: GPT и Gemini через ту же абстракцию ──
@@ -292,16 +290,18 @@ ok(await page.evaluate(() => !!document.querySelector('#h-vector .vec-card')), '
 ok(await page.evaluate(() => /запис/.test(document.querySelector('#h-vector .vec-sub').textContent)), 'вектор показывает движение за неделю');
 await page.evaluate(() => rcClose());
 
-// ── Аудит главного экрана: заголовок-приветствие вместо сломанной фразы,
-// свёрнутые вторичные блоки, без дублирующего тоста поверх шапки ──
+// ── Аудит главного экрана: без декоративного приветствия и без дубля
+// быстрых действий (их даёт ＋), свёрнутые вторичные блоки ──
 const hero = await page.evaluate(() => {
-  DB.vit.ci = false;                                  // check-in не сделан — раньше здесь была «Система check-in не выполнен»
-  rHState();
-  const txt = document.getElementById('h-hl').textContent;
-  return { txt, hasEm: !!document.querySelector('#h-hl em') };
+  DB.vit.ci = false;
+  goTo('home');
+  return { greeting: !!document.getElementById('h-hl'),
+    tiles: document.querySelectorAll('#pg-home .qarow .qabtn').length,
+    date: (document.getElementById('h-date') || {}).textContent || '' };
 });
-ok(!/Систем/.test(hero.txt), `заголовок больше не «Система …» — грамматически связный текст («${hero.txt}»)`);
-ok(/Добр(ое|ый|ой) (утро|день|вечер|ночи)/.test(hero.txt) && hero.hasEm, 'заголовок — приветствие по времени суток с акцентным словом');
+ok(!hero.greeting, 'декоративного приветствия на Главной нет');
+ok(hero.tiles === 0, 'сетки из пяти быстрых плиток нет — их заменяет ＋', String(hero.tiles));
+ok(hero.date.length > 0, `дата на Главной осталась («${hero.date}»)`);
 const more = await page.evaluate(() => {
   const el = document.getElementById('h-more'), btn = document.getElementById('h-more-btn');
   const closedByDefault = !el.classList.contains('on');
@@ -309,11 +309,11 @@ const more = await page.evaluate(() => {
   toggleHomeMore();
   const openedNow = el.classList.contains('on') && /Скрыть/.test(btn.textContent);
   toggleHomeMore();
-  const closedAgain = !el.classList.contains('on') && /Показать больше/.test(btn.textContent);
+  const closedAgain = !el.classList.contains('on') && /Подробнее о дне/.test(btn.textContent);
   return { closedByDefault, hasContent, openedNow, closedAgain };
 });
 ok(more.closedByDefault && more.hasContent, 'вторичные блоки главного экрана свёрнуты по умолчанию, но отрендерены внутри');
-ok(more.openedNow && more.closedAgain, '«Показать больше» разворачивает и сворачивает обратно, текст кнопки меняется');
+ok(more.openedNow && more.closedAgain, '«Подробнее о дне» разворачивает и сворачивает обратно, текст кнопки меняется');
 const noToast = await page.evaluate(async () => {
   const calls = []; const orig = window.toast; window.toast = (m, t) => calls.push(m);
   // на время паузы гасим авто-синк (иначе фоновый таймер, взведённый более
@@ -792,7 +792,7 @@ const riskCard = await page.evaluate(() => {
   goTo('health');
   return { withRisk, noRisk };
 });
-ok(/Риск сейчас/.test(riskCard.withRisk) && /Сейчас риск/.test(riskCard.withRisk) && /стресс/.test(riskCard.withRisk), '«Риск сейчас» объясняет конкретные причины (стресс/сон), а не просто «высокий риск»');
+ok(/Что требует внимания/.test(riskCard.withRisk) && /Вероятность тяги сейчас/.test(riskCard.withRisk) && /стресс/.test(riskCard.withRisk), '«Что требует внимания» объясняет конкретные причины тяги (стресс/сон), а не просто «высокий риск»');
 ok(/Спокойно\. По твоим данным/.test(riskCard.noRisk), 'без факторов риска — спокойная, не пугающая формулировка');
 
 const bonus = await page.evaluate(() => {
@@ -993,7 +993,7 @@ const gen = await page.evaluate(async () => {
   closeOv('ov-crisis');
   return { outNormal, hasCravingBtn, outHallucinated, crisisFromFlag, crisisFromOutput };
 });
-ok(/переждём волну|Сёрфинг по тяге/.test(gen.outNormal) && gen.hasCravingBtn, 'генератор: бережное сообщение + метод из базы + мостик «записать как тягу» (JITAI)');
+ok(/переждём волну|Переждать волну тяги/.test(gen.outNormal) && gen.hasCravingBtn, 'генератор: бережное сообщение + метод из базы + мостик «записать как тягу» (JITAI)');
 ok(!/выдуманный/.test(gen.outHallucinated), 'grounding: метод не из нашей базы не подставляется — ИИ не навязывает выдуманную технику');
 ok(gen.crisisFromFlag, 'safety: флаг crisis от ИИ отменяет генерацию и открывает кризисный протокол');
 ok(gen.crisisFromOutput, 'safety: crisisScreen на самом ответе ИИ (второй слой) тоже уводит в кризисный протокол');
@@ -1124,12 +1124,12 @@ const why = await page.evaluate(() => {
     open: document.getElementById('ov-why').classList.contains('on'),
     count: list.length, symptom: last.symptom, need: last.need, action: last.action,
     kType: last.kType, verif: last.verif,
-    homeShown: /Разборы «Зачем\?»/.test(homeTxt) && /тянет проверять/.test(homeTxt),
+    homeShown: /Разборы ситуаций/.test(homeTxt) && /тянет проверять/.test(homeTxt),
   };
 });
 ok(why.count >= 1 && why.symptom === 'тянет проверять телефон' && why.action === 'сделать паузу 5 минут', 'Метод «Зачем?»: разбор сохранён (цепочка симптом→…→действие)');
 ok(why.kType === 'process_reflection' && why.verif === 'user_confirmed', 'Метод «Зачем?»: «паспорт данных» (process_reflection / user_confirmed)');
-ok(!why.open && why.homeShown, 'Метод «Зачем?»: лист закрывается, разбор виден на «Сегодня»');
+ok(!why.open && why.homeShown, 'Разбор ситуации: лист закрывается, разбор виден на «Сегодня»');
 await page.evaluate(() => { goTo('home'); });
 
 // ── Динамика «Моментов» (спарклайн за 2 недели) ──
@@ -1221,9 +1221,9 @@ const hist = await page.evaluate(() => {
   openOv('ov-history');
   const txt = document.getElementById('history-list').textContent || '';
   const rows = document.querySelectorAll('#history-list .srow').length;
-  return { open: document.getElementById('ov-history').classList.contains('on'), rows, hasMoment: /момент/.test(txt), hasWhy: /«Зачем\?»/.test(txt) && /исторический симптом/.test(txt) };
+  return { open: document.getElementById('ov-history').classList.contains('on'), rows, hasMoment: /момент/.test(txt), hasWhy: /разбор/i.test(txt) && /исторический симптом/.test(txt) };
 });
-ok(hist.open && hist.rows >= 2 && hist.hasMoment && hist.hasWhy, 'История состояний: моменты и разборы «Зачем?» в одном списке');
+ok(hist.open && hist.rows >= 2 && hist.hasMoment && hist.hasWhy, 'История состояний: моменты и разборы ситуаций в одном списке');
 await page.evaluate(() => { closeOv('ov-history'); goTo('home'); });
 
 // ── «За неделю» сводка (детерминированная, без ИИ) ──
@@ -1322,13 +1322,13 @@ const medsT = await page.evaluate(() => {
     intakeSaved: intake.kType === 'medication_intake' && intake.medId === plan.id && intake.status === 'taken',
     persisted: (db.meds || []).length === 1 && (db.medIntakes || []).length === 1,
     separate: plan.kType !== intake.kType,
-    ui: /Лекарства и витамины/.test(healthTxt) && /Витамин D/.test(healthTxt) && /сегодня: 1/.test(healthTxt),
+    ui: /Лекарства и план дня/.test(healthTxt) && /Витамин D/.test(healthTxt) && /сегодня: 1/.test(healthTxt),
     disclaimer: /не медицинская рекомендация/i.test(healthTxt),
   };
 });
 ok(medsT.planSaved && medsT.intakeSaved && medsT.persisted, 'здоровье: план (medication_plan) и факт (medication_intake) сохраняются раздельно');
 ok(medsT.separate && medsT.disclaimer, 'здоровье: план ≠ факт (разные классы) + дисклеймер «не рекомендация» виден');
-ok(medsT.ui, 'здоровье: секция «Лекарства и витамины» рендерится (имя + счётчик «сегодня: 1»)');
+ok(medsT.ui, 'здоровье: группа «Лекарства и план дня» рендерится (имя + счётчик «сегодня: 1»)');
 await page.evaluate(() => { DB.meds = []; DB.medIntakes = []; goTo('home'); });
 
 // ── Health Organizer: симптомы + измерения ──
@@ -1352,11 +1352,11 @@ const bodyT = await page.evaluate(() => {
     symOk: s.kType === 'symptom_observation' && s.severity === 6 && s.privacyClass === 'sensitive',
     meaOk: m.kType === 'measurement' && m.value === '120/80',
     persisted: (db.symptoms || []).length === 1 && (db.measures || []).length === 1,
-    ui: /Дневник тела/.test(txt) && /головная боль/.test(txt) && /120\/80/.test(txt),
+    ui: /Симптомы и показатели/.test(txt) && /головная боль/.test(txt) && /120\/80/.test(txt),
   };
 });
 ok(bodyT.symOk && bodyT.meaOk && bodyT.persisted, 'здоровье: симптом (observation) и измерение (measurement) сохраняются с паспортом');
-ok(bodyT.ui, 'здоровье: «Дневник тела» рендерит симптомы и измерения');
+ok(bodyT.ui, 'здоровье: «Симптомы и показатели» рендерит симптомы и измерения');
 await page.evaluate(() => { DB.symptoms = []; DB.measures = []; goTo('home'); });
 
 // ── Health Organizer: «Отчёт врачу» ──
@@ -3180,8 +3180,8 @@ ok(nsh.freshProfileOn && nsh.freshTabbarVisible, 'rollout 1.4: без сохра
 ok(nsh.onClass && nsh.tabs === 4 && nsh.hasFab, 'nav shell ON: body.navshell, 4 вкладки + FAB');
 ok(nsh.addLabel === 'Записать' && nsh.offLabel === 'Новый инсайт', 'nav shell: ＋ = «Записать» при ON, «Новый инсайт» при OFF');
 ok(nsh.diary && nsh.psy && nsh.astro && nsh.today, 'nav shell: вкладки ведут на существующие разделы (Дневник/Психология/Астрология/Главная)', JSON.stringify([nsh.diary, nsh.psy, nsh.astro, nsh.today]));
-ok(nsh.todayActive && nsh.more && nsh.moreActive && nsh.moreRows === 8,
-  'nav shell 1.1: «Меню» из шапки открывает компактную шторку из 8 пространств, aria-expanded=true', String(nsh.moreRows));
+ok(nsh.todayActive && nsh.more && nsh.moreActive && nsh.moreRows === 7,
+  'nav shell 1.1: «Меню» из шапки открывает компактную шторку из 7 пространств, aria-expanded=true', String(nsh.moreRows));
 ok(nsh.noMenuTab && nsh.astroTab,
   'nav shell 1.1: в нижнем острове нет «Меню», зато есть «Астрология»', JSON.stringify([nsh.noMenuTab, nsh.astroTab]));
 ok(nsh.capture && nsh.capBtns >= 9 && nsh.plusCapture, 'nav shell 1.2: полный лаунчер «Записать» (все типы записи)');
@@ -3252,11 +3252,11 @@ for (const [w, h, kind] of vps) {
     const groups = document.querySelectorAll('#nsh-nav-groups .nsh-grp-lbl').length;
     const grpBtns = document.querySelectorAll('#nsh-nav-groups .navlink').length;
     if (kind2 === 'phone') return { ok: barVisible && pad >= 64, barVisible, pad };
-    return { ok: !barVisible && sideVisible && groups === 5 && grpBtns === 8, barVisible, sideVisible, groups, grpBtns };
+    return { ok: !barVisible && sideVisible && groups === 5 && grpBtns === 7, barVisible, sideVisible, groups, grpBtns };
   }, kind));
 }
 ok(vpRes[0].ok && vpRes[1].ok && vpRes[2].ok, 'shell v2: iPhone SE/std/Pro Max — таб-бар виден, контент не перекрыт (padding ≥64)');
-ok(vpRes[3].ok, 'shell v2: iPad portrait — постоянный сгруппированный sidebar (5 групп, 8 пространств), таб-бар скрыт', JSON.stringify(vpRes[3]));
+ok(vpRes[3].ok, 'shell v2: iPad portrait — постоянный сгруппированный sidebar (5 групп, 7 пространств), таб-бар скрыт', JSON.stringify(vpRes[3]));
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(100);
 
@@ -3280,7 +3280,7 @@ const a11y = await page.evaluate(() => {
 });
 ok(a11y.allButtons && a11y.named && a11y.focusRule && a11y.current, `shell v2 a11y: ${a11y.n} элементов — настоящие button с именами, focus-visible, aria-current`);
 
-// Маршрутная полнота: все 46 маршрутов достижимы при включённом shell.
+// Маршрутная полнота: все 47 маршрутов достижимы при включённом shell.
 const routesData = ROUTES.map(r2 => ({ id: r2.id, nav: r2.nav }));
 const reach = await page.evaluate(async (routes) => {
   const failed = [];
@@ -3303,7 +3303,7 @@ const reach = await page.evaluate(async (routes) => {
   goTo('home');
   return { total: routes.length, failed };
 }, routesData);
-ok(reach.failed.length === 0 && reach.total === 46, `shell v2: маршрутная полнота — ${reach.total - reach.failed.length}/${reach.total} достижимы${reach.failed.length ? ' (провалены: ' + reach.failed.join(', ') + ')' : ''}`);
+ok(reach.failed.length === 0 && reach.total === 47, `shell v2: маршрутная полнота — ${reach.total - reach.failed.length}/${reach.total} достижимы${reach.failed.length ? ' (провалены: ' + reach.failed.join(', ') + ')' : ''}`);
 
 // Перезагрузка при ON: hash восстанавливает раздел (реальный reload).
 await page.evaluate(() => { location.hash = '#/overview'; });

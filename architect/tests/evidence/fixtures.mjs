@@ -112,7 +112,9 @@ export async function seedEmpty(page) {
     for (const k of ['checkins', 'spheres', 'sphereLogs', 'insights', 'dreams',
       'patterns', 'moments', 'whys', 'cravings', 'meds', 'medIntakes',
       'symptoms', 'measures', 'spiritual', 'evolution', 'digests', 'chapters',
-      'astroCharts', 'astroPartners', 'chats', 'corrections', 'livingMap']) {
+      'astroCharts', 'astroPartners', 'chats', 'corrections', 'livingMap',
+      'psyFormulations', 'psyGoals', 'psyInterventionEpisodes',
+      'psyObservations', 'psyReviews', 'psyAdaptivePlans', 'psyExperiments']) {
       DB[k] = [];
     }
     DB.vit = null; DB.astroBirth = null;
@@ -217,6 +219,68 @@ export async function seedPopulated(page, { longText = false } = {}) {
     ];
     DB.spiritual = [{ id: 1, day, text: 'Медитация утром — 15 минут тишины', createdAt: nowIso() }];
 
+    // — Психология: данные только через тот же canonical writer, что у UI —
+    // это одновременно реалистичная фикстура и защита от скрытого второго
+    // write-path. В longtext длинный фокус остаётся на первом видимом слое.
+    DB.psyFormulations = []; DB.psyGoals = []; DB.psyInterventionEpisodes = [];
+    DB.psyObservations = []; DB.psyReviews = []; DB.psyAdaptivePlans = []; DB.psyExperiments = [];
+    const putPsy = (type, input) => {
+      const result = psySaveRecord(type, input);
+      if (!result.ok) throw new Error(`psychology fixture ${type}: ${result.errors.join('; ')}`);
+      return result.rec;
+    };
+    const formulation = putPsy('psyFormulation', {
+      id: 'psyFormulation-fixture-1',
+      focus: LONG ? LONG.slice(0, 190) : 'Спокойнее завершать рабочий день',
+      formulation: 'После плотного дня я продолжаю мысленно решать задачи, из-за чего не успеваю переключиться на отдых.',
+      hypotheses: [{
+        text: 'Уведомления после работы могут поддерживать напряжение.',
+        claimClass: 'working_hypothesis', userStance: 'undecided',
+        sourceRefs: [{ coll: 'moments', id: 9002 }],
+      }],
+      protectiveFactors: ['Короткая прогулка помогает переключиться.'],
+      maintainingFactors: ['Рабочие уведомления остаются включёнными вечером.'],
+      sourceRefs: [{ coll: 'moments', id: 9002 }], status: 'active', createdAt: nowIso(),
+    });
+    const goal = putPsy('psyGoal', {
+      id: 'psyGoal-fixture-1', label: 'Завершать работу без вечернего напряжения',
+      proximalOutcome: 'Три вечера за неделю выключить рабочие уведомления в 19:00.',
+      distalOutcome: 'Легче переключаться на отдых и сон.',
+      targetMechanism: 'мысленное продолжение работы', status: 'active',
+      startedAt: nowIso(), reviewAt: '2026-03-22T08:00:00.000Z',
+      sourceRefs: [{ coll: 'moments', id: 9002 }], createdAt: nowIso(),
+    });
+    const observation = putPsy('psyObservation', {
+      id: 'psyObservation-fixture-1', timestamp: nowIso(),
+      metricId: 'Напряжение после работы', valueNumber: 7, unit: 'из 10',
+      contextTag: 'вечер после дедлайна', entryMode: 'event_based', source: 'user',
+      episode: {
+        event: 'Пришло рабочее сообщение после окончания дня.',
+        firstThought: 'Нужно ответить прямо сейчас.', body: 'Напряглись плечи.',
+        emotion: 'Тревога', impulse: 'Снова открыть ноутбук.',
+        action: 'Сделал паузу и отложил ответ до утра.', result: 'Напряжение немного снизилось.',
+      },
+      sourceRefs: [{ coll: 'moments', id: 9002 }], createdAt: nowIso(),
+    });
+    const intervention = putPsy('psyInterventionEpisode', {
+      id: 'psyIntervention-fixture-1', dateTime: nowIso(),
+      targetProblem: 'Сложно закончить рабочий день', targetMechanism: 'мысленное продолжение работы',
+      methodId: 'behavioral_activation', interventionSummary: 'Выключил уведомления и вышел на десятиминутную прогулку.',
+      rationale: 'Нужен небольшой физический переход от работы к отдыху.',
+      adherence: 'done', acceptability: 'helpful', outcomeClass: 'promising',
+      adverseEffects: [], confounders: ['В этот день было меньше встреч.'],
+      postObservationRefs: [{ coll: 'psyObservations', id: observation.id }],
+      sourceRefs: [{ coll: 'whys', id: 8881 }], createdAt: nowIso(),
+    });
+    putPsy('psyReview', {
+      id: 'psyReview-fixture-1', periodStart: '2026-03-09T08:00:00.000Z', periodEnd: nowIso(),
+      formulationRef: formulation.id, goalRefs: [goal.id],
+      interventionEpisodeRefs: [intervention.id], observationRefs: [observation.id],
+      methodsAppliedSummary: 'Отключение уведомлений и короткая прогулка.',
+      outcomeSummary: 'В один из вечеров переключиться получилось быстрее; данных пока мало.',
+      decision: 'continue', limitations: ['Пока записан только один случай.'], createdAt: nowIso(),
+    });
+
     // — Здоровье: план приёма + факт, симптом, измерение —
     DB.meds = [{ id: 501, kType: 'medication_plan', privacyClass: 'sensitive', name: 'Витамин D', dose: '2000 МЕ · утром', createdAt: nowIso(), sv: 2, _u: Date.now() }];
     DB.medIntakes = [{ id: 601, kType: 'medication_intake', medId: 501, status: 'taken', day, createdAt: nowIso(), sv: 2, _u: Date.now() }];
@@ -228,11 +292,12 @@ export async function seedPopulated(page, { longText = false } = {}) {
       DB.insights.unshift({ id: 99, title: 'Очень длинная запись о дне', tag: 'personal', body: LONG, links: [], createdAt: nowIso(), date: '15 марта' });
       if (DB.moments[0]) DB.moments[0].note = LONG;
       if (DB.dreams[0]) DB.dreams[0].text = LONG;
+      if (DB.psyFormulations[0]) DB.psyFormulations[0].formulation += ' ' + LONG;
     }
 
     try { if (typeof persist === 'function') persist(); } catch (_) {}
     try { rHome(); } catch (_) {}
-  }, LONG_RU);
+  }, longText ? LONG_RU : '');
 
   await setupAstro(page);
   await page.evaluate(() => { try { goTo('home'); } catch (_) {} });

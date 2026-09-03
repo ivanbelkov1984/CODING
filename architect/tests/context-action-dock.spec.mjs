@@ -114,8 +114,20 @@ await waitHidden(page);
 ok(true, 'Дневник/Сны работает с клавиатуры и скрывает dock при форме');
 await closeOverlay(page, 'ov-drm');
 
+await go(page, 'map', 'psychology');
+await waitLabels(page, ['Разбор ситуации', 'Состояние']);
+await activate(page, 'Разбор ситуации');
+await page.waitForFunction(() => document.getElementById('ov-why').classList.contains('on'));
+ok(true, 'Психология: основное действие открывает пошаговый разбор ситуации');
+await closeOverlay(page, 'ov-why');
+await waitLabels(page, ['Разбор ситуации', 'Состояние']);
+await activate(page, 'Состояние');
+await page.waitForFunction(() => document.getElementById('ov-moment').classList.contains('on'));
+ok(true, 'Психология: вторичное действие сохраняет быстрый вход в состояние');
+await closeOverlay(page, 'ov-moment');
+
 for (const [sub, label, overlay] of [
-  ['patterns', 'Новый паттерн', 'ov-pat-add'],
+  ['patterns', 'Новая закономерность', 'ov-pat-add'],
   ['spiritual', 'Новая запись', 'ov-spi-add'],
   ['evolution', 'Новая запись', 'ov-evo-add'],
 ]) {

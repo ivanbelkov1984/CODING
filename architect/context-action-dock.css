@@ -44,7 +44,7 @@
   }
 
   body.navshell .nsh-context-action.primary {
-    color: #fff;
+    color: var(--btn-primary-text);
     background: var(--blue-btn);
   }
 

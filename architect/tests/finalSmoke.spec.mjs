@@ -67,16 +67,15 @@ const clickText = (sel, text) => page.evaluate(([s, t]) => {
   if (!n) return false; n.click(); return true;
 }, [sel, text]);
 
-// ── 1–8: каждое основное пространство открывается из компактного меню ──
-step('1–8: все восемь пространств открываются из меню');
+// ── 1–7: каждое основное пространство открывается из компактного меню ──
+step('1–7: все семь пространств открываются из меню');
 for (const [label, check] of [
-  ['Главная', () => pgOn().then(p => p === 'pg-home')],
+  ['Сегодня', () => pgOn().then(p => p === 'pg-home')],
   ['Дневник', () => pgOn().then(p => p === 'pg-map')],
   ['Психология', () => page.evaluate(() => getComputedStyle(document.getElementById('ms-psychology')).display !== 'none')],
   ['Здоровье', () => pgOn().then(p => p === 'pg-health')],
   ['Астрология', () => pgOn().then(p => p === 'pg-astro')],
-  ['Закономерности', () => page.evaluate(() => getComputedStyle(document.getElementById('ms-patterns')).display !== 'none')],
-  ['Источники', () => ovOn('ov-ext-import')],
+  ['Подключить материалы', () => ovOn('ov-ext-import')],
   ['Настройки', () => pgOn().then(p => p === 'pg-settings')],
 ]) {
   const hit = await viaMenu(label);
@@ -174,7 +173,7 @@ ok(dream.formOpen && dream.grew, 'сон: форма открыта из ост�
 step('13: психология');
 await clearOv();
 await viaMenu('Психология');
-await dockClick('Момент');
+await dockClick('Состояние');
 const psy = await page.evaluate(async () => {
   const on = !!document.querySelector('#ov-moment.on');
   const n = document.getElementById('mo-note'); if (n) n.value = 'TEST-SMK момент';
@@ -205,10 +204,12 @@ ok(!astro.badDay && !astro.badTime && astro.goodDay && astro.goodTime,
 ok(astro.instantBad === null && astro.instantOk,
   'астрология: несуществующий момент отвергается, реальный собирается', JSON.stringify(astro));
 
-// ── 15: закономерности — подписи человеческие, причинность не заявляется ──
+// ── 15: закономерности внутри Дневника — подписи человеческие, причинность не заявляется ──
 step('15: закономерности');
 await clearOv();
-await viaMenu('Закономерности');
+await viaMenu('Дневник');
+await page.click('#subnav .snpill[data-sub="patterns"]');
+await page.waitForTimeout(140);
 const pat = await page.evaluate(() => {
   const box = document.getElementById('ms-patterns');
   const txt = (box || {}).textContent || '';
@@ -221,7 +222,7 @@ ok(pat.open && pat.noJson, 'закономерности: экран откры�
 // ── 16: источники — статусы и checkpoint существуют ──
 step('16: источники');
 await clearOv();
-await viaMenu('Источники');
+await viaMenu('Подключить материалы');
 const src = await page.evaluate(() => ({
   open: !!document.querySelector('#ov-ext-import.on'),
   txt: (document.getElementById('ov-ext-import') || {}).textContent || '',
@@ -237,7 +238,7 @@ step('17: резервные копии и Инспектор');
 await clearOv();
 await viaMenu('Настройки');
 const insp = await page.evaluate(async () => {
-  const row = [...document.querySelectorAll('#pg-settings .srow')].find(r => /Мои записи/.test(r.textContent));
+  const row = [...document.querySelectorAll('#pg-settings .srow')].find(r => /Все мои записи/.test(r.textContent));
   if (!row) return { found: false };
   row.click();
   await new Promise(r => setTimeout(r, 200));
@@ -260,7 +261,7 @@ ok(insp.showsMeasure && insp.showsEffective,
 await clearOv();
 const bak = await page.evaluate(async () => {
   const t = document.getElementById('toasts'); if (t) t.innerHTML = '';
-  const row = [...document.querySelectorAll('#pg-settings .srow')].find(r => /Зашифрованная резервная копия/.test(r.textContent));
+  const row = [...document.querySelectorAll('#pg-settings .srow')].find(r => /Защищённая копия/.test(r.textContent));
   if (!row) return { found: false };
   row.click();
   await new Promise(r => setTimeout(r, 300));

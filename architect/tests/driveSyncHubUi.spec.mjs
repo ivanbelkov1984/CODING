@@ -124,8 +124,11 @@ const openSources = async () => {
   // Раздел «Настройки» — та же навигация, что у видимой кнопки меню.
   await page.evaluate(() => goTo('settings'));
   await page.waitForSelector('#pg-settings', { state: 'visible' });
-  // Дальше — НАСТОЯЩИЙ клик по видимой строке, без обхода обработчика.
-  const entry = page.locator('#pg-settings button.srow', { hasText: 'Импорт внешней работы' });
+  // Служебный импорт намеренно лежит во втором слое Настроек. Раскрываем его
+  // так же, как это делает человек, и кликаем настоящий элемент управления.
+  const advanced = page.locator('#pg-settings details.settings-advanced');
+  if (!(await advanced.evaluate(el => el.open))) await advanced.locator(':scope > summary').click();
+  const entry = page.locator('#pg-settings button.srow', { hasText: 'Подключить внешние материалы' });
   await entry.first().waitFor({ state: 'visible' });
   await entry.first().click();
   await page.waitForSelector('#ov-ext-import.on', { state: 'attached' });
@@ -173,7 +176,7 @@ console.log('\nDRIVE SYNC HUB — ИНТЕРФЕЙС\n');
   await reset();
   await openSources();
   const visible = await page.locator('#ov-ext-import.on').count();
-  ok(visible === 1, 'A. экран «Импорт внешней работы» открывается видимой кнопкой меню');
+  ok(visible === 1, 'A. экран подключения материалов открывается видимой кнопкой второго слоя Настроек');
 }
 
 // ── B. Drive-источник создаётся через видимую форму ──────────────────

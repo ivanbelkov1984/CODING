@@ -71,9 +71,17 @@ function auditInPage(ctx) {
 
     // 2. Размер тап-цели.
     const r = el.getBoundingClientRect();
-    if ((r.width < 44 || r.height < 44) && tag !== 'a' /* инлайн-ссылки допустимы */) {
+    // У checkbox/radio подпись <label> является частью нативной зоны нажатия.
+    // Считаем её реальный прямоугольник, а не только маленький системный glyph.
+    const isChoice = tag === 'input' && (el.type === 'checkbox' || el.type === 'radio');
+    const explicitLabel = isChoice && el.id
+      ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`)
+      : null;
+    const hitLabel = isChoice ? (el.closest('label') || explicitLabel) : null;
+    const hitRect = hitLabel && isVisible(hitLabel) ? hitLabel.getBoundingClientRect() : r;
+    if ((hitRect.width < 44 || hitRect.height < 44) && tag !== 'a' /* инлайн-ссылки допустимы */) {
       if (out['tap-size'].length < CAP) {
-        out['tap-size'].push({ where: label(el), el: s, detail: `${Math.round(r.width)}×${Math.round(r.height)} px` });
+        out['tap-size'].push({ where: label(el), el: s, detail: `${Math.round(hitRect.width)}×${Math.round(hitRect.height)} px` });
       }
     }
 

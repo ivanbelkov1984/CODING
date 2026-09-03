@@ -4,8 +4,8 @@
 //   1. «Ещё» не существует: ни кнопки, ни разметки. «Меню» открывает drawer —
 //      тот же sidebar со всеми разделами, сгруппированно.
 //   2. Каждый пункт sidebar ведёт в РЕАЛЬНОЕ назначение (нет мёртвых кнопок).
-//   3. Подвкладки Дневника (Сны/Психология/Закономерности) имеют собственные
-//      пункты и подсвечиваются по активной подвкладке.
+//   3. Психология имеет свой пункт, а Сны/Закономерности остаются внутри
+//      Дневника; активное состояние показывает человеку родительский раздел.
 //   4. контекстный dock — контекстные действия (1–3), скрыт там, где их нет,
 //      каждая кнопка открывает настоящую форму.
 //   5. Whole Life «Жизнь сейчас» — проекция существующих данных: пустые
@@ -29,6 +29,7 @@ let pass = 0, fail = 0;
 const errors = [];
 // Дождаться устоявшегося состояния вместо фиксированной паузы. Молча выходит
 // по таймауту — судит всегда сам assert, а не наличие/отсутствие ожидания.
+const clearOv2 = () => page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
 const settled = async (fn, ms = 3000) => {
   try { await page.waitForFunction(fn, null, { timeout: ms, polling: 40 }); return true; }
   catch (e) { return false; }
@@ -70,8 +71,8 @@ ok(menu.noMoreOverlay && menu.noMoreTab, 'ни разметки ov-more, ни в
 ok(menu.menuBtn && menu.ariaBefore === 'false', 'кнопка «Меню» — настоящий <button> с aria-expanded');
 ok(menu.open && menu.hash === '#/menu', 'меню открывает drawer, hash #/menu адресуем', JSON.stringify([menu.open, menu.hash]));
 ok(menu.closed && menu.hashAfterClose !== '#/menu', 'закрытие возвращает hash раздела', menu.hashAfterClose);
-const REQUIRED = ['Главная', 'Дневник', 'Психология', 'Здоровье',
-  'Астрология', 'Закономерности', 'Источники', 'Настройки'];
+const REQUIRED = ['Сегодня', 'Дневник', 'Психология', 'Здоровье',
+  'Астрология', 'Подключить материалы', 'Настройки'];
 const missing = REQUIRED.filter(r => !menu.items.includes(r));
 ok(missing.length === 0, `все ${REQUIRED.length} крупных пространств доступны напрямую`, 'нет: ' + missing.join(', '));
 ok(menu.allButtons, 'каждый пункт — настоящий <button>');
@@ -103,7 +104,7 @@ const dest = await page.evaluate(async () => {
 const dead = dest.filter(([label, pg, ov]) => String(pg).startsWith('THROW') || (!pg && !ov));
 ok(dead.length === 0, `все ${dest.length} пунктов открывают страницу или экран`, JSON.stringify(dead));
 const byLabel = Object.fromEntries(dest.map(([l, pg, ov]) => [l, { pg, ov }]));
-ok(byLabel['Источники'] && byLabel['Источники'].ov === 'ov-ext-import', '«Источники» открывают экран импорта/моста', JSON.stringify(byLabel['Источники']));
+ok(byLabel['Подключить материалы'] && byLabel['Подключить материалы'].ov === 'ov-ext-import', '«Подключить материалы» открывает экран импорта/моста', JSON.stringify(byLabel['Подключить материалы']));
 ok(!byLabel['Поиск'] && !byLabel['Инспектор записей'],
   'Поиск и Инспектор — инструменты, а не пункты меню (их пути проверяются в §13)');
 // Под file:// ESM-модуль копий намеренно не грузится (null-origin CORS,
@@ -136,8 +137,9 @@ ok(hl.dreams.length === 1 && hl.dreams[0] === 'Дневник',
   'на подвкладке снов подсвечен родитель «Дневник» — видно, где находишься', JSON.stringify(hl.dreams));
 ok(hl.psy.length === 1 && hl.psy[0] === 'Психология',
   'психология подсвечивает ровно «Психологию», не залезая в Дневник', JSON.stringify(hl.psy));
-ok(hl.pat.includes('Закономерности'), 'закономерности подсвечены', JSON.stringify(hl.pat));
-ok(hl.health.includes('Здоровье') && !hl.health.some(t => ['Сны', 'Психология', 'Закономерности'].includes(t)),
+ok(hl.pat.length === 1 && hl.pat[0] === 'Дневник',
+  'на Закономерностях подсвечен родитель «Дневник»', JSON.stringify(hl.pat));
+ok(hl.health.includes('Здоровье') && !hl.health.some(t => ['Дневник', 'Психология'].includes(t)),
   'уход со страницы Дневника снимает подсветку подвкладок', JSON.stringify(hl.health));
 
 console.log('\n── § 4. Контекстный dock: действия текущего экрана, один бар ──');
@@ -169,7 +171,8 @@ const dockD = await page.evaluate(async () => {
   };
   out.healthOpens = await run("goTo('health')", 'Измерение');
   out.dreamOpens  = await run("goTo('map');msub('dreams')", 'Записать сон');
-  out.psyOpens    = await run("goTo('map');msub('psychology')", 'Момент');
+  out.psyWhyOpens = await run("goTo('map');msub('psychology')", 'Разбор ситуации');
+  out.psyStateOpens = await run("goTo('map');msub('psychology')", 'Состояние');
   document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
   goTo('home');
   return out;
@@ -185,8 +188,10 @@ ok(dockD.vit.length >= 1, 'сферы: есть действие', JSON.stringif
 ok(dockD.settingsHidden, 'на настройках бар скрыт — нет действий, нет бара');
 ok(dockD.healthOpens === 'ov-measure', 'dock → «Измерение» открывает настоящую форму', String(dockD.healthOpens));
 ok(dockD.dreamOpens === 'ov-drm', 'dock → «Записать сон» открывает настоящую форму', String(dockD.dreamOpens));
-ok(dockD.psyOpens === 'ov-moment',
-  'психология не потеряла действия при удалении дубля: «Момент» открывает форму', String(dockD.psyOpens));
+ok(dockD.psyWhyOpens === 'ov-why',
+  'психология: основное действие открывает пошаговый разбор', String(dockD.psyWhyOpens));
+ok(dockD.psyStateOpens === 'ov-moment',
+  'психология: «Состояние» открывает прежнюю форму момента', String(dockD.psyStateOpens));
 
 console.log('\n── § 5. Whole Life: проекция реальных данных ──');
 const life = await page.evaluate(() => {
@@ -472,20 +477,20 @@ await page.evaluate(() => { const s = document.getElementById('splash'); if (s) 
 await page.waitForTimeout(700);
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
 
-const PRIMARY = ['Главная', 'Дневник', 'Психология', 'Здоровье', 'Астрология',
-  'Закономерности', 'Источники', 'Настройки'];
+const PRIMARY = ['Сегодня', 'Дневник', 'Психология', 'Здоровье', 'Астрология',
+  'Подключить материалы', 'Настройки'];
 const ia = await page.evaluate(() => ({
   items: [...document.querySelectorAll('#nsh-nav-groups .navlink')].map(n => n.textContent.trim()),
   groups: [...document.querySelectorAll('#nsh-nav-groups .nsh-grp-lbl')].map(g => g.textContent.trim()),
   tabs: [...document.querySelectorAll('#nsh-tabbar .nsh-tab')].map(b => b.textContent.trim()),
 }));
-ok(ia.items.length <= 8, `в глобальном меню ${ia.items.length} пунктов (≤8)`, ia.items.join(' · '));
+ok(ia.items.length === 7, `в глобальном меню ровно ${ia.items.length} крупных пространств`, ia.items.join(' · '));
 ok(PRIMARY.every(p => ia.items.includes(p)) && ia.items.every(i => PRIMARY.includes(i)),
   'меню — ровно утверждённые пространства', 'есть: ' + ia.items.join(' · '));
 ok(!ia.items.includes('Ещё') && !ia.tabs.includes('Ещё'), 'ни «Ещё», ни его следов');
 ok(!/Wave|wave|X2|Experience/.test(ia.items.join(' ') + ia.groups.join(' ')), 'нет внутренних названий');
 // Вторичные функции НЕ являются nav destination
-const REMOVED = ['Записать', 'Сферы', 'Сны', 'Цели', 'Отчёт врачу', 'Обзор',
+const REMOVED = ['Записать', 'Сферы', 'Сны', 'Цели', 'Закономерности', 'Отчёт врачу', 'Обзор',
   'Поиск', 'Инспектор записей', 'Резервные копии', 'Профили', 'Обратная связь'];
 const stillThere = REMOVED.filter(r => ia.items.includes(r));
 ok(stillThere.length === 0, `все ${REMOVED.length} вторичных функций убраны из меню`, 'остались: ' + stillThere.join(', '));
@@ -542,27 +547,31 @@ ok(await dockClick('Записать сон') && await ovOpen('ov-drm'),
 // 3. Психология и цели
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
 await clickNav('Психология');
-const psyOn = await page.evaluate(() => getComputedStyle(document.getElementById('ms-psychology')).display !== 'none');
-ok(psyOn, 'меню → Психология открывает рабочее пространство');
+const psyOn = await page.evaluate(() => ({
+  visible: getComputedStyle(document.getElementById('ms-psychology')).display !== 'none',
+  title: document.getElementById('ptitle').textContent.trim(),
+}));
+ok(psyOn.visible && psyOn.title === 'Психология',
+  'меню → Психология открывает рабочее пространство с правильным заголовком', JSON.stringify(psyOn));
 
-// 4. Цели — с Главной, через проекцию «Жизнь сейчас»
-await clickNav('Главная');
-ok(await pgOn() === 'pg-home', 'меню → Главная');
+// 4. Цели — с Сегодня, через проекцию «Жизнь сейчас»
+await clickNav('Сегодня');
+ok(await pgOn() === 'pg-home', 'меню → Сегодня');
 const goalHit = await clickText('#x2-life .x2-row', 'Цели');
 await page.waitForTimeout(150);
-ok(goalHit && await pgOn() === 'pg-map', 'Главная → «Цели» ведут в психологию, где живут цели');
+ok(goalHit && await pgOn() === 'pg-map', 'Сегодня → «Цели» ведут в психологию, где живут цели');
 
-// 5. Сферы — с Главной
-await clickNav('Главная');
+// 5. Сферы — с Сегодня
+await clickNav('Сегодня');
 const sphHit = await clickText('#x2-life .x2-row', 'Сферы');
 await page.waitForTimeout(150);
-ok(sphHit && await pgOn() === 'pg-vit', 'Главная → «Сферы» открывают раздел сфер');
+ok(sphHit && await pgOn() === 'pg-vit', 'Сегодня → «Сферы» открывают раздел сфер');
 
-// 6. Обзор — с Главной (не второй home, а аналитика внутри)
-await clickNav('Главная');
+// 6. Обзор — с Сегодня (не второй home, а аналитика внутри)
+await clickNav('Сегодня');
 const ovwHit = await clickText('#x2-life .x2-row', 'Обзор недели');
 await page.waitForTimeout(150);
-ok(ovwHit && await pgOn() === 'pg-sys', 'Главная → «Обзор недели» открывает аналитику');
+ok(ovwHit && await pgOn() === 'pg-sys', 'Сегодня → «Обзор недели» открывает аналитику');
 
 // 7. Здоровье: измерение и отчёт врачу
 await clickNav('Здоровье');
@@ -574,13 +583,15 @@ const docHit = await clickText('#pg-health button', 'Отчёт врачу');
 await page.waitForTimeout(200);
 ok(docHit && await ovOpen('ov-doc-report'), 'Здоровье → «Отчёт врачу» — инструмент внутри Здоровья, не пункт меню');
 
-// 8. Астрология и Закономерности
+// 8. Астрология — из меню; Закономерности — внутри Дневника
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
 await clickNav('Астрология');
 ok(await pgOn() === 'pg-astro', 'меню → Астрология');
-await clickNav('Закономерности');
+await clickNav('Дневник');
+const patternHit = await clickText('#subnav .snpill', 'Повторы');
+await page.waitForTimeout(120);
 const patOn = await page.evaluate(() => getComputedStyle(document.getElementById('ms-patterns')).display !== 'none');
-ok(patOn, 'меню → Закономерности открывают Pattern Engine');
+ok(patternHit && patOn, 'Дневник → Повторы открывают существующий раздел закономерностей');
 
 // 9. Поиск — из шапки, а не из меню
 const searchHit = await page.evaluate(() => {
@@ -592,8 +603,8 @@ ok(searchHit && await ovOpen('ov-search'), 'Поиск всегда доступ
 
 // 10. Источники / Drive
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
-await clickNav('Источники');
-ok(await ovOpen('ov-ext-import'), 'меню → Источники открывают мост импорта (Drive/ChatGPT/файлы)');
+await clickNav('Подключить материалы');
+ok(await ovOpen('ov-ext-import'), 'меню → Подключить материалы открывает мост импорта (Drive/ChatGPT/файлы)');
 
 // 11. Настройки: Инспектор, Резервные копии, Профили, Обратная связь
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
@@ -601,18 +612,18 @@ await clickNav('Настройки');
 ok(await pgOn() === 'pg-settings', 'меню → Настройки');
 const inSettings = await page.evaluate(() => {
   const txt = document.getElementById('pg-settings').textContent;
-  return { rec: /Мои записи/.test(txt), bak: /Зашифрованная резервная копия/.test(txt),
-    prof: /Профиль/.test(txt), fb: /Обратная связь/.test(txt), src: /Импорт внешней работы/.test(txt) };
+  return { rec: /Все мои записи/.test(txt), bak: /Защищённая копия/.test(txt),
+    prof: /Мой профиль/.test(txt), fb: /Обратная связь/.test(txt), src: /Подключить внешние материалы/.test(txt) };
 });
 ok(inSettings.rec && inSettings.bak && inSettings.prof && inSettings.fb,
   'Настройки содержат Инспектор, Резервные копии, Профиль и Обратную связь', JSON.stringify(inSettings));
-ok(await clickText('#pg-settings .srow', 'Мои записи') && await ovOpen('ov-records'),
-  'Настройки → «Мои записи» открывают Инспектор записей');
+ok(await clickText('#pg-settings .srow', 'Все мои записи') && await ovOpen('ov-records'),
+  'Настройки → «Все мои записи» открывают Инспектор записей');
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
 ok(await clickText('#pg-settings .srow', 'Обратная связь') && await ovOpen('ov-feedback'),
   'Настройки → «Обратная связь» открывает форму');
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
-const bakHit = await clickText('#pg-settings .srow', 'Зашифрованная резервная копия');
+const bakHit = await clickText('#pg-settings .srow', 'Защищённая копия');
 await page.waitForTimeout(250);
 const bakState = await page.evaluate(() => ({
   open: !!document.querySelector('#ov-backup-enc.on'),
@@ -690,7 +701,7 @@ await page.evaluate(() => { const s = document.getElementById('splash'); if (s) 
 await page.waitForTimeout(700);
 await page.evaluate(() => document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on')));
 for (const [name, go, wantIsland] of [
-  ['Главная', "goTo('home')", false],
+  ['Сегодня', "goTo('home')", false],
   ['Дневник', "goTo('map');msub('overview')", true],
   ['Сны', "goTo('map');msub('dreams')", true],
   ['Здоровье', "goTo('health')", true],
@@ -728,6 +739,278 @@ const islandNav = await page.evaluate(() => {
   return seen.filter(a => menu.includes(a));
 });
 ok(islandNav.length === 0, 'остров содержит только действия, не дубли пунктов меню', islandNav.join(', '));
+
+
+console.log('\n── § 17. UX cleanup: нет переполнений, дублей и жаргона ──');
+await page.goto(FILE);
+await page.waitForSelector('#nsh-tabbar', { state: 'attached' });
+await page.evaluate(() => { const s = document.getElementById('splash'); if (s) s.style.display = 'none'; });
+await page.waitForTimeout(700);
+await clearOv2();
+
+// 17.1 Ни один экран не уезжает вправо на 390px.
+for (const [name, go] of [
+  ['Сегодня', "goTo('home')"], ['Дневник', "goTo('map');msub('overview')"],
+  ['Психология', "goTo('map');msub('psychology')"], ['Здоровье', "goTo('health')"],
+  ['Астрология', "goTo('astro')"], ['Закономерности', "goTo('map');msub('patterns')"],
+  ['Сферы', "goTo('vit')"], ['Обзор', "goTo('sys')"], ['Настройки', "goTo('settings')"],
+]) {
+  await page.evaluate(g => (new Function(g))(), go);
+  await page.waitForTimeout(220);
+  const o = await page.evaluate(() => {
+    const vis = el => { const s = getComputedStyle(el), b = el.getBoundingClientRect();
+      return s.display !== 'none' && s.visibility !== 'hidden' && b.width > 0 && b.height > 0; };
+    const chain = el => { for (let n = el; n && n !== document.body; n = n.parentElement) if (!vis(n)) return false; return true; };
+    const bad = [];
+    const inScroller = el => {
+      for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+        const ox = getComputedStyle(n).overflowX;
+        if (ox === 'auto' || ox === 'scroll') return true;
+      }
+      return false;
+    };
+    document.querySelector('.pg.on').querySelectorAll('*').forEach(el => {
+      if (!chain(el) || inScroller(el)) return;
+      const b = el.getBoundingClientRect();
+      if (b.width === 0) return;
+      if (b.right > innerWidth + 1) bad.push(`${el.tagName}.${String(el.className).slice(0, 18)}→${Math.round(b.right)}`);
+      else if (el.scrollWidth > el.clientWidth + 2 && getComputedStyle(el).overflowX === 'visible')
+        bad.push(`OVF ${el.tagName}.${String(el.className).slice(0, 18)}`);
+    });
+    return { bad: [...new Set(bad)].slice(0, 4), doc: document.documentElement.scrollWidth - innerWidth };
+  });
+  ok(o.bad.length === 0 && o.doc <= 0, `${name}: нет горизонтального переполнения на 390px`, o.bad.join(' | '));
+}
+
+// 17.2 Островок: 70% ширины, стабилен на всех вкладках, ничего не обрезано.
+const barGeo = [];
+for (const go of ["goTo('home')", "goTo('map');msub('overview')", "goTo('map');msub('psychology')", "goTo('astro')"]) {
+  await page.evaluate(g => (new Function(g))(), go);
+  await page.waitForTimeout(200);
+  barGeo.push(await page.evaluate(() => {
+    const b = document.getElementById('nsh-tabbar').getBoundingClientRect();
+    const clipped = [...document.querySelectorAll('#nsh-tabbar .nsh-tab')]
+      .some(t => t.scrollWidth > t.clientWidth + 2);
+    return { w: Math.round(b.width), pct: Math.round(b.width / innerWidth * 100), x: Math.round(b.x), clipped };
+  }));
+}
+ok(barGeo.every(g => g.pct === barGeo[0].pct && g.w === barGeo[0].w),
+  `островок не «дышит» при переключении вкладок (${barGeo.map(g => g.w).join('/')}px)`, JSON.stringify(barGeo));
+ok(barGeo[0].pct === 70, `островок занимает 70% ширины (${barGeo[0].pct}%)`, JSON.stringify(barGeo[0]));
+ok(barGeo.every(g => !g.clipped), 'ни одна вкладка островка не обрезана');
+
+// 17.3 «Зачем?» больше не самостоятельная глобальная сущность.
+const why = await page.evaluate(async () => {
+  const seen = [];
+  const scan = l => document.querySelectorAll('body *').forEach(el => {
+    if (el.closest('script,style,template')) return;
+    const own = [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ');
+    if (own.includes('«Зачем?»')) seen.push(l + ': ' + own.trim().slice(0, 50));
+  });
+  ['home', 'map', 'health', 'astro', 'sys', 'settings'].forEach(t => { goTo(t); scan(t); });
+  document.querySelectorAll('.ov').forEach(o => { o.classList.add('on'); scan('ov:' + o.id); o.classList.remove('on'); });
+  goTo('home');
+  // Разбор при этом остался достижим и пишет туда же.
+  const before = (DB.whys || []).length;
+  openOv('ov-why');
+  const formOpen = !!document.querySelector('#ov-why.on');
+  const title = (document.querySelector('#ov-why .sh-title') || {}).textContent || '';
+  document.querySelectorAll('.ov.on').forEach(o => o.classList.remove('on'));
+  return { seen: [...new Set(seen)], formOpen, title, coll: Array.isArray(DB.whys), before };
+});
+ok(why.seen.length === 0, '«Зачем?» как отдельная сущность не показывается нигде', why.seen.join(', '));
+ok(why.formOpen && /Разбор ситуации/.test(why.title),
+  'разбор ситуации остался рабочим и называется по-человечески', why.title);
+ok(why.coll, 'коллекция разборов не тронута — переименование только в подписях');
+
+// 17.4 Разбор ситуации: один вопрос на экран, прежний writer и прежние поля.
+const whyWizard = await page.evaluate(() => {
+  openOv('ov-why');
+  const panels = [...document.querySelectorAll('#why-wizard [data-why-step]')];
+  const visible = () => panels.filter(p => !p.hidden && p.offsetParent !== null);
+  const first = {
+    count: (document.getElementById('why-step-count') || {}).textContent,
+    visible: visible().length,
+    next: !(document.getElementById('why-next') || {}).hidden,
+    save: !(document.getElementById('why-save') || {}).hidden,
+  };
+  document.getElementById('why-symptom').value = 'TEST-X2 ситуация';
+  for (let i = 0; i < 6; i++) whyNext();
+  const last = {
+    count: (document.getElementById('why-step-count') || {}).textContent,
+    visible: visible().length,
+    back: !(document.getElementById('why-back') || {}).disabled,
+    next: !(document.getElementById('why-next') || {}).hidden,
+    save: !(document.getElementById('why-save') || {}).hidden,
+    progress: parseFloat((document.getElementById('why-progress-bar') || {}).style.width || '0'),
+  };
+  const before = DB.whys.length;
+  document.getElementById('why-action').value = 'TEST-X2 маленький шаг';
+  saveWhy();
+  const rec = DB.whys[DB.whys.length - 1];
+  openOv('ov-why');
+  const reset = (document.getElementById('why-step-count') || {}).textContent;
+  closeOv('ov-why');
+  return { panels: panels.length, first, last, grew: DB.whys.length === before + 1,
+    fields: rec && WHY_FIELDS.every(k => Object.prototype.hasOwnProperty.call(rec, k)),
+    symptom: rec && rec.symptom, action: rec && rec.action, reset };
+});
+ok(whyWizard.panels === 7 && whyWizard.first.visible === 1 && /1 из 7/.test(whyWizard.first.count),
+  'разбор показывает один вопрос за шаг, а не семь полей сразу', JSON.stringify(whyWizard.first));
+ok(whyWizard.last.visible === 1 && /7 из 7/.test(whyWizard.last.count) && whyWizard.last.back &&
+  !whyWizard.last.next && whyWizard.last.save && whyWizard.last.progress === 100,
+  'прогресс, Назад и Сохранить корректны на последнем шаге', JSON.stringify(whyWizard.last));
+ok(whyWizard.grew && whyWizard.fields && whyWizard.symptom === 'TEST-X2 ситуация' &&
+  whyWizard.action === 'TEST-X2 маленький шаг',
+  'пошаговый UI пишет прежним saveWhy() в прежние canonical-поля', JSON.stringify(whyWizard));
+ok(/1 из 7/.test(whyWizard.reset), 'новый разбор снова начинается с первого вопроса', whyWizard.reset);
+
+// 17.5 Сегодня: без декоративного приветствия и без дубля быстрых действий.
+await page.evaluate(() => goTo('home'));
+await page.waitForTimeout(250);
+const home = await page.evaluate(() => {
+  const pg = document.getElementById('pg-home');
+  const secs = [...pg.querySelectorAll('.sec-lbl')].filter(s => s.offsetParent !== null).map(s => s.textContent.trim());
+  return { greeting: !!document.getElementById('h-hl'), tiles: pg.querySelectorAll('.qarow .qabtn').length,
+    secs, hasDate: !!document.getElementById('h-date'),
+    detailsClosed: !document.getElementById('h-more').classList.contains('on'),
+    stateHidden: document.querySelector('#pg-home .state-hero').offsetParent === null };
+});
+ok(!home.greeting, 'декоративного приветствия на Главной нет');
+ok(home.tiles === 0, 'сетка из пяти быстрых плиток убрана — их даёт ＋', String(home.tiles));
+ok(home.hasDate, 'дата осталась: она даёт контекст, а не украшение');
+ok(home.secs.length <= 5, `Сегодня не перегружено секциями (${home.secs.length}): ${home.secs.join(' · ')}`);
+ok(home.detailsClosed && home.stateHidden,
+  'графики, история и подробная динамика не конкурируют с первым экраном Сегодня', JSON.stringify(home));
+
+// 17.6 Здоровье: первый слой короткий, подробности собраны в четыре области.
+const healthUi = await page.evaluate(() => {
+  goTo('health');
+  const root = document.getElementById('health-out');
+  const groups = [...root.querySelectorAll(':scope > details.health-group')];
+  return {
+    title: (document.getElementById('ptitle') || {}).textContent,
+    repeatedTitle: root.querySelectorAll(':scope > .domain-head .domain-title').length,
+    intro: (root.querySelector(':scope > .domain-head .domain-subtitle') || {}).textContent,
+    attention: [...root.querySelectorAll(':scope > .sec-lbl')].map(x => x.textContent.trim()),
+    names: groups.map(g => (g.querySelector(':scope > summary') || {}).textContent.trim()),
+    closed: groups.every(g => !g.open),
+    uniqueTargets: ['health-today', 'health-lab', 'health-docs', 'health-timeline']
+      .every(id => document.querySelectorAll('#' + id).length === 1),
+  };
+});
+ok(healthUi.title === 'Здоровье' && healthUi.repeatedTitle === 0 && /План на сегодня/.test(healthUi.intro) && healthUi.attention.includes('Что требует внимания'),
+  'Здоровье сразу объясняет раздел и показывает только важное сейчас', JSON.stringify(healthUi));
+ok(healthUi.names.length === 4 && healthUi.closed && healthUi.uniqueTargets,
+  'детали Здоровья собраны в четыре свёрнутые области без дублей render-target', JSON.stringify(healthUi));
+
+// 17.6a Психология: один ясный фокус и понятные задачи вместо методологического журнала.
+const psyUi = await page.evaluate(() => {
+  goTo('map');
+  const content = document.querySelector('.content');
+  content.scrollTop = Math.min(200, Math.max(0, content.scrollHeight - content.clientHeight));
+  msub('psychology');
+  const root = document.getElementById('psy-ws');
+  const summaries = [...root.querySelectorAll(':scope > details > summary')].map(x => x.textContent.trim());
+  return {
+    title: (document.getElementById('ptitle') || {}).textContent,
+    scrollTop: content.scrollTop,
+    diaryNavHidden: getComputedStyle(document.getElementById('subnav')).display === 'none',
+    repeatedTitle: root.querySelectorAll(':scope > .domain-head .domain-title').length,
+    intro: (root.querySelector(':scope > .domain-head .domain-subtitle') || {}).textContent,
+    focus: (root.querySelector(':scope > .psy-now .domain-title') || {}).textContent,
+    primary: [...root.querySelectorAll(':scope > .psy-now button')].map(x => x.textContent.trim()),
+    summaries,
+    advancedClosed: !root.querySelector(':scope > details.psy-advanced').open,
+  };
+});
+ok(psyUi.title === 'Психология' && psyUi.scrollTop === 0 && psyUi.diaryNavHidden && psyUi.repeatedTitle === 0 && /Понять, что происходит/.test(psyUi.intro) && psyUi.focus,
+  'Психология открывается сверху, без строки разделов Дневника и повторного заголовка', JSON.stringify(psyUi));
+ok(psyUi.primary.includes('Разобрать ситуацию') && psyUi.primary.includes('Записать, что произошло') &&
+  psyUi.summaries.some(x => /Что со мной происходит/.test(x)) && psyUi.summaries.some(x => /Мои цели/.test(x)) && psyUi.advancedClosed,
+  'первый слой Психологии говорит задачами, а дополнительные инструменты свёрнуты', JSON.stringify(psyUi));
+
+// 17.7 Шапка: поиск, добавление и одно глобальное меню; Настройки не дублируются.
+const topbar = await page.evaluate(() => ({
+  search: document.querySelectorAll('.topbar [aria-label="Поиск"]').length,
+  add: document.querySelectorAll('.topbar #topbar-add').length,
+  menu: document.querySelectorAll('.topbar #topbar-menu').length,
+  settings: document.querySelectorAll('.topbar [aria-label="Настройки"]').length,
+}));
+ok(topbar.search === 1 && topbar.add === 1 && topbar.menu === 1 && topbar.settings === 0,
+  'в шапке нет дублирующей шестерёнки: Настройки живут в единственном Меню', JSON.stringify(topbar));
+
+// 17.8 Астрология: понятные задачи сверху, профессиональные расчёты — глубже.
+const astroUi = await page.evaluate(() => {
+  goTo('astro');
+  const root = document.getElementById('as-menu');
+  const visible = [...root.querySelectorAll('.astro-card')]
+    .filter(b => b.offsetParent !== null).map(b => b.childNodes[1] ? b.textContent.trim() : b.textContent.trim());
+  const advanced = root.querySelector('.astro-more');
+  return {
+    title: (document.getElementById('ptitle') || {}).textContent,
+    repeatedTitle: root.querySelectorAll(':scope > .domain-head .domain-title').length,
+    intro: (root.querySelector(':scope > .domain-head .domain-subtitle') || {}).textContent,
+    visible,
+    advancedClosed: !!advanced && !advanced.open,
+    advancedCount: advanced ? advanced.querySelectorAll('.astro-card').length : 0,
+  };
+});
+ok(astroUi.title === 'Астрология' && astroUi.repeatedTitle === 0 && /Символический взгляд/.test(astroUi.intro) && astroUi.visible.some(t => /Моя карта/.test(t)) &&
+  astroUi.visible.some(t => /^Сейчас/.test(t)) && astroUi.visible.some(t => /Данные рождения/.test(t)),
+  'Астрология на первом слое говорит задачами, а не набором терминов', JSON.stringify(astroUi.visible));
+ok(astroUi.advancedClosed && astroUi.advancedCount === 5,
+  'пять профессиональных расчётов сохранены в свёрнутом втором слое', JSON.stringify(astroUi));
+
+// 17.9 Первый слой без профессионального жаргона.
+const jarg = await page.evaluate(() => {
+  const TERMS = ['КПТ', 'CBT', 'DBT', 'Схема-терапия', 'Психообразование', 'Мотивационное интервью',
+    'Follow-up', 'эпизод', 'Эпизод', 'доказательност', 'Семейство метода', 'naturalistic',
+    'claimClass', 'provenance', 'sourceId', 'insufficient'];
+  const found = new Set();
+  const scan = () => document.querySelectorAll('body *').forEach(el => {
+    if (el.closest('script,style,template')) return;
+    const own = [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ');
+    TERMS.forEach(t => { if (own.includes(t)) found.add(t); });
+  });
+  ['home', 'map', 'health', 'astro', 'vit', 'sys', 'settings'].forEach(t => { goTo(t); scan(); });
+  ['overview', 'insights', 'dreams', 'psychology', 'patterns', 'spiritual', 'evolution'].forEach(s => { goTo('map'); msub(s); scan(); });
+  document.querySelectorAll('.ov').forEach(o => { o.classList.add('on'); scan(); o.classList.remove('on'); });
+  goTo('home');
+  return [...found];
+});
+ok(jarg.length === 0, 'на первом слое нет профессионального жаргона', jarg.join(', '));
+
+// 17.10 Подходы названы по-человечески, идентификаторы не тронуты.
+const fam = await page.evaluate(() => ({
+  ru: Object.values(PSY_FAMILY_RU), ids: PSY_METHOD_FAMILIES.slice(),
+}));
+ok(fam.ids.includes('CBT') && fam.ids.includes('ACT'),
+  'идентификаторы подходов сохранены — canonical-данные не переименованы', fam.ids.join(','));
+ok(!fam.ru.some(v => /КПТ|CBT|DBT|Схема-терапия/.test(v)),
+  'подписи подходов человеческие: ' + fam.ru.slice(0, 4).join(' · '), fam.ru.join(' · '));
+
+// 17.11 Настройки: повседневные действия отделены от служебных.
+const settingsUi = await page.evaluate(() => {
+  goTo('settings');
+  const root = document.getElementById('pg-settings');
+  const advanced = root.querySelector('.settings-advanced');
+  const mainText = [...root.querySelectorAll(':scope > .card:not(.settings-advanced) .srow')]
+    .map(x => x.textContent.replace(/\s+/g, ' ').trim());
+  const ids = ['sync-lbl', 'api-lbl', 'prof-current', 'thv', 'push-status', 'keys-cnt', 'cmd', 'cmd-ac', 'cmd-out', 'cmd-res'];
+  return {
+    mainText,
+    advancedClosed: !!advanced && !advanced.open,
+    advancedLabel: advanced && advanced.querySelector(':scope > summary').textContent.trim(),
+    uniqueIds: ids.every(id => document.querySelectorAll('#' + id).length === 1),
+    primaryButtons: root.querySelectorAll(':scope > .card:not(.settings-advanced) button.srow').length,
+  };
+});
+ok(settingsUi.mainText.some(x => /Мой профиль/.test(x)) && settingsUi.mainText.some(x => /Сохранить изменения в облаке/.test(x)) &&
+  settingsUi.advancedClosed && settingsUi.advancedLabel === 'Для опытных пользователей',
+  'Настройки показывают обычные задачи, служебные инструменты свёрнуты', JSON.stringify(settingsUi));
+ok(settingsUi.uniqueIds && settingsUi.primaryButtons >= 6,
+  'перестройка Настроек сохранила единственные render-target и нативные кнопки', JSON.stringify(settingsUi));
 
 await browser.close();
 console.log(`\nEXPERIENCE 2.0 SHELL: ${pass} passed, ${fail} failed`);

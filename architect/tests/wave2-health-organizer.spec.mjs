@@ -694,6 +694,13 @@ const themeCheck = await themePage.evaluate(() => {
   return { darkVisible, lightVisible };
 });
 ok(themeCheck.darkVisible && themeCheck.lightVisible, 'здоровье: секция лаборатории рендерится и в тёмной, и в светлой теме');
+const labGroupSummary = themePage.locator('details.health-group')
+  .filter({ hasText: 'Анализы, документы и врач' }).locator('summary').first();
+await labGroupSummary.focus();
+await themePage.keyboard.press('Enter');
+const labGroupOpen = await themePage.evaluate(() => [...document.querySelectorAll('details.health-group')]
+  .some(d => /Анализы, документы и врач/.test((d.querySelector('summary') || {}).textContent || '') && d.open));
+ok(labGroupOpen, 'клавиатура: Enter раскрывает группу «Анализы, документы и врач»');
 const labRow = themePage.locator('#health-lab .si-row').first();
 await labRow.focus();
 await themePage.keyboard.press('Enter');

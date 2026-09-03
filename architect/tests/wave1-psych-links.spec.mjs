@@ -226,7 +226,7 @@ const actions = await page.evaluate(() => {
   const originalUntouched = DB.whys.find(w => w.id === 7001).actionDone === undefined;
   togglePsyActionDone(7001, false);
   const undone = projAll('whys').find(w => w.id === 7001).actionDone === false;
-  return { emptyHtml: emptyHtml.trim().length === 0 ? false : emptyHtml.includes('Заполни поле'), noMutation: beforeSnapshot === afterRender, showsOpen, hidesDoneByDefault, showsDoneAfterToggle, doneNow, undone, originalUntouched };
+  return { emptyHtml: emptyHtml.trim().length === 0 ? false : emptyHtml.includes('Заверши разбор ситуации'), noMutation: beforeSnapshot === afterRender, showsOpen, hidesDoneByDefault, showsDoneAfterToggle, doneNow, undone, originalUntouched };
 });
 ok(actions.emptyHtml, 'действия: пустое состояние объясняет, что делать дальше (не пустая декоративная карточка)');
 ok(actions.noMutation, 'rPsyActions() не мутирует DB.whys (read-only агрегация)');
