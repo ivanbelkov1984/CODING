@@ -2211,11 +2211,11 @@ function iRow(ins) {
         <div class="ins-title">${esc(ins.title)}</div>
         ${insPreview(ins) ? `<div class="ins-text">${esc(insPreview(ins))}</div>` : ''}
       </div>
-      <div class="ins-actions" onclick="event.stopPropagation()">
-        <button class="ins-act-btn" onclick="openEdit(${ins.id})" aria-label="Редактировать">
+      <div class="ins-actions">
+        <button class="ins-act-btn" onclick="event.stopPropagation();openEdit(${ins.id})" aria-label="Редактировать">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>
-        <button class="ins-act-btn" onclick="deleteIns(${ins.id})" aria-label="Удалить">
+        <button class="ins-act-btn" onclick="event.stopPropagation();deleteIns(${ins.id})" aria-label="Удалить">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="color:var(--red)"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
         </button>
       </div>
@@ -7634,7 +7634,11 @@ function renderChartWheel(chart, o = {}) {
     prevLon = p.lon;
     const [px, py] = xy(p.lon, flip ? rPl - S * .052 : rPl);
     s += line(p.lon, rZi, rZi - S * .014, 'aw-tick');
-    s += `<text x="${F(px)}" y="${F(py)}" class="aw-planet${p.retro ? ' aw-retro' : ''}"${o.static ? '' : ` onclick="astroPlanetTap('${p.body}')"`}>${PLANET_GLYPHS[p.body] || '•'}</text>`;
+    const pCls = `aw-planet${p.retro ? ' aw-retro' : ''}`;
+    const pGlyph = PLANET_GLYPHS[p.body] || '•';
+    s += o.static
+      ? `<text x="${F(px)}" y="${F(py)}" class="${pCls}">${pGlyph}</text>`
+      : `<g class="aw-hit" onclick="astroPlanetTap('${p.body}')" aria-label="Открыть: ${esc(ASTRO_RU[p.body] || p.body)}"><circle cx="${F(px)}" cy="${F(py)}" r="24"/><text x="${F(px)}" y="${F(py)}" class="${pCls}">${pGlyph}</text></g>`;
   }
   if (chart.angles) {
     const [ax, ay] = xy(chart.angles.asc.lon, rZo + S * .022), [mx, my] = xy(chart.angles.mc.lon, rZo + S * .022);
@@ -7652,12 +7656,19 @@ function renderChartWheel(chart, o = {}) {
     for (const a of (o.extras.asteroids || [])) {
       const [px, py] = xy(a.lon, rHub + S * .033);
       const rule = `pointInSign.${a.body}.${zodiacOf(a.lon).sign}`;
-      s += `<text x="${F(px)}" y="${F(py)}" class="aw-planet aw-extra"${o.static ? '' : ` onclick="astroFullText('${rule}','${(ASTEROID_WHEEL_GLYPHS[a.body] ? a.name : a.name)} в знаке ${zodiacOf(a.lon).sign}')"`}>${ASTEROID_WHEEL_GLYPHS[a.body] || '•'}</text>`;
+      const aTitle = `${a.name} в знаке ${zodiacOf(a.lon).sign}`;
+      const aGlyph = ASTEROID_WHEEL_GLYPHS[a.body] || '•';
+      s += o.static
+        ? `<text x="${F(px)}" y="${F(py)}" class="aw-planet aw-extra">${aGlyph}</text>`
+        : `<g class="aw-hit" onclick="astroFullText('${rule}','${aTitle}')" aria-label="Открыть: ${esc(aTitle)}"><circle cx="${F(px)}" cy="${F(py)}" r="24"/><text x="${F(px)}" y="${F(py)}" class="aw-planet aw-extra">${aGlyph}</text></g>`;
     }
     for (const st of (o.extras.stars || [])) {
       const [px, py] = xy(st.lon, rZi - S * .028);
       const key = STAR_KEYS[st.name];
-      s += `<text x="${F(px)}" y="${F(py)}" class="aw-star"${o.static || !key ? '' : ` onclick="astroFullText('star.${key}','Звезда ${st.name}')"`}>✦</text>`;
+      const stTitle = `Звезда ${st.name}`;
+      s += o.static || !key
+        ? `<text x="${F(px)}" y="${F(py)}" class="aw-star">✦</text>`
+        : `<g class="aw-hit" onclick="astroFullText('star.${key}','${stTitle}')" aria-label="Открыть: ${esc(stTitle)}"><circle cx="${F(px)}" cy="${F(py)}" r="24"/><text x="${F(px)}" y="${F(py)}" class="aw-star">✦</text></g>`;
     }
   }
   return s + '</svg>';
@@ -9215,7 +9226,7 @@ function rVit() {
     return `<div class="vbar">
       <span class="vb-name">${a.lbl}</span>
       <div class="vb-track"><div class="vb-fill" style="width:${a.s*10}%;background:${c}"></div></div>
-      <span class="vb-val" onclick="openOv('ov-axis-all')">${a.s}</span>
+      <button type="button" class="vb-val" onclick="openOv('ov-axis-all')" aria-label="Открыть все показатели: ${esc(a.lbl)}, ${a.s} из 10">${a.s}</button>
     </div>`;
   }).join('');
   rTrends();
@@ -12346,7 +12357,7 @@ const INTERACTIVE_SELECTOR = [
   '.sph-card[onclick]', '.prof-row[onclick]', '.ins-row[onclick]',
   '.ch-row[onclick]', '.drm[onclick]', '.pat[onclick]', '.spi[onclick]',
   '.oqrow[onclick]', '.otd[onclick]', '.amb[onclick]', '.si-row.tap[onclick]',
-  '[data-rule][onclick]', '[data-rules][onclick]'
+  '[data-rule][onclick]', '[data-rules][onclick]', '.aw-hit[onclick]'
 ].join(',');
 function accessibleNameFor(el) {
   if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
@@ -12372,6 +12383,13 @@ function upgradeInteractive(root) {
 }
 function initInteractiveA11y() {
   upgradeInteractive(document);
+  document.addEventListener('click', e => {
+    const ov = e.target && e.target.closest && e.target.closest('.ov[data-backdrop-close],.ov[data-backdrop-action]');
+    if (!ov || e.target !== ov) return;
+    if (ov.dataset.backdropAction === 'backup' && window.ArchBackup) window.ArchBackup.requestClose();
+    else if (ov.dataset.backdropAction === 'capture') { closeOv('ov-capture'); nshHashToPage(); }
+    else closeOv(ov.id);
+  });
   document.addEventListener('keydown', e => {
     const el = e.target && e.target.closest && e.target.closest('[data-a11y-ready="1"]');
     if (!el || (e.key !== 'Enter' && e.key !== ' ')) return;

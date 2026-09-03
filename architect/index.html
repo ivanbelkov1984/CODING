@@ -809,7 +809,7 @@
 
 <!-- ОБРАТНАЯ СВЯЗЬ -->
 <!-- ── МОДЕЛИ ДИАЛОГА: пикер в стиле Perplexity ─────────────────── -->
-<div class="ov" id="ov-models" onclick="if(event.target===this)closeOv('ov-models')">
+<div class="ov" id="ov-models" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="mdl-head">
@@ -837,7 +837,7 @@
   </div>
 </div>
 
-<div class="ov" id="ov-feedback" onclick="if(event.target===this)closeOv('ov-feedback')">
+<div class="ov" id="ov-feedback" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Обратная связь</div>
@@ -854,19 +854,19 @@
 <!-- ══ OVERLAYS ══════════════════════════════════════════════════ -->
 
 <!-- ПОИСК -->
-<div class="ov" id="ov-search" onclick="if(event.target===this)closeOv('ov-search')">
+<div class="ov" id="ov-search" data-backdrop-close>
   <div class="search-box">
     <div class="search-bar">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
       <input id="search-in" placeholder="Поиск по инсайтам, снам, паттернам…" autocomplete="off" oninput="runSearch(this.value)">
-      <span class="search-close" onclick="closeOv('ov-search')">Закрыть</span>
+      <button type="button" class="search-close" onclick="closeOv('ov-search')">Закрыть</button>
     </div>
     <div class="search-results" id="search-results"><div class="search-empty">Начни вводить запрос</div></div>
   </div>
 </div>
 
 <!-- НОВЫЙ ИНСАЙТ -->
-<div class="ov" id="ov-add" onclick="if(event.target===this)closeOv('ov-add')">
+<div class="ov" id="ov-add" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Новый инсайт</div>
@@ -912,7 +912,7 @@
 </div>
 
 <!-- РЕДАКТИРОВАТЬ ИНСАЙТ -->
-<div class="ov" id="ov-edit" onclick="if(event.target===this)closeOv('ov-edit')">
+<div class="ov" id="ov-edit" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Редактировать</div>
@@ -952,7 +952,7 @@
 </div>
 
 <!-- CHECK-IN -->
-<div class="ov" id="ov-why" onclick="if(event.target===this)closeOv('ov-why')">
+<div class="ov" id="ov-why" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Разбор ситуации</div>
@@ -1007,14 +1007,14 @@
     </div>
   </div>
 </div>
-<div class="ov" id="ov-astro-text" onclick="if(event.target===this)closeOv('ov-astro-text')">
+<div class="ov" id="ov-astro-text" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title" id="astro-text-title">Подробнее</div>
     <div style="padding:0 1rem 1rem" id="astro-text-body"></div>
   </div>
 </div>
-<div class="ov" id="ov-astro-wheel" onclick="if(event.target===this)closeOv('ov-astro-wheel')">
+<div class="ov" id="ov-astro-wheel" data-backdrop-close>
   <div class="sheet" style="max-height:97vh">
     <div class="sh-pull"></div>
     <div class="sh-title">Натальная карта <button class="ib" style="float:right" onclick="closeOv('ov-astro-wheel')" aria-label="Закрыть"><i data-lucide="x"></i></button></div>
@@ -1024,7 +1024,7 @@
     </div>
   </div>
 </div>
-<div class="ov" id="ov-astro-consent" onclick="if(event.target===this)closeOv('ov-astro-consent')">
+<div class="ov" id="ov-astro-consent" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Глубокий анализ · согласие</div>
@@ -1038,7 +1038,7 @@
     </div>
   </div>
 </div>
-<div class="ov" id="ov-doc-report" onclick="if(event.target===this)closeOv('ov-doc-report')">
+<div class="ov" id="ov-doc-report" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Отчёт для врача</div>
@@ -1059,7 +1059,7 @@
     </div>
   </div>
 </div>
-<div class="ov" id="ov-symptom" onclick="if(event.target===this)closeOv('ov-symptom')">
+<div class="ov" id="ov-symptom" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Симптом</div>
@@ -1072,7 +1072,7 @@
     </div>
   </div>
 </div>
-<div class="ov" id="ov-measure" onclick="if(event.target===this)closeOv('ov-measure')">
+<div class="ov" id="ov-measure" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Измерение</div>
@@ -1086,7 +1086,7 @@
     </div>
   </div>
 </div>
-<div class="ov" id="ov-med-add" onclick="if(event.target===this)closeOv('ov-med-add')">
+<div class="ov" id="ov-med-add" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Добавить в план</div>
@@ -1123,7 +1123,7 @@
   </div>
 </div>
 <!-- Wave 2 (issue #150): Health Organizer — «Сегодня» (деталь плана/фактов) -->
-<div class="ov" id="ov-med-detail" onclick="if(event.target===this)closeOv('ov-med-detail')">
+<div class="ov" id="ov-med-detail" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">План приёма</div>
@@ -1131,7 +1131,7 @@
   </div>
 </div>
 <!-- Wave 2: лабораторные результаты — создание/редактирование -->
-<div class="ov" id="ov-lab-add" onclick="if(event.target===this)closeOv('ov-lab-add')">
+<div class="ov" id="ov-lab-add" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Результат анализа</div>
@@ -1161,7 +1161,7 @@
   </div>
 </div>
 <!-- Wave 2: лабораторные результаты — деталь/тренд/удаление -->
-<div class="ov" id="ov-lab-det" onclick="if(event.target===this)closeOv('ov-lab-det')">
+<div class="ov" id="ov-lab-det" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Результат анализа</div>
@@ -1169,7 +1169,7 @@
   </div>
 </div>
 <!-- Wave 2: документы здоровья — создание/редактирование -->
-<div class="ov" id="ov-doc-add" onclick="if(event.target===this)closeOv('ov-doc-add')">
+<div class="ov" id="ov-doc-add" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Документ здоровья</div>
@@ -1204,7 +1204,7 @@
   </div>
 </div>
 <!-- Wave 2: документы здоровья — деталь/удаление -->
-<div class="ov" id="ov-doc-det" onclick="if(event.target===this)closeOv('ov-doc-det')">
+<div class="ov" id="ov-doc-det" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Документ здоровья</div>
@@ -1212,7 +1212,7 @@
   </div>
 </div>
 <!-- «Мои записи»: просмотр и индивидуальное удаление любой пользовательской записи -->
-<div class="ov" id="ov-records" onclick="if(event.target===this)closeOv('ov-records')">
+<div class="ov" id="ov-records" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Мои записи</div>
@@ -1225,7 +1225,7 @@
   </div>
 </div>
 <!-- Инспектор записи: полное содержимое, правка по матрице, удаление отдельно -->
-<div class="ov" id="ov-rec-det" onclick="if(event.target===this)closeOv('ov-rec-det')">
+<div class="ov" id="ov-rec-det" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title" id="rec-det-title">Запись</div>
@@ -1233,7 +1233,7 @@
     <div id="rec-det-actions" class="sh-form" style="padding:0 1rem 1rem"></div>
   </div>
 </div>
-<div class="ov" id="ov-history" onclick="if(event.target===this)closeOv('ov-history')">
+<div class="ov" id="ov-history" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">История состояний</div>
@@ -1244,7 +1244,7 @@
 <!-- Wave 4.1 (issue #156): подробности символического астроисточника.
      Только факты расчёта — методология, движок, дата пика, орбис, уверенность,
      известно ли время рождения. Без трактовок и без утверждений о причинности. -->
-<div class="ov" id="ov-syn-astro" onclick="if(event.target===this)closeOv('ov-syn-astro')">
+<div class="ov" id="ov-syn-astro" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Астрологическое событие — подробности</div>
@@ -1252,7 +1252,7 @@
     <div style="padding:0 1rem 1rem"><button class="btn btn-s btn-full" onclick="closeOv('ov-syn-astro')">Закрыть</button></div>
   </div>
 </div>
-<div class="ov" id="ov-syn-evidence" onclick="if(event.target===this)closeOv('ov-syn-evidence')">
+<div class="ov" id="ov-syn-evidence" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Записи, подтверждающие эту закономерность</div>
@@ -1260,7 +1260,7 @@
     <div style="padding:0 1rem 1rem"><button class="btn btn-s btn-full" onclick="closeOv('ov-syn-evidence')">Закрыть</button></div>
   </div>
 </div>
-<div class="ov" id="ov-moment-det" onclick="if(event.target===this)closeOv('ov-moment-det')">
+<div class="ov" id="ov-moment-det" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Момент</div>
@@ -1273,7 +1273,7 @@
     </div>
   </div>
 </div>
-<div class="ov" id="ov-why-det" onclick="if(event.target===this)closeOv('ov-why-det')">
+<div class="ov" id="ov-why-det" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Разбор ситуации</div>
@@ -1286,7 +1286,7 @@
     </div>
   </div>
 </div>
-<div class="ov" id="ov-moment" onclick="if(event.target===this)closeOv('ov-moment')">
+<div class="ov" id="ov-moment" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Как ты сейчас?</div>
@@ -1305,7 +1305,7 @@
     </div>
   </div>
 </div>
-<div class="ov" id="ov-ci" onclick="if(event.target===this)closeOv('ov-ci')">
+<div class="ov" id="ov-ci" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Как я себя чувствую</div>
@@ -1353,7 +1353,7 @@
 </div>
 
 <!-- ТЯГА / ИМПУЛЬС -->
-<div class="ov" id="ov-craving" onclick="if(event.target===this)closeOv('ov-craving')">
+<div class="ov" id="ov-craving" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Тяга — импульс</div>
@@ -1394,7 +1394,7 @@
 </div>
 
 <!-- ПРИЁМЫ САМОРЕГУЛЯЦИИ -->
-<div class="ov" id="ov-tech" onclick="if(event.target===this)closeOv('ov-tech')">
+<div class="ov" id="ov-tech" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Приёмы под состояние</div>
@@ -1423,7 +1423,7 @@
 </div>
 
 <!-- КАК ЗАЩИЩЕНЫ ДАННЫЕ (честная модель приватности) -->
-<div class="ov" id="ov-privacy" onclick="if(event.target===this)closeOv('ov-privacy')">
+<div class="ov" id="ov-privacy" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Как защищены твои данные</div>
@@ -1463,7 +1463,7 @@
 </div>
 
 <!-- СОН -->
-<div class="ov" id="ov-drm" onclick="if(event.target===this)closeOv('ov-drm')">
+<div class="ov" id="ov-drm" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Зафиксировать сон</div>
@@ -1486,7 +1486,7 @@
 </div>
 
 <!-- ДОБАВИТЬ ПАТТЕРН -->
-<div class="ov" id="ov-pat-add" onclick="if(event.target===this)closeOv('ov-pat-add')">
+<div class="ov" id="ov-pat-add" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Новая закономерность</div>
@@ -1507,7 +1507,7 @@
 </div>
 
 <!-- Wave 1 (issue #148): контекст отношений — новый человек/контекст -->
-<div class="ov" id="ov-relctx" onclick="if(event.target===this)closeOv('ov-relctx')">
+<div class="ov" id="ov-relctx" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Новый контекст отношений</div>
@@ -1522,7 +1522,7 @@
 </div>
 
 <!-- Wave 1 (issue #148): кризисная безопасная панель — вместо обычного AI-анализа -->
-<div class="ov" id="ov-crisis-safety" onclick="if(event.target===this)closeOv('ov-crisis-safety')">
+<div class="ov" id="ov-crisis-safety" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Сначала о безопасности</div>
@@ -1534,7 +1534,7 @@
 <!-- Wave 1 (issue #148): согласие на AI-помощь по психологическим данным -->
 <!-- Wave 7 (issue #162): единая форма психологического workspace. Поля
      задаются PSY_FORM_SPECS, запись идёт через общий psySaveRecord(). -->
-<div class="ov" id="ov-psy-form" onclick="if(event.target===this)closeOv('ov-psy-form')">
+<div class="ov" id="ov-psy-form" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title" id="psy-form-title">Психология</div>
@@ -1549,7 +1549,7 @@
 
 <!-- Wave 8 (issue #163): завершение персонального эксперимента — итог обязан
      нести ограничения; причинный статус вычисляется движком, не пользователем. -->
-<div class="ov" id="ov-psy-exp-done" onclick="if(event.target===this)closeOv('ov-psy-exp-done')">
+<div class="ov" id="ov-psy-exp-done" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Итог эксперимента</div>
@@ -1567,7 +1567,7 @@
   </div>
 </div>
 
-<div class="ov" id="ov-psy-ai-consent" onclick="if(event.target===this)closeOv('ov-psy-ai-consent')">
+<div class="ov" id="ov-psy-ai-consent" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">AI-подсказка · согласие</div>
@@ -1580,7 +1580,7 @@
 </div>
 
 <!-- СОЗДАТЬ/ПРАВИТЬ СФЕРУ -->
-<div class="ov" id="ov-sphere-edit" onclick="if(event.target===this)closeOv('ov-sphere-edit')">
+<div class="ov" id="ov-sphere-edit" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title" id="sphere-edit-title">Новая сфера</div>
@@ -1618,7 +1618,7 @@
 </div>
 
 <!-- ОТМЕТИТЬ СФЕРУ ЗА ДЕНЬ -->
-<div class="ov" id="ov-sphere-log" onclick="if(event.target===this)closeOv('ov-sphere-log')">
+<div class="ov" id="ov-sphere-log" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title" id="sphere-log-title">Отметить</div>
@@ -1627,7 +1627,7 @@
 </div>
 
 <!-- ДОБАВИТЬ ДУХОВНОЕ -->
-<div class="ov" id="ov-spi-add" onclick="if(event.target===this)closeOv('ov-spi-add')">
+<div class="ov" id="ov-spi-add" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Духовный путь</div>
@@ -1650,7 +1650,7 @@
 </div>
 
 <!-- ДОБАВИТЬ ЭВОЛЮЦИЮ -->
-<div class="ov" id="ov-evo-add" onclick="if(event.target===this)closeOv('ov-evo-add')">
+<div class="ov" id="ov-evo-add" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Журнал эволюции</div>
@@ -1671,7 +1671,7 @@
 </div>
 
 <!-- ЖУРНАЛ ЭВОЛЮЦИИ (список) -->
-<div class="ov" id="ov-evo" onclick="if(event.target===this)closeOv('ov-evo')">
+<div class="ov" id="ov-evo" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Журнал эволюции</div>
@@ -1680,7 +1680,7 @@
 </div>
 
 <!-- ДЕТАЛЬНЫЙ ПРОСМОТР -->
-<div class="ov" id="ov-det" onclick="if(event.target===this)closeOv('ov-det')">
+<div class="ov" id="ov-det" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div style="padding:0 1rem">
@@ -1695,14 +1695,14 @@
     <div style="padding:1rem;display:flex;gap:.625rem">
       <button class="btn btn-d btn-sm" id="det-del-btn" onclick="deleteInsFromDet()"><i data-lucide="trash-2"></i>Удалить</button>
       <button class="btn btn-s btn-sm" id="det-edit-btn" onclick="openEditFromDet()"><i data-lucide="edit-2"></i>Изменить</button>
-      <button class="btn btn-s btn-sm" id="det-share-btn" onclick="shareIns()" aria-label="Поделиться записью"><i data-lucide="share-2"></i></button>
+      <button class="btn btn-s btn-sm" id="det-share-btn" style="min-width:44px" onclick="shareIns()" aria-label="Поделиться записью"><i data-lucide="share-2"></i></button>
       <button class="btn btn-p btn-sm btn-full" onclick="closeOv('ov-det')">Закрыть</button>
     </div>
   </div>
 </div>
 
 <!-- РЕДАКТИРОВАТЬ ОСИ (все) -->
-<div class="ov" id="ov-axis-all" onclick="if(event.target===this)closeOv('ov-axis-all')">
+<div class="ov" id="ov-axis-all" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Оси жизни</div>
@@ -1716,7 +1716,7 @@
 
 <!-- КОНФИГУРАЦИЯ ОСЕЙ -->
 <!-- ── КЛЮЧИ СЕРВИСОВ: все внешние подключения в одном месте ──────── -->
-<div class="ov" id="ov-keys" onclick="if(event.target===this)closeOv('ov-keys')">
+<div class="ov" id="ov-keys" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Ключи сервисов</div>
@@ -1724,7 +1724,7 @@
   </div>
 </div>
 
-<div class="ov" id="ov-cfg" onclick="if(event.target===this)closeOv('ov-cfg')">
+<div class="ov" id="ov-cfg" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Конфигурация</div>
@@ -1843,7 +1843,7 @@
 </div>
 
 <!-- ДОБАВИТЬ ОСЬ -->
-<div class="ov" id="ov-axis-new" onclick="if(event.target===this)closeOv('ov-axis-new')">
+<div class="ov" id="ov-axis-new" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Новая ось</div>
@@ -1872,7 +1872,7 @@
 </div>
 
 <!-- ИМПОРТ -->
-<div class="ov" id="ov-import" onclick="if(event.target===this)closeOv('ov-import')">
+<div class="ov" id="ov-import" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Импорт данных</div>
@@ -1891,7 +1891,7 @@
 </div>
 
 <!-- ── ИМПОРТ ИЗ CHATGPT: многолетний дневник из чатов → в систему ── -->
-<div class="ov" id="ov-gpt" onclick="if(event.target===this)closeOv('ov-gpt')">
+<div class="ov" id="ov-gpt" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Импорт из ChatGPT</div>
@@ -1914,7 +1914,7 @@
 </div>
 
 <!-- ПРОФИЛИ -->
-<div class="ov" id="ov-profiles" onclick="if(event.target===this)closeOv('ov-profiles')">
+<div class="ov" id="ov-profiles" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Профили</div>
@@ -1927,7 +1927,7 @@
 </div>
 
 <!-- ДОБАВИТЬ ПРОФИЛЬ -->
-<div class="ov" id="ov-add-profile" onclick="if(event.target===this)closeOv('ov-add-profile')">
+<div class="ov" id="ov-add-profile" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Новый профиль</div>
@@ -1943,7 +1943,7 @@
 </div>
 
 <!-- ЖУРНАЛ СИНХРОНИЗАЦИИ -->
-<div class="ov" id="ov-backups" onclick="if(event.target===this)closeOv('ov-backups')">
+<div class="ov" id="ov-backups" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Резервные копии</div>
@@ -1958,7 +1958,7 @@
      показывает состояние, ничего не чинит автоматически. -->
 <!-- Wave 6 (issue #160): импорт внешней работы. Весь разбор локальный:
      без сети, без AI, без Google OAuth. До подтверждения — ноль мутаций. -->
-<div class="ov" id="ov-ext-import" onclick="if(event.target===this)closeOv('ov-ext-import')">
+<div class="ov" id="ov-ext-import" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Импорт данных</div>
@@ -2006,7 +2006,7 @@
   </div>
 </div>
 
-<div class="ov" id="ov-storage" onclick="if(event.target===this)closeOv('ov-storage')">
+<div class="ov" id="ov-storage" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Хранилище и диагностика</div>
@@ -2024,7 +2024,7 @@
   </div>
 </div>
 
-<div class="ov" id="ov-log" onclick="if(event.target===this)closeOv('ov-log')">
+<div class="ov" id="ov-log" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Журнал синхронизации</div>
@@ -2037,7 +2037,7 @@
 </div>
 
 <!-- ── ЗАШИФРОВАННАЯ ПЕРЕНОСИМАЯ РЕЗЕРВНАЯ КОПИЯ (Slice 4) ─────────── -->
-<div class="ov" id="ov-backup-enc" onclick="if(event.target===this&&window.ArchBackup)ArchBackup.requestClose()">
+<div class="ov" id="ov-backup-enc" data-backdrop-action="backup">
   <div class="sheet be-sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Зашифрованная резервная копия</div>
@@ -2112,7 +2112,7 @@
 </div>
 
 <!-- ══ «ЗАПИСАТЬ» — минимальный лаунчер (nav shell v2; типы не меняются) ══ -->
-<div class="ov" id="ov-capture" onclick="if(event.target===this){closeOv('ov-capture');nshHashToPage()}">
+<div class="ov" id="ov-capture" data-backdrop-action="capture">
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Записать</div>
@@ -2149,7 +2149,7 @@
 
 <!-- ══ Выбор сферы из «Записать» (nav shell v2): при нескольких сферах
      пользователь выбирает явно — запись не попадает молча в первую ══ -->
-<div class="ov" id="ov-sphere-pick" onclick="if(event.target===this)closeOv('ov-sphere-pick')">
+<div class="ov" id="ov-sphere-pick" data-backdrop-close>
   <div class="sheet">
     <div class="sh-pull"></div>
     <div class="sh-title">Какую сферу отметить?</div>
